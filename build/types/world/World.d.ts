@@ -1,23 +1,21 @@
+import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
-import * as CANNON from 'cannon';
+import { Character } from '../characters/Character';
 import { CameraOperator } from '../core/CameraOperator';
-import { Stats } from '../../lib/utils/Stats';
-import { CannonDebugRenderer } from '../../lib/cannon/CannonDebugRenderer';
+import { InfoStack } from '../core/InfoStack';
 import { InputManager } from '../core/InputManager';
 import { LoadingManager } from '../core/LoadingManager';
-import { InfoStack } from '../core/InfoStack';
-import { IWorldEntity } from '../interfaces/IWorldEntity';
 import { IUpdatable } from '../interfaces/IUpdatable';
-import { Character } from '../characters/Character';
-import { Path } from './Path';
+import { IWorldEntity } from '../interfaces/IWorldEntity';
 import { Vehicle } from '../vehicles/Vehicle';
+import { Path } from './Path';
 import { Scenario } from './Scenario';
 import { Sky } from './Sky';
 export declare class World {
     renderer: THREE.WebGLRenderer;
     camera: THREE.PerspectiveCamera;
     composer: any;
-    stats: Stats;
+    // stats: Stats;
     graphicsWorld: THREE.Scene;
     sky: Sky;
     physicsWorld: CANNON.World;
@@ -36,7 +34,6 @@ export declare class World {
     cameraOperator: CameraOperator;
     timeScaleTarget: number;
     console: InfoStack;
-    cannonDebugRenderer: CannonDebugRenderer;
     scenarios: Scenario[];
     characters: Character[];
     vehicles: Vehicle[];

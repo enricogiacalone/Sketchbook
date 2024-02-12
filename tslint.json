@@ -1,8 +1,6 @@
 {
     "defaultSeverity": "error",
-    "extends": [
-        "tslint:recommended"
-    ],
+    "extends": ["tslint:recommended"],
     "jsRules": {},
     "rules": {
         "one-line": false,
@@ -31,12 +29,10 @@
             "member-variable-declaration",
             "object-destructuring",
             "array-destructuring"
-          ]
+        ]
     },
     "linterOptions": {
-        "exclude": [
-            "build"
-        ]
+        "exclude": ["build"]
     },
     "rulesDirectory": []
 }

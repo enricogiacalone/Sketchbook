@@ -1,13 +1,16 @@
 import { Character } from '../characters/Character';
 import * as THREE from 'three';
-import * as CANNON from 'cannon';
+import * as CANNON from 'cannon-es';
 import { World } from '../world/World';
 import { KeyBinding } from '../core/KeyBinding';
 import { VehicleSeat } from './VehicleSeat';
 import { Wheel } from './Wheel';
 import { EntityType } from '../enums/EntityType';
 import { IWorldEntity } from '../interfaces/IWorldEntity';
-export declare abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
+export declare abstract class Vehicle
+    extends THREE.Object3D
+    implements IWorldEntity
+{
     updateOrder: number;
     abstract entityType: EntityType;
     controllingCharacter: Character;
@@ -33,7 +36,11 @@ export declare abstract class Vehicle extends THREE.Object3D implements IWorldEn
     onInputChange(): void;
     resetControls(): void;
     allowSleep(value: boolean): void;
-    handleKeyboardEvent(event: KeyboardEvent, code: string, pressed: boolean): void;
+    handleKeyboardEvent(
+        event: KeyboardEvent,
+        code: string,
+        pressed: boolean
+    ): void;
     setFirstPersonView(value: boolean): void;
     toggleFirstPersonView(): void;
     triggerAction(actionName: string, value: boolean): void;
