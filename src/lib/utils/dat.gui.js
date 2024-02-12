@@ -14,10 +14,12 @@
  */
 
 (function (global, factory) {
-    typeof exports === 'object' && typeof module !== 'undefined' ? module.exports = factory() :
-        typeof define === 'function' && define.amd ? define(factory) :
-        (global.dat = factory());
-}(this, (function () {
+    typeof exports === 'object' && typeof module !== 'undefined'
+        ? (module.exports = factory())
+        : typeof define === 'function' && define.amd
+          ? define(factory)
+          : (global.dat = factory());
+})(this, function () {
     'use strict';
 
     // function ___$insertStyle(css) {
@@ -46,7 +48,11 @@
         var h = Math.round(color.h);
         var s = color.s.toFixed(1);
         var v = color.v.toFixed(1);
-        if (forceCSSHex || colorFormat === 'THREE_CHAR_HEX' || colorFormat === 'SIX_CHAR_HEX') {
+        if (
+            forceCSSHex ||
+            colorFormat === 'THREE_CHAR_HEX' ||
+            colorFormat === 'SIX_CHAR_HEX'
+        ) {
             var str = color.hex.toString(16);
             while (str.length < 6) {
                 str = '0' + str;
@@ -79,25 +85,37 @@
     var Common = {
         BREAK: {},
         extend: function extend(target) {
-            this.each(ARR_SLICE.call(arguments, 1), function (obj) {
-                var keys = this.isObject(obj) ? Object.keys(obj) : [];
-                keys.forEach(function (key) {
-                    if (!this.isUndefined(obj[key])) {
-                        target[key] = obj[key];
-                    }
-                }.bind(this));
-            }, this);
+            this.each(
+                ARR_SLICE.call(arguments, 1),
+                function (obj) {
+                    var keys = this.isObject(obj) ? Object.keys(obj) : [];
+                    keys.forEach(
+                        function (key) {
+                            if (!this.isUndefined(obj[key])) {
+                                target[key] = obj[key];
+                            }
+                        }.bind(this)
+                    );
+                },
+                this
+            );
             return target;
         },
         defaults: function defaults(target) {
-            this.each(ARR_SLICE.call(arguments, 1), function (obj) {
-                var keys = this.isObject(obj) ? Object.keys(obj) : [];
-                keys.forEach(function (key) {
-                    if (this.isUndefined(target[key])) {
-                        target[key] = obj[key];
-                    }
-                }.bind(this));
-            }, this);
+            this.each(
+                ARR_SLICE.call(arguments, 1),
+                function (obj) {
+                    var keys = this.isObject(obj) ? Object.keys(obj) : [];
+                    keys.forEach(
+                        function (key) {
+                            if (this.isUndefined(target[key])) {
+                                target[key] = obj[key];
+                            }
+                        }.bind(this)
+                    );
+                },
+                this
+            );
             return target;
         },
         compose: function compose() {
@@ -120,7 +138,10 @@
                 var key = void 0;
                 var l = void 0;
                 for (key = 0, l = obj.length; key < l; key++) {
-                    if (key in obj && itr.call(scope, obj[key], key) === this.BREAK) {
+                    if (
+                        key in obj &&
+                        itr.call(scope, obj[key], key) === this.BREAK
+                    ) {
                         return;
                     }
                 }
@@ -163,7 +184,7 @@
         isNull: function isNull(obj) {
             return obj === null;
         },
-        isNaN: function (_isNaN) {
+        isNaN: (function (_isNaN) {
             function isNaN(_x) {
                 return _isNaN.apply(this, arguments);
             }
@@ -171,12 +192,14 @@
                 return _isNaN.toString();
             };
             return isNaN;
-        }(function (obj) {
+        })(function (obj) {
             return isNaN(obj);
         }),
-        isArray: Array.isArray || function (obj) {
-            return obj.constructor === Array;
-        },
+        isArray:
+            Array.isArray ||
+            function (obj) {
+                return obj.constructor === Array;
+            },
         isObject: function isObject(obj) {
             return obj === Object(obj);
         },
@@ -191,24 +214,36 @@
         },
         isFunction: function isFunction(obj) {
             return Object.prototype.toString.call(obj) === '[object Function]';
-        }
+        },
     };
 
-    var INTERPRETATIONS = [{
+    var INTERPRETATIONS = [
+        {
             litmus: Common.isString,
             conversions: {
                 THREE_CHAR_HEX: {
                     read: function read(original) {
-                        var test = original.match(/^#([A-F0-9])([A-F0-9])([A-F0-9])$/i);
+                        var test = original.match(
+                            /^#([A-F0-9])([A-F0-9])([A-F0-9])$/i
+                        );
                         if (test === null) {
                             return false;
                         }
                         return {
                             space: 'HEX',
-                            hex: parseInt('0x' + test[1].toString() + test[1].toString() + test[2].toString() + test[2].toString() + test[3].toString() + test[3].toString(), 0)
+                            hex: parseInt(
+                                '0x' +
+                                    test[1].toString() +
+                                    test[1].toString() +
+                                    test[2].toString() +
+                                    test[2].toString() +
+                                    test[3].toString() +
+                                    test[3].toString(),
+                                0
+                            ),
                         };
                     },
-                    write: colorToString
+                    write: colorToString,
                 },
                 SIX_CHAR_HEX: {
                     read: function read(original) {
@@ -218,29 +253,16 @@
                         }
                         return {
                             space: 'HEX',
-                            hex: parseInt('0x' + test[1].toString(), 0)
+                            hex: parseInt('0x' + test[1].toString(), 0),
                         };
                     },
-                    write: colorToString
+                    write: colorToString,
                 },
                 CSS_RGB: {
                     read: function read(original) {
-                        var test = original.match(/^rgb\(\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*\)/);
-                        if (test === null) {
-                            return false;
-                        }
-                        return {
-                            space: 'RGB',
-                            r: parseFloat(test[1]),
-                            g: parseFloat(test[2]),
-                            b: parseFloat(test[3])
-                        };
-                    },
-                    write: colorToString
-                },
-                CSS_RGBA: {
-                    read: function read(original) {
-                        var test = original.match(/^rgba\(\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*\)/);
+                        var test = original.match(
+                            /^rgb\(\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*\)/
+                        );
                         if (test === null) {
                             return false;
                         }
@@ -249,12 +271,29 @@
                             r: parseFloat(test[1]),
                             g: parseFloat(test[2]),
                             b: parseFloat(test[3]),
-                            a: parseFloat(test[4])
                         };
                     },
-                    write: colorToString
-                }
-            }
+                    write: colorToString,
+                },
+                CSS_RGBA: {
+                    read: function read(original) {
+                        var test = original.match(
+                            /^rgba\(\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*\)/
+                        );
+                        if (test === null) {
+                            return false;
+                        }
+                        return {
+                            space: 'RGB',
+                            r: parseFloat(test[1]),
+                            g: parseFloat(test[2]),
+                            b: parseFloat(test[3]),
+                            a: parseFloat(test[4]),
+                        };
+                    },
+                    write: colorToString,
+                },
+            },
         },
         {
             litmus: Common.isNumber,
@@ -264,14 +303,14 @@
                         return {
                             space: 'HEX',
                             hex: original,
-                            conversionName: 'HEX'
+                            conversionName: 'HEX',
                         };
                     },
                     write: function write(color) {
                         return color.hex;
-                    }
-                }
-            }
+                    },
+                },
+            },
         },
         {
             litmus: Common.isArray,
@@ -285,12 +324,12 @@
                             space: 'RGB',
                             r: original[0],
                             g: original[1],
-                            b: original[2]
+                            b: original[2],
                         };
                     },
                     write: function write(color) {
                         return [color.r, color.g, color.b];
-                    }
+                    },
                 },
                 RGBA_ARRAY: {
                     read: function read(original) {
@@ -300,27 +339,32 @@
                             r: original[0],
                             g: original[1],
                             b: original[2],
-                            a: original[3]
+                            a: original[3],
                         };
                     },
                     write: function write(color) {
                         return [color.r, color.g, color.b, color.a];
-                    }
-                }
-            }
+                    },
+                },
+            },
         },
         {
             litmus: Common.isObject,
             conversions: {
                 RGBA_OBJ: {
                     read: function read(original) {
-                        if (Common.isNumber(original.r) && Common.isNumber(original.g) && Common.isNumber(original.b) && Common.isNumber(original.a)) {
+                        if (
+                            Common.isNumber(original.r) &&
+                            Common.isNumber(original.g) &&
+                            Common.isNumber(original.b) &&
+                            Common.isNumber(original.a)
+                        ) {
                             return {
                                 space: 'RGB',
                                 r: original.r,
                                 g: original.g,
                                 b: original.b,
-                                a: original.a
+                                a: original.a,
                             };
                         }
                         return false;
@@ -330,18 +374,22 @@
                             r: color.r,
                             g: color.g,
                             b: color.b,
-                            a: color.a
+                            a: color.a,
                         };
-                    }
+                    },
                 },
                 RGB_OBJ: {
                     read: function read(original) {
-                        if (Common.isNumber(original.r) && Common.isNumber(original.g) && Common.isNumber(original.b)) {
+                        if (
+                            Common.isNumber(original.r) &&
+                            Common.isNumber(original.g) &&
+                            Common.isNumber(original.b)
+                        ) {
                             return {
                                 space: 'RGB',
                                 r: original.r,
                                 g: original.g,
-                                b: original.b
+                                b: original.b,
                             };
                         }
                         return false;
@@ -350,19 +398,24 @@
                         return {
                             r: color.r,
                             g: color.g,
-                            b: color.b
+                            b: color.b,
                         };
-                    }
+                    },
                 },
                 HSVA_OBJ: {
                     read: function read(original) {
-                        if (Common.isNumber(original.h) && Common.isNumber(original.s) && Common.isNumber(original.v) && Common.isNumber(original.a)) {
+                        if (
+                            Common.isNumber(original.h) &&
+                            Common.isNumber(original.s) &&
+                            Common.isNumber(original.v) &&
+                            Common.isNumber(original.a)
+                        ) {
                             return {
                                 space: 'HSV',
                                 h: original.h,
                                 s: original.s,
                                 v: original.v,
-                                a: original.a
+                                a: original.a,
                             };
                         }
                         return false;
@@ -372,18 +425,22 @@
                             h: color.h,
                             s: color.s,
                             v: color.v,
-                            a: color.a
+                            a: color.a,
                         };
-                    }
+                    },
                 },
                 HSV_OBJ: {
                     read: function read(original) {
-                        if (Common.isNumber(original.h) && Common.isNumber(original.s) && Common.isNumber(original.v)) {
+                        if (
+                            Common.isNumber(original.h) &&
+                            Common.isNumber(original.s) &&
+                            Common.isNumber(original.v)
+                        ) {
                             return {
                                 space: 'HSV',
                                 h: original.h,
                                 s: original.s,
-                                v: original.v
+                                v: original.v,
                             };
                         }
                         return false;
@@ -392,29 +449,33 @@
                         return {
                             h: color.h,
                             s: color.s,
-                            v: color.v
+                            v: color.v,
                         };
-                    }
-                }
-            }
-        }
+                    },
+                },
+            },
+        },
     ];
     var result = void 0;
     var toReturn = void 0;
     var interpret = function interpret() {
         toReturn = false;
-        var original = arguments.length > 1 ? Common.toArray(arguments) : arguments[0];
+        var original =
+            arguments.length > 1 ? Common.toArray(arguments) : arguments[0];
         Common.each(INTERPRETATIONS, function (family) {
             if (family.litmus(original)) {
-                Common.each(family.conversions, function (conversion, conversionName) {
-                    result = conversion.read(original);
-                    if (toReturn === false && result !== false) {
-                        toReturn = result;
-                        result.conversionName = conversionName;
-                        result.conversion = conversion;
-                        return Common.BREAK;
+                Common.each(
+                    family.conversions,
+                    function (conversion, conversionName) {
+                        result = conversion.read(original);
+                        if (toReturn === false && result !== false) {
+                            toReturn = result;
+                            result.conversionName = conversionName;
+                            result.conversion = conversion;
+                            return Common.BREAK;
+                        }
                     }
-                });
+                );
                 return Common.BREAK;
             }
         });
@@ -435,12 +496,12 @@
                 [p, v, t],
                 [p, q, v],
                 [t, p, v],
-                [v, p, q]
+                [v, p, q],
             ][hi];
             return {
                 r: c[0] * 255,
                 g: c[1] * 255,
-                b: c[2] * 255
+                b: c[2] * 255,
             };
         },
         rgb_to_hsv: function rgb_to_hsv(r, g, b) {
@@ -455,7 +516,7 @@
                 return {
                     h: NaN,
                     s: 0,
-                    v: 0
+                    v: 0,
                 };
             }
             if (r === max) {
@@ -472,7 +533,7 @@
             return {
                 h: h * 360,
                 s: s,
-                v: max / 255
+                v: max / 255,
             };
         },
         rgb_to_hex: function rgb_to_hex(r, g, b) {
@@ -482,42 +543,47 @@
             return hex;
         },
         component_from_hex: function component_from_hex(hex, componentIndex) {
-            return hex >> componentIndex * 8 & 0xFF;
+            return (hex >> (componentIndex * 8)) & 0xff;
         },
-        hex_with_component: function hex_with_component(hex, componentIndex, value) {
-            return value << (tmpComponent = componentIndex * 8) | hex & ~(0xFF << tmpComponent);
-        }
+        hex_with_component: function hex_with_component(
+            hex,
+            componentIndex,
+            value
+        ) {
+            return (
+                (value << (tmpComponent = componentIndex * 8)) |
+                (hex & ~(0xff << tmpComponent))
+            );
+        },
     };
 
-    var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) {
-        return typeof obj;
-    } : function (obj) {
-        return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
-    };
-
-
-
-
-
-
-
-
-
-
+    var _typeof =
+        typeof Symbol === 'function' && typeof Symbol.iterator === 'symbol'
+            ? function (obj) {
+                  return typeof obj;
+              }
+            : function (obj) {
+                  return obj &&
+                      typeof Symbol === 'function' &&
+                      obj.constructor === Symbol &&
+                      obj !== Symbol.prototype
+                      ? 'symbol'
+                      : typeof obj;
+              };
 
     var classCallCheck = function (instance, Constructor) {
         if (!(instance instanceof Constructor)) {
-            throw new TypeError("Cannot call a class as a function");
+            throw new TypeError('Cannot call a class as a function');
         }
     };
 
-    var createClass = function () {
+    var createClass = (function () {
         function defineProperties(target, props) {
             for (var i = 0; i < props.length; i++) {
                 var descriptor = props[i];
                 descriptor.enumerable = descriptor.enumerable || false;
                 descriptor.configurable = true;
-                if ("value" in descriptor) descriptor.writable = true;
+                if ('value' in descriptor) descriptor.writable = true;
                 Object.defineProperty(target, descriptor.key, descriptor);
             }
         }
@@ -527,13 +593,7 @@
             if (staticProps) defineProperties(Constructor, staticProps);
             return Constructor;
         };
-    }();
-
-
-
-
-
-
+    })();
 
     var get = function get(object, property, receiver) {
         if (object === null) object = Function.prototype;
@@ -547,7 +607,7 @@
             } else {
                 return get(parent, property, receiver);
             }
-        } else if ("value" in desc) {
+        } else if ('value' in desc) {
             return desc.value;
         } else {
             var getter = desc.get;
@@ -561,8 +621,11 @@
     };
 
     var inherits = function (subClass, superClass) {
-        if (typeof superClass !== "function" && superClass !== null) {
-            throw new TypeError("Super expression must either be null or a function, not " + typeof superClass);
+        if (typeof superClass !== 'function' && superClass !== null) {
+            throw new TypeError(
+                'Super expression must either be null or a function, not ' +
+                    typeof superClass
+            );
         }
 
         subClass.prototype = Object.create(superClass && superClass.prototype, {
@@ -570,31 +633,28 @@
                 value: subClass,
                 enumerable: false,
                 writable: true,
-                configurable: true
-            }
+                configurable: true,
+            },
         });
-        if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass;
+        if (superClass)
+            Object.setPrototypeOf
+                ? Object.setPrototypeOf(subClass, superClass)
+                : (subClass.__proto__ = superClass);
     };
-
-
-
-
-
-
-
-
-
-
 
     var possibleConstructorReturn = function (self, call) {
         if (!self) {
-            throw new ReferenceError("this hasn't been initialised - super() hasn't been called");
+            throw new ReferenceError(
+                "this hasn't been initialised - super() hasn't been called"
+            );
         }
 
-        return call && (typeof call === "object" || typeof call === "function") ? call : self;
+        return call && (typeof call === 'object' || typeof call === 'function')
+            ? call
+            : self;
     };
 
-    var Color = function () {
+    var Color = (function () {
         function Color() {
             classCallCheck(this, Color);
             this.__state = interpret.apply(this, arguments);
@@ -603,24 +663,28 @@
             }
             this.__state.a = this.__state.a || 1;
         }
-        createClass(Color, [{
-            key: 'toString',
-            value: function toString() {
-                return colorToString(this);
-            }
-        }, {
-            key: 'toHexString',
-            value: function toHexString() {
-                return colorToString(this, true);
-            }
-        }, {
-            key: 'toOriginal',
-            value: function toOriginal() {
-                return this.__state.conversion.write(this);
-            }
-        }]);
+        createClass(Color, [
+            {
+                key: 'toString',
+                value: function toString() {
+                    return colorToString(this);
+                },
+            },
+            {
+                key: 'toHexString',
+                value: function toHexString() {
+                    return colorToString(this, true);
+                },
+            },
+            {
+                key: 'toOriginal',
+                value: function toOriginal() {
+                    return this.__state.conversion.write(this);
+                },
+            },
+        ]);
         return Color;
-    }();
+    })();
 
     function defineRGBComponent(target, component, componentHexIndex) {
         Object.defineProperty(target, component, {
@@ -637,7 +701,7 @@
                     this.__state.space = 'RGB';
                 }
                 this.__state[component] = v;
-            }
+            },
         });
     }
 
@@ -656,14 +720,24 @@
                     this.__state.space = 'HSV';
                 }
                 this.__state[component] = v;
-            }
+            },
         });
     }
     Color.recalculateRGB = function (color, component, componentHexIndex) {
         if (color.__state.space === 'HEX') {
-            color.__state[component] = ColorMath.component_from_hex(color.__state.hex, componentHexIndex);
+            color.__state[component] = ColorMath.component_from_hex(
+                color.__state.hex,
+                componentHexIndex
+            );
         } else if (color.__state.space === 'HSV') {
-            Common.extend(color.__state, ColorMath.hsv_to_rgb(color.__state.h, color.__state.s, color.__state.v));
+            Common.extend(
+                color.__state,
+                ColorMath.hsv_to_rgb(
+                    color.__state.h,
+                    color.__state.s,
+                    color.__state.v
+                )
+            );
         } else {
             throw new Error('Corrupted color state');
         }
@@ -672,7 +746,7 @@
         var result = ColorMath.rgb_to_hsv(color.r, color.g, color.b);
         Common.extend(color.__state, {
             s: result.s,
-            v: result.v
+            v: result.v,
         });
         if (!Common.isNaN(result.h)) {
             color.__state.h = result.h;
@@ -693,7 +767,7 @@
         },
         set: function set$$1(v) {
             this.__state.a = v;
-        }
+        },
     });
     Object.defineProperty(Color.prototype, 'hex', {
         get: function get$$1() {
@@ -705,10 +779,10 @@
         set: function set$$1(v) {
             this.__state.space = 'HEX';
             this.__state.hex = v;
-        }
+        },
     });
 
-    var Controller = function () {
+    var Controller = (function () {
         function Controller(object, property) {
             classCallCheck(this, Controller);
             this.initialValue = object[property];
@@ -718,51 +792,64 @@
             this.__onChange = undefined;
             this.__onFinishChange = undefined;
         }
-        createClass(Controller, [{
-            key: 'onChange',
-            value: function onChange(fnc) {
-                this.__onChange = fnc;
-                return this;
-            }
-        }, {
-            key: 'onFinishChange',
-            value: function onFinishChange(fnc) {
-                this.__onFinishChange = fnc;
-                return this;
-            }
-        }, {
-            key: 'setValue',
-            value: function setValue(newValue) {
-                this.object[this.property] = newValue;
-                if (this.__onChange) {
-                    this.__onChange.call(this, newValue);
-                }
-                this.updateDisplay();
-                return this;
-            }
-        }, {
-            key: 'getValue',
-            value: function getValue() {
-                return this.object[this.property];
-            }
-        }, {
-            key: 'updateDisplay',
-            value: function updateDisplay() {
-                return this;
-            }
-        }, {
-            key: 'isModified',
-            value: function isModified() {
-                return this.initialValue !== this.getValue();
-            }
-        }]);
+        createClass(Controller, [
+            {
+                key: 'onChange',
+                value: function onChange(fnc) {
+                    this.__onChange = fnc;
+                    return this;
+                },
+            },
+            {
+                key: 'onFinishChange',
+                value: function onFinishChange(fnc) {
+                    this.__onFinishChange = fnc;
+                    return this;
+                },
+            },
+            {
+                key: 'setValue',
+                value: function setValue(newValue) {
+                    this.object[this.property] = newValue;
+                    if (this.__onChange) {
+                        this.__onChange.call(this, newValue);
+                    }
+                    this.updateDisplay();
+                    return this;
+                },
+            },
+            {
+                key: 'getValue',
+                value: function getValue() {
+                    return this.object[this.property];
+                },
+            },
+            {
+                key: 'updateDisplay',
+                value: function updateDisplay() {
+                    return this;
+                },
+            },
+            {
+                key: 'isModified',
+                value: function isModified() {
+                    return this.initialValue !== this.getValue();
+                },
+            },
+        ]);
         return Controller;
-    }();
+    })();
 
     var EVENT_MAP = {
         HTMLEvents: ['change'],
-        MouseEvents: ['click', 'mousemove', 'mousedown', 'mouseup', 'mouseover'],
-        KeyboardEvents: ['keydown']
+        MouseEvents: [
+            'click',
+            'mousemove',
+            'mousedown',
+            'mouseup',
+            'mouseover',
+        ],
+        KeyboardEvents: ['keydown'],
     };
     var EVENT_MAP_INV = {};
     Common.each(EVENT_MAP, function (v, k) {
@@ -785,9 +872,11 @@
     var dom = {
         makeSelectable: function makeSelectable(elem, selectable) {
             if (elem === undefined || elem.style === undefined) return;
-            elem.onselectstart = selectable ? function () {
-                return false;
-            } : function () {};
+            elem.onselectstart = selectable
+                ? function () {
+                      return false;
+                  }
+                : function () {};
             elem.style.MozUserSelect = selectable ? 'auto' : 'none';
             elem.style.KhtmlUserSelect = selectable ? 'auto' : 'none';
             elem.unselectable = selectable ? 'on' : 'off';
@@ -819,37 +908,61 @@
             }
             var evt = document.createEvent(className);
             switch (className) {
-                case 'MouseEvents':
-                    {
-                        var clientX = params.x || params.clientX || 0;
-                        var clientY = params.y || params.clientY || 0;
-                        evt.initMouseEvent(eventType, params.bubbles || false, params.cancelable || true, window, params.clickCount || 1, 0,
-                            0,
-                            clientX,
-                            clientY,
-                            false, false, false, false, 0, null);
-                        break;
-                    }
-                case 'KeyboardEvents':
-                    {
-                        var init = evt.initKeyboardEvent || evt.initKeyEvent;
-                        Common.defaults(params, {
-                            cancelable: true,
-                            ctrlKey: false,
-                            altKey: false,
-                            shiftKey: false,
-                            metaKey: false,
-                            keyCode: undefined,
-                            charCode: undefined
-                        });
-                        init(eventType, params.bubbles || false, params.cancelable, window, params.ctrlKey, params.altKey, params.shiftKey, params.metaKey, params.keyCode, params.charCode);
-                        break;
-                    }
-                default:
-                    {
-                        evt.initEvent(eventType, params.bubbles || false, params.cancelable || true);
-                        break;
-                    }
+                case 'MouseEvents': {
+                    var clientX = params.x || params.clientX || 0;
+                    var clientY = params.y || params.clientY || 0;
+                    evt.initMouseEvent(
+                        eventType,
+                        params.bubbles || false,
+                        params.cancelable || true,
+                        window,
+                        params.clickCount || 1,
+                        0,
+                        0,
+                        clientX,
+                        clientY,
+                        false,
+                        false,
+                        false,
+                        false,
+                        0,
+                        null
+                    );
+                    break;
+                }
+                case 'KeyboardEvents': {
+                    var init = evt.initKeyboardEvent || evt.initKeyEvent;
+                    Common.defaults(params, {
+                        cancelable: true,
+                        ctrlKey: false,
+                        altKey: false,
+                        shiftKey: false,
+                        metaKey: false,
+                        keyCode: undefined,
+                        charCode: undefined,
+                    });
+                    init(
+                        eventType,
+                        params.bubbles || false,
+                        params.cancelable,
+                        window,
+                        params.ctrlKey,
+                        params.altKey,
+                        params.shiftKey,
+                        params.metaKey,
+                        params.keyCode,
+                        params.charCode
+                    );
+                    break;
+                }
+                default: {
+                    evt.initEvent(
+                        eventType,
+                        params.bubbles || false,
+                        params.cancelable || true
+                    );
+                    break;
+                }
             }
             Common.defaults(evt, aux);
             elem.dispatchEvent(evt);
@@ -879,7 +992,10 @@
                 var classes = elem.className.split(/ +/);
                 if (classes.indexOf(className) === -1) {
                     classes.push(className);
-                    elem.className = classes.join(' ').replace(/^\s+/, '').replace(/\s+$/, '');
+                    elem.className = classes
+                        .join(' ')
+                        .replace(/^\s+/, '')
+                        .replace(/\s+$/, '');
                 }
             }
             return dom;
@@ -902,21 +1018,37 @@
             return dom;
         },
         hasClass: function hasClass(elem, className) {
-            return new RegExp('(?:^|\\s+)' + className + '(?:\\s+|$)').test(elem.className) || false;
+            return (
+                new RegExp('(?:^|\\s+)' + className + '(?:\\s+|$)').test(
+                    elem.className
+                ) || false
+            );
         },
         getWidth: function getWidth(elem) {
             var style = getComputedStyle(elem);
-            return cssValueToPixels(style['border-left-width']) + cssValueToPixels(style['border-right-width']) + cssValueToPixels(style['padding-left']) + cssValueToPixels(style['padding-right']) + cssValueToPixels(style.width);
+            return (
+                cssValueToPixels(style['border-left-width']) +
+                cssValueToPixels(style['border-right-width']) +
+                cssValueToPixels(style['padding-left']) +
+                cssValueToPixels(style['padding-right']) +
+                cssValueToPixels(style.width)
+            );
         },
         getHeight: function getHeight(elem) {
             var style = getComputedStyle(elem);
-            return cssValueToPixels(style['border-top-width']) + cssValueToPixels(style['border-bottom-width']) + cssValueToPixels(style['padding-top']) + cssValueToPixels(style['padding-bottom']) + cssValueToPixels(style.height);
+            return (
+                cssValueToPixels(style['border-top-width']) +
+                cssValueToPixels(style['border-bottom-width']) +
+                cssValueToPixels(style['padding-top']) +
+                cssValueToPixels(style['padding-bottom']) +
+                cssValueToPixels(style.height)
+            );
         },
         getOffset: function getOffset(el) {
             var elem = el;
             var offset = {
                 left: 0,
-                top: 0
+                top: 0,
             };
             if (elem.offsetParent) {
                 do {
@@ -929,15 +1061,21 @@
         },
         isActive: function isActive(elem) {
             return elem === document.activeElement && (elem.type || elem.href);
-        }
+        },
     };
 
-    var BooleanController = function (_Controller) {
+    var BooleanController = (function (_Controller) {
         inherits(BooleanController, _Controller);
 
         function BooleanController(object, property) {
             classCallCheck(this, BooleanController);
-            var _this2 = possibleConstructorReturn(this, (BooleanController.__proto__ || Object.getPrototypeOf(BooleanController)).call(this, object, property));
+            var _this2 = possibleConstructorReturn(
+                this,
+                (
+                    BooleanController.__proto__ ||
+                    Object.getPrototypeOf(BooleanController)
+                ).call(this, object, property)
+            );
             var _this = _this2;
             _this2.__prev = _this2.getValue();
             _this2.__checkbox = document.createElement('input');
@@ -951,39 +1089,58 @@
             _this2.updateDisplay();
             return _this2;
         }
-        createClass(BooleanController, [{
-            key: 'setValue',
-            value: function setValue(v) {
-                var toReturn = get(BooleanController.prototype.__proto__ || Object.getPrototypeOf(BooleanController.prototype), 'setValue', this).call(this, v);
-                if (this.__onFinishChange) {
-                    this.__onFinishChange.call(this, this.getValue());
-                }
-                this.__prev = this.getValue();
-                return toReturn;
-            }
-        }, {
-            key: 'updateDisplay',
-            value: function updateDisplay() {
-                if (this.getValue() === true) {
-                    this.__checkbox.setAttribute('checked', 'checked');
-                    this.__checkbox.checked = true;
-                    this.__prev = true;
-                } else {
-                    this.__checkbox.checked = false;
-                    this.__prev = false;
-                }
-                return get(BooleanController.prototype.__proto__ || Object.getPrototypeOf(BooleanController.prototype), 'updateDisplay', this).call(this);
-            }
-        }]);
+        createClass(BooleanController, [
+            {
+                key: 'setValue',
+                value: function setValue(v) {
+                    var toReturn = get(
+                        BooleanController.prototype.__proto__ ||
+                            Object.getPrototypeOf(BooleanController.prototype),
+                        'setValue',
+                        this
+                    ).call(this, v);
+                    if (this.__onFinishChange) {
+                        this.__onFinishChange.call(this, this.getValue());
+                    }
+                    this.__prev = this.getValue();
+                    return toReturn;
+                },
+            },
+            {
+                key: 'updateDisplay',
+                value: function updateDisplay() {
+                    if (this.getValue() === true) {
+                        this.__checkbox.setAttribute('checked', 'checked');
+                        this.__checkbox.checked = true;
+                        this.__prev = true;
+                    } else {
+                        this.__checkbox.checked = false;
+                        this.__prev = false;
+                    }
+                    return get(
+                        BooleanController.prototype.__proto__ ||
+                            Object.getPrototypeOf(BooleanController.prototype),
+                        'updateDisplay',
+                        this
+                    ).call(this);
+                },
+            },
+        ]);
         return BooleanController;
-    }(Controller);
+    })(Controller);
 
-    var OptionController = function (_Controller) {
+    var OptionController = (function (_Controller) {
         inherits(OptionController, _Controller);
 
         function OptionController(object, property, opts) {
             classCallCheck(this, OptionController);
-            var _this2 = possibleConstructorReturn(this, (OptionController.__proto__ || Object.getPrototypeOf(OptionController)).call(this, object, property));
+            var _this2 = possibleConstructorReturn(
+                this,
+                (
+                    OptionController.__proto__ ||
+                    Object.getPrototypeOf(OptionController)
+                ).call(this, object, property)
+            );
             var options = opts;
             var _this = _this2;
             _this2.__select = document.createElement('select');
@@ -1008,32 +1165,51 @@
             _this2.domElement.appendChild(_this2.__select);
             return _this2;
         }
-        createClass(OptionController, [{
-            key: 'setValue',
-            value: function setValue(v) {
-                var toReturn = get(OptionController.prototype.__proto__ || Object.getPrototypeOf(OptionController.prototype), 'setValue', this).call(this, v);
-                if (this.__onFinishChange) {
-                    this.__onFinishChange.call(this, this.getValue());
-                }
-                return toReturn;
-            }
-        }, {
-            key: 'updateDisplay',
-            value: function updateDisplay() {
-                if (dom.isActive(this.__select)) return this;
-                this.__select.value = this.getValue();
-                return get(OptionController.prototype.__proto__ || Object.getPrototypeOf(OptionController.prototype), 'updateDisplay', this).call(this);
-            }
-        }]);
+        createClass(OptionController, [
+            {
+                key: 'setValue',
+                value: function setValue(v) {
+                    var toReturn = get(
+                        OptionController.prototype.__proto__ ||
+                            Object.getPrototypeOf(OptionController.prototype),
+                        'setValue',
+                        this
+                    ).call(this, v);
+                    if (this.__onFinishChange) {
+                        this.__onFinishChange.call(this, this.getValue());
+                    }
+                    return toReturn;
+                },
+            },
+            {
+                key: 'updateDisplay',
+                value: function updateDisplay() {
+                    if (dom.isActive(this.__select)) return this;
+                    this.__select.value = this.getValue();
+                    return get(
+                        OptionController.prototype.__proto__ ||
+                            Object.getPrototypeOf(OptionController.prototype),
+                        'updateDisplay',
+                        this
+                    ).call(this);
+                },
+            },
+        ]);
         return OptionController;
-    }(Controller);
+    })(Controller);
 
-    var StringController = function (_Controller) {
+    var StringController = (function (_Controller) {
         inherits(StringController, _Controller);
 
         function StringController(object, property) {
             classCallCheck(this, StringController);
-            var _this2 = possibleConstructorReturn(this, (StringController.__proto__ || Object.getPrototypeOf(StringController)).call(this, object, property));
+            var _this2 = possibleConstructorReturn(
+                this,
+                (
+                    StringController.__proto__ ||
+                    Object.getPrototypeOf(StringController)
+                ).call(this, object, property)
+            );
             var _this = _this2;
 
             function onChange() {
@@ -1059,17 +1235,24 @@
             _this2.domElement.appendChild(_this2.__input);
             return _this2;
         }
-        createClass(StringController, [{
-            key: 'updateDisplay',
-            value: function updateDisplay() {
-                if (!dom.isActive(this.__input)) {
-                    this.__input.value = this.getValue();
-                }
-                return get(StringController.prototype.__proto__ || Object.getPrototypeOf(StringController.prototype), 'updateDisplay', this).call(this);
-            }
-        }]);
+        createClass(StringController, [
+            {
+                key: 'updateDisplay',
+                value: function updateDisplay() {
+                    if (!dom.isActive(this.__input)) {
+                        this.__input.value = this.getValue();
+                    }
+                    return get(
+                        StringController.prototype.__proto__ ||
+                            Object.getPrototypeOf(StringController.prototype),
+                        'updateDisplay',
+                        this
+                    ).call(this);
+                },
+            },
+        ]);
         return StringController;
-    }(Controller);
+    })(Controller);
 
     function numDecimals(x) {
         var _x = x.toString();
@@ -1078,12 +1261,18 @@
         }
         return 0;
     }
-    var NumberController = function (_Controller) {
+    var NumberController = (function (_Controller) {
         inherits(NumberController, _Controller);
 
         function NumberController(object, property, params) {
             classCallCheck(this, NumberController);
-            var _this = possibleConstructorReturn(this, (NumberController.__proto__ || Object.getPrototypeOf(NumberController)).call(this, object, property));
+            var _this = possibleConstructorReturn(
+                this,
+                (
+                    NumberController.__proto__ ||
+                    Object.getPrototypeOf(NumberController)
+                ).call(this, object, property)
+            );
             var _params = params || {};
             _this.__min = _params.min;
             _this.__max = _params.max;
@@ -1092,7 +1281,14 @@
                 if (_this.initialValue === 0) {
                     _this.__impliedStep = 1;
                 } else {
-                    _this.__impliedStep = Math.pow(10, Math.floor(Math.log(Math.abs(_this.initialValue)) / Math.LN10)) / 10;
+                    _this.__impliedStep =
+                        Math.pow(
+                            10,
+                            Math.floor(
+                                Math.log(Math.abs(_this.initialValue)) /
+                                    Math.LN10
+                            )
+                        ) / 10;
                 }
             } else {
                 _this.__impliedStep = _this.__step;
@@ -1100,54 +1296,70 @@
             _this.__precision = numDecimals(_this.__impliedStep);
             return _this;
         }
-        createClass(NumberController, [{
-            key: 'setValue',
-            value: function setValue(v) {
-                var _v = v;
-                if (this.__min !== undefined && _v < this.__min) {
-                    _v = this.__min;
-                } else if (this.__max !== undefined && _v > this.__max) {
-                    _v = this.__max;
-                }
-                if (this.__step !== undefined && _v % this.__step !== 0) {
-                    _v = Math.round(_v / this.__step) * this.__step;
-                }
-                return get(NumberController.prototype.__proto__ || Object.getPrototypeOf(NumberController.prototype), 'setValue', this).call(this, _v);
-            }
-        }, {
-            key: 'min',
-            value: function min(minValue) {
-                this.__min = minValue;
-                return this;
-            }
-        }, {
-            key: 'max',
-            value: function max(maxValue) {
-                this.__max = maxValue;
-                return this;
-            }
-        }, {
-            key: 'step',
-            value: function step(stepValue) {
-                this.__step = stepValue;
-                this.__impliedStep = stepValue;
-                this.__precision = numDecimals(stepValue);
-                return this;
-            }
-        }]);
+        createClass(NumberController, [
+            {
+                key: 'setValue',
+                value: function setValue(v) {
+                    var _v = v;
+                    if (this.__min !== undefined && _v < this.__min) {
+                        _v = this.__min;
+                    } else if (this.__max !== undefined && _v > this.__max) {
+                        _v = this.__max;
+                    }
+                    if (this.__step !== undefined && _v % this.__step !== 0) {
+                        _v = Math.round(_v / this.__step) * this.__step;
+                    }
+                    return get(
+                        NumberController.prototype.__proto__ ||
+                            Object.getPrototypeOf(NumberController.prototype),
+                        'setValue',
+                        this
+                    ).call(this, _v);
+                },
+            },
+            {
+                key: 'min',
+                value: function min(minValue) {
+                    this.__min = minValue;
+                    return this;
+                },
+            },
+            {
+                key: 'max',
+                value: function max(maxValue) {
+                    this.__max = maxValue;
+                    return this;
+                },
+            },
+            {
+                key: 'step',
+                value: function step(stepValue) {
+                    this.__step = stepValue;
+                    this.__impliedStep = stepValue;
+                    this.__precision = numDecimals(stepValue);
+                    return this;
+                },
+            },
+        ]);
         return NumberController;
-    }(Controller);
+    })(Controller);
 
     function roundToDecimal(value, decimals) {
         var tenTo = Math.pow(10, decimals);
         return Math.round(value * tenTo) / tenTo;
     }
-    var NumberControllerBox = function (_NumberController) {
+    var NumberControllerBox = (function (_NumberController) {
         inherits(NumberControllerBox, _NumberController);
 
         function NumberControllerBox(object, property, params) {
             classCallCheck(this, NumberControllerBox);
-            var _this2 = possibleConstructorReturn(this, (NumberControllerBox.__proto__ || Object.getPrototypeOf(NumberControllerBox)).call(this, object, property, params));
+            var _this2 = possibleConstructorReturn(
+                this,
+                (
+                    NumberControllerBox.__proto__ ||
+                    Object.getPrototypeOf(NumberControllerBox)
+                ).call(this, object, property, params)
+            );
             _this2.__truncationSuspended = false;
             var _this = _this2;
             var prevY = void 0;
@@ -1203,34 +1415,53 @@
             _this2.domElement.appendChild(_this2.__input);
             return _this2;
         }
-        createClass(NumberControllerBox, [{
-            key: 'updateDisplay',
-            value: function updateDisplay() {
-                this.__input.value = this.__truncationSuspended ? this.getValue() : roundToDecimal(this.getValue(), this.__precision);
-                return get(NumberControllerBox.prototype.__proto__ || Object.getPrototypeOf(NumberControllerBox.prototype), 'updateDisplay', this).call(this);
-            }
-        }]);
+        createClass(NumberControllerBox, [
+            {
+                key: 'updateDisplay',
+                value: function updateDisplay() {
+                    this.__input.value = this.__truncationSuspended
+                        ? this.getValue()
+                        : roundToDecimal(this.getValue(), this.__precision);
+                    return get(
+                        NumberControllerBox.prototype.__proto__ ||
+                            Object.getPrototypeOf(
+                                NumberControllerBox.prototype
+                            ),
+                        'updateDisplay',
+                        this
+                    ).call(this);
+                },
+            },
+        ]);
         return NumberControllerBox;
-    }(NumberController);
+    })(NumberController);
 
     function map(v, i1, i2, o1, o2) {
         return o1 + (o2 - o1) * ((v - i1) / (i2 - i1));
     }
-    var NumberControllerSlider = function (_NumberController) {
+    var NumberControllerSlider = (function (_NumberController) {
         inherits(NumberControllerSlider, _NumberController);
 
         function NumberControllerSlider(object, property, min, max, step) {
             classCallCheck(this, NumberControllerSlider);
-            var _this2 = possibleConstructorReturn(this, (NumberControllerSlider.__proto__ || Object.getPrototypeOf(NumberControllerSlider)).call(this, object, property, {
-                min: min,
-                max: max,
-                step: step
-            }));
+            var _this2 = possibleConstructorReturn(
+                this,
+                (
+                    NumberControllerSlider.__proto__ ||
+                    Object.getPrototypeOf(NumberControllerSlider)
+                ).call(this, object, property, {
+                    min: min,
+                    max: max,
+                    step: step,
+                })
+            );
             var _this = _this2;
             _this2.__background = document.createElement('div');
             _this2.__foreground = document.createElement('div');
             dom.bind(_this2.__background, 'mousedown', onMouseDown);
-            dom.bind(_this2.__background, 'touchstart', onTouchStart);
+            dom.bind(_this2.__background, 'touchstart', onTouchStart, {
+                passive: true,
+            });
             dom.addClass(_this2.__background, 'slider');
             dom.addClass(_this2.__foreground, 'slider-fg');
 
@@ -1244,7 +1475,15 @@
             function onMouseDrag(e) {
                 e.preventDefault();
                 var bgRect = _this.__background.getBoundingClientRect();
-                _this.setValue(map(e.clientX, bgRect.left, bgRect.right, _this.__min, _this.__max));
+                _this.setValue(
+                    map(
+                        e.clientX,
+                        bgRect.left,
+                        bgRect.right,
+                        _this.__min,
+                        _this.__max
+                    )
+                );
                 return false;
             }
 
@@ -1268,7 +1507,15 @@
             function onTouchMove(e) {
                 var clientX = e.touches[0].clientX;
                 var bgRect = _this.__background.getBoundingClientRect();
-                _this.setValue(map(clientX, bgRect.left, bgRect.right, _this.__min, _this.__max));
+                _this.setValue(
+                    map(
+                        clientX,
+                        bgRect.left,
+                        bgRect.right,
+                        _this.__min,
+                        _this.__max
+                    )
+                );
             }
 
             function onTouchEnd() {
@@ -1283,23 +1530,40 @@
             _this2.domElement.appendChild(_this2.__background);
             return _this2;
         }
-        createClass(NumberControllerSlider, [{
-            key: 'updateDisplay',
-            value: function updateDisplay() {
-                var pct = (this.getValue() - this.__min) / (this.__max - this.__min);
-                this.__foreground.style.width = pct * 100 + '%';
-                return get(NumberControllerSlider.prototype.__proto__ || Object.getPrototypeOf(NumberControllerSlider.prototype), 'updateDisplay', this).call(this);
-            }
-        }]);
+        createClass(NumberControllerSlider, [
+            {
+                key: 'updateDisplay',
+                value: function updateDisplay() {
+                    var pct =
+                        (this.getValue() - this.__min) /
+                        (this.__max - this.__min);
+                    this.__foreground.style.width = pct * 100 + '%';
+                    return get(
+                        NumberControllerSlider.prototype.__proto__ ||
+                            Object.getPrototypeOf(
+                                NumberControllerSlider.prototype
+                            ),
+                        'updateDisplay',
+                        this
+                    ).call(this);
+                },
+            },
+        ]);
         return NumberControllerSlider;
-    }(NumberController);
+    })(NumberController);
 
-    var FunctionController = function (_Controller) {
+    var FunctionController = (function (_Controller) {
         inherits(FunctionController, _Controller);
 
         function FunctionController(object, property, text) {
             classCallCheck(this, FunctionController);
-            var _this2 = possibleConstructorReturn(this, (FunctionController.__proto__ || Object.getPrototypeOf(FunctionController)).call(this, object, property));
+            var _this2 = possibleConstructorReturn(
+                this,
+                (
+                    FunctionController.__proto__ ||
+                    Object.getPrototypeOf(FunctionController)
+                ).call(this, object, property)
+            );
             var _this = _this2;
             _this2.__button = document.createElement('div');
             _this2.__button.innerHTML = text === undefined ? 'Fire' : text;
@@ -1312,27 +1576,35 @@
             _this2.domElement.appendChild(_this2.__button);
             return _this2;
         }
-        createClass(FunctionController, [{
-            key: 'fire',
-            value: function fire() {
-                if (this.__onChange) {
-                    this.__onChange.call(this);
-                }
-                this.getValue().call(this.object);
-                if (this.__onFinishChange) {
-                    this.__onFinishChange.call(this, this.getValue());
-                }
-            }
-        }]);
+        createClass(FunctionController, [
+            {
+                key: 'fire',
+                value: function fire() {
+                    if (this.__onChange) {
+                        this.__onChange.call(this);
+                    }
+                    this.getValue().call(this.object);
+                    if (this.__onFinishChange) {
+                        this.__onFinishChange.call(this, this.getValue());
+                    }
+                },
+            },
+        ]);
         return FunctionController;
-    }(Controller);
+    })(Controller);
 
-    var ColorController = function (_Controller) {
+    var ColorController = (function (_Controller) {
         inherits(ColorController, _Controller);
 
         function ColorController(object, property) {
             classCallCheck(this, ColorController);
-            var _this2 = possibleConstructorReturn(this, (ColorController.__proto__ || Object.getPrototypeOf(ColorController)).call(this, object, property));
+            var _this2 = possibleConstructorReturn(
+                this,
+                (
+                    ColorController.__proto__ ||
+                    Object.getPrototypeOf(ColorController)
+                ).call(this, object, property)
+            );
             _this2.__color = new Color(_this2.getValue());
             _this2.__temp = new Color(0);
             var _this = _this2;
@@ -1363,34 +1635,45 @@
                     dom.removeClass(_this.__selector, 'drag');
                 });
             });
-            dom.bind(_this2.__selector, 'touchstart', function () {
-                dom.addClass(this, 'drag').bind(window, 'touchend', function () {
-                    dom.removeClass(_this.__selector, 'drag');
-                });
-            });
+            dom.bind(
+                _this2.__selector,
+                'touchstart',
+                function () {
+                    dom.addClass(this, 'drag').bind(
+                        window,
+                        'touchend',
+                        function () {
+                            dom.removeClass(_this.__selector, 'drag');
+                        }
+                    );
+                },
+                { passive: true }
+            );
             var valueField = document.createElement('div');
             Common.extend(_this2.__selector.style, {
                 width: '122px',
                 height: '102px',
                 padding: '3px',
                 backgroundColor: '#222',
-                boxShadow: '0px 1px 3px rgba(0,0,0,0.3)'
+                boxShadow: '0px 1px 3px rgba(0,0,0,0.3)',
             });
             Common.extend(_this2.__field_knob.style, {
                 position: 'absolute',
                 width: '12px',
                 height: '12px',
-                border: _this2.__field_knob_border + (_this2.__color.v < 0.5 ? '#fff' : '#000'),
+                border:
+                    _this2.__field_knob_border +
+                    (_this2.__color.v < 0.5 ? '#fff' : '#000'),
                 boxShadow: '0px 1px 3px rgba(0,0,0,0.5)',
                 borderRadius: '12px',
-                zIndex: 1
+                zIndex: 1,
             });
             Common.extend(_this2.__hue_knob.style, {
                 position: 'absolute',
                 width: '15px',
                 height: '2px',
                 borderRight: '4px solid #fff',
-                zIndex: 1
+                zIndex: 1,
             });
             Common.extend(_this2.__saturation_field.style, {
                 width: '100px',
@@ -1398,12 +1681,12 @@
                 border: '1px solid #555',
                 marginRight: '3px',
                 display: 'inline-block',
-                cursor: 'pointer'
+                cursor: 'pointer',
             });
             Common.extend(valueField.style, {
                 width: '100%',
                 height: '100%',
-                background: 'none'
+                background: 'none',
             });
             linearGradient(valueField, 'top', 'rgba(0,0,0,0)', '#000');
             Common.extend(_this2.__hue_field.style, {
@@ -1413,7 +1696,7 @@
                 cursor: 'ns-resize',
                 position: 'absolute',
                 top: '3px',
-                right: '3px'
+                right: '3px',
             });
             hueGradient(_this2.__hue_field);
             Common.extend(_this2.__input.style, {
@@ -1422,14 +1705,20 @@
                 color: '#fff',
                 border: 0,
                 // fontWeight: 'bold',
-                textShadow: _this2.__input_textShadow + 'rgba(0,0,0,0.7)'
+                textShadow: _this2.__input_textShadow + 'rgba(0,0,0,0.7)',
             });
             dom.bind(_this2.__saturation_field, 'mousedown', fieldDown);
-            dom.bind(_this2.__saturation_field, 'touchstart', fieldDown);
+            dom.bind(_this2.__saturation_field, 'touchstart', fieldDown, {
+                passive: true,
+            });
             dom.bind(_this2.__field_knob, 'mousedown', fieldDown);
-            dom.bind(_this2.__field_knob, 'touchstart', fieldDown);
+            dom.bind(_this2.__field_knob, 'touchstart', fieldDown, {
+                passive: true,
+            });
             dom.bind(_this2.__hue_field, 'mousedown', fieldDownH);
-            dom.bind(_this2.__hue_field, 'touchstart', fieldDownH);
+            dom.bind(_this2.__hue_field, 'touchstart', fieldDownH, {
+                passive: true,
+            });
 
             function fieldDown(e) {
                 setSV(e);
@@ -1475,7 +1764,10 @@
 
             function onFinish() {
                 if (_this.__onFinishChange) {
-                    _this.__onFinishChange.call(_this, _this.__color.toOriginal());
+                    _this.__onFinishChange.call(
+                        _this,
+                        _this.__color.toOriginal()
+                    );
                 }
             }
             _this2.__saturation_field.appendChild(valueField);
@@ -1491,12 +1783,18 @@
                 if (e.type.indexOf('touch') === -1) {
                     e.preventDefault();
                 }
-                var fieldRect = _this.__saturation_field.getBoundingClientRect();
-                var _ref = e.touches && e.touches[0] || e,
+                var fieldRect =
+                    _this.__saturation_field.getBoundingClientRect();
+                var _ref = (e.touches && e.touches[0]) || e,
                     clientX = _ref.clientX,
                     clientY = _ref.clientY;
-                var s = (clientX - fieldRect.left) / (fieldRect.right - fieldRect.left);
-                var v = 1 - (clientY - fieldRect.top) / (fieldRect.bottom - fieldRect.top);
+                var s =
+                    (clientX - fieldRect.left) /
+                    (fieldRect.right - fieldRect.left);
+                var v =
+                    1 -
+                    (clientY - fieldRect.top) /
+                        (fieldRect.bottom - fieldRect.top);
                 if (v > 1) {
                     v = 1;
                 } else if (v < 0) {
@@ -1518,9 +1816,12 @@
                     e.preventDefault();
                 }
                 var fieldRect = _this.__hue_field.getBoundingClientRect();
-                var _ref2 = e.touches && e.touches[0] || e,
+                var _ref2 = (e.touches && e.touches[0]) || e,
                     clientY = _ref2.clientY;
-                var h = 1 - (clientY - fieldRect.top) / (fieldRect.bottom - fieldRect.top);
+                var h =
+                    1 -
+                    (clientY - fieldRect.top) /
+                        (fieldRect.bottom - fieldRect.top);
                 if (h > 1) {
                     h = 1;
                 } else if (h < 0) {
@@ -1532,62 +1833,112 @@
             }
             return _this2;
         }
-        createClass(ColorController, [{
-            key: 'updateDisplay',
-            value: function updateDisplay() {
-                var i = interpret(this.getValue());
-                if (i !== false) {
-                    var mismatch = false;
-                    Common.each(Color.COMPONENTS, function (component) {
-                        if (!Common.isUndefined(i[component]) && !Common.isUndefined(this.__color.__state[component]) && i[component] !== this.__color.__state[component]) {
-                            mismatch = true;
-                            return {};
+        createClass(ColorController, [
+            {
+                key: 'updateDisplay',
+                value: function updateDisplay() {
+                    var i = interpret(this.getValue());
+                    if (i !== false) {
+                        var mismatch = false;
+                        Common.each(
+                            Color.COMPONENTS,
+                            function (component) {
+                                if (
+                                    !Common.isUndefined(i[component]) &&
+                                    !Common.isUndefined(
+                                        this.__color.__state[component]
+                                    ) &&
+                                    i[component] !==
+                                        this.__color.__state[component]
+                                ) {
+                                    mismatch = true;
+                                    return {};
+                                }
+                            },
+                            this
+                        );
+                        if (mismatch) {
+                            Common.extend(this.__color.__state, i);
                         }
-                    }, this);
-                    if (mismatch) {
-                        Common.extend(this.__color.__state, i);
                     }
-                }
-                Common.extend(this.__temp.__state, this.__color.__state);
-                this.__temp.a = 1;
-                var flip = this.__color.v < 0.5 || this.__color.s > 0.5 ? 255 : 0;
-                var _flip = 255 - flip;
-                Common.extend(this.__field_knob.style, {
-                    marginLeft: 100 * this.__color.s - 7 + 'px',
-                    marginTop: 100 * (1 - this.__color.v) - 7 + 'px',
-                    backgroundColor: this.__temp.toHexString(),
-                    border: this.__field_knob_border + 'rgb(' + flip + ',' + flip + ',' + flip + ')'
-                });
-                this.__hue_knob.style.marginTop = (1 - this.__color.h / 360) * 100 + 'px';
-                this.__temp.s = 1;
-                this.__temp.v = 1;
-                linearGradient(this.__saturation_field, 'left', '#fff', this.__temp.toHexString());
-                this.__input.value = this.__color.toString();
-                Common.extend(this.__input.style, {
-                    backgroundColor: this.__color.toHexString(),
-                    color: 'rgb(' + flip + ',' + flip + ',' + flip + ')',
-                    textShadow: this.__input_textShadow + 'rgba(' + _flip + ',' + _flip + ',' + _flip + ',.7)'
-                });
-            }
-        }]);
+                    Common.extend(this.__temp.__state, this.__color.__state);
+                    this.__temp.a = 1;
+                    var flip =
+                        this.__color.v < 0.5 || this.__color.s > 0.5 ? 255 : 0;
+                    var _flip = 255 - flip;
+                    Common.extend(this.__field_knob.style, {
+                        marginLeft: 100 * this.__color.s - 7 + 'px',
+                        marginTop: 100 * (1 - this.__color.v) - 7 + 'px',
+                        backgroundColor: this.__temp.toHexString(),
+                        border:
+                            this.__field_knob_border +
+                            'rgb(' +
+                            flip +
+                            ',' +
+                            flip +
+                            ',' +
+                            flip +
+                            ')',
+                    });
+                    this.__hue_knob.style.marginTop =
+                        (1 - this.__color.h / 360) * 100 + 'px';
+                    this.__temp.s = 1;
+                    this.__temp.v = 1;
+                    linearGradient(
+                        this.__saturation_field,
+                        'left',
+                        '#fff',
+                        this.__temp.toHexString()
+                    );
+                    this.__input.value = this.__color.toString();
+                    Common.extend(this.__input.style, {
+                        backgroundColor: this.__color.toHexString(),
+                        color: 'rgb(' + flip + ',' + flip + ',' + flip + ')',
+                        textShadow:
+                            this.__input_textShadow +
+                            'rgba(' +
+                            _flip +
+                            ',' +
+                            _flip +
+                            ',' +
+                            _flip +
+                            ',.7)',
+                    });
+                },
+            },
+        ]);
         return ColorController;
-    }(Controller);
+    })(Controller);
     var vendors = ['-moz-', '-o-', '-webkit-', '-ms-', ''];
 
     function linearGradient(elem, x, a, b) {
         elem.style.background = '';
         Common.each(vendors, function (vendor) {
-            elem.style.cssText += 'background: ' + vendor + 'linear-gradient(' + x + ', ' + a + ' 0%, ' + b + ' 100%); ';
+            elem.style.cssText +=
+                'background: ' +
+                vendor +
+                'linear-gradient(' +
+                x +
+                ', ' +
+                a +
+                ' 0%, ' +
+                b +
+                ' 100%); ';
         });
     }
 
     function hueGradient(elem) {
         elem.style.background = '';
-        elem.style.cssText += 'background: -moz-linear-gradient(top,  #ff0000 0%, #ff00ff 17%, #0000ff 34%, #00ffff 50%, #00ff00 67%, #ffff00 84%, #ff0000 100%);';
-        elem.style.cssText += 'background: -webkit-linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);';
-        elem.style.cssText += 'background: -o-linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);';
-        elem.style.cssText += 'background: -ms-linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);';
-        elem.style.cssText += 'background: linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);';
+        elem.style.cssText +=
+            'background: -moz-linear-gradient(top,  #ff0000 0%, #ff00ff 17%, #0000ff 34%, #00ffff 50%, #00ff00 67%, #ffff00 84%, #ff0000 100%);';
+        elem.style.cssText +=
+            'background: -webkit-linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);';
+        elem.style.cssText +=
+            'background: -o-linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);';
+        elem.style.cssText +=
+            'background: -ms-linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);';
+        elem.style.cssText +=
+            'background: linear-gradient(top,  #ff0000 0%,#ff00ff 17%,#0000ff 34%,#00ffff 50%,#00ff00 67%,#ffff00 84%,#ff0000 100%);';
     }
 
     var css = {
@@ -1608,10 +1959,11 @@
             try {
                 head.appendChild(injected);
             } catch (e) {}
-        }
+        },
     };
 
-    var saveDialogContents = "<div id=\"dg-save\" class=\"dg dialogue\">\n\n  Here's the new load parameter for your <code>GUI</code>'s constructor:\n\n  <textarea id=\"dg-new-constructor\"></textarea>\n\n  <div id=\"dg-save-locally\">\n\n    <input id=\"dg-local-storage\" type=\"checkbox\"/> Automatically save\n    values to <code>localStorage</code> on exit.\n\n    <div id=\"dg-local-explain\">The values saved to <code>localStorage</code> will\n      override those passed to <code>dat.GUI</code>'s constructor. This makes it\n      easier to work incrementally, but <code>localStorage</code> is fragile,\n      and your friends may not see the same values you do.\n\n    </div>\n\n  </div>\n\n</div>";
+    var saveDialogContents =
+        '<div id="dg-save" class="dg dialogue">\n\n  Here\'s the new load parameter for your <code>GUI</code>\'s constructor:\n\n  <textarea id="dg-new-constructor"></textarea>\n\n  <div id="dg-save-locally">\n\n    <input id="dg-local-storage" type="checkbox"/> Automatically save\n    values to <code>localStorage</code> on exit.\n\n    <div id="dg-local-explain">The values saved to <code>localStorage</code> will\n      override those passed to <code>dat.GUI</code>\'s constructor. This makes it\n      easier to work incrementally, but <code>localStorage</code> is fragile,\n      and your friends may not see the same values you do.\n\n    </div>\n\n  </div>\n\n</div>';
 
     var ControllerFactory = function ControllerFactory(object, property) {
         var initialValue = object[property];
@@ -1619,22 +1971,36 @@
             return new OptionController(object, property, arguments[2]);
         }
         if (Common.isNumber(initialValue)) {
-            if (Common.isNumber(arguments[2]) && Common.isNumber(arguments[3])) {
+            if (
+                Common.isNumber(arguments[2]) &&
+                Common.isNumber(arguments[3])
+            ) {
                 if (Common.isNumber(arguments[4])) {
-                    return new NumberControllerSlider(object, property, arguments[2], arguments[3], arguments[4]);
+                    return new NumberControllerSlider(
+                        object,
+                        property,
+                        arguments[2],
+                        arguments[3],
+                        arguments[4]
+                    );
                 }
-                return new NumberControllerSlider(object, property, arguments[2], arguments[3]);
+                return new NumberControllerSlider(
+                    object,
+                    property,
+                    arguments[2],
+                    arguments[3]
+                );
             }
             if (Common.isNumber(arguments[4])) {
                 return new NumberControllerBox(object, property, {
                     min: arguments[2],
                     max: arguments[3],
-                    step: arguments[4]
+                    step: arguments[4],
                 });
             }
             return new NumberControllerBox(object, property, {
                 min: arguments[2],
-                max: arguments[3]
+                max: arguments[3],
             });
         }
         if (Common.isString(initialValue)) {
@@ -1652,9 +2018,15 @@
     function requestAnimationFrame(callback) {
         setTimeout(callback, 1000 / 60);
     }
-    var requestAnimationFrame$1 = window.requestAnimationFrame || window.webkitRequestAnimationFrame || window.mozRequestAnimationFrame || window.oRequestAnimationFrame || window.msRequestAnimationFrame || requestAnimationFrame;
+    var requestAnimationFrame$1 =
+        window.requestAnimationFrame ||
+        window.webkitRequestAnimationFrame ||
+        window.mozRequestAnimationFrame ||
+        window.oRequestAnimationFrame ||
+        window.msRequestAnimationFrame ||
+        requestAnimationFrame;
 
-    var CenteredDiv = function () {
+    var CenteredDiv = (function () {
         function CenteredDiv() {
             classCallCheck(this, CenteredDiv);
             this.backgroundElement = document.createElement('div');
@@ -1666,7 +2038,7 @@
                 zIndex: '1000',
                 opacity: 0,
                 WebkitTransition: 'opacity 0.2s linear',
-                transition: 'opacity 0.2s linear'
+                transition: 'opacity 0.2s linear',
             });
             dom.makeFullscreen(this.backgroundElement);
             this.backgroundElement.style.position = 'fixed';
@@ -1676,8 +2048,9 @@
                 display: 'none',
                 zIndex: '1001',
                 opacity: 0,
-                WebkitTransition: '-webkit-transform 0.2s ease-out, opacity 0.2s linear',
-                transition: 'transform 0.2s ease-out, opacity 0.2s linear'
+                WebkitTransition:
+                    '-webkit-transform 0.2s ease-out, opacity 0.2s linear',
+                transition: 'transform 0.2s ease-out, opacity 0.2s linear',
             });
             document.body.appendChild(this.backgroundElement);
             document.body.appendChild(this.domElement);
@@ -1686,48 +2059,62 @@
                 _this.hide();
             });
         }
-        createClass(CenteredDiv, [{
-            key: 'show',
-            value: function show() {
-                var _this = this;
-                this.backgroundElement.style.display = 'block';
-                this.domElement.style.display = 'block';
-                this.domElement.style.opacity = 0;
-                this.domElement.style.webkitTransform = 'scale(1.1)';
-                this.layout();
-                Common.defer(function () {
-                    _this.backgroundElement.style.opacity = 1;
-                    _this.domElement.style.opacity = 1;
-                    _this.domElement.style.webkitTransform = 'scale(1)';
-                });
-            }
-        }, {
-            key: 'hide',
-            value: function hide() {
-                var _this = this;
-                var hide = function hide() {
-                    _this.domElement.style.display = 'none';
-                    _this.backgroundElement.style.display = 'none';
-                    dom.unbind(_this.domElement, 'webkitTransitionEnd', hide);
-                    dom.unbind(_this.domElement, 'transitionend', hide);
-                    dom.unbind(_this.domElement, 'oTransitionEnd', hide);
-                };
-                dom.bind(this.domElement, 'webkitTransitionEnd', hide);
-                dom.bind(this.domElement, 'transitionend', hide);
-                dom.bind(this.domElement, 'oTransitionEnd', hide);
-                this.backgroundElement.style.opacity = 0;
-                this.domElement.style.opacity = 0;
-                this.domElement.style.webkitTransform = 'scale(1.1)';
-            }
-        }, {
-            key: 'layout',
-            value: function layout() {
-                this.domElement.style.left = window.innerWidth / 2 - dom.getWidth(this.domElement) / 2 + 'px';
-                this.domElement.style.top = window.innerHeight / 2 - dom.getHeight(this.domElement) / 2 + 'px';
-            }
-        }]);
+        createClass(CenteredDiv, [
+            {
+                key: 'show',
+                value: function show() {
+                    var _this = this;
+                    this.backgroundElement.style.display = 'block';
+                    this.domElement.style.display = 'block';
+                    this.domElement.style.opacity = 0;
+                    this.domElement.style.webkitTransform = 'scale(1.1)';
+                    this.layout();
+                    Common.defer(function () {
+                        _this.backgroundElement.style.opacity = 1;
+                        _this.domElement.style.opacity = 1;
+                        _this.domElement.style.webkitTransform = 'scale(1)';
+                    });
+                },
+            },
+            {
+                key: 'hide',
+                value: function hide() {
+                    var _this = this;
+                    var hide = function hide() {
+                        _this.domElement.style.display = 'none';
+                        _this.backgroundElement.style.display = 'none';
+                        dom.unbind(
+                            _this.domElement,
+                            'webkitTransitionEnd',
+                            hide
+                        );
+                        dom.unbind(_this.domElement, 'transitionend', hide);
+                        dom.unbind(_this.domElement, 'oTransitionEnd', hide);
+                    };
+                    dom.bind(this.domElement, 'webkitTransitionEnd', hide);
+                    dom.bind(this.domElement, 'transitionend', hide);
+                    dom.bind(this.domElement, 'oTransitionEnd', hide);
+                    this.backgroundElement.style.opacity = 0;
+                    this.domElement.style.opacity = 0;
+                    this.domElement.style.webkitTransform = 'scale(1.1)';
+                },
+            },
+            {
+                key: 'layout',
+                value: function layout() {
+                    this.domElement.style.left =
+                        window.innerWidth / 2 -
+                        dom.getWidth(this.domElement) / 2 +
+                        'px';
+                    this.domElement.style.top =
+                        window.innerHeight / 2 -
+                        dom.getHeight(this.domElement) / 2 +
+                        'px';
+                },
+            },
+        ]);
         return CenteredDiv;
-    }();
+    })();
 
     // var styleSheet = ___$insertStyle(".dg ul{list-style:none;margin:0;padding:0;width:100%;clear:both}.dg.ac{position:fixed;top:0;left:0;right:0;height:0;z-index:0}.dg:not(.ac) .main{overflow:hidden}.dg.main{-webkit-transition:opacity .1s linear;-o-transition:opacity .1s linear;-moz-transition:opacity .1s linear;transition:opacity .1s linear}.dg.main.taller-than-window{overflow-y:auto}.dg.main.taller-than-window .close-button{opacity:1;margin-top:-1px;border-top:1px solid #2c2c2c}.dg.main ul.closed .close-button{opacity:1 !important}.dg.main:hover .close-button,.dg.main .close-button.drag{opacity:1}.dg.main .close-button{-webkit-transition:opacity .1s linear;-o-transition:opacity .1s linear;-moz-transition:opacity .1s linear;transition:opacity .1s linear;border:0;line-height:19px;height:20px;cursor:pointer;text-align:center;background-color:#000}.dg.main .close-button.close-top{position:relative}.dg.main .close-button.close-bottom{position:absolute}.dg.main .close-button:hover{background-color:#111}.dg.a{float:right;margin-right:15px;overflow-y:visible}.dg.a.has-save>ul.close-top{margin-top:0}.dg.a.has-save>ul.close-bottom{margin-top:27px}.dg.a.has-save>ul.closed{margin-top:0}.dg.a .save-row{top:0;z-index:1002}.dg.a .save-row.close-top{position:relative}.dg.a .save-row.close-bottom{position:fixed}.dg li{-webkit-transition:height .1s ease-out;-o-transition:height .1s ease-out;-moz-transition:height .1s ease-out;transition:height .1s ease-out;-webkit-transition:overflow .1s linear;-o-transition:overflow .1s linear;-moz-transition:overflow .1s linear;transition:overflow .1s linear}.dg li:not(.folder){cursor:auto;height:27px;line-height:27px;padding:0 4px 0 5px}.dg li.folder{padding:0;border-left:4px solid transparent}.dg li.title{cursor:pointer;margin-left:-4px}.dg .closed li:not(.title),.dg .closed ul li,.dg .closed ul li>*{height:0;overflow:hidden;border:0}.dg .cr{clear:both;padding-left:3px;height:27px;overflow:hidden}.dg .property-name{cursor:default;float:left;clear:left;width:40%;overflow:hidden;text-overflow:ellipsis}.dg .c{float:left;width:60%;position:relative}.dg .c input[type=text]{border:0;margin-top:4px;padding:3px;width:100%;float:right}.dg .has-slider input[type=text]{width:30%;margin-left:0}.dg .slider{float:left;width:66%;margin-left:-5px;margin-right:0;height:19px;margin-top:4px}.dg .slider-fg{height:100%}.dg .c input[type=checkbox]{margin-top:7px}.dg .c select{margin-top:5px}.dg .cr.function,.dg .cr.function .property-name,.dg .cr.function *,.dg .cr.boolean,.dg .cr.boolean *{cursor:pointer}.dg .cr.color{overflow:visible}.dg .selector{display:none;position:absolute;margin-left:-9px;margin-top:23px;z-index:10}.dg .c:hover .selector,.dg .selector.drag{display:block}.dg li.save-row{padding:0}.dg li.save-row .button{display:inline-block;padding:0px 6px}.dg.dialogue{background-color:#222;width:460px;padding:15px;font-size:13px;line-height:15px}#dg-new-constructor{padding:10px;color:#222;font-family:Monaco, monospace;font-size:10px;border:0;resize:none;box-shadow:inset 1px 1px 1px #888;word-wrap:break-word;margin:12px 0;display:block;width:440px;overflow-y:scroll;height:100px;position:relative}#dg-local-explain{display:none;font-size:11px;line-height:17px;border-radius:3px;background-color:#333;padding:8px;margin-top:10px}#dg-local-explain code{font-size:10px}#dat-gui-save-locally{display:none}.dg{color:#eee;font:11px 'Lucida Grande', sans-serif;text-shadow:0 -1px 0 #111}.dg.main::-webkit-scrollbar{width:5px;background:#1a1a1a}.dg.main::-webkit-scrollbar-corner{height:0;display:none}.dg.main::-webkit-scrollbar-thumb{border-radius:5px;background:#676767}.dg li:not(.folder){background:#1a1a1a;border-bottom:1px solid #2c2c2c}.dg li.save-row{line-height:25px;background:#dad5cb;border:0}.dg li.save-row select{margin-left:5px;width:108px}.dg li.save-row .button{margin-left:5px;margin-top:1px;border-radius:2px;font-size:9px;line-height:7px;padding:4px 4px 5px 4px;background:#c5bdad;color:#fff;text-shadow:0 1px 0 #b0a58f;box-shadow:0 -1px 0 #b0a58f;cursor:pointer}.dg li.save-row .button.gears{background:#c5bdad url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAANCAYAAAB/9ZQ7AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAQJJREFUeNpiYKAU/P//PwGIC/ApCABiBSAW+I8AClAcgKxQ4T9hoMAEUrxx2QSGN6+egDX+/vWT4e7N82AMYoPAx/evwWoYoSYbACX2s7KxCxzcsezDh3evFoDEBYTEEqycggWAzA9AuUSQQgeYPa9fPv6/YWm/Acx5IPb7ty/fw+QZblw67vDs8R0YHyQhgObx+yAJkBqmG5dPPDh1aPOGR/eugW0G4vlIoTIfyFcA+QekhhHJhPdQxbiAIguMBTQZrPD7108M6roWYDFQiIAAv6Aow/1bFwXgis+f2LUAynwoIaNcz8XNx3Dl7MEJUDGQpx9gtQ8YCueB+D26OECAAQDadt7e46D42QAAAABJRU5ErkJggg==) 2px 1px no-repeat;height:7px;width:8px}.dg li.save-row .button:hover{background-color:#bab19e;box-shadow:0 -1px 0 #b0a58f}.dg li.folder{border-bottom:0}.dg li.title{padding-left:16px;background:#000 url(data:image/gif;base64,R0lGODlhBQAFAJEAAP////Pz8////////yH5BAEAAAIALAAAAAAFAAUAAAIIlI+hKgFxoCgAOw==) 6px 10px no-repeat;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.2)}.dg .closed li.title{background-image:url(data:image/gif;base64,R0lGODlhBQAFAJEAAP////Pz8////////yH5BAEAAAIALAAAAAAFAAUAAAIIlGIWqMCbWAEAOw==)}.dg .cr.boolean{border-left:3px solid #806787}.dg .cr.color{border-left:3px solid}.dg .cr.function{border-left:3px solid #e61d5f}.dg .cr.number{border-left:3px solid #2FA1D6}.dg .cr.number input[type=text]{color:#2FA1D6}.dg .cr.string{border-left:3px solid #1ed36f}.dg .cr.string input[type=text]{color:#1ed36f}.dg .cr.function:hover,.dg .cr.boolean:hover{background:#111}.dg .c input[type=text]{background:#303030;outline:none}.dg .c input[type=text]:hover{background:#3c3c3c}.dg .c input[type=text]:focus{background:#494949;color:#fff}.dg .c .slider{background:#303030;cursor:ew-resize}.dg .c .slider-fg{background:#2FA1D6;max-width:100%}.dg .c .slider:hover{background:#3c3c3c}.dg .c .slider:hover .slider-fg{background:#44abda}\n");
 
@@ -1736,13 +2123,13 @@
     var HIDE_KEY_CODE = 72;
     var CLOSE_BUTTON_HEIGHT = 20;
     var DEFAULT_DEFAULT_PRESET_NAME = 'Default';
-    var SUPPORTS_LOCAL_STORAGE = function () {
+    var SUPPORTS_LOCAL_STORAGE = (function () {
         try {
             return 'localStorage' in window && window.localStorage !== null;
         } catch (e) {
             return false;
         }
-    }();
+    })();
     var SAVE_DIALOGUE = void 0;
     var autoPlaceVirgin = true;
     var autoPlaceContainer = void 0;
@@ -1751,7 +2138,7 @@
     var GUI = function GUI(pars) {
         var _this = this;
         var params = pars || {};
-		this.domElement = document.createElement('div');
+        this.domElement = document.createElement('div');
         this.__ul = document.createElement('ul');
         this.domElement.appendChild(this.__ul);
         dom.addClass(this.domElement, CSS_NAMESPACE);
@@ -1763,11 +2150,11 @@
         params = Common.defaults(params, {
             closeOnTop: false,
             autoPlace: true,
-            width: GUI.DEFAULT_WIDTH
+            width: GUI.DEFAULT_WIDTH,
         });
         params = Common.defaults(params, {
             resizable: params.autoPlace,
-            hideable: params.autoPlace
+            hideable: params.autoPlace,
         });
         if (!Common.isUndefined(params.load)) {
             if (params.preset) {
@@ -1775,38 +2162,42 @@
             }
         } else {
             params.load = {
-                preset: DEFAULT_DEFAULT_PRESET_NAME
+                preset: DEFAULT_DEFAULT_PRESET_NAME,
             };
         }
         if (Common.isUndefined(params.parent) && params.hideable) {
             hideableGuis.push(this);
         }
-        params.resizable = Common.isUndefined(params.parent) && params.resizable;
+        params.resizable =
+            Common.isUndefined(params.parent) && params.resizable;
         if (params.autoPlace && Common.isUndefined(params.scrollable)) {
             params.scrollable = true;
         }
-        var useLocalStorage = SUPPORTS_LOCAL_STORAGE && localStorage.getItem(getLocalStorageHash(this, 'isLocal')) === 'true';
+        var useLocalStorage =
+            SUPPORTS_LOCAL_STORAGE &&
+            localStorage.getItem(getLocalStorageHash(this, 'isLocal')) ===
+                'true';
         var saveToLocalStorage = void 0;
         Object.defineProperties(this, {
             parent: {
                 get: function get$$1() {
                     return params.parent;
-                }
+                },
             },
             scrollable: {
                 get: function get$$1() {
                     return params.scrollable;
-                }
+                },
             },
             autoPlace: {
                 get: function get$$1() {
                     return params.autoPlace;
-                }
+                },
             },
             closeOnTop: {
                 get: function get$$1() {
                     return params.closeOnTop;
-                }
+                },
             },
             preset: {
                 get: function get$$1() {
@@ -1823,7 +2214,7 @@
                     }
                     setPresetSelectIndex(this);
                     _this.revert();
-                }
+                },
             },
             width: {
                 get: function get$$1() {
@@ -1832,7 +2223,7 @@
                 set: function set$$1(v) {
                     params.width = v;
                     setWidth(_this, v);
-                }
+                },
             },
             name: {
                 get: function get$$1() {
@@ -1843,7 +2234,7 @@
                     if (titleRowName) {
                         titleRowName.innerHTML = params.name;
                     }
-                }
+                },
             },
             closed: {
                 get: function get$$1() {
@@ -1858,14 +2249,16 @@
                     }
                     this.onResize();
                     if (_this.__closeButton) {
-                        _this.__closeButton.innerHTML = v ? GUI.TEXT_OPEN : GUI.TEXT_CLOSED;
+                        _this.__closeButton.innerHTML = v
+                            ? GUI.TEXT_OPEN
+                            : GUI.TEXT_CLOSED;
                     }
-                }
+                },
             },
             load: {
                 get: function get$$1() {
                     return params.load;
-                }
+                },
             },
             useLocalStorage: {
                 get: function get$$1() {
@@ -1879,10 +2272,13 @@
                         } else {
                             dom.unbind(window, 'unload', saveToLocalStorage);
                         }
-                        localStorage.setItem(getLocalStorageHash(_this, 'isLocal'), bool);
+                        localStorage.setItem(
+                            getLocalStorageHash(_this, 'isLocal'),
+                            bool
+                        );
                     }
-                }
-            }
+                },
+            },
         });
         if (Common.isUndefined(params.parent)) {
             params.closed = false;
@@ -1891,7 +2287,9 @@
             if (SUPPORTS_LOCAL_STORAGE) {
                 if (useLocalStorage) {
                     _this.useLocalStorage = true;
-                    var savedGui = localStorage.getItem(getLocalStorageHash(this, 'gui'));
+                    var savedGui = localStorage.getItem(
+                        getLocalStorageHash(this, 'gui')
+                    );
                     if (savedGui) {
                         params.load = JSON.parse(savedGui);
                     }
@@ -1902,7 +2300,10 @@
             dom.addClass(this.__closeButton, GUI.CLASS_CLOSE_BUTTON);
             if (params.closeOnTop) {
                 dom.addClass(this.__closeButton, GUI.CLASS_CLOSE_TOP);
-                this.domElement.insertBefore(this.__closeButton, this.domElement.childNodes[0]);
+                this.domElement.insertBefore(
+                    this.__closeButton,
+                    this.domElement.childNodes[0]
+                );
             } else {
                 dom.addClass(this.__closeButton, GUI.CLASS_CLOSE_BOTTOM);
                 this.domElement.appendChild(this.__closeButton);
@@ -1932,12 +2333,17 @@
         if (params.autoPlace) {
             if (Common.isUndefined(params.parent)) {
                 if (autoPlaceVirgin) {
-					autoPlaceContainer = document.createElement('div');
-					autoPlaceContainer.id = 'dat-gui-container';
+                    autoPlaceContainer = document.createElement('div');
+                    autoPlaceContainer.id = 'dat-gui-container';
                     dom.addClass(autoPlaceContainer, CSS_NAMESPACE);
-                    dom.addClass(autoPlaceContainer, GUI.CLASS_AUTO_PLACE_CONTAINER);
-					// document.body.appendChild(autoPlaceContainer);
-					document.getElementById('ui-container').appendChild(autoPlaceContainer);
+                    dom.addClass(
+                        autoPlaceContainer,
+                        GUI.CLASS_AUTO_PLACE_CONTAINER
+                    );
+                    // document.body.appendChild(autoPlaceContainer);
+                    document
+                        .getElementById('ui-container')
+                        .appendChild(autoPlaceContainer);
                     autoPlaceVirgin = false;
                 }
                 autoPlaceContainer.appendChild(this.domElement);
@@ -1959,8 +2365,15 @@
         //     addResizeHandle(this);
         // }
         saveToLocalStorage = function saveToLocalStorage() {
-            if (SUPPORTS_LOCAL_STORAGE && localStorage.getItem(getLocalStorageHash(_this, 'isLocal')) === 'true') {
-                localStorage.setItem(getLocalStorageHash(_this, 'gui'), JSON.stringify(_this.getSaveObject()));
+            if (
+                SUPPORTS_LOCAL_STORAGE &&
+                localStorage.getItem(getLocalStorageHash(_this, 'isLocal')) ===
+                    'true'
+            ) {
+                localStorage.setItem(
+                    getLocalStorageHash(_this, 'gui'),
+                    JSON.stringify(_this.getSaveObject())
+                );
             }
         };
         this.saveToLocalStorageIfPossible = saveToLocalStorage;
@@ -1996,7 +2409,10 @@
     GUI.TEXT_CLOSED = 'Close Controls';
     GUI.TEXT_OPEN = 'Open Controls';
     GUI._keydownHandler = function (e) {
-        if (document.activeElement.type !== 'text' && (e.which === HIDE_KEY_CODE || e.keyCode === HIDE_KEY_CODE)) {
+        if (
+            document.activeElement.type !== 'text' &&
+            (e.which === HIDE_KEY_CODE || e.keyCode === HIDE_KEY_CODE)
+        ) {
             GUI.toggleHide();
         }
     };
@@ -2004,17 +2420,20 @@
     Common.extend(GUI.prototype, {
         add: function add(object, property) {
             return _add(this, object, property, {
-                factoryArgs: Array.prototype.slice.call(arguments, 2)
+                factoryArgs: Array.prototype.slice.call(arguments, 2),
             });
         },
         addColor: function addColor(object, property) {
             return _add(this, object, property, {
-                color: true
+                color: true,
             });
         },
         remove: function remove(controller) {
             this.__ul.removeChild(controller.__li);
-            this.__controllers.splice(this.__controllers.indexOf(controller), 1);
+            this.__controllers.splice(
+                this.__controllers.indexOf(controller),
+                1
+            );
             var _this = this;
             Common.defer(function () {
                 _this.onResize();
@@ -2022,7 +2441,10 @@
         },
         destroy: function destroy() {
             if (this.parent) {
-                throw new Error('Only the root GUI should be removed with .destroy(). ' + 'For subfolders, use gui.removeFolder(folder) instead.');
+                throw new Error(
+                    'Only the root GUI should be removed with .destroy(). ' +
+                        'For subfolders, use gui.removeFolder(folder) instead.'
+                );
             }
             if (this.autoPlace) {
                 autoPlaceContainer.removeChild(this.domElement);
@@ -2036,16 +2458,19 @@
         },
         addFolder: function addFolder(name) {
             if (this.__folders[name] !== undefined) {
-                throw new Error('You already have a folder in this GUI by the' + ' name "' + name + '"');
+                throw new Error(
+                    'You already have a folder in this GUI by the' +
+                        ' name "' +
+                        name +
+                        '"'
+                );
             }
             var newGuiParams = {
                 name: name,
-                parent: this
+                parent: this,
             };
             newGuiParams.autoPlace = this.autoPlace;
-            if (this.load &&
-                this.load.folders &&
-                this.load.folders[name]) {
+            if (this.load && this.load.folders && this.load.folders[name]) {
                 newGuiParams.closed = this.load.folders[name].closed;
                 newGuiParams.load = this.load.folders[name];
             }
@@ -2058,9 +2483,11 @@
         removeFolder: function removeFolder(folder) {
             this.__ul.removeChild(folder.domElement.parentElement);
             delete this.__folders[folder.name];
-            if (this.load &&
+            if (
+                this.load &&
                 this.load.folders &&
-                this.load.folders[folder.name]) {
+                this.load.folders[folder.name]
+            ) {
                 delete this.load.folders[folder.name];
             }
             removeListeners(folder);
@@ -2090,7 +2517,8 @@
                 });
                 if (window.innerHeight - top - CLOSE_BUTTON_HEIGHT < h) {
                     dom.addClass(root.domElement, GUI.CLASS_TOO_TALL);
-                    root.__ul.style.height = window.innerHeight - top - CLOSE_BUTTON_HEIGHT + 'px';
+                    root.__ul.style.height =
+                        window.innerHeight - top - CLOSE_BUTTON_HEIGHT + 'px';
                 } else {
                     dom.removeClass(root.domElement, GUI.CLASS_TOO_TALL);
                     root.__ul.style.height = 'auto';
@@ -2098,7 +2526,8 @@
             }
             if (root.__resize_handle) {
                 Common.defer(function () {
-                    root.__resize_handle.style.height = root.__ul.offsetHeight + 'px';
+                    root.__resize_handle.style.height =
+                        root.__ul.offsetHeight + 'px';
                 });
             }
             if (root.__closeButton) {
@@ -2114,17 +2543,22 @@
                 SAVE_DIALOGUE.domElement.innerHTML = saveDialogContents;
             }
             if (this.parent) {
-                throw new Error('You can only call remember on a top level GUI.');
+                throw new Error(
+                    'You can only call remember on a top level GUI.'
+                );
             }
             var _this = this;
-            Common.each(Array.prototype.slice.call(arguments), function (object) {
-                if (_this.__rememberedObjects.length === 0) {
-                    addSaveMenu(_this);
+            Common.each(
+                Array.prototype.slice.call(arguments),
+                function (object) {
+                    if (_this.__rememberedObjects.length === 0) {
+                        addSaveMenu(_this);
+                    }
+                    if (_this.__rememberedObjects.indexOf(object) === -1) {
+                        _this.__rememberedObjects.push(object);
+                    }
                 }
-                if (_this.__rememberedObjects.indexOf(object) === -1) {
-                    _this.__rememberedObjects.push(object);
-                }
-            });
+            );
             if (this.autoPlace) {
                 setWidth(this, this.width);
             }
@@ -2163,7 +2597,8 @@
         saveAs: function saveAs(presetName) {
             if (!this.load.remembered) {
                 this.load.remembered = {};
-                this.load.remembered[DEFAULT_DEFAULT_PRESET_NAME] = getCurrentPreset(this, true);
+                this.load.remembered[DEFAULT_DEFAULT_PRESET_NAME] =
+                    getCurrentPreset(this, true);
             }
             this.load.remembered[presetName] = getCurrentPreset(this);
             this.preset = presetName;
@@ -2171,16 +2606,23 @@
             this.saveToLocalStorageIfPossible();
         },
         revert: function revert(gui) {
-            Common.each(this.__controllers, function (controller) {
-                if (!this.getRoot().load.remembered) {
-                    controller.setValue(controller.initialValue);
-                } else {
-                    recallSavedValue(gui || this.getRoot(), controller);
-                }
-                if (controller.__onFinishChange) {
-                    controller.__onFinishChange.call(controller, controller.getValue());
-                }
-            }, this);
+            Common.each(
+                this.__controllers,
+                function (controller) {
+                    if (!this.getRoot().load.remembered) {
+                        controller.setValue(controller.initialValue);
+                    } else {
+                        recallSavedValue(gui || this.getRoot(), controller);
+                    }
+                    if (controller.__onFinishChange) {
+                        controller.__onFinishChange.call(
+                            controller,
+                            controller.getValue()
+                        );
+                    }
+                },
+                this
+            );
             Common.each(this.__folders, function (folder) {
                 folder.revert(folder);
             });
@@ -2202,7 +2644,7 @@
             Common.each(this.__folders, function (folder) {
                 folder.updateDisplay();
             });
-        }
+        },
     });
 
     function addRow(gui, newDom, liBefore) {
@@ -2245,7 +2687,7 @@
                     controller.remove();
                     return _add(gui, controller.object, controller.property, {
                         before: nextSibling,
-                        factoryArgs: [Common.toArray(arguments)]
+                        factoryArgs: [Common.toArray(arguments)],
                     });
                 }
                 if (Common.isArray(_options) || Common.isObject(_options)) {
@@ -2253,12 +2695,13 @@
                     controller.remove();
                     return _add(gui, controller.object, controller.property, {
                         before: _nextSibling,
-                        factoryArgs: [_options]
+                        factoryArgs: [_options],
                     });
                 }
             },
             name: function name(_name) {
-                controller.__li.firstElementChild.firstElementChild.innerHTML = _name;
+                controller.__li.firstElementChild.firstElementChild.innerHTML =
+                    _name;
                 return controller;
             },
             listen: function listen() {
@@ -2268,35 +2711,60 @@
             remove: function remove() {
                 controller.__gui.remove(controller);
                 return controller;
-            }
+            },
         });
         if (controller instanceof NumberControllerSlider) {
-            var box = new NumberControllerBox(controller.object, controller.property, {
-                min: controller.__min,
-                max: controller.__max,
-                step: controller.__step
-            });
-            Common.each(['updateDisplay', 'onChange', 'onFinishChange', 'step'], function (method) {
-                var pc = controller[method];
-                var pb = box[method];
-                controller[method] = box[method] = function () {
-                    var args = Array.prototype.slice.call(arguments);
-                    pb.apply(box, args);
-                    return pc.apply(controller, args);
-                };
-            });
+            var box = new NumberControllerBox(
+                controller.object,
+                controller.property,
+                {
+                    min: controller.__min,
+                    max: controller.__max,
+                    step: controller.__step,
+                }
+            );
+            Common.each(
+                ['updateDisplay', 'onChange', 'onFinishChange', 'step'],
+                function (method) {
+                    var pc = controller[method];
+                    var pb = box[method];
+                    controller[method] = box[method] = function () {
+                        var args = Array.prototype.slice.call(arguments);
+                        pb.apply(box, args);
+                        return pc.apply(controller, args);
+                    };
+                }
+            );
             dom.addClass(li, 'has-slider');
-            controller.domElement.insertBefore(box.domElement, controller.domElement.firstElementChild);
+            controller.domElement.insertBefore(
+                box.domElement,
+                controller.domElement.firstElementChild
+            );
         } else if (controller instanceof NumberControllerBox) {
             var r = function r(returned) {
-                if (Common.isNumber(controller.__min) && Common.isNumber(controller.__max)) {
-                    var oldName = controller.__li.firstElementChild.firstElementChild.innerHTML;
-                    var wasListening = controller.__gui.__listening.indexOf(controller) > -1;
+                if (
+                    Common.isNumber(controller.__min) &&
+                    Common.isNumber(controller.__max)
+                ) {
+                    var oldName =
+                        controller.__li.firstElementChild.firstElementChild
+                            .innerHTML;
+                    var wasListening =
+                        controller.__gui.__listening.indexOf(controller) > -1;
                     controller.remove();
-                    var newController = _add(gui, controller.object, controller.property, {
-                        before: controller.__li.nextElementSibling,
-                        factoryArgs: [controller.__min, controller.__max, controller.__step]
-                    });
+                    var newController = _add(
+                        gui,
+                        controller.object,
+                        controller.property,
+                        {
+                            before: controller.__li.nextElementSibling,
+                            factoryArgs: [
+                                controller.__min,
+                                controller.__max,
+                                controller.__step,
+                            ],
+                        }
+                    );
                     newController.name(oldName);
                     if (wasListening) newController.listen();
                     return newController;
@@ -2342,10 +2810,12 @@
         var root = gui.getRoot();
         var matchedIndex = root.__rememberedObjects.indexOf(controller.object);
         if (matchedIndex !== -1) {
-            var controllerMap = root.__rememberedObjectIndecesToControllers[matchedIndex];
+            var controllerMap =
+                root.__rememberedObjectIndecesToControllers[matchedIndex];
             if (controllerMap === undefined) {
                 controllerMap = {};
-                root.__rememberedObjectIndecesToControllers[matchedIndex] = controllerMap;
+                root.__rememberedObjectIndecesToControllers[matchedIndex] =
+                    controllerMap;
             }
             controllerMap[controller.property] = controller;
             if (root.load && root.load.remembered) {
@@ -2358,7 +2828,10 @@
                 } else {
                     return;
                 }
-                if (preset[matchedIndex] && preset[matchedIndex][controller.property] !== undefined) {
+                if (
+                    preset[matchedIndex] &&
+                    preset[matchedIndex][controller.property] !== undefined
+                ) {
                     var value = preset[matchedIndex][controller.property];
                     controller.initialValue = value;
                     controller.setValue(value);
@@ -2369,7 +2842,9 @@
 
     function _add(gui, object, property, params) {
         if (object[property] === undefined) {
-            throw new Error('Object "' + object + '" has no property "' + property + '"');
+            throw new Error(
+                'Object "' + object + '" has no property "' + property + '"'
+            );
         }
         var controller = void 0;
         if (params.color) {
@@ -2420,7 +2895,7 @@
     }
 
     function addSaveMenu(gui) {
-        var div = gui.__save_row = document.createElement('li');
+        var div = (gui.__save_row = document.createElement('li'));
         dom.addClass(gui.domElement, 'has-save');
         gui.__ul.insertBefore(div, gui.__ul.firstChild);
         dom.addClass(div, 'save-row');
@@ -2439,7 +2914,7 @@
         button3.innerHTML = 'Revert';
         dom.addClass(button3, 'button');
         dom.addClass(button3, 'revert');
-        var select = gui.__preset_select = document.createElement('select');
+        var select = (gui.__preset_select = document.createElement('select'));
         if (gui.load && gui.load.remembered) {
             Common.each(gui.load.remembered, function (value, key) {
                 addPresetOption(gui, key, key === gui.preset);
@@ -2449,7 +2924,8 @@
         }
         dom.bind(select, 'change', function () {
             for (var index = 0; index < gui.__preset_select.length; index++) {
-                gui.__preset_select[index].innerHTML = gui.__preset_select[index].value;
+                gui.__preset_select[index].innerHTML =
+                    gui.__preset_select[index].value;
             }
             gui.preset = this.value;
         });
@@ -2460,10 +2936,14 @@
         div.appendChild(button3);
         if (SUPPORTS_LOCAL_STORAGE) {
             var explain = document.getElementById('dg-local-explain');
-            var localStorageCheckBox = document.getElementById('dg-local-storage');
+            var localStorageCheckBox =
+                document.getElementById('dg-local-storage');
             var saveLocally = document.getElementById('dg-save-locally');
             saveLocally.style.display = 'block';
-            if (localStorage.getItem(getLocalStorageHash(gui, 'isLocal')) === 'true') {
+            if (
+                localStorage.getItem(getLocalStorageHash(gui, 'isLocal')) ===
+                'true'
+            ) {
                 localStorageCheckBox.setAttribute('checked', 'checked');
             }
             showHideExplain(gui, explain);
@@ -2472,14 +2952,19 @@
                 showHideExplain(gui, explain);
             });
         }
-        var newConstructorTextArea = document.getElementById('dg-new-constructor');
+        var newConstructorTextArea =
+            document.getElementById('dg-new-constructor');
         dom.bind(newConstructorTextArea, 'keydown', function (e) {
             if (e.metaKey && (e.which === 67 || e.keyCode === 67)) {
                 SAVE_DIALOGUE.hide();
             }
         });
         dom.bind(gears, 'click', function () {
-            newConstructorTextArea.innerHTML = JSON.stringify(gui.getSaveObject(), undefined, 2);
+            newConstructorTextArea.innerHTML = JSON.stringify(
+                gui.getSaveObject(),
+                undefined,
+                2
+            );
             SAVE_DIALOGUE.show();
             newConstructorTextArea.focus();
             newConstructorTextArea.select();
@@ -2506,7 +2991,7 @@
             marginLeft: '-3px',
             height: '200px',
             cursor: 'ew-resize',
-            position: 'absolute'
+            position: 'absolute',
         });
 
         function drag(e) {
@@ -2533,7 +3018,10 @@
         }
         dom.bind(gui.__resize_handle, 'mousedown', dragStart);
         dom.bind(gui.__closeButton, 'mousedown', dragStart);
-        gui.domElement.insertBefore(gui.__resize_handle, gui.domElement.firstElementChild);
+        gui.domElement.insertBefore(
+            gui.__resize_handle,
+            gui.domElement.firstElementChild
+        );
     }
 
     function setWidth(gui, w) {
@@ -2550,9 +3038,12 @@
         var toReturn = {};
         Common.each(gui.__rememberedObjects, function (val, index) {
             var savedValues = {};
-            var controllerMap = gui.__rememberedObjectIndecesToControllers[index];
+            var controllerMap =
+                gui.__rememberedObjectIndecesToControllers[index];
             Common.each(controllerMap, function (controller, property) {
-                savedValues[property] = useInitialValues ? controller.initialValue : controller.getValue();
+                savedValues[property] = useInitialValues
+                    ? controller.initialValue
+                    : controller.getValue();
             });
             toReturn[index] = savedValues;
         });
@@ -2582,7 +3073,7 @@
         color: {
             Color: Color,
             math: ColorMath,
-            interpret: interpret
+            interpret: interpret,
         },
         controllers: {
             Controller: Controller,
@@ -2593,18 +3084,17 @@
             NumberControllerBox: NumberControllerBox,
             NumberControllerSlider: NumberControllerSlider,
             FunctionController: FunctionController,
-            ColorController: ColorController
+            ColorController: ColorController,
         },
         dom: {
-            dom: dom
+            dom: dom,
         },
         gui: {
-            GUI: GUI
+            GUI: GUI,
         },
-        GUI: GUI
+        GUI: GUI,
     };
 
     return index;
-
-})));
+});
 //# sourceMappingURL=dat.gui.js.map

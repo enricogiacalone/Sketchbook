@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import * as CANNON from 'cannon';
+import * as CANNON from 'cannon-es';
 import { KeyBinding } from '../core/KeyBinding';
 import { VectorSpringSimulator } from '../physics/spring_simulation/VectorSpringSimulator';
 import { RelativeSpringSimulator } from '../physics/spring_simulation/RelativeSpringSimulator';
@@ -75,7 +75,11 @@ export declare class Character extends THREE.Object3D implements IWorldEntity {
     setBehaviour(behaviour: ICharacterAI): void;
     setPhysicsEnabled(value: boolean): void;
     readCharacterData(gltf: any): void;
-    handleKeyboardEvent(event: KeyboardEvent, code: string, pressed: boolean): void;
+    handleKeyboardEvent(
+        event: KeyboardEvent,
+        code: string,
+        pressed: boolean
+    ): void;
     handleMouseButton(event: MouseEvent, code: string, pressed: boolean): void;
     handleMouseMove(event: MouseEvent, deltaX: number, deltaY: number): void;
     handleMouseWheel(event: WheelEvent, value: number): void;

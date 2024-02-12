@@ -1,8 +1,10 @@
-export interface ICollider {
-	body: CANNON.Body;
-	
-	// physical: CANNON.Body;
-	// visual: THREE.Mesh;
+import * as CANNON from 'cannon-es';
 
-	// getVisualModel(options: any): THREE.Mesh;
+export interface ICollider {
+    body: CANNON.Body;
+
+    // physical: CANNON.Body;
+    // visual: THREE.Mesh;
+
+    // getVisualModel(options: any): THREE.Mesh;
 }
