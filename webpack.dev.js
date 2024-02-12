@@ -6,6 +6,6 @@ module.exports = merge(common, {
     devtool: 'inline-source-map',
     devServer: {
         // progress: true,
-        liveReload: true,
+        liveReload: false
     },
 });
