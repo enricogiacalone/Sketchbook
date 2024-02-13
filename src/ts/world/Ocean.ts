@@ -1,5 +1,4 @@
 import * as THREE from "three";
-
 import { World } from "./World";
 import { WaterShader } from "../../lib/shaders/WaterShader";
 import { IUpdatable } from "../interfaces/IUpdatable";
@@ -30,7 +29,7 @@ export class Ocean implements IUpdatable {
   public update(timeStep: number): void {
     this.material.uniforms.cameraPos.value.copy(this.world.camera.position);
     this.material.uniforms.lightDir.value.copy(
-      new THREE.Vector3().copy(this.world.sky.sunPosition).normalize(),
+      new THREE.Vector3().copy(this.world.sky.sunPosition).normalize()
     );
     this.material.uniforms.iGlobalTime.value += timeStep;
   }

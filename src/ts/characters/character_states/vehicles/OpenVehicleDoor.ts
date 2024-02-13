@@ -23,7 +23,7 @@ export class OpenVehicleDoor extends CharacterStateBase {
   constructor(
     character: Character,
     seat: VehicleSeat,
-    entryPoint: THREE.Object3D,
+    entryPoint: THREE.Object3D
   ) {
     super(character);
 
@@ -72,7 +72,7 @@ export class OpenVehicleDoor extends CharacterStateBase {
         this.character.setState(new Idle(this.character));
       } else {
         this.character.setState(
-          new EnteringVehicle(this.character, this.seat, this.entryPoint),
+          new EnteringVehicle(this.character, this.seat, this.entryPoint)
         );
       }
     } else {
@@ -81,20 +81,20 @@ export class OpenVehicleDoor extends CharacterStateBase {
       let lerpPosition = new THREE.Vector3().lerpVectors(
         this.startPosition,
         this.endPosition,
-        this.factorSimluator.position,
+        this.factorSimluator.position
       );
       this.character.setPosition(
         lerpPosition.x,
         lerpPosition.y,
-        lerpPosition.z,
+        lerpPosition.z
       );
 
-      THREE.Quaternion.slerp(
+      this.character.quaternion.slerpQuaternions(
         this.startRotation,
         this.endRotation,
-        this.character.quaternion,
-        this.factorSimluator.position,
+        this.factorSimluator.position
       );
+      // THREE.Quaternion.slerp(this.startRotation, this.endRotation, this.character.quaternion, this.factorSimluator.position);
     }
   }
 }

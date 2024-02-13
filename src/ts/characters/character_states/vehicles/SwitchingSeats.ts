@@ -20,7 +20,7 @@ export class SwitchingSeats extends CharacterStateBase {
   constructor(
     character: Character,
     fromSeat: VehicleSeat,
-    toSeat: VehicleSeat,
+    toSeat: VehicleSeat
   ) {
     super(character);
 
@@ -69,20 +69,20 @@ export class SwitchingSeats extends CharacterStateBase {
       let lerpPosition = new THREE.Vector3().lerpVectors(
         this.startPosition,
         this.endPosition,
-        sineFactor,
+        sineFactor
       );
       this.character.setPosition(
         lerpPosition.x,
         lerpPosition.y,
-        lerpPosition.z,
+        lerpPosition.z
       );
-
-      THREE.Quaternion.slerp(
+      this.character.quaternion.slerpQuaternions(
         this.startRotation,
         this.endRotation,
-        this.character.quaternion,
-        sineFactor,
+        sineFactor
       );
+
+      // THREE.Quaternion.slerp(this.startRotation, this.endRotation, this.character.quaternion, sineFactor);
     }
   }
 }

@@ -49,7 +49,7 @@ export class ExitingVehicle extends ExitingStateBase {
         this.character.leaveSeat();
       } else {
         this.character.setState(
-          new CloseVehicleDoorOutside(this.character, this.seat),
+          new CloseVehicleDoorOutside(this.character, this.seat)
         );
       }
     } else {
@@ -64,22 +64,22 @@ export class ExitingVehicle extends ExitingStateBase {
       let lerpPosition = new THREE.Vector3().lerpVectors(
         this.startPosition,
         this.endPosition,
-        smoothFactor,
+        smoothFactor
       );
       this.character.setPosition(
         lerpPosition.x,
         lerpPosition.y,
-        lerpPosition.z,
+        lerpPosition.z
       );
 
       // Rotation
       this.updateEndRotation();
-      THREE.Quaternion.slerp(
+      this.character.quaternion.slerpQuaternions(
         this.startRotation,
         this.endRotation,
-        this.character.quaternion,
-        smoothFactor,
+        smoothFactor
       );
+      // THREE.Quaternion.slerp(this.startRotation, this.endRotation, this.character.quaternion, smoothFactor);
     }
   }
 }

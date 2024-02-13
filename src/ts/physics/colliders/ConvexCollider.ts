@@ -26,8 +26,8 @@ export class ConvexCollider implements ICollider {
     // mat.restitution = 0.7;
 
     if (this.mesh.geometry.isBufferGeometry) {
-      this.mesh.geometry = new THREE.Geometry().fromBufferGeometry(
-        this.mesh.geometry,
+      this.mesh.geometry = new THREE.BufferGeometry().setFromPoints(
+        this.mesh.geometry
       );
     }
 

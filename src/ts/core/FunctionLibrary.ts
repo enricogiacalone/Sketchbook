@@ -6,106 +6,6 @@ import { Side } from "../enums/Side";
 import { Space } from "../enums/Space";
 import { SimulationFrame } from "../physics/spring_simulation/SimulationFrame";
 
-export function createCapsuleGeometry(
-  radius: number = 1,
-  height: number = 2,
-  N: number = 32,
-): THREE.Geometry {
-  const geometry = new THREE.Geometry();
-  const TWOPI = Math.PI * 2;
-  const PID2 = 1.570796326794896619231322;
-
-  const normals = [];
-
-  // top cap
-  for (let i = 0; i <= N / 4; i++) {
-    for (let j = 0; j <= N; j++) {
-      let theta = (j * TWOPI) / N;
-      let phi = -PID2 + (Math.PI * i) / (N / 2);
-      let vertex = new THREE.Vector3();
-      let normal = new THREE.Vector3();
-      vertex.x = radius * Math.cos(phi) * Math.cos(theta);
-      vertex.y = radius * Math.cos(phi) * Math.sin(theta);
-      vertex.z = radius * Math.sin(phi);
-      vertex.z -= height / 2;
-      normal.x = vertex.x;
-      normal.y = vertex.y;
-      normal.z = vertex.z;
-      geometry.vertices.push(vertex);
-      normals.push(normal);
-    }
-  }
-
-  // bottom cap
-  for (let i = N / 4; i <= N / 2; i++) {
-    for (let j = 0; j <= N; j++) {
-      let theta = (j * TWOPI) / N;
-      let phi = -PID2 + (Math.PI * i) / (N / 2);
-      let vertex = new THREE.Vector3();
-      let normal = new THREE.Vector3();
-      vertex.x = radius * Math.cos(phi) * Math.cos(theta);
-      vertex.y = radius * Math.cos(phi) * Math.sin(theta);
-      vertex.z = radius * Math.sin(phi);
-      vertex.z += height / 2;
-      normal.x = vertex.x;
-      normal.y = vertex.y;
-      normal.z = vertex.z;
-      geometry.vertices.push(vertex);
-      normals.push(normal);
-    }
-  }
-
-  for (let i = 0; i <= N / 2; i++) {
-    for (let j = 0; j < N; j++) {
-      let vec = new THREE.Vector4(
-        i * (N + 1) + j,
-        i * (N + 1) + (j + 1),
-        (i + 1) * (N + 1) + (j + 1),
-        (i + 1) * (N + 1) + j,
-      );
-
-      if (i === N / 4) {
-        let face1 = new THREE.Face3(vec.x, vec.y, vec.z, [
-          normals[vec.x],
-          normals[vec.y],
-          normals[vec.z],
-        ]);
-
-        let face2 = new THREE.Face3(vec.x, vec.z, vec.w, [
-          normals[vec.x],
-          normals[vec.z],
-          normals[vec.w],
-        ]);
-
-        geometry.faces.push(face2);
-        geometry.faces.push(face1);
-      } else {
-        let face1 = new THREE.Face3(vec.x, vec.y, vec.z, [
-          normals[vec.x],
-          normals[vec.y],
-          normals[vec.z],
-        ]);
-
-        let face2 = new THREE.Face3(vec.x, vec.z, vec.w, [
-          normals[vec.x],
-          normals[vec.z],
-          normals[vec.w],
-        ]);
-
-        geometry.faces.push(face1);
-        geometry.faces.push(face2);
-      }
-    }
-    // if(i==(N/4)) break; // N/4 is when the center segments are solved
-  }
-
-  geometry.rotateX(Math.PI / 2);
-  geometry.computeVertexNormals();
-  geometry.computeFaceNormals();
-
-  return geometry;
-}
-
 //#endregion
 
 //#region Math
@@ -119,7 +19,7 @@ export function createCapsuleGeometry(
  */
 export function appplyVectorMatrixXZ(
   a: THREE.Vector3,
-  b: THREE.Vector3,
+  b: THREE.Vector3
 ): THREE.Vector3 {
   return new THREE.Vector3(a.x * b.z + a.z * b.x, b.y, a.z * b.z + -a.x * b.x);
 }
@@ -130,12 +30,12 @@ export function round(value: number, decimals: number = 0): number {
 
 export function roundVector(
   vector: THREE.Vector3,
-  decimals: number = 0,
+  decimals: number = 0
 ): THREE.Vector3 {
   return new THREE.Vector3(
     this.round(vector.x, decimals),
     this.round(vector.y, decimals),
-    this.round(vector.z, decimals),
+    this.round(vector.z, decimals)
   );
 }
 
@@ -147,7 +47,7 @@ export function roundVector(
 export function getAngleBetweenVectors(
   v1: THREE.Vector3,
   v2: THREE.Vector3,
-  dotTreshold: number = 0.0005,
+  dotTreshold: number = 0.0005
 ): number {
   let angle: number;
   let dot = v1.dot(v2);
@@ -175,7 +75,7 @@ export function getSignedAngleBetweenVectors(
   v1: THREE.Vector3,
   v2: THREE.Vector3,
   normal: THREE.Vector3 = new THREE.Vector3(0, 1, 0),
-  dotTreshold: number = 0.0005,
+  dotTreshold: number = 0.0005
 ): number {
   let angle = this.getAngleBetweenVectors(v1, v2, dotTreshold);
 
@@ -222,7 +122,7 @@ export function spring(
   dest: number,
   velocity: number,
   mass: number,
-  damping: number,
+  damping: number
 ): SimulationFrame {
   let acceleration = dest - source;
   acceleration /= mass;
@@ -239,7 +139,7 @@ export function springV(
   dest: THREE.Vector3,
   velocity: THREE.Vector3,
   mass: number,
-  damping: number,
+  damping: number
 ): void {
   let acceleration = new THREE.Vector3().subVectors(dest, source);
   acceleration.divideScalar(mass);
@@ -276,7 +176,7 @@ export function setupMeshProperties(child: any): void {
     mat.map.anisotropy = 4;
     mat.aoMap = child.material.aoMap;
     mat.transparent = child.material.transparent;
-    mat.skinning = child.material.skinning;
+    // mat.skinning = child.material.skinning;
     // mat.map.encoding = THREE.LinearEncoding;
     child.material = mat;
   }
@@ -299,49 +199,49 @@ export function easeOutQuad(x: number): number {
 
 export function getRight(
   obj: THREE.Object3D,
-  space: Space = Space.Global,
+  space: Space = Space.Global
 ): THREE.Vector3 {
   const matrix = getMatrix(obj, space);
   return new THREE.Vector3(
     matrix.elements[0],
     matrix.elements[1],
-    matrix.elements[2],
+    matrix.elements[2]
   );
 }
 
 export function getUp(
   obj: THREE.Object3D,
-  space: Space = Space.Global,
+  space: Space = Space.Global
 ): THREE.Vector3 {
   const matrix = getMatrix(obj, space);
   return new THREE.Vector3(
     matrix.elements[4],
     matrix.elements[5],
-    matrix.elements[6],
+    matrix.elements[6]
   );
 }
 
 export function getForward(
   obj: THREE.Object3D,
-  space: Space = Space.Global,
+  space: Space = Space.Global
 ): THREE.Vector3 {
   const matrix = getMatrix(obj, space);
   return new THREE.Vector3(
     matrix.elements[8],
     matrix.elements[9],
-    matrix.elements[10],
+    matrix.elements[10]
   );
 }
 
 export function getBack(
   obj: THREE.Object3D,
-  space: Space = Space.Global,
+  space: Space = Space.Global
 ): THREE.Vector3 {
   const matrix = getMatrix(obj, space);
   return new THREE.Vector3(
     -matrix.elements[8],
     -matrix.elements[9],
-    -matrix.elements[10],
+    -matrix.elements[10]
   );
 }
 

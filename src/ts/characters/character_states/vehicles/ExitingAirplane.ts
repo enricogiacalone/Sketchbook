@@ -15,7 +15,7 @@ export class ExitingAirplane extends ExitingStateBase {
     this.endPosition.y += 1;
 
     const quat = Utils.threeQuat(
-      (seat.vehicle as unknown as Vehicle).collision.quaternion,
+      (seat.vehicle as unknown as Vehicle).collision.quaternion
     );
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
     this.exitPoint = new THREE.Object3D();
@@ -38,28 +38,28 @@ export class ExitingAirplane extends ExitingStateBase {
         (this.timer / this.animationLength - beginningCutoff) *
           (1 / (1 - beginningCutoff)),
         0,
-        1,
+        1
       );
       let smoothFactor = Utils.easeOutQuad(factor);
       let lerpPosition = new THREE.Vector3().lerpVectors(
         this.startPosition,
         this.endPosition,
-        smoothFactor,
+        smoothFactor
       );
       this.character.setPosition(
         lerpPosition.x,
         lerpPosition.y,
-        lerpPosition.z,
+        lerpPosition.z
       );
 
       // Rotation
       this.updateEndRotation();
-      THREE.Quaternion.slerp(
+      this.character.quaternion.slerpQuaternions(
         this.startRotation,
         this.endRotation,
-        this.character.quaternion,
-        smoothFactor,
+        smoothFactor
       );
+      // THREE.Quaternion.slerp(this.startRotation, this.endRotation, this.character.quaternion, smoothFactor);
     }
   }
 }

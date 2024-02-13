@@ -46,7 +46,8 @@
     "lodash": "^4.17.21",
     "prettier": "^3.2.5",
     "sweetalert2": "^9.17.2",
-    "three": "0.113.0",
-    "three-csm": "1.0.2"
+    "three": "0.160.0",
+    "three-csm": "aiden-jeffrey/three-csm#aiden/three-157",
+    "three-to-cannon": "^5.0.1"
   }
 }

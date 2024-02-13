@@ -64,7 +64,7 @@ export class EnteringVehicle extends CharacterStateBase {
       this.character.setPosition(
         this.endPosition.x,
         this.endPosition.y,
-        this.endPosition.z,
+        this.endPosition.z
       );
 
       if (this.seat.type === SeatType.Driver) {
@@ -82,7 +82,7 @@ export class EnteringVehicle extends CharacterStateBase {
       let factor = THREE.MathUtils.clamp(
         this.timer / (this.animationLength - this.animData.end_early),
         0,
-        1,
+        1
       );
       let sineFactor = Utils.easeInOutSine(factor);
       this.factorSimulator.simulate(timeStep);
@@ -90,25 +90,25 @@ export class EnteringVehicle extends CharacterStateBase {
       let currentPosOffset = new THREE.Vector3().lerpVectors(
         this.initialPositionOffset,
         new THREE.Vector3(),
-        this.factorSimulator.position,
+        this.factorSimulator.position
       );
       let lerpPosition = new THREE.Vector3().lerpVectors(
         this.startPosition.clone().sub(currentPosOffset),
         this.endPosition,
-        sineFactor,
+        sineFactor
       );
       this.character.setPosition(
         lerpPosition.x,
         lerpPosition.y,
-        lerpPosition.z,
+        lerpPosition.z
       );
 
-      THREE.Quaternion.slerp(
+      this.character.quaternion.slerpQuaternions(
         this.startRotation,
         this.endRotation,
-        this.character.quaternion,
-        this.factorSimulator.position,
+        this.factorSimulator.position
       );
+      // THREE.Quaternion.slerp(this.startRotation, this.endRotation, this.character.quaternion, this.factorSimulator.position);
     }
   }
 
