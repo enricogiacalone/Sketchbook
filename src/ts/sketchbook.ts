@@ -1,2 +1,2 @@
-import '../css/main.css';
-export { World } from './world/World';
+import "../css/main.css";
+export { World } from "./world/World";

@@ -1,11 +1,11 @@
 {
-    "include": ["src/ts/**/*"],
-    "compilerOptions": {
-        "module": "commonjs",
-        "target": "es5",
-        "moduleResolution": "node",
-        "declaration": true,
-        "declarationDir": "build/types",
-        "baseUrl": "."
-    }
+  "include": ["src/ts/**/*"],
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es6",
+    "moduleResolution": "node",
+    "declaration": true,
+    "declarationDir": "build/types",
+    "baseUrl": "."
+  }
 }

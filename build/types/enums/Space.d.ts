@@ -1,4 +1,4 @@
 export declare enum Space {
-    Local = "local",
-    Global = "global"
+  Local = "local",
+  Global = "global",
 }
