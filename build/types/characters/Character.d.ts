@@ -78,7 +78,7 @@ export declare class Character extends THREE.Object3D implements IWorldEntity {
   handleKeyboardEvent(
     event: KeyboardEvent,
     code: string,
-    pressed: boolean,
+    pressed: boolean
   ): void;
   handleMouseButton(event: MouseEvent, code: string, pressed: boolean): void;
   handleMouseMove(event: MouseEvent, deltaX: number, deltaY: number): void;

@@ -20,7 +20,7 @@ export class CloseVehicleDoorInside extends CharacterStateBase {
 
     const side = Utils.detectRelativeSide(
       seat.seatPointObject,
-      seat.door.doorObject,
+      seat.door.doorObject
     );
     if (side === Side.Left) {
       this.playAnimation("close_door_sitting_left", 0.1);

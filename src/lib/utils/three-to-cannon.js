@@ -62,7 +62,7 @@ export const threeToCannon = function (object, options) {
     default:
       console.warn(
         'Unrecognized geometry: "%s". Using bounding box as shape.',
-        geometry.type,
+        geometry.type
       );
       return createBoxShape(geometry);
   }
@@ -88,8 +88,8 @@ function createBoxShape(geometry) {
     new CANNON.Vec3(
       (box.max.x - box.min.x) / 2,
       (box.max.y - box.min.y) / 2,
-      (box.max.z - box.min.z) / 2,
-    ),
+      (box.max.z - box.min.z) / 2
+    )
   );
 }
 
@@ -115,8 +115,8 @@ function createBoundingBoxShape(object) {
     new CANNON.Vec3(
       (box.max.x - box.min.x) / 2,
       (box.max.y - box.min.y) / 2,
-      (box.max.z - box.min.z) / 2,
-    ),
+      (box.max.z - box.min.z) / 2
+    )
   );
 
   localPosition = box
@@ -160,7 +160,7 @@ function createConvexPolyhedron(object) {
     vertices[i] = new CANNON.Vec3(
       hull.vertices[i].x,
       hull.vertices[i].y,
-      hull.vertices[i].z,
+      hull.vertices[i].z
     );
   }
 
@@ -185,7 +185,7 @@ function createCylinderShape(geometry) {
     params.radiusTop,
     params.radiusBottom,
     params.height,
-    params.radialSegments,
+    params.radialSegments
   );
 
   // Include metadata for serialization.
@@ -225,7 +225,7 @@ function createBoundingCylinderShape(object, options) {
     0.5 *
     Math.max(
       box.max[minorAxes[0]] - box.min[minorAxes[0]],
-      box.max[minorAxes[1]] - box.min[minorAxes[1]],
+      box.max[minorAxes[1]] - box.min[minorAxes[1]]
     );
 
   // Create shape.
@@ -244,7 +244,7 @@ function createBoundingCylinderShape(object, options) {
       majorAxis === "y" ? PI_2 : 0,
       majorAxis === "z" ? PI_2 : 0,
       0,
-      "XYZ",
+      "XYZ"
     )
     .normalize();
   return shape;
@@ -260,8 +260,8 @@ function createPlaneShape(geometry) {
     new CANNON.Vec3(
       (box.max.x - box.min.x) / 2 || 0.1,
       (box.max.y - box.min.y) / 2 || 0.1,
-      (box.max.z - box.min.z) / 2 || 0.1,
-    ),
+      (box.max.z - box.min.z) / 2 || 0.1
+    )
   );
 }
 

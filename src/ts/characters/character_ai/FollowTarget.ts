@@ -41,7 +41,7 @@ export class FollowTarget implements ICharacterAI {
 
       let forward = new THREE.Vector3(0, 0, 1).applyQuaternion(
         (this.character.controlledObject as unknown as THREE.Object3D)
-          .quaternion,
+          .quaternion
       );
       viewVector.y = 0;
       viewVector.normalize();
@@ -51,8 +51,8 @@ export class FollowTarget implements ICharacterAI {
         forward.dot(
           Utils.threeVector(
             (this.character.controlledObject as unknown as Vehicle).collision
-              .velocity,
-          ),
+              .velocity
+          )
         ) > 0;
       let speed = (
         this.character.controlledObject as unknown as Vehicle
@@ -91,7 +91,7 @@ export class FollowTarget implements ICharacterAI {
     } else {
       let viewVector = new THREE.Vector3().subVectors(
         this.target.position,
-        this.character.position,
+        this.character.position
       );
       this.character.setViewVector(viewVector);
 

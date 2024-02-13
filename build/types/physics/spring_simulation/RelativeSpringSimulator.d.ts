@@ -11,7 +11,7 @@ export declare class RelativeSpringSimulator extends SimulatorBase {
     mass: number,
     damping: number,
     startPosition?: number,
-    startVelocity?: number,
+    startVelocity?: number
   );
   /**
    * Advances the simulation by given time step

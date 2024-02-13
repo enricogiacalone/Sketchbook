@@ -38,7 +38,7 @@ export class LoadingManager {
       },
       (error) => {
         console.error(error);
-      },
+      }
     );
   }
 

@@ -101,12 +101,12 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.velocitySimulator = new VectorSpringSimulator(
       60,
       this.defaultVelocitySimulatorMass,
-      this.defaultVelocitySimulatorDamping,
+      this.defaultVelocitySimulatorDamping
     );
     this.rotationSimulator = new RelativeSpringSimulator(
       60,
       this.defaultRotationSimulatorMass,
-      this.defaultRotationSimulatorDamping,
+      this.defaultRotationSimulatorDamping
     );
 
     this.viewVector = new THREE.Vector3();
@@ -170,7 +170,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public setArcadeVelocityInfluence(
     x: number,
     y: number = x,
-    z: number = x,
+    z: number = x
   ): void {
     this.arcadeVelocityInfluence.set(x, y, z);
   }
@@ -195,7 +195,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       this.characterCapsule.body.interpolatedPosition = new CANNON.Vec3(
         x,
         y,
-        z,
+        z
       );
     } else {
       this.position.x = x;
@@ -219,7 +219,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public setArcadeVelocityTarget(
     velZ: number,
     velX: number = 0,
-    velY: number = 0,
+    velY: number = 0
   ): void {
     this.velocityTarget.z = velZ;
     this.velocityTarget.x = velX;
@@ -228,7 +228,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
   public setOrientation(
     vector: THREE.Vector3,
-    instantly: boolean = false,
+    instantly: boolean = false
   ): void {
     let lookVector = new THREE.Vector3().copy(vector).setY(0).normalize();
     this.orientationTarget.copy(lookVector);
@@ -273,7 +273,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public handleKeyboardEvent(
     event: KeyboardEvent,
     code: string,
-    pressed: boolean,
+    pressed: boolean
   ): void {
     if (this.controlledObject !== undefined) {
       this.controlledObject.handleKeyboardEvent(event, code, pressed);
@@ -306,7 +306,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public handleMouseButton(
     event: MouseEvent,
     code: string,
-    pressed: boolean,
+    pressed: boolean
   ): void {
     if (this.controlledObject !== undefined) {
       this.controlledObject.handleMouseButton(event, code, pressed);
@@ -326,7 +326,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public handleMouseMove(
     event: MouseEvent,
     deltaX: number,
-    deltaY: number,
+    deltaY: number
   ): void {
     if (this.controlledObject !== undefined) {
       this.controlledObject.handleMouseMove(event, deltaX, deltaY);
@@ -373,7 +373,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       this.world.inputManager.setInputReceiver(this);
     } else {
       console.warn(
-        "Attempting to take control of a character that doesn't belong to a world.",
+        "Attempting to take control of a character that doesn't belong to a world."
       );
     }
   }
@@ -403,7 +403,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       this.position.set(
         this.characterCapsule.body.interpolatedPosition.x,
         this.characterCapsule.body.interpolatedPosition.y,
-        this.characterCapsule.body.interpolatedPosition.z,
+        this.characterCapsule.body.interpolatedPosition.z
       );
     } else {
       let newPos = new THREE.Vector3();
@@ -411,7 +411,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
       this.characterCapsule.body.position.copy(Utils.cannonVector(newPos));
       this.characterCapsule.body.interpolatedPosition.copy(
-        Utils.cannonVector(newPos),
+        Utils.cannonVector(newPos)
       );
     }
 
@@ -467,7 +467,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       // Look in camera's direction
       this.viewVector = new THREE.Vector3().subVectors(
         this.position,
-        this.world.camera.position,
+        this.world.camera.position
       );
       this.getWorldPosition(this.world.cameraOperator.target);
     }
@@ -507,7 +507,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     // Figure out angle between current and target orientation
     let angle = Utils.getSignedAngleBetweenVectors(
       this.orientation,
-      this.orientationTarget,
+      this.orientationTarget
     );
 
     // Simulator
@@ -529,7 +529,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     return new THREE.Vector3(
       positiveX + negativeX,
       0,
-      positiveZ + negativeZ,
+      positiveZ + negativeZ
     ).normalize();
   }
 
@@ -538,7 +538,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     const flatViewVector = new THREE.Vector3(
       this.viewVector.x,
       0,
-      this.viewVector.z,
+      this.viewVector.z
     ).normalize();
 
     return Utils.appplyVectorMatrixXZ(flatViewVector, localDirection);
@@ -560,14 +560,14 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.lookAt(
       this.position.x + this.orientation.x,
       this.position.y + this.orientation.y,
-      this.position.z + this.orientation.z,
+      this.position.z + this.orientation.z
     );
     this.tiltContainer.rotation.z =
       -this.angularVelocity * 2.3 * this.velocity.length();
     this.tiltContainer.position.setY(
       Math.cos(Math.abs(this.angularVelocity * 2.3 * this.velocity.length())) /
         2 -
-        0.5,
+        0.5
     );
   }
 
@@ -658,7 +658,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.setPosition(
       seat.seatPointObject.position.x,
       seat.seatPointObject.position.y + 0.6,
-      seat.seatPointObject.position.z,
+      seat.seatPointObject.position.z
     );
     this.quaternion.copy(seat.seatPointObject.quaternion);
 
@@ -670,7 +670,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
   public startControllingVehicle(
     vehicle: IControllable,
-    seat: VehicleSeat,
+    seat: VehicleSeat
   ): void {
     if (this.controlledObject !== vehicle) {
       this.transferControls(vehicle);
@@ -758,7 +758,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
         character.raycastBox.position.set(
           body.position.x,
           body.position.y - character.rayCastLength - character.raySafeOffset,
-          body.position.z,
+          body.position.z
         );
       }
     }
@@ -771,12 +771,12 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     const start = new CANNON.Vec3(
       body.position.x,
       body.position.y,
-      body.position.z,
+      body.position.z
     );
     const end = new CANNON.Vec3(
       body.position.x,
       body.position.y - this.rayCastLength - this.raySafeOffset,
-      body.position.z,
+      body.position.z
     );
     // Raycast options
     const rayCastOptions = {
@@ -788,7 +788,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       start,
       end,
       rayCastOptions,
-      this.rayResult,
+      this.rayResult
     );
   }
 
@@ -797,7 +797,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     let simulatedVelocity = new THREE.Vector3(
       body.velocity.x,
       body.velocity.y,
-      body.velocity.z,
+      body.velocity.z
     );
 
     // Take local velocity
@@ -807,7 +807,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     // Turn local into global
     arcadeVelocity = Utils.appplyVectorMatrixXZ(
       character.orientation,
-      arcadeVelocity,
+      arcadeVelocity
     );
 
     let newVelocity = new THREE.Vector3();
@@ -818,7 +818,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
       let globalVelocityTarget = Utils.appplyVectorMatrixXZ(
         character.orientation,
-        character.velocityTarget,
+        character.velocityTarget
       );
       let add = new THREE.Vector3()
         .copy(arcadeVelocity)
@@ -850,18 +850,18 @@ export class Character extends THREE.Object3D implements IWorldEntity {
         THREE.MathUtils.lerp(
           simulatedVelocity.x,
           arcadeVelocity.x,
-          character.arcadeVelocityInfluence.x,
+          character.arcadeVelocityInfluence.x
         ),
         THREE.MathUtils.lerp(
           simulatedVelocity.y,
           arcadeVelocity.y,
-          character.arcadeVelocityInfluence.y,
+          character.arcadeVelocityInfluence.y
         ),
         THREE.MathUtils.lerp(
           simulatedVelocity.z,
           arcadeVelocity.z,
-          character.arcadeVelocityInfluence.z,
-        ),
+          character.arcadeVelocityInfluence.z
+        )
       );
     }
 
@@ -875,7 +875,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
         let pointVelocity = new CANNON.Vec3();
         character.rayResult.body.getVelocityAtWorldPoint(
           character.rayResult.hitPointWorld,
-          pointVelocity,
+          pointVelocity
         );
         newVelocity.add(Utils.threeVector(pointVelocity));
       }
@@ -886,7 +886,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       let normal = new THREE.Vector3(
         character.rayResult.hitNormalWorld.x,
         character.rayResult.hitNormalWorld.y,
-        character.rayResult.hitNormalWorld.z,
+        character.rayResult.hitNormalWorld.z
       );
       let q = new THREE.Quaternion().setFromUnitVectors(up, normal);
       let m = new THREE.Matrix4().makeRotationFromQuaternion(q);
@@ -926,17 +926,17 @@ export class Character extends THREE.Object3D implements IWorldEntity {
         body.velocity.y = 0;
         let speed = Math.max(
           character.velocitySimulator.position.length() * 4,
-          character.initJumpSpeed,
+          character.initJumpSpeed
         );
         body.velocity = Utils.cannonVector(
-          character.orientation.clone().multiplyScalar(speed),
+          character.orientation.clone().multiplyScalar(speed)
         );
       } else {
         // Moving objects compensation
         let add = new CANNON.Vec3();
         character.rayResult.body.getVelocityAtWorldPoint(
           character.rayResult.hitPointWorld,
-          add,
+          add
         );
         body.velocity.vsub(add, body.velocity);
       }
@@ -977,7 +977,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public removeFromWorld(world: World): void {
     if (!_.includes(world.characters, this)) {
       console.warn(
-        "Removing character from a world in which it isn't present.",
+        "Removing character from a world in which it isn't present."
       );
     } else {
       if (world.inputManager.inputReceiver === this) {

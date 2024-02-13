@@ -27,7 +27,7 @@ export class Driving extends CharacterStateBase {
       this.seat.vehicle.noDirectionPressed()
     ) {
       this.character.setState(
-        new CloseVehicleDoorInside(this.character, this.seat),
+        new CloseVehicleDoorInside(this.character, this.seat)
       );
     }
   }

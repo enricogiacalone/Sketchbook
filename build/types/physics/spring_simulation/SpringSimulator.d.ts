@@ -10,7 +10,7 @@ export declare class SpringSimulator extends SimulatorBase {
     mass: number,
     damping: number,
     startPosition?: number,
-    startVelocity?: number,
+    startVelocity?: number
   );
   /**
    * Advances the simulation by given time step

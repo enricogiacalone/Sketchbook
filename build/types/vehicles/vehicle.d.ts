@@ -39,7 +39,7 @@ export declare abstract class Vehicle
   handleKeyboardEvent(
     event: KeyboardEvent,
     code: string,
-    pressed: boolean,
+    pressed: boolean
   ): void;
   setFirstPersonView(value: boolean): void;
   toggleFirstPersonView(): void;

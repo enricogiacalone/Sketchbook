@@ -15,7 +15,7 @@ export class RelativeSpringSimulator extends SimulatorBase {
     mass: number,
     damping: number,
     startPosition: number = 0,
-    startVelocity: number = 0,
+    startVelocity: number = 0
   ) {
     // Construct base
     super(fps, mass, damping);
@@ -52,7 +52,7 @@ export class RelativeSpringSimulator extends SimulatorBase {
     let lerp = THREE.MathUtils.lerp(
       0,
       this.cache[1].position,
-      this.offset / this.frameTime,
+      this.offset / this.frameTime
     );
 
     // Substract last lerp from current to make output relative
@@ -62,7 +62,7 @@ export class RelativeSpringSimulator extends SimulatorBase {
     this.velocity = THREE.MathUtils.lerp(
       this.cache[0].velocity,
       this.cache[1].velocity,
-      this.offset / this.frameTime,
+      this.offset / this.frameTime
     );
   }
 
@@ -84,7 +84,7 @@ export class RelativeSpringSimulator extends SimulatorBase {
       this.target,
       newFrame.velocity,
       this.mass,
-      this.damping,
+      this.damping
     );
   }
 }

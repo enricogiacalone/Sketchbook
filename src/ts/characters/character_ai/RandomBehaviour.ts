@@ -19,8 +19,8 @@ export class RandomBehaviour implements ICharacterAI {
         new THREE.Vector3(
           Math.random() - 0.5,
           Math.random() - 0.5,
-          Math.random() - 0.5,
-        ),
+          Math.random() - 0.5
+        )
       );
 
       this.character.triggerAction("up", true);

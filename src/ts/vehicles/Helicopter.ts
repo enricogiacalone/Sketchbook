@@ -101,7 +101,7 @@ export class Helicopter extends Vehicle implements IControllable, IWorldEntity {
     let gravityCompensation = new CANNON.Vec3(
       -gravity.x,
       -gravity.y,
-      -gravity.z,
+      -gravity.z
     ).length();
     gravityCompensation *= this.world.physicsFrameTime;
     gravityCompensation *= 0.98;
@@ -109,7 +109,7 @@ export class Helicopter extends Vehicle implements IControllable, IWorldEntity {
     gravityCompensation *= Math.sqrt(THREE.MathUtils.clamp(dot, 0, 1));
 
     let vertDamping = new THREE.Vector3(0, body.velocity.y, 0).multiplyScalar(
-      -0.01,
+      -0.01
     );
     let vertStab = up.clone();
     vertStab.multiplyScalar(gravityCompensation);
@@ -128,7 +128,7 @@ export class Helicopter extends Vehicle implements IControllable, IWorldEntity {
     if (this.controllingCharacter !== undefined) {
       let rotStabVelocity = new THREE.Quaternion().setFromUnitVectors(
         up,
-        globalUp,
+        globalUp
       );
       rotStabVelocity.x *= 0.3;
       rotStabVelocity.y *= 0.3;

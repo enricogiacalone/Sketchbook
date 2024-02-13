@@ -189,7 +189,7 @@ export class Airplane extends Vehicle implements IControllable, IWorldEntity {
     lookVelocity.normalize();
     let rotStabVelocity = new THREE.Quaternion().setFromUnitVectors(
       forward,
-      Utils.threeVector(lookVelocity),
+      Utils.threeVector(lookVelocity)
     );
     rotStabVelocity.x *= 0.3;
     rotStabVelocity.y *= 0.3;
@@ -314,17 +314,17 @@ export class Airplane extends Vehicle implements IControllable, IWorldEntity {
     body.angularVelocity.x = THREE.MathUtils.lerp(
       body.angularVelocity.x,
       body.angularVelocity.x * 0.98,
-      flightModeInfluence,
+      flightModeInfluence
     );
     body.angularVelocity.y = THREE.MathUtils.lerp(
       body.angularVelocity.y,
       body.angularVelocity.y * 0.98,
-      flightModeInfluence,
+      flightModeInfluence
     );
     body.angularVelocity.z = THREE.MathUtils.lerp(
       body.angularVelocity.z,
       body.angularVelocity.z * 0.98,
-      flightModeInfluence,
+      flightModeInfluence
     );
   }
 

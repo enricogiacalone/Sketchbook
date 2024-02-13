@@ -14,7 +14,7 @@ export declare class OpenVehicleDoor extends CharacterStateBase {
   constructor(
     character: Character,
     seat: VehicleSeat,
-    entryPoint: THREE.Object3D,
+    entryPoint: THREE.Object3D
   );
   update(timeStep: number): void;
 }

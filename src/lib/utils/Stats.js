@@ -74,7 +74,7 @@ export var Stats = function () {
           var memory = performance.memory;
           memPanel.update(
             memory.usedJSHeapSize / 1048576,
-            memory.jsHeapSizeLimit / 1048576,
+            memory.jsHeapSizeLimit / 1048576
           );
         }
       }
@@ -142,7 +142,7 @@ Stats.Panel = function (name, fg, bg) {
       context.fillText(
         round(value) + " " + name + " (" + round(min) + "-" + round(max) + ")",
         TEXT_X,
-        TEXT_Y,
+        TEXT_Y
       );
 
       context.drawImage(
@@ -154,7 +154,7 @@ Stats.Panel = function (name, fg, bg) {
         GRAPH_X,
         GRAPH_Y,
         GRAPH_WIDTH - PR,
-        GRAPH_HEIGHT,
+        GRAPH_HEIGHT
       );
 
       context.fillRect(GRAPH_X + GRAPH_WIDTH - PR, GRAPH_Y, PR, GRAPH_HEIGHT);
@@ -165,7 +165,7 @@ Stats.Panel = function (name, fg, bg) {
         GRAPH_X + GRAPH_WIDTH - PR,
         GRAPH_Y,
         PR,
-        round((1 - value / maxValue) * GRAPH_HEIGHT),
+        round((1 - value / maxValue) * GRAPH_HEIGHT)
       );
     },
   };

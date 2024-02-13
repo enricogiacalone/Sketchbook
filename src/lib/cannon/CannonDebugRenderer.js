@@ -64,11 +64,11 @@ CannonDebugRenderer.prototype = {
           // Get world position
           body.interpolatedQuaternion.vmult(
             body.shapeOffsets[j],
-            shapeWorldPosition,
+            shapeWorldPosition
           );
           body.interpolatedPosition.vadd(
             shapeWorldPosition,
-            shapeWorldPosition,
+            shapeWorldPosition
           );
 
           // Get world quaternion
@@ -178,7 +178,7 @@ CannonDebugRenderer.prototype = {
           geometry.vertices.push(
             new THREE.Vector3(v0.x, v0.y, v0.z),
             new THREE.Vector3(v1.x, v1.y, v1.z),
-            new THREE.Vector3(v2.x, v2.y, v2.z),
+            new THREE.Vector3(v2.x, v2.y, v2.z)
           );
           var j = geometry.vertices.length - 3;
           geometry.faces.push(new THREE.Face3(j, j + 1, j + 2));
@@ -208,7 +208,7 @@ CannonDebugRenderer.prototype = {
               geometry.vertices.push(
                 new THREE.Vector3(v0.x, v0.y, v0.z),
                 new THREE.Vector3(v1.x, v1.y, v1.z),
-                new THREE.Vector3(v2.x, v2.y, v2.z),
+                new THREE.Vector3(v2.x, v2.y, v2.z)
               );
               var i = geometry.vertices.length - 3;
               geometry.faces.push(new THREE.Face3(i, i + 1, i + 2));

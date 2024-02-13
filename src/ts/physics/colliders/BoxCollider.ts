@@ -21,12 +21,12 @@ export class BoxCollider implements ICollider {
     options.position = new CANNON.Vec3(
       options.position.x,
       options.position.y,
-      options.position.z,
+      options.position.z
     );
     options.size = new CANNON.Vec3(
       options.size.x,
       options.size.y,
-      options.size.z,
+      options.size.z
     );
 
     let mat = new CANNON.Material("boxMat");

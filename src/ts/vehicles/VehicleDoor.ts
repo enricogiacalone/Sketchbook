@@ -32,7 +32,7 @@ export class VehicleDoor {
 
     const side = Utils.detectRelativeSide(
       this.seat.seatPointObject,
-      this.doorObject,
+      this.doorObject
     );
     if (side === Side.Left) this.sideMultiplier = -1;
     else if (side === Side.Right) this.sideMultiplier = 1;
@@ -63,7 +63,7 @@ export class VehicleDoor {
     }
 
     this.doorObject.setRotationFromEuler(
-      new THREE.Euler(0, this.sideMultiplier * this.rotation, 0),
+      new THREE.Euler(0, this.sideMultiplier * this.rotation, 0)
     );
   }
 
@@ -74,13 +74,13 @@ export class VehicleDoor {
 
       // Get acceleration
       let vehicleVel = Utils.threeVector(
-        this.vehicle.rayCastVehicle.chassisBody.velocity,
+        this.vehicle.rayCastVehicle.chassisBody.velocity
       );
       let vehicleVelDiff = vehicleVel.clone().sub(this.lastVehicleVel);
 
       // Get vectors
       const quat = Utils.threeQuat(
-        this.vehicle.rayCastVehicle.chassisBody.quaternion,
+        this.vehicle.rayCastVehicle.chassisBody.quaternion
       );
       const back = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
@@ -146,7 +146,7 @@ export class VehicleDoor {
 
     // Get vectors
     const quat = Utils.threeQuat(
-      this.vehicle.rayCastVehicle.chassisBody.quaternion,
+      this.vehicle.rayCastVehicle.chassisBody.quaternion
     );
     const back = new THREE.Vector3(0, 0, -1).applyQuaternion(quat);
     this.lastTrailerPos.copy(back.add(this.doorWorldPos));

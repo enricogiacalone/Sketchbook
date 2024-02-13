@@ -56,7 +56,7 @@ export class VehicleSpawnPoint implements ISpawnPoint {
                       if (
                         Object.prototype.hasOwnProperty.call(
                           path.nodes,
-                          nodeName,
+                          nodeName
                         )
                       ) {
                         const node = path.nodes[nodeName];
@@ -77,7 +77,7 @@ export class VehicleSpawnPoint implements ISpawnPoint {
             }
           });
         }
-      },
+      }
     );
   }
 

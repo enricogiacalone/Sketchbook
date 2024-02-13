@@ -158,7 +158,7 @@ export const quickhull = (function () {
       if (currentFace !== face) {
         // ...and check if they're pointing in the same direction
         dot = getNormal(currentFace, points).dot(
-          diff.subVectors(points[apex], points[currentFace[0]]),
+          diff.subVectors(points[apex], points[currentFace[0]])
         );
         if (dot > 0) {
           visibleFaces.push(currentFace);
@@ -430,7 +430,7 @@ export const quickhull = (function () {
         faces[ll][2],
         faces[ll][1],
         faces[ll][0],
-        faces[ll].normal,
+        faces[ll].normal
       );
     }
 

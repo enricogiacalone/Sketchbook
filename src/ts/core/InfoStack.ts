@@ -18,7 +18,7 @@ export class InfoStack implements IWorldEntity {
     messageElement.classList.add(
       "console-message",
       "animate__animated",
-      this.entranceAnimation,
+      this.entranceAnimation
     );
     messageElement.style.setProperty("--animate-duration", "0.3s");
     let textElement = document.createTextNode(text);

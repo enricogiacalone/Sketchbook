@@ -198,11 +198,11 @@ export class Car extends Vehicle implements IControllable {
       forward
         .clone()
         .multiplyScalar(
-          airSpinAcceleration * (airSpinInfluence + flipOverInfluence),
-        ),
+          airSpinAcceleration * (airSpinInfluence + flipOverInfluence)
+        )
     );
     const effectiveSpinVectorRight = Utils.cannonVector(
-      right.clone().multiplyScalar(airSpinAcceleration * airSpinInfluence),
+      right.clone().multiplyScalar(airSpinAcceleration * airSpinInfluence)
     );
 
     // Right
@@ -243,14 +243,14 @@ export class Car extends Vehicle implements IControllable {
     velocity.normalize();
     let driftCorrection = Utils.getSignedAngleBetweenVectors(
       Utils.threeVector(velocity),
-      forward,
+      forward
     );
 
     const maxSteerVal = 0.8;
     let speedFactor = THREE.MathUtils.clamp(
       this.speed * 0.3,
       1,
-      Number.MAX_VALUE,
+      Number.MAX_VALUE
     );
 
     if (this.actions.right.isPressed) {
@@ -258,14 +258,14 @@ export class Car extends Vehicle implements IControllable {
       this.steeringSimulator.target = THREE.MathUtils.clamp(
         steering,
         -maxSteerVal,
-        maxSteerVal,
+        maxSteerVal
       );
     } else if (this.actions.left.isPressed) {
       let steering = Math.max(maxSteerVal / speedFactor, -driftCorrection);
       this.steeringSimulator.target = THREE.MathUtils.clamp(
         steering,
         -maxSteerVal,
-        maxSteerVal,
+        maxSteerVal
       );
     } else this.steeringSimulator.target = 0;
 

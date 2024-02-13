@@ -49,12 +49,12 @@ export class InputManager implements IUpdatable {
     document.addEventListener(
       "pointerlockchange",
       this.boundOnPointerlockChange,
-      false,
+      false
     );
     document.addEventListener(
       "pointerlockerror",
       this.boundOnPointerlockError,
-      false,
+      false
     );
 
     // Keys
@@ -90,7 +90,7 @@ export class InputManager implements IUpdatable {
       this.domElement.addEventListener(
         "mousemove",
         this.boundOnMouseMove,
-        false,
+        false
       );
       this.domElement.addEventListener("mouseup", this.boundOnMouseUp, false);
       this.isLocked = true;
@@ -98,12 +98,12 @@ export class InputManager implements IUpdatable {
       this.domElement.removeEventListener(
         "mousemove",
         this.boundOnMouseMove,
-        false,
+        false
       );
       this.domElement.removeEventListener(
         "mouseup",
         this.boundOnMouseUp,
-        false,
+        false
       );
       this.isLocked = false;
     }
@@ -120,7 +120,7 @@ export class InputManager implements IUpdatable {
       this.domElement.addEventListener(
         "mousemove",
         this.boundOnMouseMove,
-        false,
+        false
       );
       this.domElement.addEventListener("mouseup", this.boundOnMouseUp, false);
     }
@@ -135,7 +135,7 @@ export class InputManager implements IUpdatable {
       this.inputReceiver.handleMouseMove(
         event,
         event.movementX,
-        event.movementY,
+        event.movementY
       );
     }
   }
@@ -145,12 +145,12 @@ export class InputManager implements IUpdatable {
       this.domElement.removeEventListener(
         "mousemove",
         this.boundOnMouseMove,
-        false,
+        false
       );
       this.domElement.removeEventListener(
         "mouseup",
         this.boundOnMouseUp,
-        false,
+        false
       );
     }
 
@@ -158,7 +158,7 @@ export class InputManager implements IUpdatable {
       this.inputReceiver.handleMouseButton(
         event,
         "mouse" + event.button,
-        false,
+        false
       );
     }
   }

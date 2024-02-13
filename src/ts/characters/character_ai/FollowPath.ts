@@ -71,7 +71,7 @@ export class FollowPath extends FollowTarget implements ICharacterAI {
         this.character.controlledObject as unknown as Vehicle
       ).collision.quaternion.copy(
         (this.character.controlledObject as unknown as Vehicle).collision
-          .initQuaternion,
+          .initQuaternion
       );
       this.staleTimer = 0;
     }

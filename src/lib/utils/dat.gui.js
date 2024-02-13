@@ -94,10 +94,10 @@
               if (!this.isUndefined(obj[key])) {
                 target[key] = obj[key];
               }
-            }.bind(this),
+            }.bind(this)
           );
         },
-        this,
+        this
       );
       return target;
     },
@@ -111,10 +111,10 @@
               if (this.isUndefined(target[key])) {
                 target[key] = obj[key];
               }
-            }.bind(this),
+            }.bind(this)
           );
         },
-        this,
+        this
       );
       return target;
     },
@@ -234,7 +234,7 @@
                   test[2].toString() +
                   test[3].toString() +
                   test[3].toString(),
-                0,
+                0
               ),
             };
           },
@@ -256,7 +256,7 @@
         CSS_RGB: {
           read: function read(original) {
             var test = original.match(
-              /^rgb\(\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*\)/,
+              /^rgb\(\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*\)/
             );
             if (test === null) {
               return false;
@@ -273,7 +273,7 @@
         CSS_RGBA: {
           read: function read(original) {
             var test = original.match(
-              /^rgba\(\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*\)/,
+              /^rgba\(\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*\)/
             );
             if (test === null) {
               return false;
@@ -540,7 +540,7 @@
     hex_with_component: function hex_with_component(
       hex,
       componentIndex,
-      value,
+      value
     ) {
       return (
         (value << (tmpComponent = componentIndex * 8)) |
@@ -616,7 +616,7 @@
     if (typeof superClass !== "function" && superClass !== null) {
       throw new TypeError(
         "Super expression must either be null or a function, not " +
-          typeof superClass,
+          typeof superClass
       );
     }
 
@@ -637,7 +637,7 @@
   var possibleConstructorReturn = function (self, call) {
     if (!self) {
       throw new ReferenceError(
-        "this hasn't been initialised - super() hasn't been called",
+        "this hasn't been initialised - super() hasn't been called"
       );
     }
 
@@ -719,12 +719,12 @@
     if (color.__state.space === "HEX") {
       color.__state[component] = ColorMath.component_from_hex(
         color.__state.hex,
-        componentHexIndex,
+        componentHexIndex
       );
     } else if (color.__state.space === "HSV") {
       Common.extend(
         color.__state,
-        ColorMath.hsv_to_rgb(color.__state.h, color.__state.s, color.__state.v),
+        ColorMath.hsv_to_rgb(color.__state.h, color.__state.s, color.__state.v)
       );
     } else {
       throw new Error("Corrupted color state");
@@ -908,7 +908,7 @@
             false,
             false,
             0,
-            null,
+            null
           );
           break;
         }
@@ -933,7 +933,7 @@
             params.shiftKey,
             params.metaKey,
             params.keyCode,
-            params.charCode,
+            params.charCode
           );
           break;
         }
@@ -941,7 +941,7 @@
           evt.initEvent(
             eventType,
             params.bubbles || false,
-            params.cancelable || true,
+            params.cancelable || true
           );
           break;
         }
@@ -1002,7 +1002,7 @@
     hasClass: function hasClass(elem, className) {
       return (
         new RegExp("(?:^|\\s+)" + className + "(?:\\s+|$)").test(
-          elem.className,
+          elem.className
         ) || false
       );
     },
@@ -1056,7 +1056,7 @@
         (
           BooleanController.__proto__ ||
           Object.getPrototypeOf(BooleanController)
-        ).call(this, object, property),
+        ).call(this, object, property)
       );
       var _this = _this2;
       _this2.__prev = _this2.getValue();
@@ -1079,7 +1079,7 @@
             BooleanController.prototype.__proto__ ||
               Object.getPrototypeOf(BooleanController.prototype),
             "setValue",
-            this,
+            this
           ).call(this, v);
           if (this.__onFinishChange) {
             this.__onFinishChange.call(this, this.getValue());
@@ -1103,7 +1103,7 @@
             BooleanController.prototype.__proto__ ||
               Object.getPrototypeOf(BooleanController.prototype),
             "updateDisplay",
-            this,
+            this
           ).call(this);
         },
       },
@@ -1120,7 +1120,7 @@
         this,
         (
           OptionController.__proto__ || Object.getPrototypeOf(OptionController)
-        ).call(this, object, property),
+        ).call(this, object, property)
       );
       var options = opts;
       var _this = _this2;
@@ -1154,7 +1154,7 @@
             OptionController.prototype.__proto__ ||
               Object.getPrototypeOf(OptionController.prototype),
             "setValue",
-            this,
+            this
           ).call(this, v);
           if (this.__onFinishChange) {
             this.__onFinishChange.call(this, this.getValue());
@@ -1171,7 +1171,7 @@
             OptionController.prototype.__proto__ ||
               Object.getPrototypeOf(OptionController.prototype),
             "updateDisplay",
-            this,
+            this
           ).call(this);
         },
       },
@@ -1188,7 +1188,7 @@
         this,
         (
           StringController.__proto__ || Object.getPrototypeOf(StringController)
-        ).call(this, object, property),
+        ).call(this, object, property)
       );
       var _this = _this2;
 
@@ -1226,7 +1226,7 @@
             StringController.prototype.__proto__ ||
               Object.getPrototypeOf(StringController.prototype),
             "updateDisplay",
-            this,
+            this
           ).call(this);
         },
       },
@@ -1250,7 +1250,7 @@
         this,
         (
           NumberController.__proto__ || Object.getPrototypeOf(NumberController)
-        ).call(this, object, property),
+        ).call(this, object, property)
       );
       var _params = params || {};
       _this.__min = _params.min;
@@ -1263,7 +1263,7 @@
           _this.__impliedStep =
             Math.pow(
               10,
-              Math.floor(Math.log(Math.abs(_this.initialValue)) / Math.LN10),
+              Math.floor(Math.log(Math.abs(_this.initialValue)) / Math.LN10)
             ) / 10;
         }
       } else {
@@ -1289,7 +1289,7 @@
             NumberController.prototype.__proto__ ||
               Object.getPrototypeOf(NumberController.prototype),
             "setValue",
-            this,
+            this
           ).call(this, _v);
         },
       },
@@ -1334,7 +1334,7 @@
         (
           NumberControllerBox.__proto__ ||
           Object.getPrototypeOf(NumberControllerBox)
-        ).call(this, object, property, params),
+        ).call(this, object, property, params)
       );
       _this2.__truncationSuspended = false;
       var _this = _this2;
@@ -1402,7 +1402,7 @@
             NumberControllerBox.prototype.__proto__ ||
               Object.getPrototypeOf(NumberControllerBox.prototype),
             "updateDisplay",
-            this,
+            this
           ).call(this);
         },
       },
@@ -1427,7 +1427,7 @@
           min: min,
           max: max,
           step: step,
-        }),
+        })
       );
       var _this = _this2;
       _this2.__background = document.createElement("div");
@@ -1450,7 +1450,7 @@
         e.preventDefault();
         var bgRect = _this.__background.getBoundingClientRect();
         _this.setValue(
-          map(e.clientX, bgRect.left, bgRect.right, _this.__min, _this.__max),
+          map(e.clientX, bgRect.left, bgRect.right, _this.__min, _this.__max)
         );
         return false;
       }
@@ -1476,7 +1476,7 @@
         var clientX = e.touches[0].clientX;
         var bgRect = _this.__background.getBoundingClientRect();
         _this.setValue(
-          map(clientX, bgRect.left, bgRect.right, _this.__min, _this.__max),
+          map(clientX, bgRect.left, bgRect.right, _this.__min, _this.__max)
         );
       }
 
@@ -1502,7 +1502,7 @@
             NumberControllerSlider.prototype.__proto__ ||
               Object.getPrototypeOf(NumberControllerSlider.prototype),
             "updateDisplay",
-            this,
+            this
           ).call(this);
         },
       },
@@ -1520,7 +1520,7 @@
         (
           FunctionController.__proto__ ||
           Object.getPrototypeOf(FunctionController)
-        ).call(this, object, property),
+        ).call(this, object, property)
       );
       var _this = _this2;
       _this2.__button = document.createElement("div");
@@ -1560,7 +1560,7 @@
         this,
         (
           ColorController.__proto__ || Object.getPrototypeOf(ColorController)
-        ).call(this, object, property),
+        ).call(this, object, property)
       );
       _this2.__color = new Color(_this2.getValue());
       _this2.__temp = new Color(0);
@@ -1600,7 +1600,7 @@
             dom.removeClass(_this.__selector, "drag");
           });
         },
-        { passive: true },
+        { passive: true }
       );
       var valueField = document.createElement("div");
       Common.extend(_this2.__selector.style, {
@@ -1795,7 +1795,7 @@
                   return {};
                 }
               },
-              this,
+              this
             );
             if (mismatch) {
               Common.extend(this.__color.__state, i);
@@ -1827,7 +1827,7 @@
             this.__saturation_field,
             "left",
             "#fff",
-            this.__temp.toHexString(),
+            this.__temp.toHexString()
           );
           this.__input.value = this.__color.toString();
           Common.extend(this.__input.style, {
@@ -1917,14 +1917,14 @@
             property,
             arguments[2],
             arguments[3],
-            arguments[4],
+            arguments[4]
           );
         }
         return new NumberControllerSlider(
           object,
           property,
           arguments[2],
-          arguments[3],
+          arguments[3]
         );
       }
       if (Common.isNumber(arguments[4])) {
@@ -2221,7 +2221,7 @@
         dom.addClass(this.__closeButton, GUI.CLASS_CLOSE_TOP);
         this.domElement.insertBefore(
           this.__closeButton,
-          this.domElement.childNodes[0],
+          this.domElement.childNodes[0]
         );
       } else {
         dom.addClass(this.__closeButton, GUI.CLASS_CLOSE_BOTTOM);
@@ -2287,7 +2287,7 @@
       ) {
         localStorage.setItem(
           getLocalStorageHash(_this, "gui"),
-          JSON.stringify(_this.getSaveObject()),
+          JSON.stringify(_this.getSaveObject())
         );
       }
     };
@@ -2355,7 +2355,7 @@
       if (this.parent) {
         throw new Error(
           "Only the root GUI should be removed with .destroy(). " +
-            "For subfolders, use gui.removeFolder(folder) instead.",
+            "For subfolders, use gui.removeFolder(folder) instead."
         );
       }
       if (this.autoPlace) {
@@ -2374,7 +2374,7 @@
           "You already have a folder in this GUI by the" +
             ' name "' +
             name +
-            '"',
+            '"'
         );
       }
       var newGuiParams = {
@@ -2501,7 +2501,7 @@
         this.load.remembered = {};
         this.load.remembered[DEFAULT_DEFAULT_PRESET_NAME] = getCurrentPreset(
           this,
-          true,
+          true
         );
       }
       this.load.remembered[presetName] = getCurrentPreset(this);
@@ -2522,7 +2522,7 @@
             controller.__onFinishChange.call(controller, controller.getValue());
           }
         },
-        this,
+        this
       );
       Common.each(this.__folders, function (folder) {
         folder.revert(folder);
@@ -2621,7 +2621,7 @@
           min: controller.__min,
           max: controller.__max,
           step: controller.__step,
-        },
+        }
       );
       Common.each(
         ["updateDisplay", "onChange", "onFinishChange", "step"],
@@ -2633,12 +2633,12 @@
             pb.apply(box, args);
             return pc.apply(controller, args);
           };
-        },
+        }
       );
       dom.addClass(li, "has-slider");
       controller.domElement.insertBefore(
         box.domElement,
-        controller.domElement.firstElementChild,
+        controller.domElement.firstElementChild
       );
     } else if (controller instanceof NumberControllerBox) {
       var r = function r(returned) {
@@ -2662,7 +2662,7 @@
                 controller.__max,
                 controller.__step,
               ],
-            },
+            }
           );
           newController.name(oldName);
           if (wasListening) newController.listen();
@@ -2742,7 +2742,7 @@
   function _add(gui, object, property, params) {
     if (object[property] === undefined) {
       throw new Error(
-        'Object "' + object + '" has no property "' + property + '"',
+        'Object "' + object + '" has no property "' + property + '"'
       );
     }
     var controller = void 0;
@@ -2858,7 +2858,7 @@
       newConstructorTextArea.innerHTML = JSON.stringify(
         gui.getSaveObject(),
         undefined,
-        2,
+        2
       );
       SAVE_DIALOGUE.show();
       newConstructorTextArea.focus();
@@ -2915,7 +2915,7 @@
     dom.bind(gui.__closeButton, "mousedown", dragStart);
     gui.domElement.insertBefore(
       gui.__resize_handle,
-      gui.domElement.firstElementChild,
+      gui.domElement.firstElementChild
     );
   }
 

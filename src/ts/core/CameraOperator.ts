@@ -37,7 +37,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
     world: World,
     camera: THREE.Camera,
     sensitivityX: number = 1,
-    sensitivityY: number = sensitivityX * 0.8,
+    sensitivityY: number = sensitivityX * 0.8
   ) {
     this.world = world;
     this.camera = camera;
@@ -68,7 +68,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
 
   public setSensitivity(
     sensitivityX: number,
-    sensitivityY: number = sensitivityX,
+    sensitivityY: number = sensitivityX
   ): void {
     this.sensitivity = new THREE.Vector2(sensitivityX, sensitivityY);
   }
@@ -92,7 +92,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
       this.camera.position.y = THREE.MathUtils.clamp(
         this.camera.position.y,
         this.target.y,
-        Number.POSITIVE_INFINITY,
+        Number.POSITIVE_INFINITY
       );
       this.camera.lookAt(this.target);
       let newPos = this.target
@@ -101,7 +101,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
           new THREE.Vector3()
             .subVectors(this.camera.position, this.target)
             .normalize()
-            .multiplyScalar(this.targetRadius),
+            .multiplyScalar(this.targetRadius)
         );
       this.camera.position.x = newPos.x;
       this.camera.position.y = newPos.y;
@@ -129,7 +129,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
   public handleKeyboardEvent(
     event: KeyboardEvent,
     code: string,
-    pressed: boolean,
+    pressed: boolean
   ): void {
     // Free camera
     if (code === "KeyC" && pressed === true && event.shiftKey === true) {
@@ -157,7 +157,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
   public handleMouseButton(
     event: MouseEvent,
     code: string,
-    pressed: boolean,
+    pressed: boolean
   ): void {
     for (const action in this.actions) {
       if (this.actions.hasOwnProperty(action)) {
@@ -173,7 +173,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
   public handleMouseMove(
     event: MouseEvent,
     deltaX: number,
-    deltaY: number,
+    deltaY: number
   ): void {
     this.move(deltaX, deltaY);
   }
@@ -216,17 +216,17 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
     this.upVelocity = THREE.MathUtils.lerp(
       this.upVelocity,
       +this.actions.up.isPressed - +this.actions.down.isPressed,
-      0.3,
+      0.3
     );
     this.forwardVelocity = THREE.MathUtils.lerp(
       this.forwardVelocity,
       +this.actions.forward.isPressed - +this.actions.back.isPressed,
-      0.3,
+      0.3
     );
     this.rightVelocity = THREE.MathUtils.lerp(
       this.rightVelocity,
       +this.actions.right.isPressed - +this.actions.left.isPressed,
-      0.3,
+      0.3
     );
 
     this.target.add(up.multiplyScalar(speed * this.upVelocity));

@@ -30,7 +30,7 @@ export declare class CameraOperator implements IInputReceiver, IUpdatable {
     world: World,
     camera: THREE.Camera,
     sensitivityX?: number,
-    sensitivityY?: number,
+    sensitivityY?: number
   );
   setSensitivity(sensitivityX: number, sensitivityY?: number): void;
   setRadius(value: number, instantly?: boolean): void;
@@ -39,7 +39,7 @@ export declare class CameraOperator implements IInputReceiver, IUpdatable {
   handleKeyboardEvent(
     event: KeyboardEvent,
     code: string,
-    pressed: boolean,
+    pressed: boolean
   ): void;
   handleMouseWheel(event: WheelEvent, value: number): void;
   handleMouseButton(event: MouseEvent, code: string, pressed: boolean): void;

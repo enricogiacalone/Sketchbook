@@ -37,7 +37,7 @@ export class Sitting extends CharacterStateBase {
       this.noDirection()
     ) {
       this.character.setState(
-        new CloseVehicleDoorInside(this.character, this.seat),
+        new CloseVehicleDoorInside(this.character, this.seat)
       );
     } else if (this.character.vehicleEntryInstance !== null) {
       if (this.character.vehicleEntryInstance.wantsToDrive) {
@@ -46,7 +46,7 @@ export class Sitting extends CharacterStateBase {
             if (this.seat.door?.rotation > 0)
               this.seat.door.physicsEnabled = true;
             this.character.setState(
-              new SwitchingSeats(this.character, this.seat, possibleDriverSeat),
+              new SwitchingSeats(this.character, this.seat, possibleDriverSeat)
             );
             break;
           }
@@ -66,8 +66,8 @@ export class Sitting extends CharacterStateBase {
         new SwitchingSeats(
           this.character,
           this.seat,
-          this.seat.connectedSeats[0],
-        ),
+          this.seat.connectedSeats[0]
+        )
       );
     }
 

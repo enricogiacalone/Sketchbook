@@ -33,7 +33,7 @@ export class VehicleSeat {
       if (object.userData.hasOwnProperty("door_object")) {
         this.door = new VehicleDoor(
           this,
-          gltf.scene.getObjectByName(object.userData.door_object),
+          gltf.scene.getObjectByName(object.userData.door_object)
         );
       }
 
@@ -46,7 +46,7 @@ export class VehicleSeat {
         }
       } else {
         console.error(
-          "Seat object " + object + " has no entry point reference property.",
+          "Seat object " + object + " has no entry point reference property."
         );
       }
 

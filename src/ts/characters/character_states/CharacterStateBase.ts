@@ -108,7 +108,7 @@ export abstract class CharacterStateBase implements ICharacterState {
       if (this.animationLength === undefined) {
         console.error(
           this.constructor.name +
-            "Error: Set this.animationLength in state constructor!",
+            "Error: Set this.animationLength in state constructor!"
         );
         return false;
       } else {
@@ -141,7 +141,7 @@ export abstract class CharacterStateBase implements ICharacterState {
     let range = Math.PI;
     let angle = Utils.getSignedAngleBetweenVectors(
       this.character.orientation,
-      this.character.getCameraRelativeMovementVector(),
+      this.character.getCameraRelativeMovementVector()
     );
 
     if (angle > range * 0.8) {

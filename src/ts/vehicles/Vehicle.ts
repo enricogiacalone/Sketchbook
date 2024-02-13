@@ -71,7 +71,7 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
       handlingSetup.chassisConnectionPointLocal.set(
         wheel.position.x,
         wheel.position.y + 0.2,
-        wheel.position.z,
+        wheel.position.z
       );
       const index = this.rayCastVehicle.addWheel(handlingSetup);
       wheel.rayCastWheelInfoIndex = index;
@@ -88,14 +88,14 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
     this.position.set(
       this.collision.interpolatedPosition.x,
       this.collision.interpolatedPosition.y,
-      this.collision.interpolatedPosition.z,
+      this.collision.interpolatedPosition.z
     );
 
     this.quaternion.set(
       this.collision.interpolatedQuaternion.x,
       this.collision.interpolatedQuaternion.y,
       this.collision.interpolatedQuaternion.z,
-      this.collision.interpolatedQuaternion.w,
+      this.collision.interpolatedQuaternion.w
     );
 
     this.seats.forEach((seat: VehicleSeat) => {
@@ -118,11 +118,11 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
       upAxisWorld.set(
         this.rayCastVehicle.indexUpAxis === 0 ? 1 : 0,
         this.rayCastVehicle.indexUpAxis === 1 ? 1 : 0,
-        this.rayCastVehicle.indexUpAxis === 2 ? 1 : 0,
+        this.rayCastVehicle.indexUpAxis === 2 ? 1 : 0
       );
       this.rayCastVehicle.chassisBody.vectorToWorldFrame(
         upAxisWorld,
-        upAxisWorld,
+        upAxisWorld
       );
     }
 
@@ -144,8 +144,8 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
         new SwitchingSeats(
           this.controllingCharacter,
           this.controllingCharacter.occupyingSeat,
-          this.controllingCharacter.occupyingSeat.connectedSeats[0],
-        ),
+          this.controllingCharacter.occupyingSeat.connectedSeats[0]
+        )
       );
       this.controllingCharacter.stopControllingVehicle();
     }
@@ -170,7 +170,7 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
   public handleKeyboardEvent(
     event: KeyboardEvent,
     code: string,
-    pressed: boolean,
+    pressed: boolean
   ): void {
     // Free camera
     if (code === "KeyC" && pressed === true && event.shiftKey === true) {
@@ -235,7 +235,7 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
   public handleMouseButton(
     event: MouseEvent,
     code: string,
-    pressed: boolean,
+    pressed: boolean
   ): void {
     return;
   }
@@ -243,7 +243,7 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
   public handleMouseMove(
     event: MouseEvent,
     deltaX: number,
-    deltaY: number,
+    deltaY: number
   ): void {
     this.world.cameraOperator.move(deltaX, deltaY);
   }
@@ -273,7 +273,7 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
       this.world.cameraOperator.target.set(
         this.position.x,
         this.position.y + 0.5,
-        this.position.z,
+        this.position.z
       );
     }
   }
@@ -296,7 +296,7 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
       if (this.drive === wheel.drive || this.drive === "awd") {
         this.rayCastVehicle.applyEngineForce(
           force,
-          wheel.rayCastWheelInfoIndex,
+          wheel.rayCastWheelInfoIndex
         );
       }
     });
@@ -335,7 +335,7 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
   public removeFromWorld(world: World): void {
     if (!_.includes(world.vehicles, this)) {
       console.warn(
-        "Removing character from a world in which it isn't present.",
+        "Removing character from a world in which it isn't present."
       );
     } else {
       this.world = undefined;
@@ -376,7 +376,7 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
               child.visible = false;
 
               let phys = new CANNON.Box(
-                new CANNON.Vec3(child.scale.x, child.scale.y, child.scale.z),
+                new CANNON.Vec3(child.scale.x, child.scale.y, child.scale.z)
               );
               phys.collisionFilterMask = ~CollisionGroups.TrimeshColliders;
               this.collision.addShape(
@@ -384,8 +384,8 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
                 new CANNON.Vec3(
                   child.position.x,
                   child.position.y,
-                  child.position.z,
-                ),
+                  child.position.z
+                )
               );
             } else if (child.userData.shape === "sphere") {
               child.visible = false;
@@ -397,8 +397,8 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
                 new CANNON.Vec3(
                   child.position.x,
                   child.position.y,
-                  child.position.z,
-                ),
+                  child.position.z
+                )
               );
             }
           }

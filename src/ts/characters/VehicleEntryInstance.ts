@@ -17,7 +17,7 @@ export class VehicleEntryInstance {
     this.entryPoint.getWorldPosition(entryPointWorldPos);
     let viewVector = new THREE.Vector3().subVectors(
       entryPointWorldPos,
-      this.character.position,
+      this.character.position
     );
     this.character.setOrientation(viewVector);
 

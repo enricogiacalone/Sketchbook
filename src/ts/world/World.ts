@@ -95,11 +95,11 @@ export class World {
       scope.renderer.setSize(window.innerWidth, window.innerHeight);
       fxaaPass.uniforms["resolution"].value.set(
         1 / (window.innerWidth * pixelRatio),
-        1 / (window.innerHeight * pixelRatio),
+        1 / (window.innerHeight * pixelRatio)
       );
       scope.composer.setSize(
         window.innerWidth * pixelRatio,
-        window.innerHeight * pixelRatio,
+        window.innerHeight * pixelRatio
       );
     }
     window.addEventListener("resize", onWindowResize, false);
@@ -110,7 +110,7 @@ export class World {
       80,
       window.innerWidth / window.innerHeight,
       0.1,
-      1010,
+      1010
     );
 
     // Passes
@@ -173,7 +173,7 @@ export class World {
     this.cameraOperator = new CameraOperator(
       this,
       this.camera,
-      this.params.Mouse_Sensitivity,
+      this.params.Mouse_Sensitivity
     );
     this.sky = new Sky(this);
 
@@ -227,7 +227,7 @@ export class World {
     this.params.Time_Scale = THREE.MathUtils.lerp(
       this.params.Time_Scale,
       this.timeScaleTarget,
-      0.2,
+      0.2
     );
 
     // Physics debug
@@ -251,7 +251,7 @@ export class World {
         worldPos.y += 1;
         this.outOfBoundsRespawn(
           vehicle.rayCastVehicle.chassisBody,
-          Utils.cannonVector(worldPos),
+          Utils.cannonVector(worldPos)
         );
       }
     });
@@ -369,7 +369,7 @@ export class World {
                   size: new THREE.Vector3(
                     child.scale.x,
                     child.scale.y,
-                    child.scale.z,
+                    child.scale.z
                   ),
                 });
                 phys.body.position.copy(Utils.cannonVector(child.position));
@@ -417,7 +417,7 @@ export class World {
 
   public launchScenario(
     scenarioID: string,
-    loadingManager?: LoadingManager,
+    loadingManager?: LoadingManager
   ): void {
     this.lastScenarioID = scenarioID;
 
@@ -490,13 +490,13 @@ export class World {
   private generateHTML(): void {
     // Fonts
     $("head").append(
-      '<link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap" rel="stylesheet">',
+      '<link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap" rel="stylesheet">'
     );
     $("head").append(
-      '<link href="https://fonts.googleapis.com/css2?family=Solway:wght@400;500;700&display=swap" rel="stylesheet">',
+      '<link href="https://fonts.googleapis.com/css2?family=Solway:wght@400;500;700&display=swap" rel="stylesheet">'
     );
     $("head").append(
-      '<link href="https://fonts.googleapis.com/css2?family=Cutive+Mono&display=swap" rel="stylesheet">',
+      '<link href="https://fonts.googleapis.com/css2?family=Cutive+Mono&display=swap" rel="stylesheet">'
     );
 
     // Loader

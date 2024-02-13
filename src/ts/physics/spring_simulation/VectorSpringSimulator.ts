@@ -25,7 +25,7 @@ export class VectorSpringSimulator extends SimulatorBase {
     this.cache = [];
     for (let i = 0; i < 2; i++) {
       this.cache.push(
-        new SimulationFrameVector(new THREE.Vector3(), new THREE.Vector3()),
+        new SimulationFrameVector(new THREE.Vector3(), new THREE.Vector3())
       );
     }
   }
@@ -42,12 +42,12 @@ export class VectorSpringSimulator extends SimulatorBase {
     this.position.lerpVectors(
       this.cache[0].position,
       this.cache[1].position,
-      this.offset / this.frameTime,
+      this.offset / this.frameTime
     );
     this.velocity.lerpVectors(
       this.cache[0].velocity,
       this.cache[1].velocity,
-      this.offset / this.frameTime,
+      this.offset / this.frameTime
     );
   }
 
@@ -58,7 +58,7 @@ export class VectorSpringSimulator extends SimulatorBase {
     // Deep clone data from previous frame
     let newSpring = new SimulationFrameVector(
       this.lastFrame().position.clone(),
-      this.lastFrame().velocity.clone(),
+      this.lastFrame().velocity.clone()
     );
 
     // Calculate new Spring
@@ -67,7 +67,7 @@ export class VectorSpringSimulator extends SimulatorBase {
       this.target,
       newSpring.velocity,
       this.mass,
-      this.damping,
+      this.damping
     );
 
     // Return new Spring
