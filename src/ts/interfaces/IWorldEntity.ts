@@ -1,11 +1,10 @@
-import { World } from '../world/World';
-import { EntityType } from '../enums/EntityType';
-import { IUpdatable } from './IUpdatable';
+import { World } from "../world/World";
+import { EntityType } from "../enums/EntityType";
+import { IUpdatable } from "./IUpdatable";
 
-export interface IWorldEntity extends IUpdatable
-{
-	entityType: EntityType;
+export interface IWorldEntity extends IUpdatable {
+  entityType: EntityType;
 
-	addToWorld(world: World): void;
-	removeFromWorld(world: World): void;
+  addToWorld(world: World): void;
+  removeFromWorld(world: World): void;
 }

@@ -1,3 +1,3 @@
 export interface ICollider {
-    body: CANNON.Body;
+  body: CANNON.Body;
 }

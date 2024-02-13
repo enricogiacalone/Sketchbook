@@ -25,21 +25,21 @@ Mostly a playground for exploring how conventional third person gameplay mechani
 
 ## Features
 
-* World
-	* Three.js scene
-	* Cannon.js physics
-	* Variable timescale
-	* Frame skipping
-	* FXAA anti-aliasing
-* Characters
-	* Third-person camera
-	* Raycast character controller with capsule collisions
-	* General state system
-	* Character AI
-* Vehicles
-	* Cars
-	* Airplanes
-	* Helicopters
+- World
+  - Three.js scene
+  - Cannon.js physics
+  - Variable timescale
+  - Frame skipping
+  - FXAA anti-aliasing
+- Characters
+  - Third-person camera
+  - Raycast character controller with capsule collisions
+  - General state system
+  - Character AI
+- Vehicles
+  - Cars
+  - Airplanes
+  - Helicopters
 
 All planned features can be found in the [GitHub Projects](https://github.com/swift502/Sketchbook/projects).
 
@@ -58,7 +58,7 @@ You can define your own scenes in Blender, and then read them with Sketchbook. S
 2. Load a glb scene defined in Blender:
 
 ```javascript
-const world = new Sketchbook.World('scene.glb');
+const world = new Sketchbook.World("scene.glb");
 ```
 
 <!--
