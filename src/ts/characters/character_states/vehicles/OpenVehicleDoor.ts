@@ -67,7 +67,7 @@ export class OpenVehicleDoor extends CharacterStateBase {
     if (this.animationEnded(timeStep)) {
       if (this.anyDirection()) {
         this.character.vehicleEntryInstance = null;
-        this.character.world.graphicsWorld.attach(this.character);
+        this.character.world.sceneManager.graphicsWorld.attach(this.character);
         this.character.setPhysicsEnabled(true);
         this.character.setState(new Idle(this.character));
       } else {

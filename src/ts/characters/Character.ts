@@ -26,6 +26,8 @@ import { EnteringVehicle } from "./character_states/vehicles/EnteringVehicle";
 import { ExitingAirplane } from "./character_states/vehicles/ExitingAirplane";
 import { ExitingVehicle } from "./character_states/vehicles/ExitingVehicle";
 import { OpenVehicleDoor } from "./character_states/vehicles/OpenVehicleDoor";
+import { SceneManager } from "../core/SceneManager";
+import { PhysicsManager } from "../core/PhysicsManager";
 
 export class Character extends THREE.Object3D implements IWorldEntity {
   public updateOrder: number = 1;
@@ -252,9 +254,9 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.physicsEnabled = value;
 
     if (value === true) {
-      this.world.physicsWorld.addBody(this.characterCapsule.body);
+      this.world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
     } else {
-      this.world.physicsWorld.removeBody(this.characterCapsule.body);
+      this.world.physicsManager.physicsWorld.removeBody(this.characterCapsule.body);
     }
   }
 
@@ -467,7 +469,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       // Look in camera's direction
       this.viewVector = new THREE.Vector3().subVectors(
         this.position,
-        this.world.camera.position
+        this.world.sceneManager.camera.position
       );
       this.getWorldPosition(this.world.cameraOperator.target);
     }
@@ -784,7 +786,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       skipBackfaces: true /* ignore back faces */,
     };
     // Cast the ray
-    this.rayHasHit = this.world?.physicsWorld.raycastClosest(
+    this.rayHasHit = this.world?.physicsManager.physicsWorld.raycastClosest(
       start,
       end,
       rayCastOptions,
@@ -895,7 +897,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       newVelocity.applyMatrix4(m);
 
       // Compensate for gravity
-      // newVelocity.y -= body.world.physicsWorld.gravity.y / body.character.world.physicsFrameRate;
+      // newVelocity.y -= body.world.physicsManager.physicsWorld.gravity.y / body.character.world.physicsFrameRate;
 
       // Apply velocity
       body.velocity.x = newVelocity.x;
@@ -961,11 +963,11 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       world.characters.push(this);
 
       // Register physics
-      world.physicsWorld.addBody(this.characterCapsule.body);
+      world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
 
       // Add to graphicsWorld
-      world.graphicsWorld.add(this);
-      world.graphicsWorld.add(this.raycastBox);
+      world.sceneManager.graphicsWorld.add(this);
+      world.sceneManager.graphicsWorld.add(this.raycastBox);
 
       // Shadow cascades
       this.materials.forEach((mat) => {
@@ -990,11 +992,11 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       _.pull(world.characters, this);
 
       // Remove physics
-      world.physicsWorld.removeBody(this.characterCapsule.body);
+      world.physicsManager.physicsWorld.removeBody(this.characterCapsule.body);
 
       // Remove visuals
-      world.graphicsWorld.remove(this);
-      world.graphicsWorld.remove(this.raycastBox);
+      world.sceneManager.graphicsWorld.remove(this);
+      world.sceneManager.graphicsWorld.remove(this.raycastBox);
     }
   }
 }

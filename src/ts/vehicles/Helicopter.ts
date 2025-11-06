@@ -97,7 +97,7 @@ export class Helicopter extends Vehicle implements IControllable, IWorldEntity {
     }
 
     // Vertical stabilization
-    let gravity = this.world.physicsWorld.gravity;
+    let gravity = this.world.physicsManager.physicsWorld.gravity;
     let gravityCompensation = new CANNON.Vec3(
       -gravity.x,
       -gravity.y,

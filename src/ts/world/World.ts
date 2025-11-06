@@ -3,10 +3,6 @@ import * as $ from "jquery";
 import * as _ from "lodash";
 import Swal from "sweetalert2";
 import * as THREE from "three";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass";
-import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass";
-import { FXAAShader } from "three/examples/jsm/shaders/FXAAShader";
 import { Detector } from "../../lib/utils/Detector";
 import { Stats } from "../../lib/utils/Stats";
 import * as GUI from "../../lib/utils/dat.gui";
@@ -27,15 +23,13 @@ import { Ocean } from "./Ocean";
 import { Path } from "./Path";
 import { Scenario } from "./Scenario";
 import { Sky } from "./Sky";
+import { SceneManager } from "../core/SceneManager";
+import { PhysicsManager } from "../core/PhysicsManager";
+import { GameManager } from "../core/GameManager";
 
 export class World {
-  public renderer: THREE.WebGLRenderer;
-  public camera: THREE.PerspectiveCamera;
-  public composer: any;
   public stats: Stats;
-  public graphicsWorld: THREE.Scene;
   public sky: Sky;
-  public physicsWorld: CANNON.World;
   public parallelPairs: any[];
   public physicsFrameRate: number;
   public physicsFrameTime: number;
@@ -58,6 +52,9 @@ export class World {
   public paths: Path[] = [];
   public scenarioGUIFolder: any;
   public updatables: IUpdatable[] = [];
+  public sceneManager: SceneManager;
+  public physicsManager: PhysicsManager;
+  public gameManager: GameManager;
 
   private lastScenarioID: string;
 
@@ -77,79 +74,10 @@ export class World {
       });
     }
 
-    // Renderer
-    this.renderer = new THREE.WebGLRenderer();
-    this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
+    this.sceneManager = new SceneManager(this);
+    this.physicsManager = new PhysicsManager(this);
+    this.gameManager = new GameManager(this);
     this.generateHTML();
-
-    // Auto window resize
-    function onWindowResize(): void {
-      scope.camera.aspect = window.innerWidth / window.innerHeight;
-      scope.camera.updateProjectionMatrix();
-      scope.renderer.setSize(window.innerWidth, window.innerHeight);
-      fxaaPass.uniforms["resolution"].value.set(
-        1 / (window.innerWidth * pixelRatio),
-        1 / (window.innerHeight * pixelRatio)
-      );
-      scope.composer.setSize(
-        window.innerWidth * pixelRatio,
-        window.innerHeight * pixelRatio
-      );
-    }
-    window.addEventListener("resize", onWindowResize, false);
-
-    // Three.js scene
-    this.graphicsWorld = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(
-      80,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      1010
-    );
-
-    // Passes
-    let renderPass = new RenderPass(this.graphicsWorld, this.camera);
-    let fxaaPass = new ShaderPass(FXAAShader);
-
-    // FXAA
-    let pixelRatio = this.renderer.getPixelRatio();
-    fxaaPass.material["uniforms"].resolution.value.x =
-      1 / (window.innerWidth * pixelRatio);
-    fxaaPass.material["uniforms"].resolution.value.y =
-      1 / (window.innerHeight * pixelRatio);
-
-    // Composer
-    this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(renderPass);
-    this.composer.addPass(fxaaPass);
-
-    // Physics
-    this.physicsWorld = new CANNON.World();
-    this.physicsWorld.gravity.set(0, -9.81, 0);
-    this.physicsWorld.broadphase = new CANNON.SAPBroadphase(this.physicsWorld);
-    // this.physicsWorld.solver = 10;
-    this.physicsWorld.allowSleep = true;
-
-    this.physicsWorld.addEventListener("preStep", () => {
-      this.characters.forEach((character) => {
-        character.physicsPreStep(character.characterCapsule.body, character);
-      });
-      this.vehicles.forEach((vehicle) => {
-        vehicle.physicsPreStep(vehicle.collision);
-      });
-    });
-
-    this.physicsWorld.addEventListener("postStep", () => {
-      this.characters.forEach((character) => {
-        character.physicsPostStep(character.characterCapsule.body, character);
-      });
-    });
 
     this.parallelPairs = [];
     this.physicsFrameRate = 60;
@@ -169,10 +97,10 @@ export class World {
     this.createParamsGUI(scope);
 
     // Initialization
-    this.inputManager = new InputManager(this, this.renderer.domElement);
+    this.inputManager = new InputManager(this, this.sceneManager.renderer.domElement);
     this.cameraOperator = new CameraOperator(
       this,
-      this.camera,
+      this.sceneManager.camera,
       this.params.Mouse_Sensitivity
     );
     this.sky = new Sky(this);
@@ -216,45 +144,11 @@ export class World {
   // Update
   // Handles all logic updates.
   public update(timeStep: number, unscaledTimeStep: number): void {
-    this.updatePhysics(timeStep);
-
-    // Update registred objects
-    this.updatables.forEach((entity) => {
-      entity.update(timeStep, unscaledTimeStep);
-    });
-
-    // Lerp time scale
-    this.params.Time_Scale = THREE.MathUtils.lerp(
-      this.params.Time_Scale,
-      this.timeScaleTarget,
-      0.2
-    );
+    this.physicsManager.update(timeStep);
+    this.gameManager.update(timeStep, unscaledTimeStep);
 
     // Physics debug
     // if (this.params.Debug_Physics) this.cannonDebugRenderer.update();
-  }
-
-  public updatePhysics(timeStep: number): void {
-    // Step the physics world
-    this.physicsWorld.step(this.physicsFrameTime, timeStep);
-
-    this.characters.forEach((char) => {
-      if (this.isOutOfBounds(char.characterCapsule.body.position)) {
-        this.outOfBoundsRespawn(char.characterCapsule.body);
-      }
-    });
-
-    this.vehicles.forEach((vehicle) => {
-      if (this.isOutOfBounds(vehicle.rayCastVehicle.chassisBody.position)) {
-        let worldPos = new THREE.Vector3();
-        vehicle.spawnPoint.getWorldPosition(worldPos);
-        worldPos.y += 1;
-        this.outOfBoundsRespawn(
-          vehicle.rayCastVehicle.chassisBody,
-          Utils.cannonVector(worldPos)
-        );
-      }
-    });
   }
 
   public isOutOfBounds(position: CANNON.Vec3): boolean {
@@ -317,8 +211,7 @@ export class World {
     this.stats.begin();
 
     // Actual rendering with a FXAA ON/OFF switch
-    if (this.params.FXAA) this.composer.render();
-    else this.renderer.render(this.graphicsWorld, this.camera);
+    this.sceneManager.render();
 
     // Measuring render time
     this.renderDelta = this.clock.getDelta();
@@ -380,10 +273,10 @@ export class World {
                   shape.collisionFilterMask = ~CollisionGroups.TrimeshColliders;
                 });
 
-                this.physicsWorld.addBody(phys.body);
+                this.physicsManager.physicsWorld.addBody(phys.body);
               } else if (child.userData.type === "trimesh") {
                 let phys = new TrimeshCollider(child, {});
-                this.physicsWorld.addBody(phys.body);
+                this.physicsManager.physicsWorld.addBody(phys.body);
               }
 
               child.visible = false;
@@ -401,7 +294,7 @@ export class World {
       }
     });
 
-    this.graphicsWorld.add(gltf.scene);
+    this.sceneManager.graphicsWorld.add(gltf.scene);
 
     // Launch default scenario
     let defaultScenarioID: string;
@@ -531,10 +424,6 @@ export class World {
 				</div>
 			</div>
 		`).appendTo("body");
-
-    // Canvas
-    document.body.appendChild(this.renderer.domElement);
-    this.renderer.domElement.id = "canvas";
   }
 
   private createParamsGUI(scope: World): void {

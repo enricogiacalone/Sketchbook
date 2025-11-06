@@ -35,7 +35,7 @@ export abstract class ExitingStateBase extends CharacterStateBase {
   public detachCharacterFromVehicle(): void {
     this.character.controlledObject = undefined;
     this.character.resetOrientation();
-    this.character.world.graphicsWorld.attach(this.character);
+    this.character.world.sceneManager.graphicsWorld.attach(this.character);
     this.character.resetVelocity();
     this.character.setPhysicsEnabled(true);
     this.character.setPosition(
@@ -55,7 +55,7 @@ export abstract class ExitingStateBase extends CharacterStateBase {
     forward.y = 0;
     forward.normalize();
 
-    this.character.world.graphicsWorld.attach(this.dummyObj);
+    this.character.world.sceneManager.graphicsWorld.attach(this.dummyObj);
     this.exitPoint.getWorldPosition(this.dummyObj.position);
     let target = this.dummyObj.position.clone().add(forward);
     this.dummyObj.lookAt(target);

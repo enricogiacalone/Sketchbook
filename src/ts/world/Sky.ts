@@ -59,7 +59,7 @@ export class Sky extends THREE.Object3D implements IUpdatable {
     this.hemiLight.color.setHSL(0.59, 0.4, 0.6);
     this.hemiLight.groundColor.setHSL(0.095, 0.2, 0.75);
     this.hemiLight.position.set(0, 50, 0);
-    this.world.graphicsWorld.add(this.hemiLight);
+    this.world.sceneManager.graphicsWorld.add(this.hemiLight);
 
     // CSM
     this.csm = new CSM({
@@ -68,19 +68,20 @@ export class Sky extends THREE.Object3D implements IUpdatable {
       lightIntensity: 2.5,
       cascades: 3,
       shadowMapSize: 2048,
-      camera: world.camera,
-      parent: world.graphicsWorld,
+      camera: world.sceneManager.camera,
+      parent: world.sceneManager.graphicsWorld,
     });
     this.csm.fade = true;
+    this.csm.updateFrustums();
 
     this.refreshSunPosition();
 
-    world.graphicsWorld.add(this);
+    world.sceneManager.graphicsWorld.add(this);
     world.registerUpdatable(this);
   }
 
   public update(timeScale: number): void {
-    this.position.copy(this.world.camera.position);
+    this.position.copy(this.world.sceneManager.camera.position);
     this.refreshSunPosition();
 
     this.csm.update();
@@ -105,7 +106,7 @@ export class Sky extends THREE.Object3D implements IUpdatable {
       Math.cos((this._phi * Math.PI) / 180);
 
     this.skyMaterial.uniforms.sunPosition.value.copy(this.sunPosition);
-    this.skyMaterial.uniforms.cameraPos.value.copy(this.world.camera.position);
+    this.skyMaterial.uniforms.cameraPos.value.copy(this.world.sceneManager.camera.position);
   }
 
   public refreshHemiIntensity(): void {

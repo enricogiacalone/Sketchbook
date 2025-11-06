@@ -12,14 +12,12 @@ import { Vehicle } from "../vehicles/Vehicle";
 import { Path } from "./Path";
 import { Scenario } from "./Scenario";
 import { Sky } from "./Sky";
+import { SceneManager } from "../core/SceneManager";
+import { PhysicsManager } from "../core/PhysicsManager";
+import { GameManager } from "../core/GameManager";
 export declare class World {
-    renderer: THREE.WebGLRenderer;
-    camera: THREE.PerspectiveCamera;
-    composer: any;
     stats: Stats;
-    graphicsWorld: THREE.Scene;
     sky: Sky;
-    physicsWorld: CANNON.World;
     parallelPairs: any[];
     physicsFrameRate: number;
     physicsFrameTime: number;
@@ -41,10 +39,12 @@ export declare class World {
     paths: Path[];
     scenarioGUIFolder: any;
     updatables: IUpdatable[];
+    sceneManager: SceneManager;
+    physicsManager: PhysicsManager;
+    gameManager: GameManager;
     private lastScenarioID;
     constructor(worldScenePath?: any);
     update(timeStep: number, unscaledTimeStep: number): void;
-    updatePhysics(timeStep: number): void;
     isOutOfBounds(position: CANNON.Vec3): boolean;
     outOfBoundsRespawn(body: CANNON.Body, position?: CANNON.Vec3): void;
     /**
