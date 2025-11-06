@@ -6,6 +6,10 @@
     "moduleResolution": "node",
     "declaration": true,
     "declarationDir": "build/types",
-    "baseUrl": "."
+    "baseUrl": ".",
+    "types": ["three"],
+    "paths": {
+      "three/addons/*": ["./node_modules/three/examples/jsm/*"]
+    }
   }
 }

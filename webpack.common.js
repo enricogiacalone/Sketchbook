@@ -12,6 +12,9 @@ module.exports = {
   },
   resolve: {
     extensions: [".tsx", ".ts", ".js"],
+    alias: {
+      'three/addons': path.resolve(__dirname, 'node_modules/three/examples/jsm')
+    }
   },
   module: {
     rules: [

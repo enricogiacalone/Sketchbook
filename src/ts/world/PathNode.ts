@@ -1,5 +1,6 @@
 import { Path } from "./Path";
 import { Object3D } from "three";
+import * as THREE from "three";
 
 export class PathNode {
   public object: Object3D;

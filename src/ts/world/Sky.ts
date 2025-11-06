@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { default as CSM } from "three-csm";
+import { CSM } from "three/addons/csm/CSM.js";
 import { SkyShader } from "../../lib/shaders/SkyShader";
 import { IUpdatable } from "../interfaces/IUpdatable";
 import { World } from "./World";
@@ -62,26 +62,6 @@ export class Sky extends THREE.Object3D implements IUpdatable {
     this.world.graphicsWorld.add(this.hemiLight);
 
     // CSM
-    // New version
-    // let splitsCallback = (amount, near, far, target) =>
-    // {
-    // 	for (let i = amount - 1; i >= 0; i--)
-    // 	{
-    // 		target.push(Math.pow(1 / 3, i));
-    // 	}
-    // };
-
-    // Legacy
-    let splitsCallback = (amount, near, far) => {
-      let arr = [];
-
-      for (let i = amount - 1; i >= 0; i--) {
-        arr.push(Math.pow(1 / 4, i));
-      }
-
-      return arr;
-    };
-
     this.csm = new CSM({
       // fov: 80,
       // far: 250, // maxFar
@@ -90,8 +70,6 @@ export class Sky extends THREE.Object3D implements IUpdatable {
       shadowMapSize: 2048,
       camera: world.camera,
       parent: world.graphicsWorld,
-      mode: "custom",
-      customSplitsCallback: splitsCallback,
     });
     this.csm.fade = true;
 
