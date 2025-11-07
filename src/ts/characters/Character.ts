@@ -142,7 +142,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     // capsulePhysics.physical.collisionFilterMask = ~CollisionGroups.Trimesh;
     this.characterCapsule.body.shapes.forEach((shape) => {
       // tslint:disable-next-line: no-bitwise
-      shape.collisionFilterMask = ~CollisionGroups.TrimeshColliders;
+      shape.collisionFilterMask = CollisionGroups.Default | CollisionGroups.TrimeshColliders;
     });
     this.characterCapsule.body.allowSleep = false;
 

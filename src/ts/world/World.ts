@@ -26,6 +26,7 @@ import { Sky } from "./Sky";
 import { SceneManager } from "../core/SceneManager";
 import { PhysicsManager } from "../core/PhysicsManager";
 import { GameManager } from "../core/GameManager";
+import CannonDebugger from "cannon-es-debugger";
 
 export class World {
   public stats: Stats;
@@ -45,7 +46,7 @@ export class World {
   public cameraOperator: CameraOperator;
   public timeScaleTarget: number = 1;
   public console: InfoStack;
-  // public cannonDebugRenderer: CannonDebugRenderer;
+  public cannonDebugRenderer: any;
   public scenarios: Scenario[] = [];
   public characters: Character[] = [];
   public vehicles: Vehicle[] = [];
@@ -97,7 +98,10 @@ export class World {
     this.createParamsGUI(scope);
 
     // Initialization
-    this.inputManager = new InputManager(this, this.sceneManager.renderer.domElement);
+    this.inputManager = new InputManager(
+      this,
+      this.sceneManager.renderer.domElement
+    );
     this.cameraOperator = new CameraOperator(
       this,
       this.sceneManager.camera,
@@ -147,8 +151,10 @@ export class World {
     this.physicsManager.update(timeStep);
     this.gameManager.update(timeStep, unscaledTimeStep);
 
-    // Physics debug
-    // if (this.params.Debug_Physics) this.cannonDebugRenderer.update();
+    if (this.params.Debug_Physics) {
+      console.log("Cannon Debugger: Updating");
+      this.cannonDebugRenderer.update();
+    }
   }
 
   public isOutOfBounds(position: CANNON.Vec3): boolean {
@@ -489,15 +495,17 @@ export class World {
         scope.cameraOperator.setSensitivity(value, value * 0.8);
       });
     settingsFolder.add(this.params, "Debug_Physics").onChange((enabled) => {
-      // if (enabled)
-      // {
-      // 	this.cannonDebugRenderer = new CannonDebugRenderer( this.graphicsWorld, this.physicsWorld );
-      // }
-      // else
-      // {
-      // 	this.cannonDebugRenderer.clearMeshes();
-      // 	this.cannonDebugRenderer = undefined;
-      // }
+      if (enabled) {
+        console.log("Cannon Debugger: Enabling");
+        this.cannonDebugRenderer = CannonDebugger(
+          this.sceneManager.graphicsWorld,
+          this.physicsManager.physicsWorld
+        );
+      } else {
+        console.log("Cannon Debugger: Disabling");
+        this.cannonDebugRenderer.destroy();
+        this.cannonDebugRenderer = undefined;
+      }
 
       scope.characters.forEach((char) => {
         char.raycastBox.visible = enabled;

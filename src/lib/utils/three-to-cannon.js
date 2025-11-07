@@ -135,42 +135,8 @@ function createBoundingBoxShape(object) {
  * @return {CANNON.Shape}
  */
 function createConvexPolyhedron(object) {
-  var i,
-    vertices,
-    faces,
-    hull,
-    eps = 1e-4,
-    geometry = getGeometry(object);
-
-  if (!geometry || !geometry.vertices.length) return null;
-
-  // Perturb.
-  for (i = 0; i < geometry.vertices.length; i++) {
-    geometry.vertices[i].x += (Math.random() - 0.5) * eps;
-    geometry.vertices[i].y += (Math.random() - 0.5) * eps;
-    geometry.vertices[i].z += (Math.random() - 0.5) * eps;
-  }
-
-  // Compute the 3D convex hull.
-  hull = quickhull(geometry);
-
-  // Convert from THREE.Vector3 to CANNON.Vec3.
-  vertices = new Array(hull.vertices.length);
-  for (i = 0; i < hull.vertices.length; i++) {
-    vertices[i] = new CANNON.Vec3(
-      hull.vertices[i].x,
-      hull.vertices[i].y,
-      hull.vertices[i].z
-    );
-  }
-
-  // Convert from THREE.Face to Array<number>.
-  faces = new Array(hull.faces.length);
-  for (i = 0; i < hull.faces.length; i++) {
-    faces[i] = [hull.faces[i].a, hull.faces[i].b, hull.faces[i].c];
-  }
-
-  return new CANNON.ConvexPolyhedron(vertices, faces);
+  console.warn('[three-to-cannon] createConvexPolyhedron is not supported with BufferGeometry in this version.');
+  return null;
 }
 
 /**
@@ -293,14 +259,23 @@ function createBoundingSphereShape(object, options) {
  * @return {CANNON.Shape}
  */
 function createTrimeshShape(object) {
-  let geometry = getGeometry(object);
+  var geometry = getGeometry(object);
 
-  let indices,
-    vertices = getVertices(geometry);
+  if (!geometry) {
+    return null;
+  }
 
-  if (!vertices.length) return null;
+  var vertices = getVertices(geometry);
+  var indices = [];
 
-  indices = Object.keys(vertices).map(Number);
+  if (geometry.index) {
+    indices = Array.prototype.slice.call(geometry.index.array, 0);
+  } else {
+    for (var i = 0; i < vertices.length / 3; i++) {
+      indices.push(i);
+    }
+  }
+
   return new CANNON.Trimesh(vertices, indices);
 }
 
@@ -314,67 +289,41 @@ function createTrimeshShape(object) {
  * @param {THREE.Object3D} object
  */
 function getGeometry(object) {
-  var matrix,
-    mesh,
-    meshes = getMeshes(object),
-    tmp = new THREE.Geometry(),
-    combined = new THREE.Geometry();
-
+  var meshes = getMeshes(object);
   if (meshes.length === 0) return null;
 
-  // Apply scale  – it can't easily be applied to a CANNON.Shape later.
-  if (meshes.length === 1) {
-    var position = new THREE.Vector3(),
-      quaternion = new THREE.Quaternion(),
-      scale = new THREE.Vector3();
-    if (meshes[0].geometry.isBufferGeometry) {
-      if (
-        meshes[0].geometry.attributes.position &&
-        meshes[0].geometry.attributes.position.itemSize > 2
-      ) {
-        tmp.fromBufferGeometry(meshes[0].geometry);
-      }
-    } else {
-      tmp = meshes[0].geometry.clone();
-    }
-    tmp.metadata = meshes[0].geometry.metadata;
-    meshes[0].updateMatrixWorld();
-    meshes[0].matrixWorld.decompose(position, quaternion, scale);
-    return tmp.scale(scale.x, scale.y, scale.z);
+  if (meshes.length > 1) {
+    console.warn('[three-to-cannon] Found multiple meshes in one object. Using only the first mesh.');
   }
 
-  // Recursively merge geometry, preserving local transforms.
-  while ((mesh = meshes.pop())) {
-    mesh.updateMatrixWorld();
-    if (mesh.geometry.isBufferGeometry) {
-      if (
-        mesh.geometry.attributes.position &&
-        mesh.geometry.attributes.position.itemSize > 2
-      ) {
-        var tmpGeom = new THREE.Geometry();
-        tmpGeom.fromBufferGeometry(mesh.geometry);
-        combined.merge(tmpGeom, mesh.matrixWorld);
-        tmpGeom.dispose();
-      }
-    } else {
-      combined.merge(mesh.geometry, mesh.matrixWorld);
-    }
-  }
+  var mesh = meshes[0];
+  mesh.updateMatrixWorld();
+  
+  var geometry = mesh.geometry.clone();
+  
+  var position = new THREE.Vector3();
+  var quaternion = new THREE.Quaternion();
+  var scale = new THREE.Vector3();
+  mesh.matrixWorld.decompose(position, quaternion, scale);
+  geometry.scale(scale.x, scale.y, scale.z);
 
-  matrix = new THREE.Matrix4();
-  matrix.scale(object.scale);
-  combined.applyMatrix(matrix);
-  return combined;
+  return geometry;
 }
 
 /**
  * @return {Array<number>}
  */
 function getVertices(geometry) {
-  if (!geometry.attributes) {
-    geometry = new THREE.BufferGeometry().fromGeometry(geometry);
+  if (!geometry.isBufferGeometry) {
+    console.warn('[three-to-cannon] Geometry is not a BufferGeometry. Cannot get vertices.');
+    return [];
   }
-  return (geometry.attributes.position || {}).array || [];
+  var position = geometry.attributes.position;
+  if (!position) {
+    console.warn('[three-to-cannon] Geometry has no position attribute. Cannot get vertices.');
+    return [];
+  }
+  return position.array;
 }
 
 /**

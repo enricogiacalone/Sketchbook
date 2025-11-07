@@ -1,9 +1,11 @@
 import * as CANNON from "cannon-es";
 import { Object3D } from "three";
-// import { threeToCannon } from "../../../lib/utils/three-to-cannon";
-import { ShapeType, threeToCannon } from "three-to-cannon";
+import { threeToCannon } from "../../../lib/utils/three-to-cannon";
+// import { ShapeType, threeToCannon } from "three-to-cannon";
 import * as Utils from "../../core/FunctionLibrary";
 import { ICollider } from "../../interfaces/ICollider";
+import { CollisionGroups } from "../../enums/CollisionGroups";
+import * as THREE from "three";
 
 export class TrimeshCollider implements ICollider {
   public mesh: any;
@@ -14,10 +16,15 @@ export class TrimeshCollider implements ICollider {
   constructor(mesh: Object3D, options: any) {
     this.mesh = mesh.clone();
 
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+    mesh.getWorldPosition(worldPos);
+    mesh.getWorldQuaternion(worldQuat);
+
     let defaults = {
       mass: 0,
-      position: mesh.position,
-      rotation: mesh.quaternion,
+      position: worldPos,
+      rotation: worldQuat,
       friction: 0.3,
     };
     options = Utils.setDefaults(options, defaults);
@@ -27,7 +34,7 @@ export class TrimeshCollider implements ICollider {
     mat.friction = options.friction;
     // mat.restitution = 0.7;
 
-    let result = threeToCannon(this.mesh, { type: ShapeType.MESH });
+    let shape = threeToCannon(this.mesh, { type: "Trimesh" });
     // shape['material'] = mat;
 
     // Add phys sphere
@@ -35,9 +42,10 @@ export class TrimeshCollider implements ICollider {
       mass: options.mass,
       position: options.position,
       quaternion: options.rotation,
-      shape: result.shape,
+      shape: shape,
     });
 
+    physBox.collisionFilterGroup = CollisionGroups.TrimeshColliders;
     physBox.material = mat;
 
     this.body = physBox;
