@@ -782,7 +782,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     );
     // Raycast options
     const rayCastOptions = {
-      collisionFilterMask: CollisionGroups.Default,
+      collisionFilterMask: CollisionGroups.Default | CollisionGroups.TrimeshColliders,
       skipBackfaces: true /* ignore back faces */,
     };
     // Cast the ray

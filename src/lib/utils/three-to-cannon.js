@@ -1,6 +1,5 @@
-import * as THREE from "three";
 import * as CANNON from "cannon-es";
-import { quickhull } from "./THREE.quickhull";
+import * as THREE from "three";
 
 var PI_2 = Math.PI / 2;
 
@@ -19,7 +18,6 @@ var Type = {
  */
 export const threeToCannon = function (object, options) {
   options = options || {};
-  console.log("noo", object);
 
   var geometry;
 
@@ -135,7 +133,9 @@ function createBoundingBoxShape(object) {
  * @return {CANNON.Shape}
  */
 function createConvexPolyhedron(object) {
-  console.warn('[three-to-cannon] createConvexPolyhedron is not supported with BufferGeometry in this version.');
+  console.warn(
+    "[three-to-cannon] createConvexPolyhedron is not supported with BufferGeometry in this version."
+  );
   return null;
 }
 
@@ -293,14 +293,16 @@ function getGeometry(object) {
   if (meshes.length === 0) return null;
 
   if (meshes.length > 1) {
-    console.warn('[three-to-cannon] Found multiple meshes in one object. Using only the first mesh.');
+    console.warn(
+      "[three-to-cannon] Found multiple meshes in one object. Using only the first mesh."
+    );
   }
 
   var mesh = meshes[0];
   mesh.updateMatrixWorld();
-  
+
   var geometry = mesh.geometry.clone();
-  
+
   var position = new THREE.Vector3();
   var quaternion = new THREE.Quaternion();
   var scale = new THREE.Vector3();
@@ -315,12 +317,16 @@ function getGeometry(object) {
  */
 function getVertices(geometry) {
   if (!geometry.isBufferGeometry) {
-    console.warn('[three-to-cannon] Geometry is not a BufferGeometry. Cannot get vertices.');
+    console.warn(
+      "[three-to-cannon] Geometry is not a BufferGeometry. Cannot get vertices."
+    );
     return [];
   }
   var position = geometry.attributes.position;
   if (!position) {
-    console.warn('[three-to-cannon] Geometry has no position attribute. Cannot get vertices.');
+    console.warn(
+      "[three-to-cannon] Geometry has no position attribute. Cannot get vertices."
+    );
     return [];
   }
   return position.array;
