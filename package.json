@@ -47,7 +47,6 @@
     "lodash": "^4.17.21",
     "prettier": "^3.6.2",
     "sweetalert2": "^9.17.2",
-    "three": "^0.181.0",
-    "three-to-cannon": "^5.0.2"
+    "three": "^0.181.0"
   }
 }

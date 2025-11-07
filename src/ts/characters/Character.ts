@@ -29,6 +29,8 @@ import { OpenVehicleDoor } from "./character_states/vehicles/OpenVehicleDoor";
 import { SceneManager } from "../core/SceneManager";
 import { PhysicsManager } from "../core/PhysicsManager";
 
+import { SpeechBubble } from "../core/SpeechBubble";
+
 export class Character extends THREE.Object3D implements IWorldEntity {
   public updateOrder: number = 1;
   public entityType: EntityType = EntityType.Character;
@@ -39,6 +41,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public materials: THREE.Material[] = [];
   public mixer: THREE.AnimationMixer;
   public animations: any[];
+  public speechBubble: SpeechBubble;
 
   // Movement
   public acceleration: THREE.Vector3 = new THREE.Vector3();
@@ -88,17 +91,24 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.readCharacterData(gltf);
     this.setAnimations(gltf.animations);
 
+    // Calculate character height from GLTF scene bounding box
+    const bbox = new THREE.Box3().setFromObject(gltf.scene);
+    this.height = bbox.max.y - bbox.min.y;
+
     // The visuals group is centered for easy character tilting
     this.tiltContainer = new THREE.Group();
     this.add(this.tiltContainer);
 
     // Model container is used to reliably ground the character, as animation can alter the position of the model itself
     this.modelContainer = new THREE.Group();
-    this.modelContainer.position.y = -0.57;
+    this.modelContainer.position.y = -0.57; // This might need adjustment based on actual model
     this.tiltContainer.add(this.modelContainer);
     this.modelContainer.add(gltf.scene);
 
     this.mixer = new THREE.AnimationMixer(gltf.scene);
+
+    this.speechBubble = new SpeechBubble(this.height); // Pass calculated height
+    this.tiltContainer.add(this.speechBubble);
 
     this.velocitySimulator = new VectorSpringSimulator(
       60,
@@ -391,7 +401,6 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public update(timeStep: number): void {
     this.behaviour?.update(timeStep);
     this.vehicleEntryInstance?.update(timeStep);
-    // console.log(this.occupyingSeat);
     this.charState?.update(timeStep);
 
     // this.visuals.position.copy(this.modelOffset);

@@ -67,8 +67,13 @@ export class EnteringVehicle extends CharacterStateBase {
         this.endPosition.z
       );
 
+      // Close the door after entering
+      if (this.seat.door) {
+        this.seat.door.rotation = 0; // Assuming 0 closes the door
+        this.seat.door.physicsEnabled = true; // Re-enable physics for the door
+      }
+
       if (this.seat.type === SeatType.Driver) {
-        if (this.seat.door) this.seat.door.physicsEnabled = true;
         this.character.setState(new Driving(this.character, this.seat));
       } else if (this.seat.type === SeatType.Passenger) {
         this.character.setState(new Sitting(this.character, this.seat));

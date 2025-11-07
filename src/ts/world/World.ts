@@ -22,11 +22,15 @@ import { Vehicle } from "../vehicles/Vehicle";
 import { Ocean } from "./Ocean";
 import { Path } from "./Path";
 import { Scenario } from "./Scenario";
+import { CharacterSpawnPoint } from "./CharacterSpawnPoint";
 import { Sky } from "./Sky";
 import { SceneManager } from "../core/SceneManager";
 import { PhysicsManager } from "../core/PhysicsManager";
 import { GameManager } from "../core/GameManager";
 import CannonDebugger from "cannon-es-debugger";
+
+import { FollowTarget } from "../characters/character_ai/FollowTarget";
+import { RandomBehaviour } from "../characters/character_ai/RandomBehaviour";
 
 export class World {
   public stats: Stats;
@@ -326,7 +330,36 @@ export class World {
     if (!loadingManager) loadingManager = new LoadingManager(this);
     for (const scenario of this.scenarios) {
       if (scenario.id === scenarioID || scenario.spawnAlways) {
-        scenario.launch(loadingManager, this);
+        // Find the player spawn point
+        let playerSpawnPoint: CharacterSpawnPoint | undefined;
+        scenario.spawnPoints.forEach(sp => {
+          if (sp instanceof CharacterSpawnPoint) {
+            playerSpawnPoint = sp;
+          }
+        });
+
+        if (playerSpawnPoint) {
+          // Spawn the player character first
+          playerSpawnPoint.spawn(loadingManager, this, () => {
+            // After player is spawned, then spawn AI characters
+            for (let i = 0; i < 5; i++) {
+              loadingManager.loadGLTF("build/assets/boxman.glb", (model) => {
+                let character = new Character(model);
+                character.setBehaviour(new FollowTarget(this.characters[0])); // this.characters[0] should now be the player
+
+                // Get a random spawn position
+                const x = Math.random() * 200 - 100;
+                const z = Math.random() * 100 - 50;
+                character.setPosition(x, 20, z);
+
+                this.add(character);
+              });
+            }
+          });
+        } else {
+          // No player spawn point found, just launch the scenario normally
+          scenario.launch(loadingManager, this);
+        }
       }
     }
   }

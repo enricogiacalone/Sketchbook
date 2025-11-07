@@ -15,7 +15,7 @@ export class Scenario {
   public descriptionContent: string;
 
   private rootNode: THREE.Object3D;
-  private spawnPoints: ISpawnPoint[] = [];
+  public spawnPoints: ISpawnPoint[] = [];
   private invisible: boolean = false;
   private initialCameraAngle: number;
 

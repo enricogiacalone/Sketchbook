@@ -89,8 +89,31 @@ export class FollowTarget implements ICharacterAI {
         this.character.controlledObject.triggerAction("right", false);
       }
     } else {
+      let targetPosition = new THREE.Vector3();
+      let targetVehicle: Vehicle | undefined; // Moved declaration here
+
+      if ((this.target as Character).controlledObject !== undefined) {
+        // Main character is in a vehicle, follow the vehicle's world position
+        targetVehicle = (this.target as Character).controlledObject as unknown as Vehicle;
+        targetVehicle.getWorldPosition(targetPosition);
+
+        // Check for free seats and enter if close enough
+        if (this.character.position.distanceTo(targetPosition) < this.stopDistance + 2) { // A bit more distance to enter
+          const freeSeat = targetVehicle.seats.find(seat => seat.occupiedBy === null);
+          if (freeSeat) {
+            // Make AI character enter the vehicle
+            this.character.enterVehicle(freeSeat, freeSeat.entryPoints[0]); // Assuming first entry point
+            return; // AI character is entering, no need to follow
+          }
+        }
+
+      } else {
+        // Main character is on foot, follow the character's world position
+        this.target.getWorldPosition(targetPosition);
+      }
+
       let viewVector = new THREE.Vector3().subVectors(
-        this.target.position,
+        targetPosition,
         this.character.position
       );
       this.character.setViewVector(viewVector);
@@ -99,6 +122,7 @@ export class FollowTarget implements ICharacterAI {
       if (viewVector.length() > this.stopDistance) {
         this.isTargetReached = false;
         this.character.triggerAction("up", true);
+        this.character.speechBubble.showRandomPhrase();
       }
       // Stand still
       else {
@@ -108,6 +132,7 @@ export class FollowTarget implements ICharacterAI {
         // Look at character
         this.character.setOrientation(viewVector);
       }
+      this.character.speechBubble.update(timeStep);
     }
   }
 }
