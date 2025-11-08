@@ -5,3 +5,20 @@
 @import "modules/loadingScreen.css";
 @import "modules/cubeLoader.css";
 @import "modules/welcomeScreen.css";
+
+/* Crosshair */
+#crosshair {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin-top: -10px; /* Half of height */
+  margin-left: -10px; /* Half of width */
+  border: 2px solid white;
+  border-radius: 50%;
+  box-sizing: border-box;
+  pointer-events: none; /* Allow clicks to pass through */
+  z-index: 1000; /* Ensure it's on top */
+  display: none; /* Hidden by default, UIManager will show it */
+}

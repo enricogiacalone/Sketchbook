@@ -19,4 +19,11 @@ export class UIManager {
       ? "48px"
       : "0px";
   }
+
+  public static setCrosshairVisible(value: boolean): void {
+    const crosshair = document.getElementById("crosshair");
+    if (crosshair) {
+        crosshair.style.display = value ? "block" : "none";
+    }
+  }
 }

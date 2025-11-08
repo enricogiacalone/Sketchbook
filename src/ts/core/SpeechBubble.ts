@@ -18,6 +18,9 @@ export class SpeechBubble extends THREE.Object3D {
     "Gotcha!",
     "Where do you think you're going?",
     "Stop right there!",
+    "This is a very long phrase that should definitely wrap around multiple lines to fit inside the speech bubble.",
+    "Another example of a phrase that needs to be wrapped.",
+    "Short phrase."
   ];
 
   private displayTimer: number = 0;
@@ -78,39 +81,98 @@ export class SpeechBubble extends THREE.Object3D {
     this.visible = false;
   }
 
+  private wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+    const words = text.split(' ');
+    const lines: string[] = [];
+    let currentLine = words[0];
+
+    for (let i = 1; i < words.length; i++) {
+        const word = words[i];
+        const testLine = currentLine + ' ' + word;
+        const metrics = context.measureText(testLine);
+        const testWidth = metrics.width;
+
+        if (testWidth > maxWidth && i > 0) {
+            lines.push(currentLine);
+            currentLine = word;
+        } else {
+            currentLine = testLine;
+        }
+    }
+    lines.push(currentLine);
+    return lines;
+  }
+
   private updateTextCanvas(text: string): void {
     const border = 20;
-    const font = 'bold 48px Arial'; // Made font bold
-    const textColor = '#000000';
     const outlineColor = '#FFFFFF'; // White outline for comic effect
     const outlineWidth = 4;
+    const textColor = '#000000';
 
-    // Measure text
-    this.textContext.font = font;
-    const metrics = this.textContext.measureText(text);
-    const textWidth = metrics.width;
-    const textHeight = 48; // Approximate height for 48px font
+    // Calculate maximum allowed text dimensions based on the bubble's dimensions
+    // We use a ratio to convert from THREE.PlaneGeometry dimensions to canvas pixels
+    const pixelsPerUnit = 256; // A reasonable arbitrary value for converting world units to pixels
+    const maxTextWidthPx = this.initialTextMeshWidth * pixelsPerUnit - (border * 2 + outlineWidth * 2);
+    const maxTextHeightPx = this.initialTextMeshHeight * pixelsPerUnit - (border * 2 + outlineWidth * 2);
 
-    // Set canvas size (plus space for outline) to a power of 2 for optimal WebGL performance
-    this.textCanvas.width = textWidth + border * 2 + outlineWidth * 2;
-    this.textCanvas.height = textHeight + border * 2 + outlineWidth * 2;
+    let fontSize = 48; // Start with a reasonable font size
+    let lines: string[] = [];
+    let textHeightPx = 0;
+    let widestLinePx = 0;
+    const lineHeightMultiplier = 1.2; // 120% of font size for line height
+
+    // Iteratively reduce font size until text fits both width and height
+    while (fontSize > 10) { // Minimum font size of 10px
+        this.textContext.font = `bold ${fontSize}px Arial`;
+        lines = this.wrapText(this.textContext, text, maxTextWidthPx);
+        
+        widestLinePx = 0;
+        for (const line of lines) {
+            const metrics = this.textContext.measureText(line);
+            if (metrics.width > widestLinePx) {
+                widestLinePx = metrics.width;
+            }
+        }
+        textHeightPx = lines.length * fontSize * lineHeightMultiplier;
+
+        if (widestLinePx <= maxTextWidthPx && textHeightPx <= maxTextHeightPx) {
+            break; // Text fits, break the loop
+        }
+        fontSize -= 2; // Reduce font size and try again
+    }
+
+    // If text still doesn't fit after reducing font size to minimum, it will be clipped.
+    // This is a fallback, ideally, phrases should be designed to fit.
+
+    // Set canvas size
+    // Add padding for border and outline
+    this.textCanvas.width = Math.min(2048, widestLinePx + border * 2 + outlineWidth * 2);
+    this.textCanvas.height = Math.min(2048, textHeightPx + border * 2 + outlineWidth * 2);
 
     // Clear canvas
     this.textContext.clearRect(0, 0, this.textCanvas.width, this.textCanvas.height);
 
     // Apply font and styles
-    this.textContext.font = font;
+    this.textContext.font = `bold ${fontSize}px Arial`;
     this.textContext.textAlign = 'center';
     this.textContext.textBaseline = 'middle';
 
-    // Draw outline
-    this.textContext.strokeStyle = outlineColor;
-    this.textContext.lineWidth = outlineWidth * 2; // Twice the width for better visibility
-    this.textContext.strokeText(text, this.textCanvas.width / 2, this.textCanvas.height / 2);
+    const startY = (this.textCanvas.height - textHeightPx) / 2 + (fontSize * lineHeightMultiplier) / 2;
 
-    // Draw text
-    this.textContext.fillStyle = textColor;
-    this.textContext.fillText(text, this.textCanvas.width / 2, this.textCanvas.height / 2);
+    // Draw each line
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineY = startY + i * fontSize * lineHeightMultiplier;
+
+        // Draw outline
+        this.textContext.strokeStyle = outlineColor;
+        this.textContext.lineWidth = outlineWidth * 2;
+        this.textContext.strokeText(line, this.textCanvas.width / 2, lineY);
+
+        // Draw text
+        this.textContext.fillStyle = textColor;
+        this.textContext.fillText(line, this.textCanvas.width / 2, lineY);
+    }
     
     this.textTexture.needsUpdate = true;
 
@@ -121,8 +183,24 @@ export class SpeechBubble extends THREE.Object3D {
     const currentTextMeshWidth = this.initialTextMeshWidth;
     const currentTextMeshHeight = this.initialTextMeshHeight;
 
-    const textScaleFactor = Math.min(currentTextMeshWidth / aspectRatio, currentTextMeshHeight) / currentTextMeshHeight;
-    this.textMesh.scale.set(aspectRatio * textScaleFactor, textScaleFactor, 1);
+    // Scale the text mesh to fit the canvas content, maintaining aspect ratio
+    // The goal is to make the text mesh match the canvas content's aspect ratio
+    // and fit within the initialTextMeshWidth/Height constraints.
+    let meshWidth = currentTextMeshWidth;
+    let meshHeight = currentTextMeshHeight;
+
+    const canvasAspectRatio = this.textCanvas.width / this.textCanvas.height;
+    const meshAspectRatio = currentTextMeshWidth / currentTextMeshHeight;
+
+    if (canvasAspectRatio > meshAspectRatio) {
+        // Canvas is wider than mesh area, constrain by width
+        meshHeight = currentTextMeshWidth / canvasAspectRatio;
+    } else {
+        // Canvas is taller than mesh area, constrain by height
+        meshWidth = currentTextMeshHeight * canvasAspectRatio;
+    }
+
+    this.textMesh.scale.set(meshWidth / this.textMesh.geometry.parameters.width, meshHeight / this.textMesh.geometry.parameters.height, 1);
   }
 
   public showRandomPhrase(): void {

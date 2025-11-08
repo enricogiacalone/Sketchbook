@@ -28,6 +28,8 @@ import { ExitingVehicle } from "./character_states/vehicles/ExitingVehicle";
 import { OpenVehicleDoor } from "./character_states/vehicles/OpenVehicleDoor";
 import { SceneManager } from "../core/SceneManager";
 import { PhysicsManager } from "../core/PhysicsManager";
+import { UIManager } from "../core/UIManager";
+import { Explosion } from "../core/Explosion"; // Added import // Added import
 
 import { SpeechBubble } from "../core/SpeechBubble";
 
@@ -440,6 +442,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     // this.world.dirLight.target = this;
 
     this.displayControls();
+    UIManager.setCrosshairVisible(false);
   }
 
   public displayControls(): void {
@@ -1006,6 +1009,11 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       }
 
       this.world = undefined;
+
+      // Create explosion effect at character's position
+      const explosionPosition = new THREE.Vector3();
+      this.getWorldPosition(explosionPosition);
+      new Explosion(world, explosionPosition);
 
       // Remove from characters
       _.pull(world.characters, this);

@@ -6,6 +6,9 @@ import { KeyBinding } from "./KeyBinding";
 import { Character } from "../characters/Character";
 import _ from "lodash";
 import { IUpdatable } from "../interfaces/IUpdatable";
+import { UIManager } from "./UIManager";
+import * as CANNON from "cannon-es";
+import { Bullet } from "./Bullet";
 
 export class CameraOperator implements IInputReceiver, IUpdatable {
   public updateOrder: number = 4;
@@ -61,6 +64,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
       up: new KeyBinding("KeyE"),
       down: new KeyBinding("KeyQ"),
       fast: new KeyBinding("ShiftLeft"),
+      shoot: new KeyBinding("Mouse0"),
     };
 
     world.registerUpdatable(this);
@@ -159,14 +163,55 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
     code: string,
     pressed: boolean
   ): void {
-    for (const action in this.actions) {
-      if (this.actions.hasOwnProperty(action)) {
-        const binding = this.actions[action];
+    if (this.inputReceiver !== undefined) {
+      this.inputReceiver.handleMouseButton(event, "mouse" + event.button, true);
+    }
 
-        if (_.includes(binding.eventCodes, code)) {
-          binding.isPressed = pressed;
+    // Shooting logic
+    if (code === "mouse0" && pressed) { // Trigger only on left mouse button DOWN
+        const rayOrigin = new CANNON.Vec3(this.camera.position.x, this.camera.position.y, this.camera.position.z);
+        const rayDirection = new THREE.Vector3();
+        this.camera.getWorldDirection(rayDirection); // Get camera's forward direction
+        const rayEnd = new CANNON.Vec3(
+            rayOrigin.x + rayDirection.x * 1000, // Ray length
+            rayOrigin.y + rayDirection.y * 1000,
+            rayOrigin.z + rayDirection.z * 1000
+        );
+
+        const rayResult = new CANNON.RaycastResult();
+        const rayOptions = {
+            collisionFilterMask: 2, // Target collision group 2 (Characters)
+            skipBackfaces: true,
+        };
+
+        this.world.physicsManager.physicsWorld.raycastClosest(rayOrigin, rayEnd, rayOptions, rayResult);
+
+        if (rayResult.hasHit) {
+            // Find the character associated with the hit body
+            for (const character of this.world.characters) {
+                if (character.characterCapsule.body === rayResult.body) {
+                    console.log("Hit character:", character);
+                    // Only remove from world if it's not the main character
+                    if (character !== this.world.characters[0]) {
+                        character.removeFromWorld(this.world);
+                    }
+                    break;
+                }
+            }
         }
-      }
+
+        // Create a visual bullet
+        const cameraUp = new THREE.Vector3(0, 1, 0); // World up
+        const cameraRight = new THREE.Vector3();
+        cameraRight.crossVectors(rayDirection, cameraUp).normalize(); // Camera's right vector
+        const cameraLocalUp = new THREE.Vector3();
+        cameraLocalUp.crossVectors(cameraRight, rayDirection).normalize(); // Camera's local up vector
+
+        const bulletOrigin = this.camera.position.clone()
+            .add(rayDirection.clone().multiplyScalar(0.5)) // Forward offset
+            .add(cameraLocalUp.clone().multiplyScalar(-0.05)); // Small downward offset
+
+        new Bullet(this.world, bulletOrigin, rayDirection);
     }
   }
 
@@ -200,7 +245,12 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
         keys: ["Shift", "+", "C"],
         desc: "Exit free camera mode",
       },
+      {
+        keys: ["Mouse0"],
+        desc: "Shoot",
+      },
     ]);
+    UIManager.setCrosshairVisible(true);
   }
 
   public inputReceiverUpdate(timeStep: number): void {
