@@ -132,10 +132,11 @@ export class World {
             '<a href="https://github.com/swift502/Sketchbook" target="_blank">GitHub page</a><a href="https://discord.gg/fGuEqCe" target="_blank">Discord server</a>',
           confirmButtonText: "Okay",
           buttonsStyling: false,
-          onClose: () => {
+        }).then((result) => {
+          if (result.isConfirmed) {
             UIManager.setUserInterfaceVisible(true);
             this.updateEnemyCountDisplay(); // Update counter after UI is visible
-          },
+          }
         });
       };
       this.loadingManager.loadGLTF(worldScenePath, (gltf) => {
