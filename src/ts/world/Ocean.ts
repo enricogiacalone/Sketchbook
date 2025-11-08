@@ -27,7 +27,9 @@ export class Ocean implements IUpdatable {
   }
 
   public update(timeStep: number): void {
-    this.material.uniforms.cameraPos.value.copy(this.world.sceneManager.camera.position);
+    this.material.uniforms.cameraPos.value.copy(
+      this.world.sceneManager.camera.position
+    );
     this.material.uniforms.lightDir.value.copy(
       new THREE.Vector3().copy(this.world.sky.sunPosition).normalize()
     );

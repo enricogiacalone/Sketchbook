@@ -154,7 +154,8 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     // capsulePhysics.physical.collisionFilterMask = ~CollisionGroups.Trimesh;
     this.characterCapsule.body.shapes.forEach((shape) => {
       // tslint:disable-next-line: no-bitwise
-      shape.collisionFilterMask = CollisionGroups.Default | CollisionGroups.TrimeshColliders;
+      shape.collisionFilterMask =
+        CollisionGroups.Default | CollisionGroups.TrimeshColliders;
     });
     this.characterCapsule.body.allowSleep = false;
 
@@ -266,9 +267,13 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.physicsEnabled = value;
 
     if (value === true) {
-      this.world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
+      this.world.physicsManager.physicsWorld.addBody(
+        this.characterCapsule.body
+      );
     } else {
-      this.world.physicsManager.physicsWorld.removeBody(this.characterCapsule.body);
+      this.world.physicsManager.physicsWorld.removeBody(
+        this.characterCapsule.body
+      );
     }
   }
 
@@ -738,9 +743,13 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       const currentVehicle = this.occupyingSeat.vehicle;
 
       // If this is the main character, make all other characters in the same vehicle exit
-      if (this === this.world.characters[0]) { // Check if this is the main character
-        this.world.characters.forEach(otherCharacter => {
-          if (otherCharacter !== this && otherCharacter.occupyingSeat?.vehicle === currentVehicle) {
+      if (this === this.world.characters[0]) {
+        // Check if this is the main character
+        this.world.characters.forEach((otherCharacter) => {
+          if (
+            otherCharacter !== this &&
+            otherCharacter.occupyingSeat?.vehicle === currentVehicle
+          ) {
             otherCharacter.exitVehicle(); // Call exitVehicle for other characters
           }
         });
@@ -804,7 +813,8 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     );
     // Raycast options
     const rayCastOptions = {
-      collisionFilterMask: CollisionGroups.Default | CollisionGroups.TrimeshColliders,
+      collisionFilterMask:
+        CollisionGroups.Default | CollisionGroups.TrimeshColliders,
       skipBackfaces: true /* ignore back faces */,
     };
     // Cast the ray

@@ -24,7 +24,7 @@ export class UIManager {
   public static setCrosshairVisible(value: boolean): void {
     const crosshair = document.getElementById("crosshair");
     if (crosshair) {
-        crosshair.style.display = value ? "block" : "none";
+      crosshair.style.display = value ? "block" : "none";
     }
   }
 }

@@ -94,12 +94,19 @@ export class FollowTarget implements ICharacterAI {
 
       if ((this.target as Character).controlledObject !== undefined) {
         // Main character is in a vehicle, follow the vehicle's world position
-        targetVehicle = (this.target as Character).controlledObject as unknown as Vehicle;
+        targetVehicle = (this.target as Character)
+          .controlledObject as unknown as Vehicle;
         targetVehicle.getWorldPosition(targetPosition);
 
         // Check for free seats and enter if close enough
-        if (this.character.position.distanceTo(targetPosition) < this.stopDistance + 2) { // A bit more distance to enter
-          const freeSeat = targetVehicle.seats.find(seat => seat.occupiedBy === null);
+        if (
+          this.character.position.distanceTo(targetPosition) <
+          this.stopDistance + 2
+        ) {
+          // A bit more distance to enter
+          const freeSeat = targetVehicle.seats.find(
+            (seat) => seat.occupiedBy === null
+          );
           if (freeSeat) {
             // Re-check if the seat is still free just before entering
             if (freeSeat.occupiedBy === null) {
@@ -109,7 +116,6 @@ export class FollowTarget implements ICharacterAI {
             }
           }
         }
-
       } else {
         // Main character is on foot, follow the character's world position
         this.target.getWorldPosition(targetPosition);

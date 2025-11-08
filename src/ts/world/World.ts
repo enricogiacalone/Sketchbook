@@ -253,10 +253,17 @@ export class World {
 
     // Check if the removed entity is an enemy character
     if (worldEntity instanceof Character) {
-      console.log("Entity is a Character. EntityType:", worldEntity.entityType, "Expected EntityType.Enemy:", EntityType.Enemy);
+      console.log(
+        "Entity is a Character. EntityType:",
+        worldEntity.entityType,
+        "Expected EntityType.Enemy:",
+        EntityType.Enemy
+      );
       if (worldEntity.entityType === EntityType.Enemy) {
         this.currentEnemyCount--;
-        console.log(`Enemy removed. Remaining enemies: ${this.currentEnemyCount}`);
+        console.log(
+          `Enemy removed. Remaining enemies: ${this.currentEnemyCount}`
+        );
         this.updateEnemyCountDisplay(); // Update UI using helper method
 
         if (this.currentEnemyCount <= 0) {
@@ -264,7 +271,10 @@ export class World {
           this.spawnEnemies(this.initialEnemyCount * 2);
         }
       } else {
-        console.log("Entity is a Character but not an Enemy. EntityType:", worldEntity.entityType);
+        console.log(
+          "Entity is a Character but not an Enemy. EntityType:",
+          worldEntity.entityType
+        );
       }
     } else {
       console.log("Entity is not a Character. Type:", typeof worldEntity);
@@ -341,13 +351,10 @@ export class World {
         break;
       }
     }
-    if (defaultScenarioID !== undefined)
-      this.launchScenario(defaultScenarioID);
+    if (defaultScenarioID !== undefined) this.launchScenario(defaultScenarioID);
   }
 
-  public launchScenario(
-    scenarioID: string
-  ): void {
+  public launchScenario(scenarioID: string): void {
     this.lastScenarioID = scenarioID;
 
     this.clearEntities();
@@ -358,7 +365,7 @@ export class World {
       if (scenario.id === scenarioID || scenario.spawnAlways) {
         // Find the player spawn point
         let playerSpawnPoint: CharacterSpawnPoint | undefined;
-        scenario.spawnPoints.forEach(sp => {
+        scenario.spawnPoints.forEach((sp) => {
           if (sp instanceof CharacterSpawnPoint) {
             playerSpawnPoint = sp;
           }
@@ -434,7 +441,10 @@ export class World {
   }
 
   private updateEnemyCountDisplay(): void {
-    console.log("updateEnemyCountDisplay called. currentEnemyCount:", this.currentEnemyCount);
+    console.log(
+      "updateEnemyCountDisplay called. currentEnemyCount:",
+      this.currentEnemyCount
+    );
     let enemyCountElement = document.getElementById("dynamic-enemy-count");
 
     if (!enemyCountElement) {
@@ -456,14 +466,21 @@ export class World {
         uiContainer.appendChild(enemyCountElement);
         console.log("Dynamic enemy count element appended to ui-container.");
       } else {
-        console.warn("UI container not found, cannot append dynamic enemy count element.");
+        console.warn(
+          "UI container not found, cannot append dynamic enemy count element."
+        );
         return;
       }
     }
 
     if (enemyCountElement) {
       enemyCountElement.innerHTML = `Enemies: ${this.currentEnemyCount}`;
-      console.log("Updated #dynamic-enemy-count. Current innerHTML:", enemyCountElement.innerHTML, "Display style:", enemyCountElement.style.display);
+      console.log(
+        "Updated #dynamic-enemy-count. Current innerHTML:",
+        enemyCountElement.innerHTML,
+        "Display style:",
+        enemyCountElement.style.display
+      );
     }
   }
 

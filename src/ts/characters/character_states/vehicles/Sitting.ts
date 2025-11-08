@@ -1,4 +1,4 @@
-import { CharacterStateBase } from "../_stateLibrary";
+import { CharacterStateBase } from "~/characters/character_states/CharacterStateBase";
 import { Character } from "~/characters/Character";
 import { VehicleSeat } from "src/ts/vehicles/VehicleSeat";
 import { CloseVehicleDoorInside } from "./CloseVehicleDoorInside";

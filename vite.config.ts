@@ -10,6 +10,17 @@ export default defineConfig({
   build: {
     outDir: 'build',
     sourcemap: true,
+    // Consider using manualChunks for code splitting to optimize bundle size
+    // and improve initial load times, especially for larger applications.
+    // Example:
+    // rollupOptions: {
+    //   output: {
+    //     manualChunks: {
+    //       vendor: ['react', 'react-dom'],
+    //       // Add other chunks as needed
+    //     },
+    //   },
+    // },
   },
   resolve: {
     alias: {

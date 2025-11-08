@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { CharacterStateBase } from "../_stateLibrary";
+import { CharacterStateBase } from "~/characters/character_states/CharacterStateBase";
 import { Character } from "~/characters/Character";
 import { IControllable } from "~/interfaces/IControllable";
 import { Driving } from "./Driving";

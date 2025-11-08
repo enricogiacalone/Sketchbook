@@ -50,9 +50,7 @@ export class LoadingManager {
           },
           (error) => {
             console.error(error);
-            throw new Error(
-              `Failed to parse GLTF file at '${path}': ${error}`
-            );
+            throw new Error(`Failed to parse GLTF file at '${path}': ${error}`);
           }
         );
       })

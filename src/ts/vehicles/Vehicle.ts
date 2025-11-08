@@ -39,8 +39,8 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
     super();
 
     if (handlingSetup === undefined) handlingSetup = {};
-    (handlingSetup.chassisConnectionPointLocal = new CANNON.Vec3()),
-      (handlingSetup.axleLocal = new CANNON.Vec3(-1, 0, 0));
+    ((handlingSetup.chassisConnectionPointLocal = new CANNON.Vec3()),
+      (handlingSetup.axleLocal = new CANNON.Vec3(-1, 0, 0)));
     handlingSetup.directionLocal = new CANNON.Vec3(0, -1, 0);
 
     // Physics mat

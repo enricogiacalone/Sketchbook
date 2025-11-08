@@ -12,7 +12,11 @@ export class CharacterSpawnPoint implements ISpawnPoint {
     this.object = object;
   }
 
-  public spawn(loadingManager: LoadingManager, world: World, callback?: Function): void {
+  public spawn(
+    loadingManager: LoadingManager,
+    world: World,
+    callback?: Function
+  ): void {
     loadingManager.loadGLTF("boxman.glb", (model) => {
       let player = new Character(model);
 

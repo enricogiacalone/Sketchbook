@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import * as Utils from "~/core/FunctionLibrary";
 
-import { CharacterStateBase } from "../_stateLibrary";
+import { CharacterStateBase } from "~/characters/character_states/CharacterStateBase";
 import { Character } from "~/characters/Character";
 import { VehicleSeat } from "~/vehicles/VehicleSeat";
 import { IControllable } from "~/interfaces/IControllable";
