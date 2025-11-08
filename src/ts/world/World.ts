@@ -1,11 +1,11 @@
 import * as CANNON from "cannon-es";
-import * as $ from "jquery";
+import $ from "jquery";
 import * as _ from "lodash";
 import Swal from "sweetalert2";
 import * as THREE from "three";
 import { Detector } from "../../lib/utils/Detector";
 import { Stats } from "../../lib/utils/Stats";
-import * as GUI from "../../lib/utils/dat.gui";
+declare const dat: any;
 import { Character } from "../characters/Character";
 import { CameraOperator } from "../core/CameraOperator";
 import * as Utils from "../core/FunctionLibrary";
@@ -343,7 +343,7 @@ export class World {
           playerSpawnPoint.spawn(loadingManager, this, () => {
             // After player is spawned, then spawn AI characters
             for (let i = 0; i < 5; i++) {
-              loadingManager.loadGLTF("build/assets/boxman.glb", (model) => {
+              loadingManager.loadGLTF("boxman.glb", (model) => {
                 let character = new Character(model);
                 character.setBehaviour(new FollowTarget(this.characters[0])); // this.characters[0] should now be the player
 
@@ -478,7 +478,7 @@ export class World {
       Sun_Rotation: 145,
     };
 
-    const gui = new GUI.GUI();
+    const gui = new dat.GUI();
 
     // Scenario
     this.scenarioGUIFolder = gui.addFolder("Scenarios");

@@ -10,7 +10,7 @@ import { IWorldEntity } from "../interfaces/IWorldEntity";
 import { World } from "../world/World";
 import { VehicleSeat } from "./VehicleSeat";
 import { Wheel } from "./Wheel";
-import _ = require("lodash");
+import _ from "lodash";
 
 export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
   public updateOrder: number = 2;

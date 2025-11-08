@@ -13,7 +13,7 @@ export class CharacterSpawnPoint implements ISpawnPoint {
   }
 
   public spawn(loadingManager: LoadingManager, world: World, callback?: Function): void {
-    loadingManager.loadGLTF("build/assets/boxman.glb", (model) => {
+    loadingManager.loadGLTF("boxman.glb", (model) => {
       let player = new Character(model);
 
       let worldPos = new THREE.Vector3();

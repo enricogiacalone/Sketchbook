@@ -732,6 +732,16 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
   public exitVehicle(): void {
     if (this.occupyingSeat !== null) {
+      const currentVehicle = this.occupyingSeat.vehicle;
+
+      // If this is the main character, make all other characters in the same vehicle exit
+      if (this === this.world.characters[0]) { // Check if this is the main character
+        this.world.characters.forEach(otherCharacter => {
+          if (otherCharacter !== this && otherCharacter.occupyingSeat?.vehicle === currentVehicle) {
+            otherCharacter.exitVehicle(); // Call exitVehicle for other characters
+          }
+        });
+      }
       if (this.occupyingSeat.vehicle.entityType === EntityType.Airplane) {
         this.setState(new ExitingAirplane(this, this.occupyingSeat));
       } else {
