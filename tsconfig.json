@@ -9,7 +9,7 @@
     "baseUrl": ".",
     "types": ["three"],
     "paths": {
-      "~/*": ["./src/*"],
+      "~/*": ["./src/ts/*"],
       "$lib/*": ["./src/lib/*"],
       "three/addons/*": ["./node_modules/three/examples/jsm/*"]
     }
