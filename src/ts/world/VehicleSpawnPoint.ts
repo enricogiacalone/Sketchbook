@@ -1,14 +1,14 @@
 import * as THREE from "three";
-import { Character } from "../characters/Character";
-import { FollowPath } from "../characters/character_ai/FollowPath";
-import * as Utils from "../core/FunctionLibrary";
-import { LoadingManager } from "../core/LoadingManager";
-import { ISpawnPoint } from "../interfaces/ISpawnPoint";
-import { Airplane } from "../vehicles/Airplane";
-import { Car } from "../vehicles/Car";
-import { Helicopter } from "../vehicles/Helicopter";
-import { Vehicle } from "../vehicles/Vehicle";
-import { World } from "../world/World";
+import { Character } from "~/characters/Character";
+import { FollowPath } from "~/characters/character_ai/FollowPath";
+import * as Utils from "~/core/FunctionLibrary";
+import { LoadingManager } from "~/core/LoadingManager";
+import { ISpawnPoint } from "~/interfaces/ISpawnPoint";
+import { Airplane } from "~/vehicles/Airplane";
+import { Car } from "~/vehicles/Car";
+import { Helicopter } from "~/vehicles/Helicopter";
+import { Vehicle } from "~/vehicles/Vehicle";
+import { World } from "~/world/World";
 
 export class VehicleSpawnPoint implements ISpawnPoint {
   public type: string;

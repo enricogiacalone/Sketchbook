@@ -1,4 +1,4 @@
-import * as Utils from "../../core/FunctionLibrary";
+import * as Utils from "~/core/FunctionLibrary";
 import {
   CharacterStateBase,
   Idle,
@@ -8,7 +8,7 @@ import {
   Sprint,
   Walk,
 } from "./_stateLibrary";
-import { Character } from "../Character";
+import { Character } from "~/characters/Character";
 
 export class StartWalkBase extends CharacterStateBase {
   constructor(character: Character) {

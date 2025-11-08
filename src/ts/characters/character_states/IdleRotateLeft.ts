@@ -1,6 +1,6 @@
 import { CharacterStateBase, Idle, JumpIdle, Walk } from "./_stateLibrary";
-import { ICharacterState } from "../../interfaces/ICharacterState";
-import { Character } from "../Character";
+import { ICharacterState } from "~/interfaces/ICharacterState";
+import { Character } from "~/characters/Character";
 
 export class IdleRotateLeft
   extends CharacterStateBase

@@ -1,16 +1,16 @@
 import * as THREE from "three";
 import { CharacterStateBase } from "../_stateLibrary";
-import { Character } from "../../Character";
-import { IControllable } from "../../../interfaces/IControllable";
+import { Character } from "~/characters/Character";
+import { IControllable } from "~/interfaces/IControllable";
 import { Driving } from "./Driving";
-import { VehicleSeat } from "../../../vehicles/VehicleSeat";
-import { Side } from "../../../enums/Side";
+import { VehicleSeat } from "~/vehicles/VehicleSeat";
+import { Side } from "~/enums/Side";
 import { Sitting } from "./Sitting";
-import { SeatType } from "../../../enums/SeatType";
-import { EntityType } from "../../../enums/EntityType";
+import { SeatType } from "~/enums/SeatType";
+import { EntityType } from "~/enums/EntityType";
 import { Object3D } from "three";
-import * as Utils from "../../../core/FunctionLibrary";
-import { SpringSimulator } from "../../../physics/spring_simulation/SpringSimulator";
+import * as Utils from "~/core/FunctionLibrary";
+import { SpringSimulator } from "~/physics/spring_simulation/SpringSimulator";
 
 export class EnteringVehicle extends CharacterStateBase {
   private vehicle: IControllable;

@@ -1,5 +1,5 @@
 import "../css/main.css";
-import { World } from "./world/World";
+import { World } from "~/world/World";
 
 // The application needs a .glb file to load the full world scene.
 // The original project contained a .blend file which was likely

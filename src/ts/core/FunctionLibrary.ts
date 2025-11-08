@@ -2,9 +2,9 @@ import * as CANNON from "cannon-es";
 import * as _ from "lodash";
 import * as THREE from "three";
 import { Object3D } from "three";
-import { Side } from "../enums/Side";
-import { Space } from "../enums/Space";
-import { SimulationFrame } from "../physics/spring_simulation/SimulationFrame";
+import { Side } from "~/enums/Side";
+import { Space } from "~/enums/Space";
+import { SimulationFrame } from "~/physics/spring_simulation/SimulationFrame";
 
 //#endregion
 

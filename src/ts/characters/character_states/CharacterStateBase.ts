@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import * as Utils from "../../core/FunctionLibrary";
+import * as Utils from "~/core/FunctionLibrary";
 import {
   DropIdle,
   DropRolling,
@@ -13,8 +13,8 @@ import {
   StartWalkRight,
   Walk,
 } from "./_stateLibrary";
-import { Character } from "../Character";
-import { ICharacterState } from "../../interfaces/ICharacterState";
+import { Character } from "~/characters/Character";
+import { ICharacterState } from "~/interfaces/ICharacterState";
 
 export abstract class CharacterStateBase implements ICharacterState {
   public character: Character;

@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import * as Utils from "./FunctionLibrary";
-import { World } from "../world/World";
-import { IInputReceiver } from "../interfaces/IInputReceiver";
+import { World } from "~/world/World";
+import { IInputReceiver } from "~/interfaces/IInputReceiver";
 import { KeyBinding } from "./KeyBinding";
-import { Character } from "../characters/Character";
+import { Character } from "~/characters/Character";
 import _ from "lodash";
-import { IUpdatable } from "../interfaces/IUpdatable";
+import { IUpdatable } from "~/interfaces/IUpdatable";
 import { UIManager } from "./UIManager";
 import * as CANNON from "cannon-es";
 import { Bullet } from "./Bullet";

@@ -1,5 +1,5 @@
 import { StartWalkBase } from "./_stateLibrary";
-import { Character } from "../Character";
+import { Character } from "~/characters/Character";
 
 export class StartWalkBackRight extends StartWalkBase {
   constructor(character: Character) {

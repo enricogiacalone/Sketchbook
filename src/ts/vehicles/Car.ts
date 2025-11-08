@@ -1,10 +1,10 @@
 import * as CANNON from "cannon-es";
 import * as THREE from "three";
-import * as Utils from "../core/FunctionLibrary";
-import { KeyBinding } from "../core/KeyBinding";
-import { EntityType } from "../enums/EntityType";
-import { IControllable } from "../interfaces/IControllable";
-import { SpringSimulator } from "../physics/spring_simulation/SpringSimulator";
+import * as Utils from "~/core/FunctionLibrary";
+import { KeyBinding } from "~/core/KeyBinding";
+import { EntityType } from "~/enums/EntityType";
+import { IControllable } from "~/interfaces/IControllable";
+import { SpringSimulator } from "~/physics/spring_simulation/SpringSimulator";
 import { Vehicle } from "./Vehicle";
 
 export class Car extends Vehicle implements IControllable {

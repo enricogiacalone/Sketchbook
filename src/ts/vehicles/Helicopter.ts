@@ -1,11 +1,11 @@
 import * as CANNON from "cannon-es";
 import * as THREE from "three";
-import * as Utils from "../core/FunctionLibrary";
+import * as Utils from "~/core/FunctionLibrary";
 
-import { KeyBinding } from "../core/KeyBinding";
-import { EntityType } from "../enums/EntityType";
-import { IControllable } from "../interfaces/IControllable";
-import { IWorldEntity } from "../interfaces/IWorldEntity";
+import { KeyBinding } from "~/core/KeyBinding";
+import { EntityType } from "~/enums/EntityType";
+import { IControllable } from "~/interfaces/IControllable";
+import { IWorldEntity } from "~/interfaces/IWorldEntity";
 import { Vehicle } from "./Vehicle";
 
 export class Helicopter extends Vehicle implements IControllable, IWorldEntity {

@@ -1,7 +1,7 @@
 import * as CANNON from 'cannon-es';
-import { World } from '../world/World';
+import { World } from '~/world/World';
 import * as THREE from 'three';
-import * as Utils from './FunctionLibrary';
+import * as Utils from '~/core/FunctionLibrary';
 
 export class PhysicsManager {
     public world: World;

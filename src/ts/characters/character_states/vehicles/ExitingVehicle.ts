@@ -1,14 +1,14 @@
 import * as THREE from "three";
-import * as Utils from "../../../core/FunctionLibrary";
+import * as Utils from "~/core/FunctionLibrary";
 
-import { Character } from "../../Character";
-import { Side } from "../../../enums/Side";
-import { VehicleSeat } from "../../../vehicles/VehicleSeat";
-import { Idle } from "../Idle";
+import { Character } from "~/characters/Character";
+import { Side } from "~/enums/Side";
+import { VehicleSeat } from "~/vehicles/VehicleSeat";
+import { Idle } from "~/characters/character_states/Idle";
 import { CloseVehicleDoorOutside } from "./CloseVehicleDoorOutside";
 import { Vehicle } from "src/ts/vehicles/Vehicle";
-import { Falling } from "../Falling";
-import { DropRolling } from "../DropRolling";
+import { Falling } from "~/characters/character_states/Falling";
+import { DropRolling } from "~/characters/character_states/DropRolling";
 import { ExitingStateBase } from "./ExitingStateBase";
 
 export class ExitingVehicle extends ExitingStateBase {

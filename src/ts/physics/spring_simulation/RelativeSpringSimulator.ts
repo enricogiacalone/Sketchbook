@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { SimulatorBase } from "./SimulatorBase";
 import { SimulationFrame } from "./SimulationFrame";
-import { spring } from "../../core/FunctionLibrary";
+import { spring } from "~/core/FunctionLibrary";
 
 export class RelativeSpringSimulator extends SimulatorBase {
   public position: number;

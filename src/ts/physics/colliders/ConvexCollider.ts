@@ -1,8 +1,8 @@
 import * as CANNON from "cannon-es";
 import * as THREE from "three";
 import { Object3D, Vector3 } from "three";
-import * as Utils from "../../core/FunctionLibrary";
-import { ICollider } from "../../interfaces/ICollider";
+import * as Utils from "~/core/FunctionLibrary";
+import { ICollider } from "~/interfaces/ICollider";
 
 export class ConvexCollider implements ICollider {
   public mesh: any;

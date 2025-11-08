@@ -5,8 +5,8 @@ import {
   Sprint,
   Walk,
 } from "./_stateLibrary";
-import { ICharacterState } from "../../interfaces/ICharacterState";
-import { Character } from "../Character";
+import { ICharacterState } from "~/interfaces/ICharacterState";
+import { Character } from "~/characters/Character";
 
 export class EndWalk extends CharacterStateBase implements ICharacterState {
   constructor(character: Character) {

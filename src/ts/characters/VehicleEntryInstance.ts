@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { VehicleSeat } from "../vehicles/VehicleSeat";
-import { Character } from "./Character";
+import { VehicleSeat } from "~/vehicles/VehicleSeat";
+import { Character } from "~/characters/Character";
 
 export class VehicleEntryInstance {
   public character: Character;

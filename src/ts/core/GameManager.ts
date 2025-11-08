@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { World } from '../world/World';
+import { World } from '~/world/World';
 
 export class GameManager {
     public world: World;

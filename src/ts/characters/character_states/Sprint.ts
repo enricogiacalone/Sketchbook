@@ -4,7 +4,7 @@ import {
   JumpRunning,
   Walk,
 } from "./_stateLibrary";
-import { Character } from "../Character";
+import { Character } from "~/characters/Character";
 
 export class Sprint extends CharacterStateBase {
   constructor(character: Character) {

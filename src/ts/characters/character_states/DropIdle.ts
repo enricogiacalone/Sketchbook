@@ -4,8 +4,8 @@ import {
   JumpIdle,
   StartWalkForward,
 } from "./_stateLibrary";
-import { ICharacterState } from "../../interfaces/ICharacterState";
-import { Character } from "../Character";
+import { ICharacterState } from "~/interfaces/ICharacterState";
+import { Character } from "~/characters/Character";
 
 export class DropIdle extends CharacterStateBase implements ICharacterState {
   constructor(character: Character) {

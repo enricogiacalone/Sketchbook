@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { CSM } from "three/addons/csm/CSM.js";
-import { SkyShader } from "../../lib/shaders/SkyShader";
-import { IUpdatable } from "../interfaces/IUpdatable";
-import { World } from "./World";
+import { SkyShader } from "$lib/shaders/SkyShader";
+import { IUpdatable } from "~/interfaces/IUpdatable";
+import { World } from "~/world/World";
 
 export class Sky extends THREE.Object3D implements IUpdatable {
   public updateOrder: number = 5;

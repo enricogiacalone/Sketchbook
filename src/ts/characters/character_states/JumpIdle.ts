@@ -1,6 +1,6 @@
 import { CharacterStateBase, Falling } from "./_stateLibrary";
-import { ICharacterState } from "../../interfaces/ICharacterState";
-import { Character } from "../Character";
+import { ICharacterState } from "~/interfaces/ICharacterState";
+import { Character } from "~/characters/Character";
 
 export class JumpIdle extends CharacterStateBase implements ICharacterState {
   private alreadyJumped: boolean;

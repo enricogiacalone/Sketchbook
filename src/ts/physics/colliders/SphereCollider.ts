@@ -1,7 +1,7 @@
 import * as CANNON from "cannon-es";
 import * as THREE from "three";
-import * as Utils from "../../core/FunctionLibrary";
-import { ICollider } from "../../interfaces/ICollider";
+import * as Utils from "~/core/FunctionLibrary";
+import { ICollider } from "~/interfaces/ICollider";
 
 export class SphereCollider implements ICollider {
   public options: any;

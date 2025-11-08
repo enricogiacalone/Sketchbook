@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { World } from '../world/World';
+import { World } from '~/world/World';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass';

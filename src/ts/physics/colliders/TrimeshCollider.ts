@@ -1,10 +1,10 @@
 import * as CANNON from "cannon-es";
 import { Object3D } from "three";
-import { threeToCannon } from "../../../lib/utils/three-to-cannon";
+import { threeToCannon } from "$lib/utils/three-to-cannon";
 // import { ShapeType, threeToCannon } from "three-to-cannon";
-import * as Utils from "../../core/FunctionLibrary";
-import { ICollider } from "../../interfaces/ICollider";
-import { CollisionGroups } from "../../enums/CollisionGroups";
+import * as Utils from "~/core/FunctionLibrary";
+import { ICollider } from "~/interfaces/ICollider";
+import { CollisionGroups } from "~/enums/CollisionGroups";
 import * as THREE from "three";
 
 export class TrimeshCollider implements ICollider {

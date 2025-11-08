@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { World } from "../world/World";
-import { IUpdatable } from "../interfaces/IUpdatable";
+import { World } from "~/world/World";
+import { IUpdatable } from "~/interfaces/IUpdatable";
 
 interface ExplosionParticle {
     mesh: THREE.Mesh;

@@ -1,7 +1,7 @@
 import { InfoStackMessage } from "./InfoStackMessage";
-import { IWorldEntity } from "../interfaces/IWorldEntity";
-import { EntityType } from "../enums/EntityType";
-import { World } from "../world/World";
+import { IWorldEntity } from "~/interfaces/IWorldEntity";
+import { EntityType } from "~/enums/EntityType";
+import { World } from "~/world/World";
 
 export class InfoStack implements IWorldEntity {
   public updateOrder: number = 3;

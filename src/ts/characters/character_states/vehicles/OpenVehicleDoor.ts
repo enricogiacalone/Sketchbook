@@ -1,12 +1,12 @@
 import * as THREE from "three";
 import { CharacterStateBase } from "../_stateLibrary";
-import { Character } from "../../Character";
-import { VehicleSeat } from "../../../vehicles/VehicleSeat";
-import { Side } from "../../../enums/Side";
-import { Idle } from "../Idle";
+import { Character } from "~/characters/Character";
+import { VehicleSeat } from "~/vehicles/VehicleSeat";
+import { Side } from "~/enums/Side";
+import { Idle } from "~/characters/character_states/Idle";
 import { EnteringVehicle } from "./EnteringVehicle";
-import * as Utils from "../../../core/FunctionLibrary";
-import { SpringSimulator } from "../../../physics/spring_simulation/SpringSimulator";
+import * as Utils from "~/core/FunctionLibrary";
+import { SpringSimulator } from "~/physics/spring_simulation/SpringSimulator";
 
 export class OpenVehicleDoor extends CharacterStateBase {
   private seat: VehicleSeat;

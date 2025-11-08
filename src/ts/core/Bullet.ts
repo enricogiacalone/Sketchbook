@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { IUpdatable } from "../interfaces/IUpdatable";
-import { World } from "../world/World";
+import { IUpdatable } from "~/interfaces/IUpdatable";
+import { World } from "~/world/World";
 
 export class Bullet extends THREE.Mesh implements IUpdatable {
     public updateOrder: number = 5; // Update after camera and characters

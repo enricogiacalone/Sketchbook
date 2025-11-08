@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { SimulatorBase } from "./SimulatorBase";
 import { SimulationFrameVector } from "./SimulationFrameVector";
-import { springV } from "../../core/FunctionLibrary";
+import { springV } from "~/core/FunctionLibrary";
 
 export class VectorSpringSimulator extends SimulatorBase {
   public position: THREE.Vector3;

@@ -1,11 +1,11 @@
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
-import * as Utils from "../../core/FunctionLibrary";
+import * as Utils from "~/core/FunctionLibrary";
 
 import { FollowTarget } from "./FollowTarget";
-import { ICharacterAI } from "../../interfaces/ICharacterAI";
-import { PathNode } from "../../world/PathNode";
-import { Vehicle } from "../../vehicles/Vehicle";
+import { ICharacterAI } from "~/interfaces/ICharacterAI";
+import { PathNode } from "~/world/PathNode";
+import { Vehicle } from "~/vehicles/Vehicle";
 
 export class FollowPath extends FollowTarget implements ICharacterAI {
   public nodeRadius: number;

@@ -1,11 +1,11 @@
 import * as THREE from "three";
-import * as Utils from "../../../core/FunctionLibrary";
+import * as Utils from "~/core/FunctionLibrary";
 
-import { Character } from "../../Character";
-import { VehicleSeat } from "../../../vehicles/VehicleSeat";
-import { Falling } from "../Falling";
+import { Character } from "~/characters/Character";
+import { VehicleSeat } from "~/vehicles/VehicleSeat";
+import { Falling } from "~/characters/character_states/Falling";
 import { ExitingStateBase } from "./ExitingStateBase";
-import { Vehicle } from "../../../vehicles/Vehicle";
+import { Vehicle } from "~/vehicles/Vehicle";
 
 export class ExitingAirplane extends ExitingStateBase {
   constructor(character: Character, seat: VehicleSeat) {

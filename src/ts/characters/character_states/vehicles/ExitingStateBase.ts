@@ -1,10 +1,10 @@
 import * as THREE from "three";
-import * as Utils from "../../../core/FunctionLibrary";
+import * as Utils from "~/core/FunctionLibrary";
 
 import { CharacterStateBase } from "../_stateLibrary";
-import { Character } from "../../Character";
-import { VehicleSeat } from "../../../vehicles/VehicleSeat";
-import { IControllable } from "../../../interfaces/IControllable";
+import { Character } from "~/characters/Character";
+import { VehicleSeat } from "~/vehicles/VehicleSeat";
+import { IControllable } from "~/interfaces/IControllable";
 import { Vehicle } from "src/ts/vehicles/Vehicle";
 
 export abstract class ExitingStateBase extends CharacterStateBase {
