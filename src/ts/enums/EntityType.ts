@@ -1,5 +1,6 @@
 export enum EntityType {
   Character,
+  Enemy,
   Airplane,
   Car,
   Helicopter,

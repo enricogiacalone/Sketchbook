@@ -101,9 +101,12 @@ export class FollowTarget implements ICharacterAI {
         if (this.character.position.distanceTo(targetPosition) < this.stopDistance + 2) { // A bit more distance to enter
           const freeSeat = targetVehicle.seats.find(seat => seat.occupiedBy === null);
           if (freeSeat) {
-            // Make AI character enter the vehicle
-            this.character.enterVehicle(freeSeat, freeSeat.entryPoints[0]); // Assuming first entry point
-            return; // AI character is entering, no need to follow
+            // Re-check if the seat is still free just before entering
+            if (freeSeat.occupiedBy === null) {
+              // Make AI character enter the vehicle
+              this.character.enterVehicle(freeSeat, freeSeat.entryPoints[0]); // Assuming first entry point
+              return; // AI character is entering, no need to follow
+            }
           }
         }
 

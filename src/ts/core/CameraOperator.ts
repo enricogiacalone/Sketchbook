@@ -193,7 +193,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
                     console.log("Hit character:", character);
                     // Only remove from world if it's not the main character
                     if (character !== this.world.characters[0]) {
-                        character.removeFromWorld(this.world);
+                        this.world.remove(character); // Call World's remove method
                     }
                     break;
                 }

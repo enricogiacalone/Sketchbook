@@ -14,6 +14,7 @@ import { InputManager } from "../core/InputManager";
 import { LoadingManager } from "../core/LoadingManager";
 import { UIManager } from "../core/UIManager";
 import { CollisionGroups } from "../enums/CollisionGroups";
+import { EntityType } from "../enums/EntityType"; // Added import for EntityType
 import { IUpdatable } from "../interfaces/IUpdatable";
 import { IWorldEntity } from "../interfaces/IWorldEntity";
 import { BoxCollider } from "../physics/colliders/BoxCollider";
@@ -62,6 +63,9 @@ export class World {
   public gameManager: GameManager;
 
   private lastScenarioID: string;
+  private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
+  private currentEnemyCount: number = 0; // New property to track active enemies
+  private loadingManager: LoadingManager; // New property to store the loading manager
 
   constructor(worldScenePath?: any) {
     const scope = this;
@@ -113,10 +117,11 @@ export class World {
     );
     this.sky = new Sky(this);
 
+    this.loadingManager = new LoadingManager(this); // Initialize loadingManager unconditionally
+
     // Load scene if path is supplied
     if (worldScenePath !== undefined) {
-      let loadingManager = new LoadingManager(this);
-      loadingManager.onFinishedCallback = () => {
+      this.loadingManager.onFinishedCallback = () => {
         this.update(1, 1);
         this.setTimeScale(1);
 
@@ -129,11 +134,12 @@ export class World {
           buttonsStyling: false,
           onClose: () => {
             UIManager.setUserInterfaceVisible(true);
+            this.updateEnemyCountDisplay(); // Update counter after UI is visible
           },
         });
       };
-      loadingManager.loadGLTF(worldScenePath, (gltf) => {
-        this.loadScene(loadingManager, gltf);
+      this.loadingManager.loadGLTF(worldScenePath, (gltf) => {
+        this.loadScene(this.loadingManager, gltf);
       });
     } else {
       UIManager.setUserInterfaceVisible(true);
@@ -141,9 +147,9 @@ export class World {
       Swal.fire({
         icon: "success",
         title: "Hello world!",
-        text: "Empty Sketchbook world was succesfully initialized. Enjoy the blueness of the sky.",
         buttonsStyling: false,
       });
+      this.updateEnemyCountDisplay(); // Update counter after UI is visible
     }
 
     this.render(this);
@@ -243,6 +249,27 @@ export class World {
   }
 
   public remove(worldEntity: IWorldEntity): void {
+    console.log("World.remove called for entity:", worldEntity);
+
+    // Check if the removed entity is an enemy character
+    if (worldEntity instanceof Character) {
+      console.log("Entity is a Character. EntityType:", worldEntity.entityType, "Expected EntityType.Enemy:", EntityType.Enemy);
+      if (worldEntity.entityType === EntityType.Enemy) {
+        this.currentEnemyCount--;
+        console.log(`Enemy removed. Remaining enemies: ${this.currentEnemyCount}`);
+        this.updateEnemyCountDisplay(); // Update UI using helper method
+
+        if (this.currentEnemyCount <= 0) {
+          console.log("All enemies defeated! Spawning new wave.");
+          this.spawnEnemies(this.initialEnemyCount * 2);
+        }
+      } else {
+        console.log("Entity is a Character but not an Enemy. EntityType:", worldEntity.entityType);
+      }
+    } else {
+      console.log("Entity is not a Character. Type:", typeof worldEntity);
+    }
+
     worldEntity.removeFromWorld(this);
     this.unregisterUpdatable(worldEntity);
   }
@@ -315,19 +342,18 @@ export class World {
       }
     }
     if (defaultScenarioID !== undefined)
-      this.launchScenario(defaultScenarioID, loadingManager);
+      this.launchScenario(defaultScenarioID);
   }
 
   public launchScenario(
-    scenarioID: string,
-    loadingManager?: LoadingManager
+    scenarioID: string
   ): void {
     this.lastScenarioID = scenarioID;
 
     this.clearEntities();
+    this.updateEnemyCountDisplay(); // Initialize enemy count display
 
     // Launch default scenario
-    if (!loadingManager) loadingManager = new LoadingManager(this);
     for (const scenario of this.scenarios) {
       if (scenario.id === scenarioID || scenario.spawnAlways) {
         // Find the player spawn point
@@ -340,25 +366,13 @@ export class World {
 
         if (playerSpawnPoint) {
           // Spawn the player character first
-          playerSpawnPoint.spawn(loadingManager, this, () => {
+          playerSpawnPoint.spawn(this.loadingManager, this, () => {
             // After player is spawned, then spawn AI characters
-            for (let i = 0; i < 5; i++) {
-              loadingManager.loadGLTF("boxman.glb", (model) => {
-                let character = new Character(model);
-                character.setBehaviour(new FollowTarget(this.characters[0])); // this.characters[0] should now be the player
-
-                // Get a random spawn position
-                const x = Math.random() * 200 - 100;
-                const z = Math.random() * 100 - 50;
-                character.setPosition(x, 20, z);
-
-                this.add(character);
-              });
-            }
+            this.spawnEnemies(5);
           });
         } else {
           // No player spawn point found, just launch the scenario normally
-          scenario.launch(loadingManager, this);
+          scenario.launch(this.loadingManager, this);
         }
       }
     }
@@ -417,6 +431,61 @@ export class World {
     });
 
     document.getElementById("controls").innerHTML = html;
+  }
+
+  private updateEnemyCountDisplay(): void {
+    console.log("updateEnemyCountDisplay called. currentEnemyCount:", this.currentEnemyCount);
+    let enemyCountElement = document.getElementById("dynamic-enemy-count");
+
+    if (!enemyCountElement) {
+      console.log("Creating dynamic enemy count element.");
+      enemyCountElement = document.createElement("div");
+      enemyCountElement.id = "dynamic-enemy-count";
+      enemyCountElement.style.position = "absolute";
+      enemyCountElement.style.top = "10px";
+      enemyCountElement.style.left = "10px";
+      enemyCountElement.style.color = "white";
+      enemyCountElement.style.fontSize = "24px";
+      enemyCountElement.style.zIndex = "100000";
+      enemyCountElement.style.backgroundColor = "rgba(0,0,0,0.5)";
+      enemyCountElement.style.padding = "5px";
+      enemyCountElement.style.borderRadius = "5px";
+
+      const uiContainer = document.getElementById("ui-container");
+      if (uiContainer) {
+        uiContainer.appendChild(enemyCountElement);
+        console.log("Dynamic enemy count element appended to ui-container.");
+      } else {
+        console.warn("UI container not found, cannot append dynamic enemy count element.");
+        return;
+      }
+    }
+
+    if (enemyCountElement) {
+      enemyCountElement.innerHTML = `Enemies: ${this.currentEnemyCount}`;
+      console.log("Updated #dynamic-enemy-count. Current innerHTML:", enemyCountElement.innerHTML, "Display style:", enemyCountElement.style.display);
+    }
+  }
+
+  public spawnEnemies(count: number): void {
+    this.initialEnemyCount = count; // Update initial count for the new wave
+    this.currentEnemyCount = count; // Reset current count
+    this.updateEnemyCountDisplay(); // Update UI using helper method
+
+    for (let i = 0; i < count; i++) {
+      this.loadingManager.loadGLTF("boxman.glb", (model) => {
+        let character = new Character(model);
+        character.entityType = EntityType.Enemy; // Assign Enemy EntityType
+        character.setBehaviour(new FollowTarget(this.characters[0])); // this.characters[0] is the player
+
+        // Get a random spawn position
+        const x = Math.random() * 200 - 100;
+        const z = Math.random() * 100 - 50;
+        character.setPosition(x, 20, z);
+
+        this.add(character);
+      });
+    }
   }
 
   private generateHTML(): void {

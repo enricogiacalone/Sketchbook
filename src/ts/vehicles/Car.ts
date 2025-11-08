@@ -35,10 +35,10 @@ export class Car extends Vehicle implements IControllable {
       suspensionStiffness: 20,
       suspensionRestLength: 0.35,
       maxSuspensionTravel: 1,
-      frictionSlip: 0.8,
+      frictionSlip: 1.0,
       dampingRelaxation: 2,
       dampingCompression: 2,
-      rollInfluence: 0.8,
+      rollInfluence: 0.4,
     });
 
     this.readCarData(gltf);
@@ -88,7 +88,7 @@ export class Car extends Vehicle implements IControllable {
     }
 
     // Engine
-    const engineForce = 500;
+    const engineForce = 700;
     const maxGears = 5;
     const gearsMaxSpeeds = {
       R: -4,
@@ -278,7 +278,7 @@ export class Car extends Vehicle implements IControllable {
   public onInputChange(): void {
     super.onInputChange();
 
-    const brakeForce = 1000000;
+    const brakeForce = 500000;
 
     if (this.actions.exitVehicle.justPressed) {
       this.characterWantsToExit = true;

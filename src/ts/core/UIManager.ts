@@ -1,5 +1,6 @@
 export class UIManager {
   public static setUserInterfaceVisible(value: boolean): void {
+    console.log("UIManager.setUserInterfaceVisible called with:", value);
     document.getElementById("ui-container").style.display = value
       ? "block"
       : "none";
