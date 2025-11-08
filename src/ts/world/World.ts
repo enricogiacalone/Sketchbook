@@ -5,7 +5,7 @@ import Swal from "sweetalert2";
 import * as THREE from "three";
 import { Detector } from "../../lib/utils/Detector";
 import { Stats } from "../../lib/utils/Stats";
-declare const dat: any;
+import * as dat from "dat.gui";
 import { Character } from "../characters/Character";
 import { CameraOperator } from "../core/CameraOperator";
 import * as Utils from "../core/FunctionLibrary";
