@@ -45,6 +45,15 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public animations: any[];
   public speechBubble: SpeechBubble;
 
+  // Health
+  public maxHealth: number = 100;
+  public health: number;
+  public isDead: boolean = false;
+  public healthBarContainer: THREE.Group;
+  public healthBarMesh: THREE.Mesh;
+  public healthBarBackgroundMesh: THREE.Mesh;
+  private healthBarHideTimeout: any;
+
   // Movement
   public acceleration: THREE.Vector3 = new THREE.Vector3();
   public velocity: THREE.Vector3 = new THREE.Vector3();
@@ -112,6 +121,12 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.speechBubble = new SpeechBubble(this.height); // Pass calculated height
     this.tiltContainer.add(this.speechBubble);
 
+    // Initialize health
+    this.health = this.maxHealth;
+    console.log(`Character ${this.name} initialized with health: ${this.health}`);
+    console.log("Character object after constructor:", this);
+    console.log(`Character ${this.name} initialized with health: ${this.health}`);
+
     this.velocitySimulator = new VectorSpringSimulator(
       60,
       this.defaultVelocitySimulatorMass,
@@ -147,7 +162,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       mass: 1,
       position: new CANNON.Vec3(),
       height: 0.5,
-      radius: 0.25,
+      radius: 0.3,
       segments: 8,
       friction: 0.0,
     });
@@ -155,7 +170,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.characterCapsule.body.shapes.forEach((shape) => {
       // tslint:disable-next-line: no-bitwise
       shape.collisionFilterMask =
-        CollisionGroups.Default | CollisionGroups.TrimeshColliders;
+        CollisionGroups.Default | CollisionGroups.TrimeshColliders | CollisionGroups.Bullet;
     });
     this.characterCapsule.body.allowSleep = false;
 
@@ -176,6 +191,30 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
     // States
     this.setState(new Idle(this));
+  }
+
+  public createHealthBar(): void {
+    console.log(`Character ${this.name} createHealthBar() called.`);
+    // Health bar visuals
+    this.healthBarContainer = new THREE.Group();
+    this.healthBarContainer.position.y = this.height + 0.2; // Position above character's head
+    this.healthBarContainer.scale.set(1 / 3, 1 / 3, 1 / 3); // Scale down for better visibility
+    this.tiltContainer.add(this.healthBarContainer);
+    console.log(`Character ${this.name} healthBarContainer parent after add:`, this.healthBarContainer.parent);
+
+    const healthBarBackgroundGeometry = new THREE.PlaneGeometry(1, 0.1);
+    const healthBarBackgroundMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Red background
+    this.healthBarBackgroundMesh = new THREE.Mesh(healthBarBackgroundGeometry, healthBarBackgroundMaterial);
+    this.healthBarBackgroundMesh.position.set(0, 0, 0);
+    this.healthBarContainer.add(this.healthBarBackgroundMesh);
+
+    const healthBarGeometry = new THREE.PlaneGeometry(1, 0.1);
+    const healthBarMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00 }); // Green health bar
+    this.healthBarMesh = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
+    this.healthBarMesh.position.set(0, 0, 0.001); // Slightly in front of background
+    this.healthBarContainer.add(this.healthBarMesh);
+
+    this.healthBarContainer.visible = false; // Initially hidden
   }
 
   public setAnimations(animations: []): void {
@@ -271,9 +310,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
         this.characterCapsule.body
       );
     } else {
-      this.world.physicsManager.physicsWorld.removeBody(
-        this.characterCapsule.body
-      );
+      this.world.physicsManager.bodiesToRemove.push(this.characterCapsule.body);
     }
   }
 
@@ -405,6 +442,51 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     }
   }
 
+  public takeDamage(damage: number): void {
+    if (this.isDead) return; // Prevent taking damage if already dead
+
+    if (this.health === 100) {
+      console.log(`Character ${this.name} taking ${damage} damage. Initial health was 100.`);
+    } else {
+      console.warn(`Character ${this.name} taking ${damage} damage. Initial health was ${this.health} (expected 100).`);
+    }
+    this.health -= damage;
+    this.health = Math.max(0, this.health); // Ensure health doesn't go below zero
+    console.log(`Character ${this.name} new health: ${this.health}. Health bar visible: ${this.healthBarContainer?.visible}`);
+    console.log(`Character ${this.name} healthBarContainer object:`, this.healthBarContainer);
+
+    // Update health bar
+    const healthPercentage = this.health / this.maxHealth;
+    this.healthBarMesh.scale.x = healthPercentage;
+    this.healthBarMesh.position.x = (healthPercentage - 1) / 2; // Adjust position to scale from left
+
+    this.healthBarContainer.visible = true;
+    console.log(`Character ${this.name} health bar set to visible: ${this.healthBarContainer.visible}`);
+
+    // Clear previous timeout if exists
+    if (this.healthBarHideTimeout) {
+      clearTimeout(this.healthBarHideTimeout);
+    }
+
+    // Set timeout to hide health bar after 3 seconds, only for non-enemies
+    if (this.entityType !== EntityType.Enemy) {
+      this.healthBarHideTimeout = setTimeout(() => {
+        this.healthBarContainer.visible = false;
+        console.log(`Character ${this.name} health bar hidden.`);
+      }, 3000); // 3 seconds
+    }
+
+    if (this.health <= 0) {
+      this.isDead = true; // Mark as dead
+      console.log(`${this.name} has been defeated!`);
+      this.removeFromWorld(this.world);
+      // Ensure health bar is removed when character is defeated
+      if (this.healthBarContainer) {
+        this.healthBarContainer.parent?.remove(this.healthBarContainer);
+      }
+    }
+  }
+
   public update(timeStep: number): void {
     this.behaviour?.update(timeStep);
     this.vehicleEntryInstance?.update(timeStep);
@@ -509,6 +591,14 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
       return action.getClip().duration;
     }
+  }
+
+  public setColor(color: THREE.Color): void {
+    this.materials.forEach((material: any) => {
+      if (material.color !== undefined) {
+        material.color.copy(color);
+      }
+    });
   }
 
   public springMovement(timeStep: number): void {
@@ -771,7 +861,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
   public leaveSeat(): void {
     if (this.occupyingSeat !== null) {
-      this.occupyingSeat.occupiedBy = null;
+      this.occupyingSeat.occupyingBy = null;
       this.occupyingSeat = null;
     }
   }
@@ -996,6 +1086,11 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
       // Register physics
       world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
+      this.characterCapsule.body.userData = this; // Set userData for collision detection
+      console.log(`Character ${this.name} added to world with health: ${this.health}`);
+
+      // Create health bar for the character
+      this.createHealthBar();
 
       // Add to graphicsWorld
       world.sceneManager.graphicsWorld.add(this);
@@ -1009,31 +1104,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   }
 
   public removeFromWorld(world: World): void {
-    if (!_.includes(world.characters, this)) {
-      console.warn(
-        "Removing character from a world in which it isn't present."
-      );
-    } else {
-      if (world.inputManager.inputReceiver === this) {
-        world.inputManager.inputReceiver = undefined;
-      }
-
-      this.world = undefined;
-
-      // Create explosion effect at character's position
-      const explosionPosition = new THREE.Vector3();
-      this.getWorldPosition(explosionPosition);
-      new Explosion(world, explosionPosition);
-
-      // Remove from characters
-      _.pull(world.characters, this);
-
-      // Remove physics
-      world.physicsManager.physicsWorld.removeBody(this.characterCapsule.body);
-
-      // Remove visuals
-      world.sceneManager.graphicsWorld.remove(this);
-      world.sceneManager.graphicsWorld.remove(this.raycastBox);
-    }
+    // Delegate removal to the world, which handles enemy count and physics body removal
+    world.remove(this);
   }
 }

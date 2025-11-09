@@ -6,6 +6,9 @@ import * as Utils from "~/core/FunctionLibrary";
 export class PhysicsManager {
   public world: World;
   public physicsWorld: CANNON.World;
+  public bodiesToRemove: CANNON.Body[] = [];
+  public bulletMaterial: CANNON.Material; // Added
+  public trimeshMaterial: CANNON.Material; // Added
 
   constructor(world: World) {
     this.world = world;
@@ -14,6 +17,19 @@ export class PhysicsManager {
     this.physicsWorld.gravity.set(0, -9.81, 0);
     this.physicsWorld.broadphase = new CANNON.SAPBroadphase(this.physicsWorld);
     this.physicsWorld.allowSleep = true;
+
+    this.bulletMaterial = new CANNON.Material("bulletMaterial");
+    this.trimeshMaterial = new CANNON.Material("trimeshMaterial");
+
+    const bulletTrimeshContactMaterial = new CANNON.ContactMaterial(
+      this.bulletMaterial,
+      this.trimeshMaterial,
+      {
+        friction: 0.3, // Increased friction
+        restitution: 0.7, // Slightly reduced restitution
+      }
+    );
+    this.physicsWorld.addContactMaterial(bulletTrimeshContactMaterial);
 
     this.physicsWorld.addEventListener("preStep", () => {
       this.world.characters.forEach((character) => {
@@ -32,6 +48,14 @@ export class PhysicsManager {
   }
 
   public update(timeStep: number): void {
+    // Process deferred body removals
+    for (let i = 0; i < this.bodiesToRemove.length; i++) {
+      const body = this.bodiesToRemove[i];
+      this.physicsWorld.removeBody(body);
+      body.world = null; // Explicitly nullify world reference
+    }
+    this.bodiesToRemove.length = 0; // Clear the list
+
     this.physicsWorld.step(this.world.physicsFrameTime, timeStep);
 
     this.world.characters.forEach((char) => {

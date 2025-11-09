@@ -196,20 +196,6 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
         rayResult
       );
 
-      if (rayResult.hasHit) {
-        // Find the character associated with the hit body
-        for (const character of this.world.characters) {
-          if (character.characterCapsule.body === rayResult.body) {
-            console.log("Hit character:", character);
-            // Only remove from world if it's not the main character
-            if (character !== this.world.characters[0]) {
-              this.world.remove(character); // Call World's remove method
-            }
-            break;
-          }
-        }
-      }
-
       // Create a visual bullet
       const cameraUp = new THREE.Vector3(0, 1, 0); // World up
       const cameraRight = new THREE.Vector3();

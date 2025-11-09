@@ -1,9 +1,8 @@
+import Swal from "sweetalert2";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { World } from "~/world/World";
 import { LoadingTrackerEntry } from "./LoadingTrackerEntry";
 import { UIManager } from "./UIManager";
-import { Scenario } from "~/world/Scenario";
-import Swal from "sweetalert2";
-import { World } from "~/world/World";
 
 export class LoadingManager {
   public firstLoad: boolean = true;
@@ -85,39 +84,6 @@ export class LoadingManager {
 
       UIManager.setLoadingScreenVisible(false);
     }
-  }
-
-  public createWelcomeScreenCallback(scenario: Scenario): void {
-    if (this.onFinishedCallback === undefined) {
-      this.onFinishedCallback = () => {
-        this.world.update(1, 1);
-
-        Swal.fire({
-          title: scenario.descriptionTitle,
-          html: scenario.descriptionContent,
-          confirmButtonText: "Play",
-          buttonsStyling: false,
-          onClose: () => {
-            this.world.setTimeScale(1);
-            UIManager.setUserInterfaceVisible(true);
-          },
-        });
-      };
-    }
-  }
-
-  private getLoadingPercentage(): number {
-    let done = true;
-    let total = 0;
-    let finished = 0;
-
-    for (const item of this.loadingTracker) {
-      total++;
-      finished += item.progress;
-      if (!item.finished) done = false;
-    }
-
-    return (finished / total) * 100;
   }
 
   private isLoadingDone(): boolean {

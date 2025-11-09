@@ -105,6 +105,15 @@ export class World {
     // Create right panel GUI
     this.createParamsGUI(scope);
 
+    // Initialize Cannon Debugger if Debug_Physics is true
+    if (this.params.Debug_Physics) {
+      console.log("Cannon Debugger: Enabling on startup");
+      this.cannonDebugRenderer = CannonDebugger(
+        this.sceneManager.graphicsWorld,
+        this.physicsManager.physicsWorld
+      );
+    }
+
     // Initialization
     this.inputManager = new InputManager(
       this,
@@ -277,11 +286,34 @@ export class World {
           worldEntity.entityType
         );
       }
+
+      // --- Moved logic from Character.removeFromWorld ---
+      if (this.inputManager.inputReceiver === worldEntity) {
+        this.inputManager.inputReceiver = undefined;
+      }
+
+      // Remove from characters
+      _.pull(this.characters, worldEntity);
+
+      // Remove physics
+      // Make the body completely non-interactive and static before removing it
+      worldEntity.characterCapsule.body.collisionResponse = 0;
+      worldEntity.characterCapsule.body.mass = 0;
+      worldEntity.characterCapsule.body.sleep(); // Put the body to sleep
+      this.physicsManager.bodiesToRemove.push(worldEntity.characterCapsule.body); // Add to deferred removal list
+
+      // Remove visuals
+      this.sceneManager.graphicsWorld.remove(worldEntity);
+      this.sceneManager.graphicsWorld.remove(worldEntity.raycastBox);
+      if (worldEntity.healthBarContainer && worldEntity.healthBarContainer.parent) {
+        worldEntity.healthBarContainer.parent.remove(worldEntity.healthBarContainer);
+      }
+      // --- End of moved logic ---
+
     } else {
       console.log("Entity is not a Character. Type:", typeof worldEntity);
     }
 
-    worldEntity.removeFromWorld(this);
     this.unregisterUpdatable(worldEntity);
   }
 
@@ -323,7 +355,9 @@ export class World {
 
                 this.physicsManager.physicsWorld.addBody(phys.body);
               } else if (child.userData.type === "trimesh") {
-                let phys = new TrimeshCollider(child, {});
+                let phys = new TrimeshCollider(child, {
+                  material: this.physicsManager.trimeshMaterial, // Assign trimesh material
+                });
                 this.physicsManager.physicsWorld.addBody(phys.body);
               }
 
@@ -376,6 +410,7 @@ export class World {
           // Spawn the player character first
           playerSpawnPoint.spawn(this.loadingManager, this, () => {
             // After player is spawned, then spawn AI characters
+            this.characters[0].setColor(new THREE.Color(0x0000ff)); // Set main character color to blue
             this.spawnEnemies(5);
           });
         } else {
@@ -493,8 +528,12 @@ export class World {
     for (let i = 0; i < count; i++) {
       this.loadingManager.loadGLTF("boxman.glb", (model) => {
         let character = new Character(model);
+        character.name = `Enemy ${i}`; // Assign a name for debugging
         character.entityType = EntityType.Enemy; // Assign Enemy EntityType
         character.setBehaviour(new FollowTarget(this.characters[0])); // this.characters[0] is the player
+        character.setColor(new THREE.Color(0xff0000)); // Set enemy character color to red
+        character.createHealthBar(); // Create health bar for enemies
+        console.log(`Spawned ${character.name} with health: ${character.health}`);
 
         // Get a random spawn position
         const x = Math.random() * 200 - 100;
