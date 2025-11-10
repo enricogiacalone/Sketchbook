@@ -66,7 +66,7 @@ export class Bullet extends THREE.Mesh implements IUpdatable {
     }
   }
 
-  private onCollide = (event: CANNON.Event) => {
+  private onCollide = (event: any) => {
     // Create explosion at the bullet's current position (which is the collision point)
     new Explosion(this.world, this.position.clone());
 

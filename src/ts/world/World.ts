@@ -1,11 +1,11 @@
 import * as CANNON from "cannon-es";
-import $ from "jquery";
+
 import * as _ from "lodash";
 import Swal from "sweetalert2";
 import * as THREE from "three";
-import { Detector } from "$lib/utils/Detector";
-import { Stats } from "$lib/utils/Stats";
-import * as dat from "dat.gui";
+
+import Stats from "stats.js";
+import { GUI } from "lil-gui";
 import { Character } from "~/characters/Character";
 import { CameraOperator } from "~/core/CameraOperator";
 import * as Utils from "~/core/FunctionLibrary";
@@ -74,19 +74,6 @@ export class World {
   constructor(worldScenePath?: any) {
     const scope = this;
 
-    // WebGL not supported
-    if (!Detector.webgl) {
-      Swal.fire({
-        icon: "warning",
-        title: "WebGL compatibility",
-        text: "This browser doesn't seem to have the required WebGL capabilities. The application may not work correctly.",
-        footer:
-          '<a href="https://get.webgl.org/" target="_blank">Click here for more information</a>',
-        showConfirmButton: false,
-        buttonsStyling: false,
-      });
-    }
-
     this.sceneManager = new SceneManager(this);
     this.physicsManager = new PhysicsManager(this);
     this.gameManager = new GameManager(this);
@@ -105,7 +92,9 @@ export class World {
     this.justRendered = false;
 
     // Stats (FPS, Frame time, Memory)
-    this.stats = Stats();
+    this.stats = new Stats();
+    this.stats.dom.id = "stats";
+    document.getElementById("ui-container").appendChild(this.stats.dom);
     // Create right panel GUI
     this.createParamsGUI(scope);
 
@@ -342,7 +331,7 @@ export class World {
 
       // Remove physics
       // Make the body completely non-interactive and static before removing it
-      worldEntity.characterCapsule.body.collisionResponse = 0;
+      worldEntity.characterCapsule.body.collisionResponse = false;
       worldEntity.characterCapsule.body.mass = 0;
       worldEntity.characterCapsule.body.sleep(); // Put the body to sleep
       this.physicsManager.bodiesToRemove.push(worldEntity.characterCapsule.body); // Add to deferred removal list
@@ -594,48 +583,61 @@ export class World {
 
   private generateHTML(): void {
     // Fonts
-    $("head").append(
-      '<link href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap" rel="stylesheet">'
-    );
-    $("head").append(
-      '<link href="https://fonts.googleapis.com/css2?family=Solway:wght@400;500;700&display=swap" rel="stylesheet">'
-    );
-    $("head").append(
-      '<link href="https://fonts.googleapis.com/css2?family=Cutive+Mono&display=swap" rel="stylesheet">'
-    );
+    const fontLink1 = document.createElement("link");
+    fontLink1.href =
+      "https://fonts.googleapis.com/css2?family=Alfa+Slab+One&display=swap";
+    fontLink1.rel = "stylesheet";
+    document.head.appendChild(fontLink1);
+
+    const fontLink2 = document.createElement("link");
+    fontLink2.href =
+      "https://fonts.googleapis.com/css2?family=Solway:wght@400;500;700&display=swap";
+    fontLink2.rel = "stylesheet";
+    document.head.appendChild(fontLink2);
+
+    const fontLink3 = document.createElement("link");
+    fontLink3.href =
+      "https://fonts.googleapis.com/css2?family=Cutive+Mono&display=swap";
+    fontLink3.rel = "stylesheet";
+    document.head.appendChild(fontLink3);
 
     // Loader
-    $(`	<div id="loading-screen">
-				<div id="loading-screen-background"></div>
-				<h1 id="main-title" class="sb-font">Sketchbook 0.4</h1>
-				<div class="cubeWrap">
-					<div class="cube">
-						<div class="faces1"></div>
-						<div class="faces2"></div>     
-					</div> 
-				</div> 
-				<div id="loading-text">Loading...</div>
-			</div>
-		`).appendTo("body");
+    const loadingScreenDiv = document.createElement("div");
+    loadingScreenDiv.id = "loading-screen";
+    loadingScreenDiv.innerHTML = `
+      <div id="loading-screen-background"></div>
+      <h1 id="main-title" class="sb-font">Sketchbook 0.4</h1>
+      <div class="cubeWrap">
+        <div class="cube">
+          <div class="faces1"></div>
+          <div class="faces2"></div>     
+        </div> 
+      </div> 
+      <div id="loading-text">Loading...</div>
+    `;
+    document.body.appendChild(loadingScreenDiv);
 
     // UI
-    $(`	<div id="ui-container" style="display: none;">
-				<div class="github-corner">
-					<a href="https://github.com/swift502/Sketchbook" target="_blank" title="Fork me on GitHub">
-						<svg viewbox="0 0 100 100" fill="currentColor">
-							<title>Fork me on GitHub</title>
-							<path d="M0 0v100h100V0H0zm60 70.2h.2c1 2.7.3 4.7 0 5.2 1.4 1.4 2 3 2 5.2 0 7.4-4.4 9-8.7 9.5.7.7 1.3 2
-							1.3 3.7V99c0 .5 1.4 1 1.4 1H44s1.2-.5 1.2-1v-3.8c-3.5 1.4-5.2-.8-5.2-.8-1.5-2-3-2-3-2-2-.5-.2-1-.2-1
-							2-.7 3.5.8 3.5.8 2 1.7 4 1 5 .3.2-1.2.7-2 1.2-2.4-4.3-.4-8.8-2-8.8-9.4 0-2 .7-4 2-5.2-.2-.5-1-2.5.2-5
-							0 0 1.5-.6 5.2 1.8 1.5-.4 3.2-.6 4.8-.6 1.6 0 3.3.2 4.8.7 2.8-2 4.4-2 5-2z"></path>
-						</svg>
-					</a>
-				</div>
-				<div class="left-panel">
-					<div id="controls" class="panel-segment flex-bottom"></div>
-				</div>
-			</div>
-		`).appendTo("body");
+    const uiContainerDiv = document.createElement("div");
+    uiContainerDiv.id = "ui-container";
+    uiContainerDiv.style.display = "none";
+    uiContainerDiv.innerHTML = `
+      <div class="github-corner">
+        <a href="https://github.com/swift502/Sketchbook" target="_blank" title="Fork me on GitHub">
+          <svg viewbox="0 0 100 100" fill="currentColor">
+            <title>Fork me on GitHub</title>
+            <path d="M0 0v100h100V0H0zm60 70.2h.2c1 2.7.3 4.7 0 5.2 1.4 1.4 2 3 2 5.2 0 7.4-4.4 9-8.7 9.5.7.7 1.3 2
+            1.3 3.7V99c0 .5 1.4 1 1.4 1H44s1.2-.5 1.2-1v-3.8c-3.5 1.4-5.2-.8-5.2-.8-1.5-2-3-2-3-2-2-.5-.2-1-.2-1
+            2-.7 3.5.8 3.5.8 2 1.7 4 1 5 .3.2-1.2.7-2 1.2-2.4-4.3-.4-8.8-2-8.8-9.4 0-2 .7-4 2-5.2-.2-.5-1-2.5.2-5
+            0 0 1.5-.6 5.2 1.8 1.5-.4 3.2-.6 4.8-.6 1.6 0 3.3.2 4.8.7 2.8-2 4.4-2 5-2z"></path>
+          </svg>
+        </a>
+      </div>
+      <div class="left-panel">
+        <div id="controls" class="panel-segment flex-bottom"></div>
+      </div>
+    `;
+    document.body.appendChild(uiContainerDiv);
   }
 
   private createParamsGUI(scope: World): void {
@@ -651,7 +653,7 @@ export class World {
       Sun_Rotation: 145,
     };
 
-    const gui = new dat.GUI();
+    const gui = new GUI();
 
     // Scenario
     this.scenarioGUIFolder = gui.addFolder("Scenarios");

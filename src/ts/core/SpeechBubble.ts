@@ -253,8 +253,8 @@ export class SpeechBubble extends THREE.Object3D {
     }
 
     this.textMesh.scale.set(
-      meshWidth / this.textMesh.geometry.parameters.width,
-      meshHeight / this.textMesh.geometry.parameters.height,
+      meshWidth / this.initialTextMeshWidth,
+      meshHeight / this.initialTextMeshHeight,
       1
     );
   }

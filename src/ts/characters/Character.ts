@@ -26,6 +26,7 @@ import { EnteringVehicle } from "~/characters/character_states/vehicles/Entering
 import { ExitingAirplane } from "~/characters/character_states/vehicles/ExitingAirplane";
 import { ExitingVehicle } from "~/characters/character_states/vehicles/ExitingVehicle";
 import { OpenVehicleDoor } from "~/characters/character_states/vehicles/OpenVehicleDoor";
+import { Flying } from "~/characters/character_states/Flying";
 import { SceneManager } from "~/core/SceneManager";
 import { PhysicsManager } from "~/core/PhysicsManager";
 import { UIManager } from "~/core/UIManager";
@@ -156,6 +157,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       seat_switch: new KeyBinding("KeyX"),
       primary: new KeyBinding("Mouse0"),
       secondary: new KeyBinding("Mouse1"),
+      fly: new KeyBinding("KeyB"),
     };
 
     // Physics
@@ -347,6 +349,13 @@ export class Character extends THREE.Object3D implements IWorldEntity {
         event.shiftKey === true
       ) {
         this.world.restartScenario();
+      } else if (code === "KeyB" && pressed === true) {
+        if (this.charState instanceof Flying) {
+          this.setState(new Idle(this));
+          this.displayControls();
+        } else if (!this.rayHasHit) {
+          this.setState(new Flying(this));
+        }
       } else {
         for (const action in this.actions) {
           if (this.actions.hasOwnProperty(action)) {
@@ -574,6 +583,26 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       {
         keys: ["Shift", "+", "C"],
         desc: "Free camera",
+      },
+      {
+        keys: ["B"],
+        desc: "Toggle Flight Mode",
+      },
+      {
+        keys: ["W", "A", "S", "D"],
+        desc: "Fly around (in flight mode)",
+      },
+      {
+        keys: ["Space"],
+        desc: "Fly up (in flight mode)",
+      },
+      {
+        keys: ["Shift"],
+        desc: "Fly down (in flight mode)",
+      },
+      {
+        keys: ["Mouse1"],
+        desc: "Exit Flight Mode",
       },
     ]);
   }
@@ -878,7 +907,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
   public leaveSeat(): void {
     if (this.occupyingSeat !== null) {
-      this.occupyingSeat.occupyingBy = null;
+      this.occupyingSeat.occupiedBy = null;
       this.occupyingSeat = null;
     }
   }
@@ -1007,7 +1036,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     }
 
     // If we're hitting the ground, stick to ground
-    if (character.rayHasHit) {
+    if (character.rayHasHit && !(character.charState instanceof Flying)) {
       // Flatten velocity
       newVelocity.y = 0;
 

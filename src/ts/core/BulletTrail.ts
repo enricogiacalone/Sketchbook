@@ -77,7 +77,7 @@ export class BulletTrail extends THREE.Object3D implements IUpdatable {
     }
   }
 
-  private removeTrail(): void {
+  public removeTrail(): void {
     this.world.sceneManager.graphicsWorld.remove(this);
     this.world.unregisterUpdatable(this);
     this.line.geometry.dispose();

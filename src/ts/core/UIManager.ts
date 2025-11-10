@@ -22,7 +22,7 @@ export class UIManager {
   }
 
   public static setFPSVisible(value: boolean): void {
-    document.getElementById("statsBox").style.display = value
+    document.getElementById("stats").style.display = value
       ? "block"
       : "none";
     document.getElementById("dat-gui-container").style.top = value

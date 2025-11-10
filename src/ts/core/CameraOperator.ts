@@ -163,10 +163,6 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
     code: string,
     pressed: boolean
   ): void {
-    if (this.inputReceiver !== undefined) {
-      this.inputReceiver.handleMouseButton(event, "mouse" + event.button, true);
-    }
-
     // Shooting logic
     if (code === "mouse0" && pressed) {
       // Trigger only on left mouse button DOWN

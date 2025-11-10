@@ -1,17 +1,19 @@
 {
   "include": ["src/ts/**/*"],
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "es2020",
     "target": "es6",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
     "declaration": true,
     "declarationDir": "build/types",
     "baseUrl": ".",
     "types": ["three"],
+    "lib": ["es2017", "dom", "dom.iterable"],
     "paths": {
       "~/*": ["./src/ts/*"],
       "$lib/*": ["./src/lib/*"],
-      "three/addons/*": ["./node_modules/three/examples/jsm/*"]
+      "three/examples/jsm/*": ["./node_modules/three/examples/jsm/*"]
     }
   }
 }

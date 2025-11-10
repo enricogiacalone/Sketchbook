@@ -29,8 +29,6 @@
   },
   "homepage": "https://github.com/swift502/Sketchbook",
   "devDependencies": {
-    "@types/dat.gui": "^0.7.13",
-    "@types/jquery": "^3.5.33",
     "@types/lodash": "^4.17.20",
     "@types/node": "^24.10.0",
     "typescript": "^5.9.3",
@@ -40,11 +38,11 @@
     "@types/three": "^0.181.0",
     "cannon-es": "^0.20.0",
     "cannon-es-debugger": "^1.0.0",
-    "dat.gui": "^0.7.9",
-    "jquery": "^3.7.1",
+    "lil-gui": "^0.21.0",
     "lodash": "^4.17.21",
     "prettier": "^3.6.2",
+    "stats.js": "^0.17.0",
     "sweetalert2": "^11.26.3",
-    "three": "^0.181.0"
+    "three": "^0.181.1"
   }
 }
