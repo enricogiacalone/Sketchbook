@@ -25,6 +25,7 @@ import { Path } from "~/world/Path";
 import { Scenario } from "~/world/Scenario";
 import { CharacterSpawnPoint } from "~/world/CharacterSpawnPoint";
 import { Sky } from "~/world/Sky";
+import { Cloud } from "~/world/Cloud";
 import { SceneManager } from "~/core/SceneManager";
 import { PhysicsManager } from "~/core/PhysicsManager";
 import { GameManager } from "~/core/GameManager";
@@ -32,10 +33,13 @@ import CannonDebugger from "cannon-es-debugger";
 
 import { FollowTarget } from "~/characters/character_ai/FollowTarget";
 import { RandomBehaviour } from "~/characters/character_ai/RandomBehaviour";
+import { Planet } from "./Planet";
 
 export class World {
   public stats: Stats;
   public sky: Sky;
+  public clouds: Cloud[] = [];
+  public planets: Planet[] = [];
   public parallelPairs: any[];
   public physicsFrameRate: number;
   public physicsFrameTime: number;
@@ -125,6 +129,47 @@ export class World {
       this.params.Mouse_Sensitivity
     );
     this.sky = new Sky(this);
+
+    // Create multiple cloud banks
+    for (let i = 0; i < 4; i++) {
+      const bankCenter = new THREE.Vector3(
+        (Math.random() - 0.5) * 1500,
+        100 + (Math.random() - 0.5) * 100,
+        (Math.random() - 0.5) * 1500
+      );
+
+      for (let j = 0; j < 10; j++) {
+        const cloud = new Cloud(
+          this,
+          100 + Math.random() * 100,
+          Math.random() * 0.5 + 0.5
+        );
+        cloud.group.position.set(
+          bankCenter.x + (Math.random() - 0.5) * 500,
+          bankCenter.y + (Math.random() - 0.5) * 50,
+          bankCenter.z + (Math.random() - 0.5) * 500
+        );
+        this.clouds.push(cloud);
+      }
+    }
+
+    // Create a few planets
+    for (let i = 0; i < 3; i++) {
+      const color = new THREE.Color(
+        Math.random(),
+        Math.random(),
+        Math.random()
+      );
+      const size = 50 + Math.random() * 50;
+      const planet = new Planet(this, color, size);
+      planet.setPosition(
+        (Math.random() - 0.5) * 1500,
+        200 + Math.random() * 200,
+        (Math.random() - 0.5) * 1500
+      );
+      planet.mesh.renderOrder = -1; // Render planets behind clouds
+      this.planets.push(planet);
+    }
 
     this.loadingManager = new LoadingManager(this); // Initialize loadingManager unconditionally
 
@@ -310,6 +355,8 @@ export class World {
       }
       // --- End of moved logic ---
 
+    } else if (worldEntity instanceof Vehicle) {
+      worldEntity.removeFromWorld(this);
     } else {
       console.log("Entity is not a Character. Type:", typeof worldEntity);
     }

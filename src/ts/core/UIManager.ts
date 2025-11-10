@@ -1,4 +1,13 @@
+import { Minimap } from './Minimap';
+import { World } from '../world/World';
+
 export class UIManager {
+  public static minimap: Minimap;
+
+  public static initMinimap(world: World): void {
+    this.minimap = new Minimap(world);
+  }
+
   public static setUserInterfaceVisible(value: boolean): void {
     console.log("UIManager.setUserInterfaceVisible called with:", value);
     document.getElementById("ui-container").style.display = value

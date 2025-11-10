@@ -32,11 +32,13 @@ import { UIManager } from "~/core/UIManager";
 import { Explosion } from "~/core/Explosion"; // Added import // Added import
 
 import { SpeechBubble } from "~/core/SpeechBubble";
+import { Bullet } from "../core/Bullet";
 
 export class Character extends THREE.Object3D implements IWorldEntity {
   public updateOrder: number = 1;
   public entityType: EntityType = EntityType.Character;
-
+  private lastShotTime: number = 0;
+  private fireRate: number = 0.2; // seconds between shots
   public height: number = 0;
   public tiltContainer: THREE.Group;
   public modelContainer: THREE.Group;
@@ -422,6 +424,21 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       action.justPressed = false;
       action.justReleased = false;
     }
+  }
+
+  public shoot(): void {
+    const now = Date.now() / 1000;
+    if (now - this.lastShotTime < this.fireRate) {
+      return; // Fire rate limit
+    }
+    this.lastShotTime = now;
+
+    const bulletPosition = this.position
+      .clone()
+      .add(this.orientation.clone().multiplyScalar(0.5)) // Start in front of character
+      .add(new THREE.Vector3(0, this.height * 0.8, 0)); // At chest height
+
+    new Bullet(this.world, bulletPosition, this.orientation);
   }
 
   public takeControl(): void {

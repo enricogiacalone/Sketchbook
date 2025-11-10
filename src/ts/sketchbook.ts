@@ -1,4 +1,5 @@
 import "../css/main.css";
+import { UIManager } from "./core/UIManager";
 import { World } from "~/world/World";
 
 // The application needs a .glb file to load the full world scene.
@@ -14,4 +15,5 @@ import { World } from "~/world/World";
 // 2. Create a 'public' directory in the project root.
 // 3. Place 'world.glb' inside the 'public' directory.
 // 4. Change the line below from 'new World()' to "new World('world.glb')".
-new World("world.glb");
+const world = new World("world.glb");
+UIManager.initMinimap(world);

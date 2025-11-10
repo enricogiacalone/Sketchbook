@@ -25,6 +25,10 @@ export class Idle extends CharacterStateBase implements ICharacterState {
       this.character.setState(new JumpIdle(this.character));
     }
 
+    if (this.character.actions.primary.justPressed) {
+      this.character.shoot();
+    }
+
     if (this.anyDirection()) {
       if (this.character.velocity.length() > 0.5) {
         this.character.setState(new Walk(this.character));

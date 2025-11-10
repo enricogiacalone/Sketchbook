@@ -27,6 +27,10 @@ export class Walk extends CharacterStateBase {
   public onInputChange(): void {
     super.onInputChange();
 
+    if (this.character.actions.primary.justPressed) {
+      this.character.shoot();
+    }
+
     if (this.noDirection()) {
       this.character.setState(new EndWalk(this.character));
     }

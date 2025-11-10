@@ -1,0 +1,48 @@
+import * as THREE from "three";
+import { World } from "./World";
+
+export class Planet {
+  public mesh: THREE.Mesh;
+
+  constructor(world: World, textureColor: THREE.Color, size: number) {
+    const texture = this.createPlanetTexture(textureColor);
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+    });
+    const geometry = new THREE.SphereGeometry(size, 32, 32);
+    this.mesh = new THREE.Mesh(geometry, material);
+    world.sceneManager.graphicsWorld.add(this.mesh);
+  }
+
+  public setPosition(x: number, y: number, z: number): void {
+    this.mesh.position.set(x, y, z);
+  }
+
+  private createPlanetTexture(color: THREE.Color): THREE.CanvasTexture {
+    const canvas = document.createElement("canvas");
+    canvas.width = 128;
+    canvas.height = 128;
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("Failed to get 2d context");
+    }
+
+    // Base color
+    context.fillStyle = "#" + color.getHexString();
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Add some noise
+    for (let i = 0; i < 1000; i++) {
+      const x = Math.random() * canvas.width;
+      const y = Math.random() * canvas.height;
+      const alpha = Math.random() * 0.2;
+      context.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+      context.beginPath();
+      context.arc(x, y, Math.random() * 2, 0, Math.PI * 2);
+      context.fill();
+    }
+
+    return new THREE.CanvasTexture(canvas);
+  }
+}

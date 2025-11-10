@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import { World } from "~/world/World";
 import { IUpdatable } from "~/interfaces/IUpdatable";
+import { Character } from "../characters/Character";
+import { EntityType } from "../enums/EntityType";
 
 interface ExplosionParticle {
   mesh: THREE.Mesh;
@@ -18,6 +20,8 @@ export class Explosion extends THREE.Group implements IUpdatable {
   private particleCount: number = 15;
   private maxParticleSpeed: number = 10;
   private maxParticleLifetime: number = 1.0; // seconds
+  private radius: number = 3;
+  private damage: number = 50;
 
   constructor(world: World, position: THREE.Vector3) {
     super();
@@ -28,6 +32,22 @@ export class Explosion extends THREE.Group implements IUpdatable {
     this.world.registerUpdatable(this);
 
     this.createParticles();
+    this.applyRadiusDamage();
+  }
+
+  private applyRadiusDamage(): void {
+    this.world.physicsManager.physicsWorld.bodies.forEach((body) => {
+      if (body.userData instanceof Character) {
+        const character = body.userData as Character;
+        const distance = character.position.distanceTo(this.position);
+
+        if (distance < this.radius) {
+          const damage =
+            this.damage * (1 - distance / this.radius);
+          character.takeDamage(damage);
+        }
+      }
+    });
   }
 
   private createParticles(): void {

@@ -67,37 +67,23 @@ export class Bullet extends THREE.Mesh implements IUpdatable {
   }
 
   private onCollide = (event: CANNON.Event) => {
-    const otherBody = event.body;
-    const character = otherBody.userData as Character;
+    // Create explosion at the bullet's current position (which is the collision point)
+    new Explosion(this.world, this.position.clone());
 
-    if (character instanceof Character) {
-      // If it hits any character (enemy or main character), remove the bullet.
-      // Only damage enemies.
-      if (character.entityType === EntityType.Enemy) {
-        console.log(`Bullet hit character: ${character.name} (Health: ${character.health})`);
-        console.log("Bullet damage:", this.damage);
-        character.takeDamage(this.damage);
+    // Create bullet impact effect at collision point
+    const contactPoint = new THREE.Vector3()
+      .copy(event.contact.ni as unknown as THREE.Vector3)
+      .negate()
+      .multiplyScalar(event.contact.ri.length())
+      .add(this.position);
+    const contactNormal = new THREE.Vector3().copy(
+      event.contact.ni as unknown as THREE.Vector3
+    );
+    new BulletImpactEffect(this.world, contactPoint, contactNormal);
 
-        // Create bullet impact effect at collision point
-        const contactPoint = new THREE.Vector3().copy(event.contact.ni as unknown as THREE.Vector3).negate().multiplyScalar(event.contact.ri.length()).add(this.position);
-        const contactNormal = new THREE.Vector3().copy(event.contact.ni as unknown as THREE.Vector3);
-        new BulletImpactEffect(this.world, contactPoint, contactNormal);
-
-        if (character.health <= 0) {
-          // Create explosion at the bullet's current position (which is the collision point)
-          new Explosion(this.world, this.position);
-        }
-      }
-      this.removeBullet(); // Remove bullet if it hits any character
-    } else {
-      // If it's not a character, the bullet bounces.
-      // Create a bullet impact effect for ricochets.
-      const contactPoint = new THREE.Vector3().copy(event.contact.ni as unknown as THREE.Vector3).negate().multiplyScalar(event.contact.ri.length()).add(this.position);
-      const contactNormal = new THREE.Vector3().copy(event.contact.ni as unknown as THREE.Vector3);
-      new BulletImpactEffect(this.world, contactPoint, contactNormal);
-      // The bullet will be removed when its lifetime expires.
-    }
-  }
+    // Remove bullet
+    this.removeBullet();
+  };
 
   private removeBullet(): void {
     this.world.physicsManager.physicsWorld.removeBody(this.body);
