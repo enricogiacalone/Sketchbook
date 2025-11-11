@@ -35,6 +35,38 @@ import { FollowTarget } from "~/characters/character_ai/FollowTarget";
 import { RandomBehaviour } from "~/characters/character_ai/RandomBehaviour";
 import { Planet } from "./Planet";
 
+// Constants for cloud generation
+const CLOUD_BANK_COUNT = 4;
+const CLOUDS_PER_BANK = 10;
+const CLOUD_BANK_SPREAD_X = 1500;
+const CLOUD_BANK_SPREAD_Z = 1500;
+const CLOUD_BANK_BASE_Y = 100;
+const CLOUD_BANK_RANDOM_Y = 100;
+const CLOUD_POSITION_RANDOM_X = 500;
+const CLOUD_POSITION_RANDOM_Y = 50;
+const CLOUD_POSITION_RANDOM_Z = 500;
+const CLOUD_SIZE_BASE = 100;
+const CLOUD_SIZE_RANDOM = 100;
+const CLOUD_OPACITY_BASE = 0.5;
+const CLOUD_OPACITY_RANDOM = 0.5;
+
+// Constants for planet generation
+const PLANET_COUNT = 3;
+const PLANET_SIZE_BASE = 50;
+const PLANET_SIZE_RANDOM = 50;
+const PLANET_POSITION_RANDOM_X = 1500;
+const PLANET_POSITION_BASE_Y = 200;
+const PLANET_POSITION_RANDOM_Y = 200;
+const PLANET_POSITION_RANDOM_Z = 1500;
+
+// Constants for GLTF userData
+const USER_DATA_PHYSICS = "physics";
+const USER_DATA_TYPE_BOX = "box";
+const USER_DATA_TYPE_TRIMESH = "trimesh";
+const USER_DATA_PATH = "path";
+const USER_DATA_SCENARIO = "scenario";
+const MATERIAL_NAME_OCEAN = "ocean";
+
 export class World {
   public stats: Stats;
   public sky: Sky;
@@ -72,33 +104,23 @@ export class World {
   private loadingManager: LoadingManager; // New property to store the loading manager
 
   constructor(worldScenePath?: any) {
-    const scope = this;
+    this._initializeCoreManagers();
+    this._initializePhysicsSettings();
+    this._initializeRenderLoop();
+    this._initializeStatsAndGUI();
+    this._initializeCannonDebugger(); // Call the new method here
+    this._initializeInputAndCamera();
+    this._initializeSkyAndClouds();
+    this._initializePlanets();
+    this._loadWorldScene(worldScenePath);
 
-    this.sceneManager = new SceneManager(this);
-    this.physicsManager = new PhysicsManager(this);
-    this.gameManager = new GameManager(this);
-    this.generateHTML();
+    this.render(this);
+  }
 
-    this.parallelPairs = [];
-    this.physicsFrameRate = 60;
-    this.physicsFrameTime = 1 / this.physicsFrameRate;
-    this.physicsMaxPrediction = this.physicsFrameRate;
-
-    // RenderLoop
-    this.clock = new THREE.Clock();
-    this.renderDelta = 0;
-    this.logicDelta = 0;
-    this.sinceLastFrame = 0;
-    this.justRendered = false;
-
-    // Stats (FPS, Frame time, Memory)
-    this.stats = new Stats();
-    this.stats.dom.id = "stats";
-    document.getElementById("ui-container").appendChild(this.stats.dom);
-    // Create right panel GUI
-    this.createParamsGUI(scope);
-
-    // Initialize Cannon Debugger if Debug_Physics is true
+  /**
+   * Initializes Cannon Debugger if Debug_Physics is true.
+   */
+  private _initializeCannonDebugger(): void {
     if (this.params.Debug_Physics) {
       console.log("Cannon Debugger: Enabling on startup");
       this.cannonDebugRenderer = CannonDebugger(
@@ -106,8 +128,53 @@ export class World {
         this.physicsManager.physicsWorld
       );
     }
+  }
 
-    // Initialization
+  /**
+   * Initializes core managers (Scene, Physics, Game) and generates initial HTML.
+   */
+  private _initializeCoreManagers(): void {
+    this.sceneManager = new SceneManager(this);
+    this.physicsManager = new PhysicsManager(this);
+    this.gameManager = new GameManager(this);
+    this.generateHTML();
+  }
+
+  /**
+   * Sets up physics-related parameters.
+   */
+  private _initializePhysicsSettings(): void {
+    this.parallelPairs = [];
+    this.physicsFrameRate = 60;
+    this.physicsFrameTime = 1 / this.physicsFrameRate;
+    this.physicsMaxPrediction = this.physicsFrameRate;
+  }
+
+  /**
+   * Initializes render loop related properties.
+   */
+  private _initializeRenderLoop(): void {
+    this.clock = new THREE.Clock();
+    this.renderDelta = 0;
+    this.logicDelta = 0;
+    this.sinceLastFrame = 0;
+    this.justRendered = false;
+  }
+
+  /**
+   * Initializes performance stats and the GUI.
+   */
+  private _initializeStatsAndGUI(): void {
+    this.stats = new Stats();
+    this.stats.dom.id = "stats";
+    document.getElementById("ui-container").appendChild(this.stats.dom);
+    this.createParamsGUI(this); // Pass 'this' (World instance) as scope
+  }
+
+  /**
+   * Initializes input management and camera operation.
+   */
+  private _initializeInputAndCamera(): void {
     this.inputManager = new InputManager(
       this,
       this.sceneManager.renderer.domElement
@@ -117,52 +184,67 @@ export class World {
       this.sceneManager.camera,
       this.params.Mouse_Sensitivity
     );
+  }
+
+  /**
+   * Initializes the sky and creates cloud banks.
+   */
+  private _initializeSkyAndClouds(): void {
     this.sky = new Sky(this);
 
     // Create multiple cloud banks
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < CLOUD_BANK_COUNT; i++) {
       const bankCenter = new THREE.Vector3(
-        (Math.random() - 0.5) * 1500,
-        100 + (Math.random() - 0.5) * 100,
-        (Math.random() - 0.5) * 1500
+        (Math.random() - 0.5) * CLOUD_BANK_SPREAD_X,
+        CLOUD_BANK_BASE_Y + (Math.random() - 0.5) * CLOUD_BANK_RANDOM_Y,
+        (Math.random() - 0.5) * CLOUD_BANK_SPREAD_Z
       );
 
-      for (let j = 0; j < 10; j++) {
+      for (let j = 0; j < CLOUDS_PER_BANK; j++) {
         const cloud = new Cloud(
           this,
-          100 + Math.random() * 100,
-          Math.random() * 0.5 + 0.5
+          CLOUD_SIZE_BASE + Math.random() * CLOUD_SIZE_RANDOM,
+          CLOUD_OPACITY_BASE + Math.random() * CLOUD_OPACITY_RANDOM
         );
         cloud.group.position.set(
-          bankCenter.x + (Math.random() - 0.5) * 500,
-          bankCenter.y + (Math.random() - 0.5) * 50,
-          bankCenter.z + (Math.random() - 0.5) * 500
+          bankCenter.x + (Math.random() - 0.5) * CLOUD_POSITION_RANDOM_X,
+          bankCenter.y + (Math.random() - 0.5) * CLOUD_POSITION_RANDOM_Y,
+          bankCenter.z + (Math.random() - 0.5) * CLOUD_POSITION_RANDOM_Z
         );
         this.clouds.push(cloud);
       }
     }
+  }
 
-    // Create a few planets
-    for (let i = 0; i < 3; i++) {
+  /**
+   * Creates and positions planets in the world.
+   */
+  private _initializePlanets(): void {
+    for (let i = 0; i < PLANET_COUNT; i++) {
       const color = new THREE.Color(
         Math.random(),
         Math.random(),
         Math.random()
       );
-      const size = 50 + Math.random() * 50;
-      const planet = new Planet(this, color, size);
+      const size = PLANET_SIZE_BASE + Math.random() * PLANET_SIZE_RANDOM;
+      const planet = new Planet(this, this.physicsManager, color, size);
       planet.setPosition(
-        (Math.random() - 0.5) * 1500,
-        200 + Math.random() * 200,
-        (Math.random() - 0.5) * 1500
+        (Math.random() - 0.5) * PLANET_POSITION_RANDOM_X,
+        PLANET_POSITION_BASE_Y + Math.random() * PLANET_POSITION_RANDOM_Y,
+        (Math.random() - 0.5) * PLANET_POSITION_RANDOM_Z
       );
       planet.mesh.renderOrder = -1; // Render planets behind clouds
       this.planets.push(planet);
     }
+  }
 
+  /**
+   * Handles loading the world scene, if a path is provided.
+   * @param worldScenePath Optional path to the GLTF scene to load.
+   */
+  private _loadWorldScene(worldScenePath?: any): void {
     this.loadingManager = new LoadingManager(this); // Initialize loadingManager unconditionally
 
-    // Load scene if path is supplied
     if (worldScenePath !== undefined) {
       this.loadingManager.onFinishedCallback = () => {
         this.update(1, 1);
@@ -195,8 +277,6 @@ export class World {
       });
       this.updateEnemyCountDisplay(); // Update counter after UI is visible
     }
-
-    this.render(this);
   }
 
   // Update
@@ -204,6 +284,10 @@ export class World {
   public update(timeStep: number, unscaledTimeStep: number): void {
     this.physicsManager.update(timeStep);
     this.gameManager.update(timeStep, unscaledTimeStep);
+
+    this.planets.forEach((planet) => {
+      planet.update();
+    });
 
     if (this.params.Debug_Physics) {
       console.log("Cannon Debugger: Updating");
@@ -359,57 +443,7 @@ export class World {
 
   public loadScene(loadingManager: LoadingManager, gltf: any): void {
     gltf.scene.traverse((child) => {
-      if (child.hasOwnProperty("userData")) {
-        if (child.type === "Mesh") {
-          Utils.setupMeshProperties(child);
-          this.sky.csm.setupMaterial(child.material);
-
-          if (child.material.name === "ocean") {
-            this.registerUpdatable(new Ocean(child, this));
-          }
-        }
-
-        if (child.userData.hasOwnProperty("data")) {
-          if (child.userData.data === "physics") {
-            if (child.userData.hasOwnProperty("type")) {
-              // Convex doesn't work! Stick to boxes!
-              if (child.userData.type === "box") {
-                let phys = new BoxCollider({
-                  size: new THREE.Vector3(
-                    child.scale.x,
-                    child.scale.y,
-                    child.scale.z
-                  ),
-                });
-                phys.body.position.copy(Utils.cannonVector(child.position));
-                phys.body.quaternion.copy(Utils.cannonQuat(child.quaternion));
-                phys.body.updateAABB();
-
-                phys.body.shapes.forEach((shape) => {
-                  shape.collisionFilterMask = ~CollisionGroups.TrimeshColliders;
-                });
-
-                this.physicsManager.physicsWorld.addBody(phys.body);
-              } else if (child.userData.type === "trimesh") {
-                let phys = new TrimeshCollider(child, {
-                  material: this.physicsManager.trimeshMaterial, // Assign trimesh material
-                });
-                this.physicsManager.physicsWorld.addBody(phys.body);
-              }
-
-              child.visible = false;
-            }
-          }
-
-          if (child.userData.data === "path") {
-            this.paths.push(new Path(child));
-          }
-
-          if (child.userData.data === "scenario") {
-            this.scenarios.push(new Scenario(child, this));
-          }
-        }
-      }
+      this._processSceneChild(child);
     });
 
     this.sceneManager.graphicsWorld.add(gltf.scene);
@@ -423,6 +457,64 @@ export class World {
       }
     }
     if (defaultScenarioID !== undefined) this.launchScenario(defaultScenarioID);
+  }
+
+  /**
+   * Processes a single child object from the loaded GLTF scene.
+   * @param child The THREE.Object3D child to process.
+   */
+  private _processSceneChild(child: THREE.Object3D): void {
+    if (child.hasOwnProperty("userData")) {
+      if (child.type === "Mesh") {
+        Utils.setupMeshProperties(child);
+        this.sky.csm.setupMaterial(child.material);
+
+        if (child.material.name === MATERIAL_NAME_OCEAN) {
+          this.registerUpdatable(new Ocean(child, this));
+        }
+      }
+
+      if (child.userData.hasOwnProperty("data")) {
+        if (child.userData.data === USER_DATA_PHYSICS) {
+          if (child.userData.hasOwnProperty("type")) {
+            // Convex doesn't work! Stick to boxes!
+            if (child.userData.type === USER_DATA_TYPE_BOX) {
+              let phys = new BoxCollider({
+                size: new THREE.Vector3(
+                  child.scale.x,
+                  child.scale.y,
+                  child.scale.z
+                ),
+              });
+              phys.body.position.copy(Utils.cannonVector(child.position));
+              phys.body.quaternion.copy(Utils.cannonQuat(child.quaternion));
+              phys.body.updateAABB();
+
+              phys.body.shapes.forEach((shape) => {
+                shape.collisionFilterMask = ~CollisionGroups.TrimeshColliders;
+              });
+
+              this.physicsManager.physicsWorld.addBody(phys.body);
+            } else if (child.userData.type === USER_DATA_TYPE_TRIMESH) {
+              let phys = new TrimeshCollider(child, {
+                material: this.physicsManager.trimeshMaterial, // Assign trimesh material
+              });
+              this.physicsManager.physicsWorld.addBody(phys.body);
+            }
+
+            child.visible = false;
+          }
+        }
+
+        if (child.userData.data === USER_DATA_PATH) {
+          this.paths.push(new Path(child));
+        }
+
+        if (child.userData.data === USER_DATA_SCENARIO) {
+          this.scenarios.push(new Scenario(child, this));
+        }
+      }
+    }
   }
 
   public launchScenario(scenarioID: string): void {

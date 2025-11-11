@@ -18,8 +18,8 @@ import * as THREE from "three";
 export let SkyShader = {
   uniforms: {
     luminance: { value: 1 },
-    turbidity: { value: 2 },
-    rayleigh: { value: 1 },
+    turbidity: { value: 1 },
+    rayleigh: { value: 0.5 },
     mieCoefficient: { value: 0.005 },
     mieDirectionalG: { value: 0.8 },
     sunPosition: { value: new THREE.Vector3() },

@@ -3,6 +3,11 @@ import { World } from "~/world/World";
 import * as THREE from "three";
 import * as Utils from "~/core/FunctionLibrary";
 
+// Physics Constants
+const GRAVITY_Y = -9.81;
+const BULLET_TRIMESH_FRICTION = 0.3;
+const BULLET_TRIMESH_RESTITUTION = 0.7;
+
 export class PhysicsManager {
   public world: World;
   public physicsWorld: CANNON.World;
@@ -14,7 +19,7 @@ export class PhysicsManager {
     this.world = world;
 
     this.physicsWorld = new CANNON.World();
-    this.physicsWorld.gravity.set(0, -9.81, 0);
+    this.physicsWorld.gravity.set(0, GRAVITY_Y, 0);
     this.physicsWorld.broadphase = new CANNON.SAPBroadphase(this.physicsWorld);
     this.physicsWorld.allowSleep = true;
 
@@ -25,57 +30,71 @@ export class PhysicsManager {
       this.bulletMaterial,
       this.trimeshMaterial,
       {
-        friction: 0.3, // Increased friction
-        restitution: 0.7, // Slightly reduced restitution
+        friction: BULLET_TRIMESH_FRICTION,
+        restitution: BULLET_TRIMESH_RESTITUTION,
       }
     );
     this.physicsWorld.addContactMaterial(bulletTrimeshContactMaterial);
 
-    this.physicsWorld.addEventListener("preStep", () => {
-      this.world.characters.forEach((character) => {
-        character.physicsPreStep(character.characterCapsule.body, character);
-      });
-      this.world.vehicles.forEach((vehicle) => {
-        vehicle.physicsPreStep(vehicle.collision);
-      });
-    });
+    this.physicsWorld.addEventListener("preStep", () => this._onPreStep());
+    this.physicsWorld.addEventListener("postStep", () => this._onPostStep());
+  }
 
-    this.physicsWorld.addEventListener("postStep", () => {
-      this.world.characters.forEach((character) => {
-        character.physicsPostStep(character.characterCapsule.body, character);
-      });
+  private _onPreStep(): void {
+    this.world.characters.forEach((character) => {
+      character.physicsPreStep(character.characterCapsule.body, character);
+    });
+    this.world.vehicles.forEach((vehicle) => {
+      vehicle.physicsPreStep(vehicle.collision);
+    });
+  }
+
+  private _onPostStep(): void {
+    this.world.characters.forEach((character) => {
+      character.physicsPostStep(character.characterCapsule.body, character);
     });
   }
 
   public update(timeStep: number): void {
-    // Process deferred body removals
+    this._processDeferredBodyRemovals();
+
+    this.physicsWorld.step(this.world.physicsFrameTime, timeStep);
+
+    this.world.characters.forEach((char) => {
+      this._handleCharacterOutOfBounds(char);
+    });
+
+    this.world.vehicles.forEach((vehicle) => {
+      this._handleVehicleOutOfBounds(vehicle);
+    });
+  }
+
+  private _processDeferredBodyRemovals(): void {
     for (let i = 0; i < this.bodiesToRemove.length; i++) {
       const body = this.bodiesToRemove[i];
       this.physicsWorld.removeBody(body);
       body.world = null; // Explicitly nullify world reference
     }
     this.bodiesToRemove.length = 0; // Clear the list
+  }
 
-    this.physicsWorld.step(this.world.physicsFrameTime, timeStep);
+  private _handleCharacterOutOfBounds(character: Character): void {
+    if (this.world.isOutOfBounds(character.characterCapsule.body.position)) {
+      this.world.outOfBoundsRespawn(character.characterCapsule.body);
+    }
+  }
 
-    this.world.characters.forEach((char) => {
-      if (this.world.isOutOfBounds(char.characterCapsule.body.position)) {
-        this.world.outOfBoundsRespawn(char.characterCapsule.body);
-      }
-    });
-
-    this.world.vehicles.forEach((vehicle) => {
-      if (
-        this.world.isOutOfBounds(vehicle.rayCastVehicle.chassisBody.position)
-      ) {
-        let worldPos = new THREE.Vector3();
-        vehicle.spawnPoint.getWorldPosition(worldPos);
-        worldPos.y += 1;
-        this.world.outOfBoundsRespawn(
-          vehicle.rayCastVehicle.chassisBody,
-          Utils.cannonVector(worldPos)
-        );
-      }
-    });
+  private _handleVehicleOutOfBounds(vehicle: Vehicle): void {
+    if (
+      this.world.isOutOfBounds(vehicle.rayCastVehicle.chassisBody.position)
+    ) {
+      let worldPos = new THREE.Vector3();
+      vehicle.spawnPoint.getWorldPosition(worldPos);
+      worldPos.y += 1;
+      this.world.outOfBoundsRespawn(
+        vehicle.rayCastVehicle.chassisBody,
+        Utils.cannonVector(worldPos)
+      );
+    }
   }
 }

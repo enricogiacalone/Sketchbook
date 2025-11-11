@@ -67,7 +67,7 @@ export class Sky extends THREE.Object3D implements IUpdatable {
       // far: 250, // maxFar
       lightIntensity: 2.5,
       cascades: 3,
-      shadowMapSize: 2048,
+      shadowMapSize: 1024,
       camera: world.sceneManager.camera,
       parent: world.sceneManager.graphicsWorld,
     });

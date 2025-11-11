@@ -1,10 +1,13 @@
 import * as THREE from "three";
+import * as CANNON from "cannon-es";
 import { World } from "./World";
+import { PhysicsManager } from "../core/PhysicsManager";
 
 export class Planet {
   public mesh: THREE.Mesh;
+  public body: CANNON.Body;
 
-  constructor(world: World, textureColor: THREE.Color, size: number) {
+  constructor(world: World, physicsManager: PhysicsManager, textureColor: THREE.Color, size: number) {
     const texture = this.createPlanetTexture(textureColor);
     const material = new THREE.MeshBasicMaterial({
       map: texture,
@@ -12,10 +15,25 @@ export class Planet {
     const geometry = new THREE.SphereGeometry(size, 32, 32);
     this.mesh = new THREE.Mesh(geometry, material);
     world.sceneManager.graphicsWorld.add(this.mesh);
+
+    // Create CANNON.Body
+    const shape = new CANNON.Sphere(size);
+    this.body = new CANNON.Body({
+      mass: 0, // Static body
+      shape: shape,
+      material: physicsManager.solidMaterial, // Use a generic solid material for now
+    });
+    physicsManager.physicsWorld.addBody(this.body);
   }
 
   public setPosition(x: number, y: number, z: number): void {
     this.mesh.position.set(x, y, z);
+    this.body.position.set(x, y, z);
+  }
+
+  public update(): void {
+    this.mesh.position.copy(this.body.position as any);
+    this.mesh.quaternion.copy(this.body.quaternion as any);
   }
 
   private createPlanetTexture(color: THREE.Color): THREE.CanvasTexture {
@@ -28,8 +46,11 @@ export class Planet {
       throw new Error("Failed to get 2d context");
     }
 
+    // Ensure 'color' is a proper THREE.Color instance
+    const safeColor = new THREE.Color().copy(color);
+
     // Base color
-    context.fillStyle = "#" + color.getHexString();
+    context.fillStyle = "#" + safeColor.getHexString();
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     // Add some noise

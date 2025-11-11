@@ -5,6 +5,17 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass";
 import { FXAAShader } from "three/examples/jsm/shaders/FXAAShader";
 
+const MAX_DEVICE_PIXEL_RATIO = 1.5;
+
+// Camera Constants
+const CAMERA_FOV = 80;
+const CAMERA_NEAR = 0.1;
+const CAMERA_FAR = 1010;
+
+// Renderer Constants
+const TONE_MAPPING_EXPOSURE = 1.0;
+const SHADOW_MAP_TYPE = THREE.PCFSoftShadowMap;
+
 export class SceneManager {
   public world: World;
   public renderer: THREE.WebGLRenderer;
@@ -14,29 +25,46 @@ export class SceneManager {
 
   constructor(world: World) {
     this.world = world;
+    this.graphicsWorld = new THREE.Scene();
 
-    // Renderer
-    this.renderer = new THREE.WebGLRenderer();
-    this.renderer.setPixelRatio(window.devicePixelRatio);
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this._initializeRenderer();
+    this._initializeCamera();
+    this._initializePostProcessing();
+    this._setupCanvas();
 
     // Auto window resize
     window.addEventListener("resize", () => this.onWindowResize(), false);
+  }
 
-    // Three.js scene
-    this.graphicsWorld = new THREE.Scene();
+  /**
+   * Initializes the WebGLRenderer.
+   */
+  private _initializeRenderer(): void {
+    this.renderer = new THREE.WebGLRenderer();
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_DEVICE_PIXEL_RATIO));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = TONE_MAPPING_EXPOSURE;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = SHADOW_MAP_TYPE;
+  }
+
+  /**
+   * Initializes the PerspectiveCamera.
+   */
+  private _initializeCamera(): void {
     this.camera = new THREE.PerspectiveCamera(
-      80,
+      CAMERA_FOV,
       window.innerWidth / window.innerHeight,
-      0.1,
-      1010
+      CAMERA_NEAR,
+      CAMERA_FAR
     );
+  }
 
-    // Passes
+  /**
+   * Initializes post-processing effects (EffectComposer, RenderPass, FXAAShader).
+   */
+  private _initializePostProcessing(): void {
     let renderPass = new RenderPass(this.graphicsWorld, this.camera);
     let fxaaPass = new ShaderPass(FXAAShader);
 
@@ -51,7 +79,12 @@ export class SceneManager {
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(renderPass);
     this.composer.addPass(fxaaPass);
+  }
 
+  /**
+   * Appends the renderer's DOM element to the document body and sets its ID.
+   */
+  private _setupCanvas(): void {
     document.body.appendChild(this.renderer.domElement);
     this.renderer.domElement.id = "canvas";
   }
@@ -62,11 +95,14 @@ export class SceneManager {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
 
     let pixelRatio = this.renderer.getPixelRatio();
-    let fxaaPass = this.composer.passes[1] as ShaderPass;
-    fxaaPass.uniforms["resolution"].value.set(
-      1 / (window.innerWidth * pixelRatio),
-      1 / (window.innerHeight * pixelRatio)
-    );
+    // Ensure fxaaPass is a ShaderPass before accessing its uniforms
+    const fxaaPass = this.composer.passes[1] as ShaderPass;
+    if (fxaaPass && fxaaPass.uniforms && fxaaPass.uniforms["resolution"]) {
+      fxaaPass.uniforms["resolution"].value.set(
+        1 / (window.innerWidth * pixelRatio),
+        1 / (window.innerHeight * pixelRatio)
+      );
+    }
     this.composer.setSize(
       window.innerWidth * pixelRatio,
       window.innerHeight * pixelRatio

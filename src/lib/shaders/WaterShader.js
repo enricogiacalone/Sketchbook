@@ -48,13 +48,13 @@ export let WaterShader = {
     varying vec3 vWorldPosition;
     varying vec2 vTexCoord;
   
-    const int NUM_STEPS = 8;
+    const int NUM_STEPS = 5;
     const float PI	 	= 3.1415;
     const float EPSILON	= 1e-3;
   
     // sea variables
-    const int ITER_GEOMETRY = 3;
-    const int ITER_FRAGMENT = 5;
+    const int ITER_GEOMETRY = 2;
+    const int ITER_FRAGMENT = 3;
     const float SEA_HEIGHT = 0.6;
     const float SEA_CHOPPY = 1.0;
     const float SEA_SPEED = 1.0;
