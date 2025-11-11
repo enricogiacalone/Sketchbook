@@ -34,6 +34,7 @@ import CannonDebugger from "cannon-es-debugger";
 import { FollowTarget } from "~/characters/character_ai/FollowTarget";
 import { RandomBehaviour } from "~/characters/character_ai/RandomBehaviour";
 import { Planet } from "./Planet";
+import { Meteorite } from './Meteorite';
 
 // Constants for cloud generation
 const CLOUD_BANK_COUNT = 4;
@@ -102,6 +103,7 @@ export class World {
   private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
   private currentEnemyCount: number = 0; // New property to track active enemies
   private loadingManager: LoadingManager; // New property to store the loading manager
+  private meteoriteInterval: any;
 
   constructor(worldScenePath?: any) {
     this._initializeCoreManagers();
@@ -115,6 +117,26 @@ export class World {
     this._loadWorldScene(worldScenePath);
 
     this.render(this);
+
+    this.meteoriteInterval = setInterval(() => this.spawnMeteoriteShower(), 2000);
+  }
+
+  public spawnMeteoriteShower(): void {
+    const showerSize = Math.floor(Math.random() * 3) + 3; // 3 to 5 meteorites
+    const basePosition = new THREE.Vector3(
+      (Math.random() - 0.5) * 500,
+      200,
+      (Math.random() - 0.5) * 500
+    );
+
+    for (let i = 0; i < showerSize; i++) {
+      const position = basePosition.clone();
+      position.x += (Math.random() - 0.5) * 50;
+      position.z += (Math.random() - 0.5) * 50;
+
+      const velocity = new THREE.Vector3(0, -100, 0);
+      new Meteorite(this, position, velocity);
+    }
   }
 
   /**

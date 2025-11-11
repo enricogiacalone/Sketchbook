@@ -17,10 +17,10 @@ export class Explosion extends THREE.Group implements IUpdatable {
 
   private world: World;
   private particles: ExplosionParticle[] = [];
-  private particleCount: number = 15;
-  private maxParticleSpeed: number = 10;
-  private maxParticleLifetime: number = 1.0; // seconds
-  private radius: number = 3;
+  private particleCount: number = 50;
+  private maxParticleSpeed: number = 30;
+  private maxParticleLifetime: number = 2.0; // seconds
+  private radius: number = 10;
   private damage: number = 50;
 
   constructor(world: World, position: THREE.Vector3) {
@@ -51,21 +51,20 @@ export class Explosion extends THREE.Group implements IUpdatable {
   }
 
   private createParticles(): void {
-    for (let i = 0; i < this.particleCount; i++) {
-      const size = Math.random() * 0.2 + 0.05; // Random size between 0.05 and 0.25
+    const fireParticleCount = this.particleCount * 0.6;
+    const smokeParticleCount = this.particleCount * 0.4;
+
+    // Create fire particles
+    for (let i = 0; i < fireParticleCount; i++) {
+      const size = Math.random() * 0.6 + 0.2; // 0.2 to 0.8
       const geometry = new THREE.SphereGeometry(size, 8, 8);
       const material = new THREE.MeshBasicMaterial({
-        color: new THREE.Color(Math.random(), Math.random() * 0.5, 0), // Shades of orange/red/yellow
+        color: new THREE.Color(1, Math.random() * 0.5, 0), // Red-Orange-Yellow
         transparent: true,
         opacity: 1,
       });
 
       const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(
-        (Math.random() - 0.5) * 0.5, // Random initial offset
-        (Math.random() - 0.5) * 0.5,
-        (Math.random() - 0.5) * 0.5
-      );
       this.add(mesh);
 
       const velocity = new THREE.Vector3(
@@ -79,7 +78,38 @@ export class Explosion extends THREE.Group implements IUpdatable {
       this.particles.push({
         mesh,
         velocity,
-        lifetime: Math.random() * this.maxParticleLifetime + 0.2, // Random lifetime
+        lifetime: Math.random() * this.maxParticleLifetime * 0.5 + 0.1, // Shorter lifetime for fire
+        age: 0,
+        initialScale: size,
+      });
+    }
+
+    // Create smoke particles
+    for (let i = 0; i < smokeParticleCount; i++) {
+      const size = Math.random() * 1.0 + 0.5; // 0.5 to 1.5
+      const geometry = new THREE.SphereGeometry(size, 8, 8);
+      const grey = Math.random() * 0.2 + 0.1; // Dark grey
+      const material = new THREE.MeshBasicMaterial({
+        color: new THREE.Color(grey, grey, grey),
+        transparent: true,
+        opacity: 0.7,
+      });
+
+      const mesh = new THREE.Mesh(geometry, material);
+      this.add(mesh);
+
+      const velocity = new THREE.Vector3(
+        (Math.random() - 0.5) * 2,
+        (Math.random() - 0.5) * 2,
+        (Math.random() - 0.5) * 2
+      )
+        .normalize()
+        .multiplyScalar(Math.random() * this.maxParticleSpeed * 0.5); // Slower speed for smoke
+
+      this.particles.push({
+        mesh,
+        velocity,
+        lifetime: Math.random() * this.maxParticleLifetime + 0.5, // Longer lifetime for smoke
         age: 0,
         initialScale: size,
       });

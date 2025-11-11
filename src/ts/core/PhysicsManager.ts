@@ -14,17 +14,17 @@ export class PhysicsManager {
   public bodiesToRemove: CANNON.Body[] = [];
   public bulletMaterial: CANNON.Material; // Added
   public trimeshMaterial: CANNON.Material; // Added
+  public meteoriteMaterial: CANNON.Material;
 
   constructor(world: World) {
     this.world = world;
-
     this.physicsWorld = new CANNON.World();
     this.physicsWorld.gravity.set(0, GRAVITY_Y, 0);
     this.physicsWorld.broadphase = new CANNON.SAPBroadphase(this.physicsWorld);
     this.physicsWorld.allowSleep = true;
-
     this.bulletMaterial = new CANNON.Material("bulletMaterial");
     this.trimeshMaterial = new CANNON.Material("trimeshMaterial");
+    this.meteoriteMaterial = new CANNON.Material("meteoriteMaterial");
 
     const bulletTrimeshContactMaterial = new CANNON.ContactMaterial(
       this.bulletMaterial,
@@ -35,6 +35,26 @@ export class PhysicsManager {
       }
     );
     this.physicsWorld.addContactMaterial(bulletTrimeshContactMaterial);
+
+    const meteoriteTrimeshContactMaterial = new CANNON.ContactMaterial(
+      this.meteoriteMaterial,
+      this.trimeshMaterial,
+      {
+        friction: 0.3,
+        restitution: 0.5,
+      }
+    );
+    this.physicsWorld.addContactMaterial(meteoriteTrimeshContactMaterial);
+
+    const meteoriteMeteoriteContactMaterial = new CANNON.ContactMaterial(
+      this.meteoriteMaterial,
+      this.meteoriteMaterial,
+      {
+        friction: 0.5,
+        restitution: 0.9,
+      }
+    );
+    this.physicsWorld.addContactMaterial(meteoriteMeteoriteContactMaterial);
 
     this.physicsWorld.addEventListener("preStep", () => this._onPreStep());
     this.physicsWorld.addEventListener("postStep", () => this._onPostStep());
