@@ -7,4 +7,5 @@ export enum EntityType {
   Decoration,
   System,
   Meteorite,
+  UFO,
 }

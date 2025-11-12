@@ -32,11 +32,20 @@ export class Flying extends CharacterStateBase implements ICharacterState {
     super.update(timeStep);
 
     // Apply anti-gravity force
-    const antiGravityForce = new CANNON.Vec3(0, this.character.characterCapsule.body.mass * 9.81, 0);
-    this.character.characterCapsule.body.applyForce(antiGravityForce, this.character.characterCapsule.body.position);
+    const antiGravityForce = new CANNON.Vec3(
+      0,
+      this.character.characterCapsule.body.mass * 9.81,
+      0
+    );
+    this.character.characterCapsule.body.applyForce(
+      antiGravityForce,
+      this.character.characterCapsule.body.position
+    );
 
     if (this.character.rayHasHit) {
-      this.character.world.sceneManager.graphicsWorld.remove(this.particleSystem);
+      this.character.world.sceneManager.graphicsWorld.remove(
+        this.particleSystem
+      );
       this.character.setState(new Rolling(this.character));
       this.character.displayControls();
       return;
@@ -79,26 +88,36 @@ export class Flying extends CharacterStateBase implements ICharacterState {
 
     // FOV
     if (forwardVelocity > 0) {
-      (this.character.world.cameraOperator.camera as THREE.PerspectiveCamera).fov = THREE.MathUtils.lerp(
-        (this.character.world.cameraOperator.camera as THREE.PerspectiveCamera).fov,
+      (
+        this.character.world.cameraOperator.camera as THREE.PerspectiveCamera
+      ).fov = THREE.MathUtils.lerp(
+        (this.character.world.cameraOperator.camera as THREE.PerspectiveCamera)
+          .fov,
         100,
         0.1
       );
     } else {
-      (this.character.world.cameraOperator.camera as THREE.PerspectiveCamera).fov = THREE.MathUtils.lerp(
-        (this.character.world.cameraOperator.camera as THREE.PerspectiveCamera).fov,
+      (
+        this.character.world.cameraOperator.camera as THREE.PerspectiveCamera
+      ).fov = THREE.MathUtils.lerp(
+        (this.character.world.cameraOperator.camera as THREE.PerspectiveCamera)
+          .fov,
         80,
         0.1
       );
     }
-    (this.character.world.cameraOperator.camera as THREE.PerspectiveCamera).updateProjectionMatrix();
+    (
+      this.character.world.cameraOperator.camera as THREE.PerspectiveCamera
+    ).updateProjectionMatrix();
   }
 
   public onInputChange(): void {
     super.onInputChange();
 
     if (this.character.actions.fly.justPressed) {
-      this.character.world.sceneManager.graphicsWorld.remove(this.particleSystem);
+      this.character.world.sceneManager.graphicsWorld.remove(
+        this.particleSystem
+      );
       this.character.setState(new Idle(this.character));
       this.character.displayControls();
     }

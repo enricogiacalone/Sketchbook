@@ -13,7 +13,11 @@ export class BulletImpactEffect extends THREE.Mesh implements IUpdatable {
   constructor(world: World, position: THREE.Vector3, normal: THREE.Vector3) {
     super(
       new THREE.SphereGeometry(0.05, 8, 8), // Small sphere for impact
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1 }) // White, fading effect
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 1,
+      }) // White, fading effect
     );
 
     this.world = world;
@@ -21,7 +25,10 @@ export class BulletImpactEffect extends THREE.Mesh implements IUpdatable {
     this.scale.set(this.initialScale, this.initialScale, this.initialScale);
 
     // Orient the effect to face away from the impact normal
-    const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, 1),
+      normal
+    );
     this.setRotationFromQuaternion(quaternion);
 
     this.world.sceneManager.graphicsWorld.add(this);

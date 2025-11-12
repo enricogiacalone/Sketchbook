@@ -7,7 +7,12 @@ export class Planet {
   public mesh: THREE.Mesh;
   public body: CANNON.Body;
 
-  constructor(world: World, physicsManager: PhysicsManager, textureColor: THREE.Color, size: number) {
+  constructor(
+    world: World,
+    physicsManager: PhysicsManager,
+    textureColor: THREE.Color,
+    size: number
+  ) {
     const texture = this.createPlanetTexture(textureColor);
     const material = new THREE.MeshBasicMaterial({
       map: texture,

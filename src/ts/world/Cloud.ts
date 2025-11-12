@@ -15,15 +15,15 @@ export class Cloud {
       depthWrite: false,
     });
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       const plane = new THREE.Mesh(
         new THREE.PlaneGeometry(size, size),
         material
       );
       plane.position.set(
-        (Math.random() - 0.5) * (size / 2),
-        (Math.random() - 0.5) * (size / 5),
-        (Math.random() - 0.5) * (size / 2)
+        (Math.random() - 0.5) * (size * 0.8),
+        (Math.random() - 0.5) * (size * 0.3),
+        (Math.random() - 0.5) * (size * 0.8)
       );
       plane.rotation.x = Math.random() * Math.PI;
       plane.rotation.y = Math.random() * Math.PI;

@@ -1,14 +1,14 @@
-import { defineConfig } from 'vite';
-import path from 'path';
+import { defineConfig } from "vite";
+import path from "path";
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  publicDir: 'public',
+  publicDir: "public",
   server: {
     open: true,
   },
   build: {
-    outDir: 'build',
+    outDir: "build",
     sourcemap: true,
     // Consider using manualChunks for code splitting to optimize bundle size
     // and improve initial load times, especially for larger applications.
@@ -24,8 +24,8 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '~': path.resolve(__dirname, './src/ts'),
-      '$lib': path.resolve(__dirname, './src/lib'),
+      "~": path.resolve(__dirname, "./src/ts"),
+      $lib: path.resolve(__dirname, "./src/lib"),
     },
   },
 });

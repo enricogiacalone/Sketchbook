@@ -1,5 +1,5 @@
-import { Minimap } from './Minimap';
-import { World } from '../world/World';
+import { Minimap } from "./Minimap";
+import { World } from "../world/World";
 
 // Constants for HTML element IDs
 const UI_CONTAINER_ID = "ui-container";
@@ -29,9 +29,7 @@ export class UIManager {
   }
 
   public static setFPSVisible(value: boolean): void {
-    document.getElementById(STATS_ID).style.display = value
-      ? "block"
-      : "none";
+    document.getElementById(STATS_ID).style.display = value ? "block" : "none";
     document.getElementById(DAT_GUI_CONTAINER_ID).style.top = value
       ? "48px"
       : "0px";

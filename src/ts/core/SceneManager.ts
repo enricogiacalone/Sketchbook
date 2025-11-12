@@ -41,7 +41,9 @@ export class SceneManager {
    */
   private _initializeRenderer(): void {
     this.renderer = new THREE.WebGLRenderer();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_DEVICE_PIXEL_RATIO));
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, MAX_DEVICE_PIXEL_RATIO)
+    );
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = TONE_MAPPING_EXPOSURE;

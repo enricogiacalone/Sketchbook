@@ -59,7 +59,7 @@
 }
 
 #minimap-player::after {
-  content: '';
+  content: "";
   position: absolute;
   left: -3px;
   top: 12px;
@@ -107,7 +107,7 @@
 
 .minimap-airplane::before,
 .minimap-airplane::after {
-  content: '';
+  content: "";
   position: absolute;
   background-color: #00aaff;
 }
@@ -127,7 +127,7 @@
 }
 
 .minimap-helicopter::before {
-  content: '';
+  content: "";
   position: absolute;
   width: 14px;
   height: 2px;
@@ -135,4 +135,3 @@
   top: -4px;
   background-color: #00aaff;
 }
-

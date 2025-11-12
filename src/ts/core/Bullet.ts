@@ -39,9 +39,14 @@ export class Bullet extends THREE.Mesh implements IUpdatable {
       position: new CANNON.Vec3(position.x, position.y, position.z),
       shape: sphereShape,
       collisionFilterGroup: CollisionGroups.Bullet,
-      collisionFilterMask: CollisionGroups.Characters | CollisionGroups.TrimeshColliders | CollisionGroups.Default,
+      collisionFilterMask:
+        CollisionGroups.Characters |
+        CollisionGroups.TrimeshColliders |
+        CollisionGroups.Default,
     });
-    this.body.velocity.copy(new CANNON.Vec3(this.velocity.x, this.velocity.y, this.velocity.z));
+    this.body.velocity.copy(
+      new CANNON.Vec3(this.velocity.x, this.velocity.y, this.velocity.z)
+    );
     this.body.addEventListener("collide", this.onCollide);
 
     this.world.physicsManager.physicsWorld.addBody(this.body);

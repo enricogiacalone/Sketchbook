@@ -1,9 +1,9 @@
-import { World } from '../world/World';
-import { IUpdatable } from '../interfaces/IUpdatable';
-import { Character } from '../characters/Character';
-import { EntityType } from '../enums/EntityType';
-import * as THREE from 'three';
-import { Vehicle } from '../vehicles/Vehicle';
+import { World } from "../world/World";
+import { IUpdatable } from "../interfaces/IUpdatable";
+import { Character } from "../characters/Character";
+import { EntityType } from "../enums/EntityType";
+import * as THREE from "three";
+import { Vehicle } from "../vehicles/Vehicle";
 
 export class Minimap implements IUpdatable {
   public updateOrder: number = 10;
@@ -23,11 +23,11 @@ export class Minimap implements IUpdatable {
 
   constructor(world: World) {
     this.world = world;
-    this.container = document.getElementById('minimap-container');
-    this.playerDot = document.getElementById('minimap-player');
-    this.northIndicator = document.getElementById('minimap-north');
-    this.healthBar = document.querySelector('#health-bar .bar-arc-fill');
-    this.armorBar = document.querySelector('#armor-bar .bar-arc-fill');
+    this.container = document.getElementById("minimap-container");
+    this.playerDot = document.getElementById("minimap-player");
+    this.northIndicator = document.getElementById("minimap-north");
+    this.healthBar = document.querySelector("#health-bar .bar-arc-fill");
+    this.armorBar = document.querySelector("#armor-bar .bar-arc-fill");
 
     this.world.registerUpdatable(this);
   }
@@ -60,9 +60,17 @@ export class Minimap implements IUpdatable {
     // Zoom based on player speed
     const speed = player.velocity.length();
     if (speed > 10) {
-      this.worldSize = THREE.MathUtils.lerp(this.worldSize, this.zoomedWorldSize, 0.1);
+      this.worldSize = THREE.MathUtils.lerp(
+        this.worldSize,
+        this.zoomedWorldSize,
+        0.1
+      );
     } else {
-      this.worldSize = THREE.MathUtils.lerp(this.worldSize, this.defaultWorldSize, 0.1);
+      this.worldSize = THREE.MathUtils.lerp(
+        this.worldSize,
+        this.defaultWorldSize,
+        0.1
+      );
     }
 
     // Update health and armor bars
@@ -72,10 +80,24 @@ export class Minimap implements IUpdatable {
     const enemies = this.world.characters.filter(
       (c) => c.entityType === EntityType.Enemy
     );
-    this.updateIcons(enemies, this.enemyDots, 'minimap-enemy', player, this.updateEnemyDot, playerYaw);
+    this.updateIcons(
+      enemies,
+      this.enemyDots,
+      "minimap-enemy",
+      player,
+      this.updateEnemyDot,
+      playerYaw
+    );
 
     // Update vehicle icons
-    this.updateIcons(this.world.vehicles, this.vehicleIcons, 'minimap-vehicle', player, this.updateVehicleIcon, playerYaw);
+    this.updateIcons(
+      this.world.vehicles,
+      this.vehicleIcons,
+      "minimap-vehicle",
+      player,
+      this.updateVehicleIcon,
+      playerYaw
+    );
   }
 
   private updateIcons<T extends Character | Vehicle>(
@@ -83,7 +105,12 @@ export class Minimap implements IUpdatable {
     icons: HTMLElement[],
     className: string,
     player: Character,
-    updateMethod: (icon: HTMLElement, item: T, player: Character, playerYaw: number) => void,
+    updateMethod: (
+      icon: HTMLElement,
+      item: T,
+      player: Character,
+      playerYaw: number
+    ) => void,
     playerYaw: number
   ): void {
     // Remove old icons
@@ -94,7 +121,7 @@ export class Minimap implements IUpdatable {
 
     // Add new icons if needed
     while (icons.length < items.length) {
-      const icon = document.createElement('div');
+      const icon = document.createElement("div");
       icon.className = className;
       this.container.appendChild(icon);
       icons.push(icon);
@@ -127,10 +154,8 @@ export class Minimap implements IUpdatable {
     const relativeX = enemy.position.x - player.position.x;
     const relativeZ = enemy.position.z - player.position.z;
 
-    const mapX =
-      (relativeX / this.worldSize) * this.mapSize + this.mapSize / 2;
-    const mapY =
-      (relativeZ / this.worldSize) * this.mapSize + this.mapSize / 2;
+    const mapX = (relativeX / this.worldSize) * this.mapSize + this.mapSize / 2;
+    const mapY = (relativeZ / this.worldSize) * this.mapSize + this.mapSize / 2;
 
     dot.style.left = `${mapX}px`;
     dot.style.top = `${mapY}px`;
@@ -144,19 +169,19 @@ export class Minimap implements IUpdatable {
   ): void {
     // Set correct class for vehicle type
     const vehicleType = vehicle.entityType;
-    let typeClass = '';
-    if (vehicleType === EntityType.Car) typeClass = 'minimap-car';
-    else if (vehicleType === EntityType.Airplane) typeClass = 'minimap-airplane';
-    else if (vehicleType === EntityType.Helicopter) typeClass = 'minimap-helicopter';
+    let typeClass = "";
+    if (vehicleType === EntityType.Car) typeClass = "minimap-car";
+    else if (vehicleType === EntityType.Airplane)
+      typeClass = "minimap-airplane";
+    else if (vehicleType === EntityType.Helicopter)
+      typeClass = "minimap-helicopter";
     icon.className = `minimap-vehicle ${typeClass}`;
 
     // Position
     const relativeX = vehicle.position.x - player.position.x;
     const relativeZ = vehicle.position.z - player.position.z;
-    const mapX =
-      (relativeX / this.worldSize) * this.mapSize + this.mapSize / 2;
-    const mapY =
-      (relativeZ / this.worldSize) * this.mapSize + this.mapSize / 2;
+    const mapX = (relativeX / this.worldSize) * this.mapSize + this.mapSize / 2;
+    const mapY = (relativeZ / this.worldSize) * this.mapSize + this.mapSize / 2;
     icon.style.left = `${mapX}px`;
     icon.style.top = `${mapY}px`;
 

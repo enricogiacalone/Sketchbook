@@ -34,7 +34,12 @@ import CannonDebugger from "cannon-es-debugger";
 import { FollowTarget } from "~/characters/character_ai/FollowTarget";
 import { RandomBehaviour } from "~/characters/character_ai/RandomBehaviour";
 import { Planet } from "./Planet";
-import { Meteorite } from './Meteorite';
+import { Meteorite } from "./Meteorite";
+import { PsychedelicParticles } from "./PsychedelicParticles";
+import { InterstellarVortex } from "./InterstellarVortex";
+import { UFO } from "./UFO";
+import { Explosion } from "../core/Explosion";
+import { AtomicExplosion } from "../core/AtomicExplosion";
 
 // Constants for cloud generation
 const CLOUD_BANK_COUNT = 4;
@@ -98,6 +103,7 @@ export class World {
   public sceneManager: SceneManager;
   public physicsManager: PhysicsManager;
   public gameManager: GameManager;
+  public interstellarVortex: InterstellarVortex;
 
   private lastScenarioID: string;
   private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
@@ -118,25 +124,53 @@ export class World {
 
     this.render(this);
 
-    this.meteoriteInterval = setInterval(() => this.spawnMeteoriteShower(), 2000);
-  }
-
-  public spawnMeteoriteShower(): void {
-    const showerSize = Math.floor(Math.random() * 3) + 3; // 3 to 5 meteorites
-    const basePosition = new THREE.Vector3(
-      (Math.random() - 0.5) * 500,
-      200,
-      (Math.random() - 0.5) * 500
+    this.meteoriteInterval = setInterval(
+      () => this.spawnMeteorShower(2, new THREE.Vector3(0, 200, 0)),
+      2000
     );
 
+    this.interstellarVortex = new InterstellarVortex(
+      this,
+      new THREE.Vector3(0, 500, 0),
+      2000
+    );
+    new PsychedelicParticles(this, 1000, this.interstellarVortex);
+  }
+
+  public spawnMeteorShower(
+    showerSize: number,
+    basePosition: THREE.Vector3
+  ): void {
     for (let i = 0; i < showerSize; i++) {
       const position = basePosition.clone();
-      position.x += (Math.random() - 0.5) * 50;
-      position.z += (Math.random() - 0.5) * 50;
+      position.x += (Math.random() - 0.5) * 150;
+      position.z += (Math.random() - 0.5) * 150;
 
-      const velocity = new THREE.Vector3(0, -100, 0);
+      const velocity = new THREE.Vector3(
+        (Math.random() - 0.5) * 100,
+        -100,
+        (Math.random() - 0.5) * 100
+      );
       new Meteorite(this, position, velocity);
     }
+  }
+
+  public spawnAtomicBomb(): void {
+    const position = new THREE.Vector3(
+      (Math.random() - 0.5) * 8000, // Farther away
+      0, // On the ground
+      (Math.random() - 0.5) * 8000
+    );
+    new AtomicExplosion(this, position);
+  }
+
+  public spawnUFO(): void {
+    const position = new THREE.Vector3(
+      (Math.random() - 0.5) * 1000,
+      150 + Math.random() * 100, // High in the sky
+      (Math.random() - 0.5) * 1000
+    );
+    new UFO(this, position);
   }
 
   /**
@@ -315,6 +349,16 @@ export class World {
       console.log("Cannon Debugger: Updating");
       this.cannonDebugRenderer.update();
     }
+
+    // Spawn UFOs
+    if (Math.random() < 0.002) {
+      this.spawnUFO();
+    }
+
+    // Spawn Atomic Bombs
+    // if (Math.random() < 0.001) {
+    //   this.spawnAtomicBomb();
+    // }
   }
 
   public isOutOfBounds(position: CANNON.Vec3): boolean {
@@ -440,16 +484,22 @@ export class World {
       worldEntity.characterCapsule.body.collisionResponse = false;
       worldEntity.characterCapsule.body.mass = 0;
       worldEntity.characterCapsule.body.sleep(); // Put the body to sleep
-      this.physicsManager.bodiesToRemove.push(worldEntity.characterCapsule.body); // Add to deferred removal list
+      this.physicsManager.bodiesToRemove.push(
+        worldEntity.characterCapsule.body
+      ); // Add to deferred removal list
 
       // Remove visuals
       this.sceneManager.graphicsWorld.remove(worldEntity);
       this.sceneManager.graphicsWorld.remove(worldEntity.raycastBox);
-      if (worldEntity.healthBarContainer && worldEntity.healthBarContainer.parent) {
-        worldEntity.healthBarContainer.parent.remove(worldEntity.healthBarContainer);
+      if (
+        worldEntity.healthBarContainer &&
+        worldEntity.healthBarContainer.parent
+      ) {
+        worldEntity.healthBarContainer.parent.remove(
+          worldEntity.healthBarContainer
+        );
       }
       // --- End of moved logic ---
-
     } else if (worldEntity instanceof Vehicle) {
       worldEntity.removeFromWorld(this);
     } else {
@@ -683,7 +733,9 @@ export class World {
         character.setBehaviour(new FollowTarget(this.characters[0])); // this.characters[0] is the player
         character.setColor(new THREE.Color(0xff0000)); // Set enemy character color to red
         character.createHealthBar(); // Create health bar for enemies
-        console.log(`Spawned ${character.name} with health: ${character.health}`);
+        console.log(
+          `Spawned ${character.name} with health: ${character.health}`
+        );
 
         // Get a random spawn position
         const x = Math.random() * 200 - 100;

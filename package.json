@@ -16,7 +16,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "prettier --check .",
+    "format": "prettier --write ."
   },
   "repository": {
     "type": "git",
@@ -41,6 +43,7 @@
     "lil-gui": "^0.21.0",
     "lodash": "^4.17.21",
     "prettier": "^3.6.2",
+    "simplex-noise": "^4.0.3",
     "stats.js": "^0.17.0",
     "sweetalert2": "^11.26.3",
     "three": "^0.181.1"

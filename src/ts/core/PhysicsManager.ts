@@ -105,9 +105,7 @@ export class PhysicsManager {
   }
 
   private _handleVehicleOutOfBounds(vehicle: Vehicle): void {
-    if (
-      this.world.isOutOfBounds(vehicle.rayCastVehicle.chassisBody.position)
-    ) {
+    if (this.world.isOutOfBounds(vehicle.rayCastVehicle.chassisBody.position)) {
       let worldPos = new THREE.Vector3();
       vehicle.spawnPoint.getWorldPosition(worldPos);
       worldPos.y += 1;

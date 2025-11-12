@@ -17,16 +17,28 @@ export class Explosion extends THREE.Group implements IUpdatable {
 
   private world: World;
   private particles: ExplosionParticle[] = [];
-  private particleCount: number = 50;
-  private maxParticleSpeed: number = 30;
-  private maxParticleLifetime: number = 2.0; // seconds
-  private radius: number = 10;
+  private particleCount: number = 100;
+  private maxParticleSpeed: number = 60;
+  private maxParticleLifetime: number = 3.0; // seconds
+  private radius: number = 20;
   private damage: number = 50;
+  private explosionScale: number;
 
-  constructor(world: World, position: THREE.Vector3) {
+  constructor(
+    world: World,
+    position: THREE.Vector3,
+    explosionScale: number = 1
+  ) {
     super();
     this.world = world;
     this.position.copy(position);
+    this.explosionScale = explosionScale;
+
+    this.particleCount = Math.floor(this.particleCount * explosionScale);
+    this.maxParticleSpeed *= explosionScale;
+    this.maxParticleLifetime *= explosionScale;
+    this.radius *= explosionScale;
+    this.damage *= explosionScale;
 
     this.world.sceneManager.graphicsWorld.add(this);
     this.world.registerUpdatable(this);
@@ -42,8 +54,7 @@ export class Explosion extends THREE.Group implements IUpdatable {
         const distance = character.position.distanceTo(this.position);
 
         if (distance < this.radius) {
-          const damage =
-            this.damage * (1 - distance / this.radius);
+          const damage = this.damage * (1 - distance / this.radius);
           character.takeDamage(damage);
         }
       }
@@ -56,7 +67,7 @@ export class Explosion extends THREE.Group implements IUpdatable {
 
     // Create fire particles
     for (let i = 0; i < fireParticleCount; i++) {
-      const size = Math.random() * 0.6 + 0.2; // 0.2 to 0.8
+      const size = (Math.random() * 1.0 + 0.5) * this.explosionScale; // 0.5 to 1.5
       const geometry = new THREE.SphereGeometry(size, 8, 8);
       const material = new THREE.MeshBasicMaterial({
         color: new THREE.Color(1, Math.random() * 0.5, 0), // Red-Orange-Yellow
@@ -86,7 +97,7 @@ export class Explosion extends THREE.Group implements IUpdatable {
 
     // Create smoke particles
     for (let i = 0; i < smokeParticleCount; i++) {
-      const size = Math.random() * 1.0 + 0.5; // 0.5 to 1.5
+      const size = (Math.random() * 2.0 + 1.0) * this.explosionScale; // 1.0 to 3.0
       const geometry = new THREE.SphereGeometry(size, 8, 8);
       const grey = Math.random() * 0.2 + 0.1; // Dark grey
       const material = new THREE.MeshBasicMaterial({

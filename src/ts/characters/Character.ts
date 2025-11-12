@@ -126,9 +126,13 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
     // Initialize health
     this.health = this.maxHealth;
-    console.log(`Character ${this.name} initialized with health: ${this.health}`);
+    console.log(
+      `Character ${this.name} initialized with health: ${this.health}`
+    );
     console.log("Character object after constructor:", this);
-    console.log(`Character ${this.name} initialized with health: ${this.health}`);
+    console.log(
+      `Character ${this.name} initialized with health: ${this.health}`
+    );
 
     this.velocitySimulator = new VectorSpringSimulator(
       60,
@@ -174,7 +178,9 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.characterCapsule.body.shapes.forEach((shape) => {
       // tslint:disable-next-line: no-bitwise
       shape.collisionFilterMask =
-        CollisionGroups.Default | CollisionGroups.TrimeshColliders | CollisionGroups.Bullet;
+        CollisionGroups.Default |
+        CollisionGroups.TrimeshColliders |
+        CollisionGroups.Bullet;
     });
     this.characterCapsule.body.allowSleep = false;
 
@@ -204,11 +210,19 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.healthBarContainer.position.y = this.height + 0.2; // Position above character's head
     this.healthBarContainer.scale.set(1 / 3, 1 / 3, 1 / 3); // Scale down for better visibility
     this.tiltContainer.add(this.healthBarContainer);
-    console.log(`Character ${this.name} healthBarContainer parent after add:`, this.healthBarContainer.parent);
+    console.log(
+      `Character ${this.name} healthBarContainer parent after add:`,
+      this.healthBarContainer.parent
+    );
 
     const healthBarBackgroundGeometry = new THREE.PlaneGeometry(1, 0.1);
-    const healthBarBackgroundMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Red background
-    this.healthBarBackgroundMesh = new THREE.Mesh(healthBarBackgroundGeometry, healthBarBackgroundMaterial);
+    const healthBarBackgroundMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff0000,
+    }); // Red background
+    this.healthBarBackgroundMesh = new THREE.Mesh(
+      healthBarBackgroundGeometry,
+      healthBarBackgroundMaterial
+    );
     this.healthBarBackgroundMesh.position.set(0, 0, 0);
     this.healthBarContainer.add(this.healthBarBackgroundMesh);
 
@@ -472,14 +486,23 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     if (this.isDead) return; // Prevent taking damage if already dead
 
     if (this.health === 100) {
-      console.log(`Character ${this.name} taking ${damage} damage. Initial health was 100.`);
+      console.log(
+        `Character ${this.name} taking ${damage} damage. Initial health was 100.`
+      );
     } else {
-      console.warn(`Character ${this.name} taking ${damage} damage. Initial health was ${this.health} (expected 100).`);
+      console.warn(
+        `Character ${this.name} taking ${damage} damage. Initial health was ${this.health} (expected 100).`
+      );
     }
     this.health -= damage;
     this.health = Math.max(0, this.health); // Ensure health doesn't go below zero
-    console.log(`Character ${this.name} new health: ${this.health}. Health bar visible: ${this.healthBarContainer?.visible}`);
-    console.log(`Character ${this.name} healthBarContainer object:`, this.healthBarContainer);
+    console.log(
+      `Character ${this.name} new health: ${this.health}. Health bar visible: ${this.healthBarContainer?.visible}`
+    );
+    console.log(
+      `Character ${this.name} healthBarContainer object:`,
+      this.healthBarContainer
+    );
 
     // Update health bar
     const healthPercentage = this.health / this.maxHealth;
@@ -487,7 +510,9 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.healthBarMesh.position.x = (healthPercentage - 1) / 2; // Adjust position to scale from left
 
     this.healthBarContainer.visible = true;
-    console.log(`Character ${this.name} health bar set to visible: ${this.healthBarContainer.visible}`);
+    console.log(
+      `Character ${this.name} health bar set to visible: ${this.healthBarContainer.visible}`
+    );
 
     // Clear previous timeout if exists
     if (this.healthBarHideTimeout) {
@@ -1133,7 +1158,9 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       // Register physics
       world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
       this.characterCapsule.body.userData = this; // Set userData for collision detection
-      console.log(`Character ${this.name} added to world with health: ${this.health}`);
+      console.log(
+        `Character ${this.name} added to world with health: ${this.health}`
+      );
 
       // Create health bar for the character
       this.createHealthBar();
