@@ -9,6 +9,7 @@
     "declarationDir": "build/types",
     "baseUrl": ".",
     "types": ["three"],
+    "typeRoots": ["./node_modules/@types", "./src/ts/types"],
     "lib": ["es2017", "dom", "dom.iterable"],
     "paths": {
       "~/*": ["./src/ts/*"],

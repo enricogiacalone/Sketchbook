@@ -115,7 +115,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
     // Model container is used to reliably ground the character, as animation can alter the position of the model itself
     this.modelContainer = new THREE.Group();
-    this.modelContainer.position.y = -0.57; // This might need adjustment based on actual model
+    // this.modelContainer.position.y = -0.57; // This might need adjustment based on actual model
     this.tiltContainer.add(this.modelContainer);
     this.modelContainer.add(gltf.scene);
 
@@ -204,16 +204,11 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   }
 
   public createHealthBar(): void {
-    console.log(`Character ${this.name} createHealthBar() called.`);
     // Health bar visuals
     this.healthBarContainer = new THREE.Group();
     this.healthBarContainer.position.y = this.height + 0.2; // Position above character's head
     this.healthBarContainer.scale.set(1 / 3, 1 / 3, 1 / 3); // Scale down for better visibility
     this.tiltContainer.add(this.healthBarContainer);
-    console.log(
-      `Character ${this.name} healthBarContainer parent after add:`,
-      this.healthBarContainer.parent
-    );
 
     const healthBarBackgroundGeometry = new THREE.PlaneGeometry(1, 0.1);
     const healthBarBackgroundMaterial = new THREE.MeshBasicMaterial({
@@ -510,9 +505,6 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.healthBarMesh.position.x = (healthPercentage - 1) / 2; // Adjust position to scale from left
 
     this.healthBarContainer.visible = true;
-    console.log(
-      `Character ${this.name} health bar set to visible: ${this.healthBarContainer.visible}`
-    );
 
     // Clear previous timeout if exists
     if (this.healthBarHideTimeout) {
@@ -523,13 +515,11 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     if (this.entityType !== EntityType.Enemy) {
       this.healthBarHideTimeout = setTimeout(() => {
         this.healthBarContainer.visible = false;
-        console.log(`Character ${this.name} health bar hidden.`);
       }, 3000); // 3 seconds
     }
 
     if (this.health <= 0) {
       this.isDead = true; // Mark as dead
-      console.log(`${this.name} has been defeated!`);
       this.removeFromWorld(this.world);
       // Ensure health bar is removed when character is defeated
       if (this.healthBarContainer) {
@@ -1166,6 +1156,12 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       this.createHealthBar();
 
       // Add to graphicsWorld
+      console.log(
+        `Character ${this.name} (${this.uuid}) properties before adding to graphicsWorld:`
+      );
+      console.log(`  - this.visible: ${this.visible}`);
+      console.log(`  - this.position:`, this.position);
+      console.log(`  - this.scale:`, this.scale);
       world.sceneManager.graphicsWorld.add(this);
       world.sceneManager.graphicsWorld.add(this.raycastBox);
 

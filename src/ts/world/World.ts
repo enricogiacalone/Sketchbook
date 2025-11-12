@@ -141,56 +141,68 @@ export class World {
   }
 
   public addNetworkPlayer(id: string, playerData: any): void {
-    console.log(`World: Adding network player ${id}`);
-    this.loadingManager.loadGLTF("boxman.glb", (model) => {
-      const networkPlayer = new NetworkPlayer(
-        model,
-        this,
-        id,
-        playerData.name,
-        playerData.avatarSkin
-      );
-      networkPlayer.setPosition(
-        playerData.position_x,
-        playerData.position_y,
-        playerData.position_z
-      );
-      networkPlayer.setNetworkQuaternion(
-        playerData.quaternion_x,
-        playerData.quaternion_y,
-        playerData.quaternion_z,
-        playerData.quaternion_w
-      );
-      networkPlayer.setAnimation(playerData.animation, 0.1);
-      this.add(networkPlayer);
-      this.networkPlayers.set(id, networkPlayer);
-      console.log(`Network player ${id} (${playerData.name}) added.`);
-    });
+    console.log(
+      `World: Attempting to add network player ${id} with data:`,
+      playerData
+    );
+
+    // Create a simple red sphere as a direct placeholder
+    const geometry = new THREE.SphereGeometry(1, 32, 32); // Radius 1, standard segments
+    const material = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Red color
+    const placeholderMesh = new THREE.Mesh(geometry, material);
+
+    placeholderMesh.position.set(
+      playerData.position_x,
+      playerData.position_y,
+      playerData.position_z
+    );
+    placeholderMesh.quaternion.set(
+      playerData.quaternion_x,
+      playerData.quaternion_y,
+      playerData.quaternion_z,
+      playerData.quaternion_w
+    );
+    placeholderMesh.name = `NetworkPlayer_${id}`; // Give it a name for identification
+
+    this.sceneManager.graphicsWorld.add(placeholderMesh);
+    this.networkPlayers.set(id, placeholderMesh); // Store the mesh directly
+    console.log(
+      `Network player ${id} (${playerData.name}) added directly to scene at position:`,
+      placeholderMesh.position,
+      `quaternion:`,
+      placeholderMesh.quaternion
+    );
   }
 
   public updateNetworkPlayer(id: string, playerData: any): void {
-    const networkPlayer = this.networkPlayers.get(id);
-    if (networkPlayer) {
-      networkPlayer.setNetworkPosition(
+    const placeholderMesh = this.networkPlayers.get(id);
+    if (placeholderMesh) {
+      placeholderMesh.position.set(
         playerData.position_x,
         playerData.position_y,
         playerData.position_z
       );
-      networkPlayer.setNetworkQuaternion(
+      placeholderMesh.quaternion.set(
         playerData.quaternion_x,
         playerData.quaternion_y,
         playerData.quaternion_z,
         playerData.quaternion_w
       );
-      networkPlayer.setAnimation(playerData.animation, 0.1);
+      // No animation for a simple sphere, but we can log it
+      console.log(
+        `Network player ${id} updated position:`,
+        placeholderMesh.position,
+        `quaternion:`,
+        placeholderMesh.quaternion
+      );
     }
   }
 
   public removeNetworkPlayer(id: string): void {
-    const networkPlayer = this.networkPlayers.get(id);
-    if (networkPlayer) {
+    const placeholderMesh = this.networkPlayers.get(id);
+    if (placeholderMesh) {
       console.log(`World: Removing network player ${id}`);
-      this.remove(networkPlayer);
+      this.sceneManager.graphicsWorld.remove(placeholderMesh);
       this.networkPlayers.delete(id);
     }
   }
@@ -505,28 +517,14 @@ export class World {
 
     // Check if the removed entity is an enemy character
     if (worldEntity instanceof Character) {
-      console.log(
-        "Entity is a Character. EntityType:",
-        worldEntity.entityType,
-        "Expected EntityType.Enemy:",
-        EntityType.Enemy
-      );
       if (worldEntity.entityType === EntityType.Enemy) {
         this.currentEnemyCount--;
-        console.log(
-          `Enemy removed. Remaining enemies: ${this.currentEnemyCount}`
-        );
+
         this.updateEnemyCountDisplay(); // Update UI using helper method
 
         if (this.currentEnemyCount <= 0) {
-          console.log("All enemies defeated! Spawning new wave.");
           this.spawnEnemies(this.initialEnemyCount * 2);
         }
-      } else {
-        console.log(
-          "Entity is a Character but not an Enemy. EntityType:",
-          worldEntity.entityType
-        );
       }
 
       // --- Moved logic from Character.removeFromWorld ---
@@ -740,10 +738,6 @@ export class World {
   }
 
   private updateEnemyCountDisplay(): void {
-    console.log(
-      "updateEnemyCountDisplay called. currentEnemyCount:",
-      this.currentEnemyCount
-    );
     let enemyCountElement = document.getElementById("dynamic-enemy-count");
 
     if (!enemyCountElement) {
@@ -774,12 +768,6 @@ export class World {
 
     if (enemyCountElement) {
       enemyCountElement.innerHTML = `Enemies: ${this.currentEnemyCount}`;
-      console.log(
-        "Updated #dynamic-enemy-count. Current innerHTML:",
-        enemyCountElement.innerHTML,
-        "Display style:",
-        enemyCountElement.style.display
-      );
     }
   }
 
@@ -796,9 +784,6 @@ export class World {
         character.setBehaviour(new FollowTarget(this.characters[0])); // this.characters[0] is the player
         character.setColor(new THREE.Color(0xff0000)); // Set enemy character color to red
         character.createHealthBar(); // Create health bar for enemies
-        console.log(
-          `Spawned ${character.name} with health: ${character.health}`
-        );
 
         // Get a random spawn position
         const x = Math.random() * 200 - 100;
