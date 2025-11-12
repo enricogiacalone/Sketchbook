@@ -21,47 +21,46 @@ export class LoadingManager {
     UIManager.setLoadingScreenVisible(true);
   }
 
-  public loadGLTF(path: string, onLoadingFinished: (gltf: any) => void): void {
+  public loadGLTFPromise(path: string): Promise<any> {
     const trackerEntry = this.addLoadingEntry(path);
 
-    fetch(path)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(
-            `Failed to load resource: ${path} (HTTP status ${response.status})`
-          );
-        }
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.indexOf("text/html") !== -1) {
-          throw new Error(
-            `Failed to load 3D model at '${path}'. The server returned an HTML page instead. This usually means the file is missing. Please make sure you have converted 'world.blend' to 'world.glb' and placed it in the 'public' directory.`
-          );
-        }
-        return response.arrayBuffer();
-      })
-      .then((data) => {
-        this.gltfLoader.parse(
-          data,
-          "",
-          (gltf) => {
-            onLoadingFinished(gltf);
-            this.doneLoading(trackerEntry);
-          },
-          (error) => {
-            console.error(error);
-            throw new Error(`Failed to parse GLTF file at '${path}': ${error}`);
+    return new Promise((resolve, reject) => {
+      fetch(path)
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(
+              `Failed to load resource: ${path} (HTTP status ${response.status})`
+            );
           }
-        );
-      })
-      .catch((error) => {
-        console.error(error);
-        Swal.fire({
-          icon: "error",
-          title: "Failed to load world",
-          text: error.message,
-          footer: "Please check the browser console for more details.",
+          const contentType = response.headers.get("content-type");
+          if (contentType && contentType.indexOf("text/html") !== -1) {
+            throw new Error(
+              `Failed to load 3D model at '${path}'. The server returned an HTML page instead. This usually means the file is missing. Please make sure you have converted 'world.blend' to 'world.glb' and placed it in the 'public' directory.`
+            );
+          }
+          return response.arrayBuffer();
+        })
+        .then((data) => {
+          this.gltfLoader.parse(
+            data,
+            "",
+            (gltf) => {
+              this.doneLoading(trackerEntry);
+              resolve(gltf);
+            },
+            (error) => {
+              console.error(error);
+              this.doneLoading(trackerEntry); // Mark as done even on error
+              reject(new Error(`Failed to parse GLTF file at '${path}': ${error}`));
+            }
+          );
+        })
+        .catch((error) => {
+          console.error(error);
+          this.doneLoading(trackerEntry); // Mark as done even on error
+          reject(new Error(`Failed to load GLTF model: ${error.message}`));
         });
-      });
+    });
   }
 
   public addLoadingEntry(path: string): LoadingTrackerEntry {
@@ -78,6 +77,7 @@ export class LoadingManager {
     if (this.isLoadingDone()) {
       if (this.onFinishedCallback !== undefined) {
         this.onFinishedCallback();
+        this.onFinishedCallback = undefined; // Prevent it from being called again
       } else {
         UIManager.setUserInterfaceVisible(true);
       }

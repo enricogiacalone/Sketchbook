@@ -47,6 +47,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public mixer: THREE.AnimationMixer;
   public animations: any[];
   public speechBubble: SpeechBubble;
+  public nameplate: THREE.Sprite;
 
   // Health
   public maxHealth: number = 100;
@@ -201,6 +202,31 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
     // States
     this.setState(new Idle(this));
+  }
+
+  public createNameplate(name: string, color: string): void {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    const fontSize = 24;
+    context.font = `bold ${fontSize}px Arial`;
+    const textWidth = context.measureText(name).width;
+
+    canvas.width = textWidth;
+    canvas.height = fontSize;
+
+    context.font = `bold ${fontSize}px Arial`;
+    context.fillStyle = color;
+    context.fillText(name, 0, fontSize);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    const material = new THREE.SpriteMaterial({ map: texture });
+    this.nameplate = new THREE.Sprite(material);
+    this.nameplate.scale.set(textWidth / 100, fontSize / 100, 1);
+    this.nameplate.position.y = this.height + 0.5; // Position above health bar
+
+    this.tiltContainer.add(this.nameplate);
   }
 
   public createHealthBar(): void {
@@ -415,7 +441,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     if (this.controlledObject !== undefined) {
       this.controlledObject.handleMouseWheel(event, value);
     } else {
-      this.world.scrollTheTimeScale(value);
+      this.world.cameraOperator.zoom(value);
     }
   }
 
@@ -528,7 +554,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     }
   }
 
-  public update(timeStep: number): void {
+  public update(timeStep: number, unscaledTimeStep: number): void {
     this.behaviour?.update(timeStep);
     this.vehicleEntryInstance?.update(timeStep);
     this.charState?.update(timeStep);

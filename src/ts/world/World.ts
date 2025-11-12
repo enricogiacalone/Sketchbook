@@ -111,10 +111,13 @@ export class World {
   private lastScenarioID: string;
   private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
   private currentEnemyCount: number = 0; // New property to track active enemies
-  private loadingManager: LoadingManager; // New property to store the loading manager
+  public loadingManager: LoadingManager; // New property to store the loading manager
   private meteoriteInterval: any;
 
-  constructor(worldScenePath?: any) {
+  constructor(
+    worldScenePath?: any,
+    private onJoin?: (name: string) => void
+  ) {
     this._initializeCoreManagers();
     this._initializePhysicsSettings();
     this._initializeRenderLoop();
@@ -140,69 +143,52 @@ export class World {
     new PsychedelicParticles(this, 1000, this.interstellarVortex);
   }
 
-  public addNetworkPlayer(id: string, playerData: any): void {
-    console.log(
-      `World: Attempting to add network player ${id} with data:`,
-      playerData
-    );
+  public async addNetworkPlayer(id: string, playerData: any): Promise<void> {
+    console.log(`World: Attempting to add network player ${id} with data:`, playerData);
 
-    // Create a simple red sphere as a direct placeholder
-    const geometry = new THREE.SphereGeometry(1, 32, 32); // Radius 1, standard segments
-    const material = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Red color
-    const placeholderMesh = new THREE.Mesh(geometry, material);
+    try {
+      // Load the character model for the network player
+      const gltf = await this.loadingManager.loadGLTFPromise("boxman.glb");
 
-    placeholderMesh.position.set(
-      playerData.position_x,
-      playerData.position_y,
-      playerData.position_z
-    );
-    placeholderMesh.quaternion.set(
-      playerData.quaternion_x,
-      playerData.quaternion_y,
-      playerData.quaternion_z,
-      playerData.quaternion_w
-    );
-    placeholderMesh.name = `NetworkPlayer_${id}`; // Give it a name for identification
+      const networkCharacter = new NetworkPlayer(gltf, this, id, playerData);
 
-    this.sceneManager.graphicsWorld.add(placeholderMesh);
-    this.networkPlayers.set(id, placeholderMesh); // Store the mesh directly
-    console.log(
-      `Network player ${id} (${playerData.name}) added directly to scene at position:`,
-      placeholderMesh.position,
-      `quaternion:`,
-      placeholderMesh.quaternion
-    );
-  }
-
-  public updateNetworkPlayer(id: string, playerData: any): void {
-    const placeholderMesh = this.networkPlayers.get(id);
-    if (placeholderMesh) {
-      placeholderMesh.position.set(
+      networkCharacter.position.set(
         playerData.position_x,
         playerData.position_y,
         playerData.position_z
       );
-      placeholderMesh.quaternion.set(
+      networkCharacter.quaternion.set(
         playerData.quaternion_x,
         playerData.quaternion_y,
         playerData.quaternion_z,
         playerData.quaternion_w
       );
-      // No animation for a simple sphere, but we can log it
-      console.log(
-        `Network player ${id} updated position:`,
-        placeholderMesh.position,
-        `quaternion:`,
-        placeholderMesh.quaternion
-      );
+
+      // Also initialize target state
+      networkCharacter.targetPosition.copy(networkCharacter.position);
+      networkCharacter.targetQuaternion.copy(networkCharacter.quaternion);
+
+      this.add(networkCharacter); // This calls networkCharacter.addToWorld(this)
+      this.networkPlayers.set(id, networkCharacter); // Store the actual NetworkPlayer instance
+
+      console.log(`NetworkPlayer ${id} (${playerData.name}) added to world.`);
+    } catch (error) {
+      console.error(`Failed to add network player ${id}:`, error);
+    }
+  }
+
+  public updateNetworkPlayer(id: string, playerData: any): void {
+    const networkCharacter = this.networkPlayers.get(id);
+    if (networkCharacter) {
+      networkCharacter.updateState(playerData);
     }
   }
 
   public removeNetworkPlayer(id: string): void {
-    const placeholderMesh = this.networkPlayers.get(id);
-    if (placeholderMesh) {
+    const networkCharacter = this.networkPlayers.get(id);
+    if (networkCharacter) {
       console.log(`World: Removing network player ${id}`);
-      this.sceneManager.graphicsWorld.remove(placeholderMesh);
+      this.remove(networkCharacter); // This calls networkCharacter.removeFromWorld(this)
       this.networkPlayers.delete(id);
     }
   }
@@ -381,18 +367,65 @@ export class World {
           text: "Feel free to explore the world and interact with available vehicles. There are also various scenarios ready to launch from the right panel.",
           footer:
             '<a href="https://github.com/swift502/Sketchbook" target="_blank">GitHub page</a><a href="https://discord.gg/fGuEqCe" target="_blank">Discord server</a>',
-          confirmButtonText: "Okay",
+          input: "text",
+          inputLabel: "Your Name",
+          inputPlaceholder: "Enter your name...",
+          confirmButtonText: "Join",
           buttonsStyling: false,
+          allowOutsideClick: false,
+          allowEscapeKey: false,
+          inputValidator: (value) => {
+            if (!value) {
+              return "You need to write something!";
+            }
+            return null; // Explicitly return null on successful validation
+          },
         }).then((result) => {
           if (result.isConfirmed) {
             UIManager.setUserInterfaceVisible(true);
-            this.updateEnemyCountDisplay(); // Update counter after UI is visible
+            this.updateEnemyCountDisplay();
+            if (this.onJoin) {
+              // Decouple the socket connection from the modal's promise chain
+              setTimeout(() => {
+                try {
+                  this.onJoin(result.value);
+                } catch (error) {
+                  console.error("Error initiating socket connection:", error);
+                  Swal.fire({
+                    icon: "error",
+                    title: "Connection Error",
+                    text: `An error occurred: ${error.message}`,
+                  });
+                }
+              }, 10); // Use a small delay
+            }
           }
         });
       };
-      this.loadingManager.loadGLTF(worldScenePath, (gltf) => {
-        this.loadScene(this.loadingManager, gltf);
-      });
+      this.loadingManager
+        .loadGLTFPromise(worldScenePath)
+        .then((gltf) => {
+          this.loadScene(this.loadingManager, gltf);
+          // Call launchScenario with the provided callback
+          let defaultScenarioID: string;
+          for (const scenario of this.scenarios) {
+            if (scenario.default) {
+              defaultScenarioID = scenario.id;
+              break;
+            }
+          }
+          if (defaultScenarioID !== undefined)
+            this.launchScenario(defaultScenarioID);
+        })
+        .catch((error) => {
+          console.error("Error loading world scene:", error);
+          Swal.fire({
+            icon: "error",
+            title: "Failed to load world",
+            text: error.message,
+            footer: "Please check the browser console for more details.",
+          });
+        });
     } else {
       UIManager.setUserInterfaceVisible(true);
       UIManager.setLoadingScreenVisible(false);
@@ -513,53 +546,83 @@ export class World {
   }
 
   public remove(worldEntity: IWorldEntity): void {
-    console.log("World.remove called for entity:", worldEntity);
+    // Special handling for local player death
+    if (worldEntity === this.player) {
+      document.exitPointerLock();
+      this.player = undefined;
+
+      // Immediately remove player from the world
+      this.performRemoval(worldEntity);
+
+      // Then, show respawn modal
+      Swal.fire({
+        title: "You Died",
+        text: "You can rejoin the game.",
+        confirmButtonText: "Respawn",
+        buttonsStyling: false,
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+      }).then(() => {
+        this.restartScenario();
+      });
+
+      // Stop further execution for local player death
+      return;
+    }
+
+    this.performRemoval(worldEntity);
+  }
+
+  private performRemoval(worldEntity: IWorldEntity): void {
+    console.log("Performing removal for entity:", (worldEntity as any).uuid);
 
     // Check if the removed entity is an enemy character
     if (worldEntity instanceof Character) {
       if (worldEntity.entityType === EntityType.Enemy) {
         this.currentEnemyCount--;
-
         this.updateEnemyCountDisplay(); // Update UI using helper method
-
         if (this.currentEnemyCount <= 0) {
           this.spawnEnemies(this.initialEnemyCount * 2);
         }
       }
 
-      // --- Moved logic from Character.removeFromWorld ---
       if (this.inputManager.inputReceiver === worldEntity) {
         this.inputManager.inputReceiver = undefined;
       }
 
-      // Remove from characters
-      _.pull(this.characters, worldEntity);
+      _.pull(this.characters, worldEntity as Character);
 
-      // Remove physics
-      // Make the body completely non-interactive and static before removing it
-      if (worldEntity.characterCapsule && worldEntity.characterCapsule.body) {
-        worldEntity.characterCapsule.body.collisionResponse = false;
-        worldEntity.characterCapsule.body.mass = 0;
-        worldEntity.characterCapsule.body.sleep(); // Put the body to sleep
-        this.physicsManager.bodiesToRemove.push(
-          worldEntity.characterCapsule.body
-        ); // Add to deferred removal list
-      }
-
-      // Remove visuals
-      this.sceneManager.graphicsWorld.remove(worldEntity);
-      if (worldEntity.raycastBox) {
-        this.sceneManager.graphicsWorld.remove(worldEntity.raycastBox);
-      }
       if (
-        worldEntity.healthBarContainer &&
-        worldEntity.healthBarContainer.parent
+        (worldEntity as Character).characterCapsule &&
+        (worldEntity as Character).characterCapsule.body
       ) {
-        worldEntity.healthBarContainer.parent.remove(
-          worldEntity.healthBarContainer
+        (
+          worldEntity as Character
+        ).characterCapsule.body.collisionResponse = false;
+        (worldEntity as Character).characterCapsule.body.mass = 0;
+        (worldEntity as Character).characterCapsule.body.sleep();
+        this.physicsManager.bodiesToRemove.push(
+          (worldEntity as Character).characterCapsule.body
         );
       }
-      // --- End of moved logic ---
+
+      this.sceneManager.graphicsWorld.remove(worldEntity as Character);
+      console.log(
+        `Entity ${(worldEntity as any).uuid} removed from scene graph.`
+      );
+      if ((worldEntity as Character).raycastBox) {
+        this.sceneManager.graphicsWorld.remove(
+          (worldEntity as Character).raycastBox
+        );
+      }
+      if (
+        (worldEntity as Character).healthBarContainer &&
+        (worldEntity as Character).healthBarContainer.parent
+      ) {
+        (worldEntity as Character).healthBarContainer.parent.remove(
+          (worldEntity as Character).healthBarContainer
+        );
+      }
     } else if (worldEntity instanceof Vehicle) {
       worldEntity.removeFromWorld(this);
     } else {
@@ -658,25 +721,60 @@ export class World {
     // Launch default scenario
     for (const scenario of this.scenarios) {
       if (scenario.id === scenarioID || scenario.spawnAlways) {
-        // Find the player spawn point
-        let playerSpawnPoint: CharacterSpawnPoint | undefined;
-        scenario.spawnPoints.forEach((sp) => {
-          if (sp instanceof CharacterSpawnPoint) {
-            playerSpawnPoint = sp;
-          }
-        });
+        // If it's the default scenario, use hard-coded spawn points for variety
+        if (scenario.default) {
+          const customSpawnPointsData = [
+            { position: new THREE.Vector3(0, 10, 0) },
+            { position: new THREE.Vector3(50, 10, 20) },
+            { position: new THREE.Vector3(-30, 10, -40) },
+            { position: new THREE.Vector3(20, 10, 60) },
+            { position: new THREE.Vector3(-60, 10, 10) },
+          ];
 
-        if (playerSpawnPoint) {
-          // Spawn the player character first
-          playerSpawnPoint.spawn(this.loadingManager, this, () => {
-            // After player is spawned, then spawn AI characters
-            this.characters[0].setColor(new THREE.Color(0x0000ff)); // Set main character color to blue
-            this.player = this.characters[0]; // Assign the local player
-            this.spawnEnemies(5);
+          const spawnPoints = customSpawnPointsData.map((sp) => {
+            const object = new THREE.Object3D();
+            object.position.copy(sp.position);
+            return new CharacterSpawnPoint(object);
           });
+
+          const randomSpawnPoint =
+            spawnPoints[Math.floor(Math.random() * spawnPoints.length)];
+
+          randomSpawnPoint.spawn(
+            this.loadingManager,
+            this,
+            (player: Character) => {
+              player.setColor(new THREE.Color(0x0000ff)); // Set main character color to blue
+              this.player = player; // Assign the local player
+              this.spawnEnemies(5);
+            }
+          );
         } else {
-          // No player spawn point found, just launch the scenario normally
-          scenario.launch(this.loadingManager, this);
+          // For other scenarios, use the spawn points from the GLTF file
+          const playerSpawnPoints: CharacterSpawnPoint[] = [];
+          scenario.spawnPoints.forEach((sp) => {
+            if (sp instanceof CharacterSpawnPoint) {
+              playerSpawnPoints.push(sp);
+            }
+          });
+
+          if (playerSpawnPoints.length > 0) {
+            const randomSpawnPoint =
+              playerSpawnPoints[
+                Math.floor(Math.random() * playerSpawnPoints.length)
+              ];
+            randomSpawnPoint.spawn(
+              this.loadingManager,
+              this,
+              (player: Character) => {
+                player.setColor(new THREE.Color(0x0000ff));
+                this.player = player;
+                this.spawnEnemies(5);
+              }
+            );
+          } else {
+            scenario.launch(this.loadingManager, this);
+          }
         }
       }
     }
@@ -692,15 +790,29 @@ export class World {
   }
 
   public clearEntities(): void {
-    for (let i = 0; i < this.characters.length; i++) {
-      this.remove(this.characters[i]);
-      i--;
+    const networkPlayers: NetworkPlayer[] = [];
+    for (const character of this.characters) {
+      if (character instanceof NetworkPlayer) {
+        networkPlayers.push(character);
+      } else {
+        this.unregisterUpdatable(character);
+        if (character.characterCapsule?.body) {
+          this.physicsManager.bodiesToRemove.push(
+            character.characterCapsule.body
+          );
+        }
+        this.sceneManager.graphicsWorld.remove(character);
+        if (this.inputManager.inputReceiver === character) {
+          this.inputManager.inputReceiver = undefined;
+        }
+      }
     }
+    this.characters = networkPlayers;
 
-    for (let i = 0; i < this.vehicles.length; i++) {
-      this.remove(this.vehicles[i]);
-      i--;
+    for (const vehicle of this.vehicles) {
+      this.remove(vehicle);
     }
+    this.vehicles = [];
   }
 
   public scrollTheTimeScale(scrollAmount: number): void {
@@ -777,21 +889,25 @@ export class World {
     this.updateEnemyCountDisplay(); // Update UI using helper method
 
     for (let i = 0; i < count; i++) {
-      this.loadingManager.loadGLTF("boxman.glb", (model) => {
-        let character = new Character(model);
-        character.name = `Enemy ${i}`; // Assign a name for debugging
-        character.entityType = EntityType.Enemy; // Assign Enemy EntityType
-        character.setBehaviour(new FollowTarget(this.characters[0])); // this.characters[0] is the player
-        character.setColor(new THREE.Color(0xff0000)); // Set enemy character color to red
-        character.createHealthBar(); // Create health bar for enemies
+      this.loadingManager.loadGLTFPromise("boxman.glb")
+        .then((model) => {
+          let character = new Character(model);
+          character.name = `Enemy ${i}`; // Assign a name for debugging
+          character.entityType = EntityType.Enemy; // Assign Enemy EntityType
+          character.setBehaviour(new FollowTarget(this.characters[0])); // this.characters[0] is the player
+          character.setColor(new THREE.Color(0xff0000)); // Set enemy character color to red
+          character.createHealthBar(); // Create health bar for enemies
 
-        // Get a random spawn position
-        const x = Math.random() * 200 - 100;
-        const z = Math.random() * 100 - 50;
-        character.setPosition(x, 20, z);
+          // Get a random spawn position
+          const x = Math.random() * 200 - 100;
+          const z = Math.random() * 100 - 50;
+          character.setPosition(x, 20, z);
 
-        this.add(character);
-      });
+          this.add(character);
+        })
+        .catch((error) => {
+          console.error("Error loading enemy character model:", error);
+        });
     }
   }
 

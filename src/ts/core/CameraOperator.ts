@@ -24,6 +24,9 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
   public onMouseDownTheta: any;
   public onMouseDownPhi: any;
   public targetRadius: number = 1;
+  public minRadius: number = 1;
+  public maxRadius: number = 20;
+  public zoomSpeed: number = 0.1;
 
   public movementSpeed: number;
   public actions: { [action: string]: KeyBinding };
@@ -78,10 +81,14 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
   }
 
   public setRadius(value: number, instantly: boolean = false): void {
-    this.targetRadius = Math.max(0.001, value);
+    this.targetRadius = THREE.MathUtils.clamp(value, this.minRadius, this.maxRadius);
     if (instantly === true) {
-      this.radius = value;
+      this.radius = this.targetRadius;
     }
+  }
+
+  public zoom(deltaY: number): void {
+    this.setRadius(this.targetRadius + deltaY * this.zoomSpeed);
   }
 
   public move(deltaX: number, deltaY: number): void {
@@ -141,7 +148,8 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
         this.world.inputManager.setInputReceiver(this.characterCaller);
         this.characterCaller = undefined;
       }
-    } else {
+    }
+    else {
       for (const action in this.actions) {
         if (this.actions.hasOwnProperty(action)) {
           const binding = this.actions[action];
@@ -155,7 +163,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
   }
 
   public handleMouseWheel(event: WheelEvent, value: number): void {
-    this.world.scrollTheTimeScale(value);
+    this.zoom(value);
   }
 
   public handleMouseButton(

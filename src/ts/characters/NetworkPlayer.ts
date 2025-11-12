@@ -1,91 +1,97 @@
 import * as THREE from "three";
+import * as _ from "lodash";
 import { Character } from "./Character";
 import { World } from "~/world/World";
 import * as Utils from "~/core/FunctionLibrary";
 
 export class NetworkPlayer extends Character {
   public socketId: string;
+  public targetPosition: THREE.Vector3;
+  public targetQuaternion: THREE.Quaternion;
+  private currentAnimation: string;
 
   constructor(
     gltf: any,
     world: World,
     socketId: string,
-    name: string,
-    avatarSkin: string
+    playerData: any
   ) {
     super(gltf);
     this.tiltContainer.add(this.modelContainer);
-    // this.modelContainer.add(gltf.scene); // Temporarily disable GLTF scene
-    gltf.scene.visible = false; // Ensure GLTF scene is not visible
-
-    // Add a simple red box as a placeholder
-    const geometry = new THREE.BoxGeometry(1, 2, 1); // Adjust size as needed
-    const material = new THREE.MeshBasicMaterial({ color: 0xff0000 }); // Red color
-    const placeholderMesh = new THREE.Mesh(geometry, material);
-    placeholderMesh.position.y = 1; // Position it correctly relative to the character's base
-    this.modelContainer.add(placeholderMesh);
-
-    console.log(
-      `NetworkPlayer ${this.name} (${this.socketId}) properties after placeholder:`
-    );
-    console.log(`  - this.visible: ${this.visible}`);
-    console.log(`  - this.position:`, this.position);
-    console.log(`  - this.scale:`, this.scale);
-    console.log(`  - placeholderMesh.visible: ${placeholderMesh.visible}`);
-    console.log(`  - placeholderMesh.position:`, placeholderMesh.position);
-    console.log(`  - placeholderMesh.scale:`, placeholderMesh.scale);
 
     this.mixer = new THREE.AnimationMixer(gltf.scene);
     this.socketId = socketId;
-    this.name = name; // Set the player's name
-    this.entityType = 1; // Assuming EntityType.NetworkPlayer or similar, if not, use a default
-    this.world = world; // Assign the world instance
+    this.name = playerData.name;
+    this.entityType = 1;
+    this.world = world;
 
-    // Network players don't need input management or camera operation
     this.inputManager = undefined;
     this.cameraOperator = undefined;
 
-    // Set initial avatar skin if applicable (e.g., change material color or texture)
-    this.setAvatarSkin(avatarSkin);
+    this.targetPosition = new THREE.Vector3();
+    this.targetQuaternion = new THREE.Quaternion();
 
-    // Network players don't have physics bodies controlled locally
-    // We will directly set their position and quaternion
+    this.setColor(new THREE.Color(playerData.color));
+    this.createNameplate(playerData.name, playerData.color);
+
     this.setPhysicsEnabled(false);
-    console.log(
-      `NetworkPlayer ${this.name} (${this.socketId}) created at initial position:`,
-      this.position
-    );
   }
 
-  public update(timeStep: number): void {
-    // Network players receive updates from the server, so their position/quaternion
-    // are set directly. We only need to update the mixer for animations.
+  public addToWorld(world: World): void {
+    if (_.includes(world.characters, this)) {
+      console.warn("Adding character to a world in which it already exists.");
+      return;
+    }
+
+    // Set world
+    this.world = world;
+
+    // Register character
+    world.characters.push(this);
+
+    // Add to graphicsWorld
+    world.sceneManager.graphicsWorld.add(this);
+    world.sceneManager.graphicsWorld.add(this.raycastBox);
+
+    // Shadow cascades
+    this.materials.forEach((mat) => {
+      world.sky.csm.setupMaterial(mat);
+    });
+  }
+
+  public update(timeStep: number, unscaledTimeStep: number): void {
     if (this.mixer !== undefined) {
       this.mixer.update(timeStep);
     }
 
-    // Update speech bubble position
+    // Interpolate position and rotation
+    this.position.lerp(this.targetPosition, 0.1);
+    this.quaternion.slerp(this.targetQuaternion, 0.1);
+
     if (this.speechBubble) {
       this.speechBubble.update(timeStep);
     }
   }
 
-  public setPosition(x: number, y: number, z: number): void {
-    this.position.set(x, y, z);
-  }
+  public updateState(data: any): void {
+    this.targetPosition.set(data.position_x, data.position_y, data.position_z);
+    this.targetQuaternion.set(
+      data.quaternion_x,
+      data.quaternion_y,
+      data.quaternion_z,
+      data.quaternion_w
+    );
 
-  public setQuaternion(x: number, y: number, z: number, w: number): void {
-    this.quaternion.set(x, y, z, w);
+    if (this.currentAnimation !== data.animation) {
+      this.currentAnimation = data.animation;
+      this.setAnimation(data.animation, 0.2);
+    }
   }
 
   public setAvatarSkin(avatarSkin: string): void {
-    // This is a placeholder. You would implement logic here to change the
-    // character's appearance based on the avatarSkin string.
-    // For example, changing material colors, textures, or even swapping models.
     console.log(
       `NetworkPlayer ${this.name} (${this.socketId}) setting avatar skin to: ${avatarSkin}`
     );
-    // Example: Change color based on avatarSkin (very basic)
     if (avatarSkin === "red") {
       this.setColor(new THREE.Color(0xff0000));
     } else if (avatarSkin === "green") {
@@ -93,7 +99,7 @@ export class NetworkPlayer extends Character {
     } else if (avatarSkin === "blue") {
       this.setColor(new THREE.Color(0x0000ff));
     } else {
-      this.setColor(new THREE.Color(0xffffff)); // Default white
+      this.setColor(new THREE.Color(0xffffff));
     }
   }
 
@@ -108,12 +114,5 @@ export class NetworkPlayer extends Character {
   public displayControls(): void {}
   public inputReceiverInit(): void {}
   public inputReceiverUpdate(): void {}
-  public setPhysicsEnabled(value: boolean): void {
-    // For network players, we don't want to add/remove physics bodies
-    // as their movement is authoritative from the server.
-    // We just set the internal flag.
-    // The base Character class's setPhysicsEnabled would add/remove the body,
-    // but for NetworkPlayer, we explicitly don't want that.
-    // So, we do nothing here or set a local flag if needed.
-  }
+  public setPhysicsEnabled(value: boolean): void {}
 }

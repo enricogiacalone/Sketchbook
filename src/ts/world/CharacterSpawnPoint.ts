@@ -15,24 +15,28 @@ export class CharacterSpawnPoint implements ISpawnPoint {
   public spawn(
     loadingManager: LoadingManager,
     world: World,
-    callback?: Function
+    callback?: (player: Character) => void
   ): void {
-    loadingManager.loadGLTF("boxman.glb", (model) => {
-      let player = new Character(model);
+    loadingManager.loadGLTFPromise("boxman.glb")
+      .then((model) => {
+        let player = new Character(model);
 
-      let worldPos = new THREE.Vector3();
-      this.object.getWorldPosition(worldPos);
-      player.setPosition(worldPos.x, worldPos.y, worldPos.z);
+        let worldPos = new THREE.Vector3();
+        this.object.getWorldPosition(worldPos);
+        player.setPosition(worldPos.x, worldPos.y, worldPos.z);
 
-      let forward = Utils.getForward(this.object);
-      player.setOrientation(forward, true);
+        let forward = Utils.getForward(this.object);
+        player.setOrientation(forward, true);
 
-      world.add(player);
-      player.takeControl();
+        world.add(player);
+        player.takeControl();
 
-      if (callback) {
-        callback();
-      }
-    });
+        if (callback) {
+          callback(player);
+        }
+      })
+      .catch((error) => {
+        console.error("Error loading character model:", error);
+      });
   }
 }
