@@ -1,3 +1,4 @@
+import { NetworkPlayer } from "~/characters/NetworkPlayer";
 import * as CANNON from "cannon-es";
 
 import * as _ from "lodash";
@@ -104,6 +105,8 @@ export class World {
   public physicsManager: PhysicsManager;
   public gameManager: GameManager;
   public interstellarVortex: InterstellarVortex;
+  public player: Character; // Reference to the local player character
+  public networkPlayers: Map<string, NetworkPlayer> = new Map(); // Map to store other players by their socket ID
 
   private lastScenarioID: string;
   private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
@@ -135,6 +138,61 @@ export class World {
       2000
     );
     new PsychedelicParticles(this, 1000, this.interstellarVortex);
+  }
+
+  public addNetworkPlayer(id: string, playerData: any): void {
+    console.log(`World: Adding network player ${id}`);
+    this.loadingManager.loadGLTF("boxman.glb", (model) => {
+      const networkPlayer = new NetworkPlayer(
+        model,
+        this,
+        id,
+        playerData.name,
+        playerData.avatarSkin
+      );
+      networkPlayer.setPosition(
+        playerData.position_x,
+        playerData.position_y,
+        playerData.position_z
+      );
+      networkPlayer.setNetworkQuaternion(
+        playerData.quaternion_x,
+        playerData.quaternion_y,
+        playerData.quaternion_z,
+        playerData.quaternion_w
+      );
+      networkPlayer.setAnimation(playerData.animation, 0.1);
+      this.add(networkPlayer);
+      this.networkPlayers.set(id, networkPlayer);
+      console.log(`Network player ${id} (${playerData.name}) added.`);
+    });
+  }
+
+  public updateNetworkPlayer(id: string, playerData: any): void {
+    const networkPlayer = this.networkPlayers.get(id);
+    if (networkPlayer) {
+      networkPlayer.setNetworkPosition(
+        playerData.position_x,
+        playerData.position_y,
+        playerData.position_z
+      );
+      networkPlayer.setNetworkQuaternion(
+        playerData.quaternion_x,
+        playerData.quaternion_y,
+        playerData.quaternion_z,
+        playerData.quaternion_w
+      );
+      networkPlayer.setAnimation(playerData.animation, 0.1);
+    }
+  }
+
+  public removeNetworkPlayer(id: string): void {
+    const networkPlayer = this.networkPlayers.get(id);
+    if (networkPlayer) {
+      console.log(`World: Removing network player ${id}`);
+      this.remove(networkPlayer);
+      this.networkPlayers.delete(id);
+    }
   }
 
   public spawnMeteorShower(
@@ -481,16 +539,20 @@ export class World {
 
       // Remove physics
       // Make the body completely non-interactive and static before removing it
-      worldEntity.characterCapsule.body.collisionResponse = false;
-      worldEntity.characterCapsule.body.mass = 0;
-      worldEntity.characterCapsule.body.sleep(); // Put the body to sleep
-      this.physicsManager.bodiesToRemove.push(
-        worldEntity.characterCapsule.body
-      ); // Add to deferred removal list
+      if (worldEntity.characterCapsule && worldEntity.characterCapsule.body) {
+        worldEntity.characterCapsule.body.collisionResponse = false;
+        worldEntity.characterCapsule.body.mass = 0;
+        worldEntity.characterCapsule.body.sleep(); // Put the body to sleep
+        this.physicsManager.bodiesToRemove.push(
+          worldEntity.characterCapsule.body
+        ); // Add to deferred removal list
+      }
 
       // Remove visuals
       this.sceneManager.graphicsWorld.remove(worldEntity);
-      this.sceneManager.graphicsWorld.remove(worldEntity.raycastBox);
+      if (worldEntity.raycastBox) {
+        this.sceneManager.graphicsWorld.remove(worldEntity.raycastBox);
+      }
       if (
         worldEntity.healthBarContainer &&
         worldEntity.healthBarContainer.parent
@@ -611,6 +673,7 @@ export class World {
           playerSpawnPoint.spawn(this.loadingManager, this, () => {
             // After player is spawned, then spawn AI characters
             this.characters[0].setColor(new THREE.Color(0x0000ff)); // Set main character color to blue
+            this.player = this.characters[0]; // Assign the local player
             this.spawnEnemies(5);
           });
         } else {

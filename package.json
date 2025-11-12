@@ -14,7 +14,10 @@
   "main": "build/sketchbook.min.js",
   "types": "build/types/sketchbook.d.ts",
   "scripts": {
-    "dev": "vite",
+    "frontend-dev": "vite",
+    "frontend-build": "vite build",
+    "backend-dev": "nodemon server.js",
+    "dev": "concurrently --kill-others \"npm run frontend-dev\" \"npm run backend-dev\"",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "prettier --check .",
@@ -33,6 +36,8 @@
   "devDependencies": {
     "@types/lodash": "^4.17.20",
     "@types/node": "^24.10.0",
+    "concurrently": "^8.2.0",
+    "nodemon": "^2.0.22",
     "typescript": "^5.9.3",
     "vite": "^7.2.2"
   },
@@ -40,10 +45,15 @@
     "@types/three": "^0.181.0",
     "cannon-es": "^0.20.0",
     "cannon-es-debugger": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "lil-gui": "^0.21.0",
     "lodash": "^4.17.21",
     "prettier": "^3.6.2",
     "simplex-noise": "^4.0.3",
+    "socket.io": "^4.7.1",
+    "socket.io-client": "^4.7.1",
     "stats.js": "^0.17.0",
     "sweetalert2": "^11.26.3",
     "three": "^0.181.1"
