@@ -74,7 +74,7 @@ export class SpeechBubble extends THREE.Object3D {
       side: THREE.DoubleSide,
     });
     this.mesh = new THREE.Mesh(bubbleGeometry, bubbleMaterial);
-    this.mesh.position.set(0, characterHeight + 0.9 * scaleFactor, 0); // Position above the character's head
+    this.mesh.position.set(0, characterHeight + (1.0 + 0.4) * scaleFactor, 0); // Position above the character's head
     this.mesh.renderOrder = 999; // Ensure it renders on top
     this.add(this.mesh);
 
@@ -86,7 +86,7 @@ export class SpeechBubble extends THREE.Object3D {
     tailShape.lineTo(0, 0);
     const tailGeometry = new THREE.ShapeGeometry(tailShape);
     this.tailMesh = new THREE.Mesh(tailGeometry, bubbleMaterial);
-    this.tailMesh.position.set(0, characterHeight + 0.5 * scaleFactor, 0.01); // Positioned below main bubble, slightly in front
+    this.tailMesh.position.set(0, characterHeight + 1.0 * scaleFactor, 0.01); // Positioned below main bubble, slightly in front
     this.tailMesh.renderOrder = 999; // Ensure it renders on top
     this.add(this.tailMesh);
 
@@ -109,7 +109,7 @@ export class SpeechBubble extends THREE.Object3D {
       this.initialTextMeshHeight
     );
     this.textMesh = new THREE.Mesh(textGeometry, this.textMaterial);
-    this.textMesh.position.set(0, characterHeight + 0.9 * scaleFactor, 0.02); // Slightly in front of the bubble
+    this.textMesh.position.set(0, characterHeight + (1.0 + 0.4) * scaleFactor, 0.02); // Slightly in front of the bubble
     this.textMesh.renderOrder = 1000; // Ensure text renders on top of the bubble
     this.add(this.textMesh);
 

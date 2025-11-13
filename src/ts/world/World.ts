@@ -159,7 +159,14 @@ export class World {
   }
 
   public async addNetworkPlayer(id: string, playerData: any): Promise<void> {
+    console.log(`Attempting to add network player with ID: ${id}`);
     try {
+      // If a player with this ID already exists, remove it first to prevent duplicates
+      if (this.networkPlayers.has(id)) {
+        console.warn(`Network player with ID ${id} already exists. Removing old instance.`);
+        this.removeNetworkPlayer(id);
+      }
+
       // Load the character model for the network player
       const gltf = await this.loadingManager.loadGLTFPromise("boxman.glb");
 
@@ -183,6 +190,7 @@ export class World {
 
       this.add(networkCharacter); // This calls networkCharacter.addToWorld(this)
       this.networkPlayers.set(id, networkCharacter); // Store the actual NetworkPlayer instance
+      console.log(`Successfully added network player with ID: ${id}`);
     } catch (error) {
       console.error(`Failed to add network player ${id}:`, error);
     }
@@ -196,12 +204,16 @@ export class World {
   }
 
   public removeNetworkPlayer(id: string): void {
+    console.log(`Attempting to remove network player with ID: ${id}`);
     const networkCharacter = this.networkPlayers.get(id);
     if (networkCharacter) {
       // Remove from world.characters array
       _.remove(this.characters, (char) => (char as NetworkPlayer).socketId === id);
       this.remove(networkCharacter); // This calls networkCharacter.removeFromWorld(this)
       this.networkPlayers.delete(id);
+      console.log(`Successfully removed network player with ID: ${id}`);
+    } else {
+      console.warn(`Attempted to remove non-existent network player with ID: ${id}`);
     }
   }
 

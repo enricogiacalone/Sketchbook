@@ -12,9 +12,10 @@ export class PhysicsManager {
   public world: World;
   public physicsWorld: CANNON.World;
   public bodiesToRemove: CANNON.Body[] = [];
-  public bulletMaterial: CANNON.Material; // Added
-  public trimeshMaterial: CANNON.Material; // Added
+  public bulletMaterial: CANNON.Material;
+  public trimeshMaterial: CANNON.Material;
   public meteoriteMaterial: CANNON.Material;
+  public characterMaterial: CANNON.Material; // New: Character material
 
   constructor(world: World) {
     this.world = world;
@@ -25,6 +26,7 @@ export class PhysicsManager {
     this.bulletMaterial = new CANNON.Material("bulletMaterial");
     this.trimeshMaterial = new CANNON.Material("trimeshMaterial");
     this.meteoriteMaterial = new CANNON.Material("meteoriteMaterial");
+    this.characterMaterial = new CANNON.Material("characterMaterial"); // Initialize character material
 
     const bulletTrimeshContactMaterial = new CANNON.ContactMaterial(
       this.bulletMaterial,
@@ -55,6 +57,28 @@ export class PhysicsManager {
       }
     );
     this.physicsWorld.addContactMaterial(meteoriteMeteoriteContactMaterial);
+
+    // New: Contact material for character-character collisions
+    const characterCharacterContactMaterial = new CANNON.ContactMaterial(
+      this.characterMaterial,
+      this.characterMaterial,
+      {
+        friction: 0.1, // Low friction to allow sliding past each other
+        restitution: 0.0, // No bounce
+      }
+    );
+    this.physicsWorld.addContactMaterial(characterCharacterContactMaterial);
+
+    // New: Contact material for character-trimesh (ground) collisions
+    const characterTrimeshContactMaterial = new CANNON.ContactMaterial(
+      this.characterMaterial,
+      this.trimeshMaterial,
+      {
+        friction: 0.0, // Characters should not stick to the ground
+        restitution: 0.0, // No bounce
+      }
+    );
+    this.physicsWorld.addContactMaterial(characterTrimeshContactMaterial);
 
     this.physicsWorld.addEventListener("preStep", () => this._onPreStep());
     this.physicsWorld.addEventListener("postStep", () => this._onPostStep());

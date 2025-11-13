@@ -3,6 +3,7 @@ import { World } from "./World";
 import { IWorldEntity } from "../interfaces/IWorldEntity";
 import { IUpdatable } from "../interfaces/IUpdatable";
 import { EntityType } from "../enums/EntityType";
+import { LaserBeam } from "../core/LaserBeam"; // Import LaserBeam
 
 export class UFO implements IWorldEntity, IUpdatable {
   public entityType: EntityType = EntityType.System; // Or a new EntityType.UFO
@@ -14,6 +15,9 @@ export class UFO implements IWorldEntity, IUpdatable {
   private speed: number = 5;
   private direction: THREE.Vector3;
   private targetPosition: THREE.Vector3;
+
+  private laserFireInterval: number = 3; // Seconds between laser fires
+  private laserFireTimer: number = 0;
 
   constructor(world: World, position: THREE.Vector3) {
     this.world = world;
@@ -59,6 +63,13 @@ export class UFO implements IWorldEntity, IUpdatable {
 
     // Simple rotation
     this.mesh.rotation.y += 0.5 * timeStep;
+
+    // Laser firing logic
+    this.laserFireTimer += timeStep;
+    if (this.laserFireTimer >= this.laserFireInterval) {
+      this.fireLaser();
+      this.laserFireTimer = 0;
+    }
   }
 
   public removeFromWorld(): void {
@@ -70,6 +81,19 @@ export class UFO implements IWorldEntity, IUpdatable {
     const x = (Math.random() - 0.5) * 1000;
     const y = 100 + Math.random() * 100; // Keep it in the air
     const z = (Math.random() - 0.5) * 1000;
+    return new THREE.Vector3(x, y, z);
+  }
+
+  private fireLaser(): void {
+    const start = this.mesh.position.clone();
+    const end = this.getRandomGroundPosition();
+    this.world.registerUpdatable(new LaserBeam(this.world, start, end));
+  }
+
+  private getRandomGroundPosition(): THREE.Vector3 {
+    const x = (Math.random() - 0.5) * 500; // Random X within a range
+    const z = (Math.random() - 0.5) * 500; // Random Z within a range
+    const y = 0; // Ground level
     return new THREE.Vector3(x, y, z);
   }
 }

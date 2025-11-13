@@ -82,7 +82,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   // Ray casting
   public rayResult: CANNON.RaycastResult = new CANNON.RaycastResult();
   public rayHasHit: boolean = false;
-  public rayCastLength: number = 0.57;
+  public rayCastLength: number = 0.55;
   public raySafeOffset: number = 0.03;
   public wantsToJump: boolean = false;
   public initJumpSpeed: number = -1;
@@ -116,7 +116,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
     // Model container is used to reliably ground the character, as animation can alter the position of the model itself
     this.modelContainer = new THREE.Group();
-    // this.modelContainer.position.y = -0.57; // This might need adjustment based on actual model
+    this.modelContainer.position.y = -0.55; // This might need adjustment based on actual model
     this.tiltContainer.add(this.modelContainer);
     this.modelContainer.add(gltf.scene);
 
@@ -1187,6 +1187,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       // Register physics
       world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
       this.characterCapsule.body.userData = this; // Set userData for collision detection
+      this.characterCapsule.body.material = this.world.physicsManager.characterMaterial; // Assign character material
 
       // Create health bar for the character
       this.createHealthBar();
