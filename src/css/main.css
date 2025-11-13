@@ -5,6 +5,7 @@
 @import "modules/cubeLoader.css";
 @import "modules/welcomeScreen.css";
 @import "modules/minimap.css";
+@import "modules/chatInput.css";
 
 /* Crosshair */
 #crosshair {

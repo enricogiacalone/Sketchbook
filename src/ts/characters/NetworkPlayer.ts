@@ -34,7 +34,7 @@ export class NetworkPlayer extends Character {
     this.setColor(new THREE.Color(playerData.color));
     this.createNameplate(playerData.name, playerData.color);
 
-    this.setPhysicsEnabled(false);
+    super.setPhysicsEnabled(true); // Enable physics for network players
   }
 
   public addToWorld(world: World): void {
@@ -139,9 +139,6 @@ export class NetworkPlayer extends Character {
   }
 
   public setAvatarSkin(avatarSkin: string): void {
-    console.log(
-      `NetworkPlayer ${this.name} (${this.socketId}) setting avatar skin to: ${avatarSkin}`
-    );
     if (avatarSkin === "red") {
       this.setColor(new THREE.Color(0xff0000));
     } else if (avatarSkin === "green") {
@@ -150,6 +147,12 @@ export class NetworkPlayer extends Character {
       this.setColor(new THREE.Color(0x0000ff));
     } else {
       this.setColor(new THREE.Color(0xffffff));
+    }
+  }
+
+  public displayMessage(message: string): void {
+    if (this.speechBubble) {
+      this.speechBubble.show(message);
     }
   }
 
@@ -164,5 +167,4 @@ export class NetworkPlayer extends Character {
   public displayControls(): void {}
   public inputReceiverInit(): void {}
   public inputReceiverUpdate(): void {}
-  public setPhysicsEnabled(value: boolean): void {}
 }

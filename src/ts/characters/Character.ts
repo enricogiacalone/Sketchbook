@@ -127,13 +127,6 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
     // Initialize health
     this.health = this.maxHealth;
-    console.log(
-      `Character ${this.name} initialized with health: ${this.health}`
-    );
-    console.log("Character object after constructor:", this);
-    console.log(
-      `Character ${this.name} initialized with health: ${this.health}`
-    );
 
     this.velocitySimulator = new VectorSpringSimulator(
       60,
@@ -202,7 +195,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.raycastBox.visible = false;
 
     // States
-    this.setState(new Idle(this));
+    // this.setState(new Idle(this));
   }
 
   public createNameplate(name: string, color: string): void {
@@ -280,6 +273,9 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public setState(state: ICharacterState): void {
     this.charState = state;
     this.charState.onInputChange();
+    if (this.world) {
+      this.displayControls();
+    }
   }
 
   public setPosition(x: number, y: number, z: number): void {
@@ -388,7 +384,6 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       } else if (code === "KeyB" && pressed === true) {
         if (this.charState instanceof Flying) {
           this.setState(new Idle(this));
-          this.displayControls();
         } else if (!this.rayHasHit) {
           this.setState(new Flying(this));
         }
@@ -507,24 +502,8 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public takeDamage(damage: number): void {
     if (this.isDead) return; // Prevent taking damage if already dead
 
-    if (this.health === 100) {
-      console.log(
-        `Character ${this.name} taking ${damage} damage. Initial health was 100.`
-      );
-    } else {
-      console.warn(
-        `Character ${this.name} taking ${damage} damage. Initial health was ${this.health} (expected 100).`
-      );
-    }
     this.health -= damage;
     this.health = Math.max(0, this.health); // Ensure health doesn't go below zero
-    console.log(
-      `Character ${this.name} new health: ${this.health}. Health bar visible: ${this.healthBarContainer?.visible}`
-    );
-    console.log(
-      `Character ${this.name} healthBarContainer object:`,
-      this.healthBarContainer
-    );
 
     // Update health bar
     const healthPercentage = this.health / this.maxHealth;
@@ -601,7 +580,17 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   }
 
   public displayControls(): void {
-    this.world.updateControls([
+    let controlsToShow;
+    if (this.charState instanceof Flying) {
+      controlsToShow = this._getFlyingControls();
+    } else {
+      controlsToShow = this._getDefaultControls();
+    }
+    this.world.updateControls(controlsToShow);
+  }
+
+  private _getDefaultControls(): any[] {
+    return [
       {
         keys: ["W", "A", "S", "D"],
         desc: "Movement",
@@ -630,23 +619,28 @@ export class Character extends THREE.Object3D implements IWorldEntity {
         keys: ["B"],
         desc: "Toggle Flight Mode",
       },
+    ];
+  }
+
+  private _getFlyingControls(): any[] {
+    return [
       {
         keys: ["W", "A", "S", "D"],
-        desc: "Fly around (in flight mode)",
+        desc: "Fly around",
       },
       {
         keys: ["Space"],
-        desc: "Fly up (in flight mode)",
+        desc: "Fly up",
       },
       {
         keys: ["Shift"],
-        desc: "Fly down (in flight mode)",
+        desc: "Fly down",
       },
       {
-        keys: ["Mouse1"],
+        keys: ["B"],
         desc: "Exit Flight Mode",
       },
-    ]);
+    ];
   }
 
   public inputReceiverUpdate(timeStep: number): void {
@@ -1169,26 +1163,20 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       // Set world
       this.world = world;
 
+      // Set initial state after world is set
+      this.setState(new Idle(this));
+
       // Register character
       world.characters.push(this);
 
       // Register physics
       world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
       this.characterCapsule.body.userData = this; // Set userData for collision detection
-      console.log(
-        `Character ${this.name} added to world with health: ${this.health}`
-      );
 
       // Create health bar for the character
       this.createHealthBar();
 
       // Add to graphicsWorld
-      console.log(
-        `Character ${this.name} (${this.uuid}) properties before adding to graphicsWorld:`
-      );
-      console.log(`  - this.visible: ${this.visible}`);
-      console.log(`  - this.position:`, this.position);
-      console.log(`  - this.scale:`, this.scale);
       world.sceneManager.graphicsWorld.add(this);
       world.sceneManager.graphicsWorld.add(this.raycastBox);
 

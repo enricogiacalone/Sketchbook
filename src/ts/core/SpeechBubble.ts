@@ -75,6 +75,7 @@ export class SpeechBubble extends THREE.Object3D {
     });
     this.mesh = new THREE.Mesh(bubbleGeometry, bubbleMaterial);
     this.mesh.position.set(0, characterHeight + 0.9 * scaleFactor, 0); // Position above the character's head
+    this.mesh.renderOrder = 999; // Ensure it renders on top
     this.add(this.mesh);
 
     // Speech bubble tail mesh (simple triangle)
@@ -86,6 +87,7 @@ export class SpeechBubble extends THREE.Object3D {
     const tailGeometry = new THREE.ShapeGeometry(tailShape);
     this.tailMesh = new THREE.Mesh(tailGeometry, bubbleMaterial);
     this.tailMesh.position.set(0, characterHeight + 0.5 * scaleFactor, 0.01); // Positioned below main bubble, slightly in front
+    this.tailMesh.renderOrder = 999; // Ensure it renders on top
     this.add(this.tailMesh);
 
     // Text canvas and texture
@@ -96,6 +98,8 @@ export class SpeechBubble extends THREE.Object3D {
     this.textMaterial = new THREE.MeshBasicMaterial({
       map: this.textTexture,
       transparent: true,
+      depthTest: false, // Disable depth testing
+      depthWrite: false, // Disable depth writing
     });
 
     this.initialTextMeshWidth = bubbleWidth - 0.2 * scaleFactor; // Store initial width
@@ -105,7 +109,8 @@ export class SpeechBubble extends THREE.Object3D {
       this.initialTextMeshHeight
     );
     this.textMesh = new THREE.Mesh(textGeometry, this.textMaterial);
-    this.textMesh.position.set(0, characterHeight + 0.9 * scaleFactor, 0.01); // Same position as main bubble, slightly in front
+    this.textMesh.position.set(0, characterHeight + 0.9 * scaleFactor, 0.02); // Slightly in front of the bubble
+    this.textMesh.renderOrder = 1000; // Ensure text renders on top of the bubble
     this.add(this.textMesh);
 
     this.visible = false;
@@ -138,125 +143,66 @@ export class SpeechBubble extends THREE.Object3D {
   }
 
   private updateTextCanvas(text: string): void {
+    const canvasWidth = 512;
+    const canvasHeight = 256;
+    this.textCanvas.width = canvasWidth;
+    this.textCanvas.height = canvasHeight;
+
     const border = 20;
-    const outlineColor = "#FFFFFF"; // White outline for comic effect
+    const outlineColor = "#FFFFFF";
     const outlineWidth = 4;
     const textColor = "#000000";
 
-    // Calculate maximum allowed text dimensions based on the bubble's dimensions
-    // We use a ratio to convert from THREE.PlaneGeometry dimensions to canvas pixels
-    const pixelsPerUnit = 256; // A reasonable arbitrary value for converting world units to pixels
-    const maxTextWidthPx =
-      this.initialTextMeshWidth * pixelsPerUnit -
-      (border * 2 + outlineWidth * 2);
-    const maxTextHeightPx =
-      this.initialTextMeshHeight * pixelsPerUnit -
-      (border * 2 + outlineWidth * 2);
+    this.textContext.clearRect(0, 0, canvasWidth, canvasHeight);
 
-    let fontSize = 48; // Start with a reasonable font size
+    let fontSize = 48;
     let lines: string[] = [];
     let textHeightPx = 0;
-    let widestLinePx = 0;
-    const lineHeightMultiplier = 1.2; // 120% of font size for line height
+    const lineHeightMultiplier = 1.2;
+    const maxTextWidthPx = canvasWidth - (border * 2 + outlineWidth * 2);
+    const maxTextHeightPx = canvasHeight - (border * 2 + outlineWidth * 2);
 
     // Iteratively reduce font size until text fits both width and height
     while (fontSize > 10) {
-      // Minimum font size of 10px
       this.textContext.font = `bold ${fontSize}px Arial`;
       lines = this.wrapText(this.textContext, text, maxTextWidthPx);
-
-      widestLinePx = 0;
-      for (const line of lines) {
-        const metrics = this.textContext.measureText(line);
-        if (metrics.width > widestLinePx) {
-          widestLinePx = metrics.width;
-        }
-      }
       textHeightPx = lines.length * fontSize * lineHeightMultiplier;
 
-      if (widestLinePx <= maxTextWidthPx && textHeightPx <= maxTextHeightPx) {
-        break; // Text fits, break the loop
+      if (textHeightPx <= maxTextHeightPx) {
+        break;
       }
-      fontSize -= 2; // Reduce font size and try again
+      fontSize -= 2;
     }
 
-    // If text still doesn't fit after reducing font size to minimum, it will be clipped.
-    // This is a fallback, ideally, phrases should be designed to fit.
-
-    // Set canvas size
-    // Add padding for border and outline
-    this.textCanvas.width = Math.min(
-      2048,
-      widestLinePx + border * 2 + outlineWidth * 2
-    );
-    this.textCanvas.height = Math.min(
-      2048,
-      textHeightPx + border * 2 + outlineWidth * 2
-    );
-
-    // Clear canvas
-    this.textContext.clearRect(
-      0,
-      0,
-      this.textCanvas.width,
-      this.textCanvas.height
-    );
-
-    // Apply font and styles
     this.textContext.font = `bold ${fontSize}px Arial`;
     this.textContext.textAlign = "center";
     this.textContext.textBaseline = "middle";
 
     const startY =
-      (this.textCanvas.height - textHeightPx) / 2 +
-      (fontSize * lineHeightMultiplier) / 2;
+      (canvasHeight - textHeightPx) / 2 + (fontSize * lineHeightMultiplier) / 2;
 
-    // Draw each line
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const lineY = startY + i * fontSize * lineHeightMultiplier;
 
-      // Draw outline
       this.textContext.strokeStyle = outlineColor;
       this.textContext.lineWidth = outlineWidth * 2;
-      this.textContext.strokeText(line, this.textCanvas.width / 2, lineY);
+      this.textContext.strokeText(line, canvasWidth / 2, lineY);
 
-      // Draw text
       this.textContext.fillStyle = textColor;
-      this.textContext.fillText(line, this.textCanvas.width / 2, lineY);
+      this.textContext.fillText(line, canvasWidth / 2, lineY);
     }
 
     this.textTexture.needsUpdate = true;
 
-    // Adjust text mesh scale to fit the text content
-    const aspectRatio = this.textCanvas.width / this.textCanvas.height;
+    // The textMesh should already be scaled to fit the bubble's dimensions in the constructor.
+    // No dynamic scaling here.
+  }
 
-    // Use stored initial dimensions
-    const currentTextMeshWidth = this.initialTextMeshWidth;
-    const currentTextMeshHeight = this.initialTextMeshHeight;
-
-    // Scale the text mesh to fit the canvas content, maintaining aspect ratio
-    // The goal is to make the text mesh match the canvas content's aspect ratio
-    // and fit within the initialTextMeshWidth/Height constraints.
-    let meshWidth = currentTextMeshWidth;
-    let meshHeight = currentTextMeshHeight;
-
-    const canvasAspectRatio = this.textCanvas.width / this.textCanvas.height;
-    const meshAspectRatio = currentTextMeshWidth / currentTextMeshHeight;
-
-    if (canvasAspectRatio > meshAspectRatio) {
-      // Canvas is wider than mesh area, constrain by width
-      meshHeight = currentTextMeshWidth / canvasAspectRatio;
-    } else {
-      // Canvas is taller than mesh area, constrain by height
-      meshWidth = currentTextMeshHeight * canvasAspectRatio;
-    }
-
-    this.textMesh.scale.set(
-      meshWidth / this.initialTextMeshWidth,
-      meshHeight / this.initialTextMeshHeight,
-      1
-    );
+  public show(message: string): void {
+    this.updateTextCanvas(message);
+    this.visible = true;
+    this.displayTimer = this.displayDuration;
   }
 
   public showRandomPhrase(): void {
@@ -264,9 +210,7 @@ export class SpeechBubble extends THREE.Object3D {
     if (!this.visible || this.displayTimer <= 0) {
       const phrase =
         this.phrases[Math.floor(Math.random() * this.phrases.length)];
-      this.updateTextCanvas(phrase);
-      this.visible = true;
-      this.displayTimer = this.displayDuration;
+      this.show(phrase);
     }
   }
 
@@ -281,6 +225,36 @@ export class SpeechBubble extends THREE.Object3D {
       if (this.displayTimer <= 0) {
         this.hide();
       }
+    }
+  }
+
+  public dispose(): void {
+    if (this.mesh) {
+      this.mesh.geometry.dispose();
+      (this.mesh.material as THREE.Material).dispose();
+      this.remove(this.mesh);
+      this.mesh = undefined;
+    }
+    if (this.tailMesh) {
+      this.tailMesh.geometry.dispose();
+      (this.tailMesh.material as THREE.Material).dispose();
+      this.remove(this.tailMesh);
+      this.tailMesh = undefined;
+    }
+    if (this.textMesh) {
+      this.textMesh.geometry.dispose();
+      (this.textMesh.material as THREE.Material).dispose();
+      this.remove(this.textMesh);
+      this.textMesh = undefined;
+    }
+    if (this.textTexture) {
+      this.textTexture.dispose();
+      this.textTexture = undefined;
+    }
+    if (this.textCanvas) {
+      // No explicit dispose for canvas, but clearing reference helps GC
+      this.textContext = undefined;
+      this.textCanvas = undefined;
     }
   }
 }

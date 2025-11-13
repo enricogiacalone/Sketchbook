@@ -1,22 +1,27 @@
 import "../css/main.css";
 import { UIManager } from "./core/UIManager";
 import { World } from "~/world/World";
-import { io } from "socket.io-client";
+import { io, Socket } from "socket.io-client";
 import Swal from "sweetalert2";
 
+let chatSocket: Socket;
+let myPlayerId: string | null = null;
+
+export function sendChatMessage(message: string): void {
+  if (chatSocket && myPlayerId) {
+    chatSocket.emit("chatMessage", { senderId: myPlayerId, message: message });
+  }
+}
+
 function setupSocketConnection(name: string) {
-  const socket = io("http://localhost:3000/update");
+  chatSocket = io("http://localhost:3000/update");
 
-  let myPlayerId: string | null = null;
-
-  socket.on("connect", () => {
-    console.log("Connected to server with ID:", socket.id);
-    socket.emit("joinGame", name);
+  chatSocket.on("connect", () => {
+    chatSocket.emit("joinGame", name);
   });
 
-  socket.on("setID", (id: string) => {
+  chatSocket.on("setID", (id: string) => {
     myPlayerId = id;
-    console.log("My player ID is:", myPlayerId);
 
     // Send player updates periodically
     setInterval(() => {
@@ -27,7 +32,7 @@ function setupSocketConnection(name: string) {
           ? world.player.charState.constructor.name.toLowerCase()
           : "idle";
 
-        socket.emit("updatePlayer", {
+        chatSocket.emit("updatePlayer", {
           position: {
             x: playerPosition.x,
             y: playerPosition.y,
@@ -45,7 +50,7 @@ function setupSocketConnection(name: string) {
     }, 50); // Send updates 20 times per second
   });
 
-  socket.on("playerData", (players: any[]) => {
+  chatSocket.on("playerData", (players: any[]) => {
     const serverPlayerIds = new Set();
 
     // Add or update players
@@ -63,21 +68,24 @@ function setupSocketConnection(name: string) {
 
     // Remove disconnected players
     world.networkPlayers.forEach((networkPlayer, id) => {
-      console.log(
-        `Checking local player ${id}. Is it on server?`,
-        serverPlayerIds.has(id)
-      );
       if (!serverPlayerIds.has(id)) {
-        console.log(`Player ${id} is not on server list. Removing.`);
         world.removeNetworkPlayer(id);
       }
     });
   });
 
-  socket.on("disconnect", () => {
-    console.log("Disconnected from server");
+  chatSocket.on("chatMessage", (data: { senderId: string; message: string }) => {
+    if (data.senderId !== myPlayerId) {
+      const networkPlayer = world.networkPlayers.get(data.senderId);
+      if (networkPlayer) {
+        networkPlayer.displayMessage(data.message);
+      }
+    }
+  });
+
+  chatSocket.on("disconnect", () => {
   });
 }
 
-const world = new World("world.glb", setupSocketConnection);
+const world = new World("world.glb", setupSocketConnection, sendChatMessage);
 UIManager.initMinimap(world);

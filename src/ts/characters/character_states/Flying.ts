@@ -24,8 +24,6 @@ export class Flying extends CharacterStateBase implements ICharacterState {
     this.playAnimation("sprint", 0.1);
 
     this.createWindParticles();
-
-    this.displayControls();
   }
 
   public update(timeStep: number): void {
@@ -47,7 +45,6 @@ export class Flying extends CharacterStateBase implements ICharacterState {
         this.particleSystem
       );
       this.character.setState(new Rolling(this.character));
-      this.character.displayControls();
       return;
     }
 
@@ -119,29 +116,7 @@ export class Flying extends CharacterStateBase implements ICharacterState {
         this.particleSystem
       );
       this.character.setState(new Idle(this.character));
-      this.character.displayControls();
     }
-  }
-
-  private displayControls(): void {
-    this.character.world.updateControls([
-      {
-        keys: ["W", "A", "S", "D"],
-        desc: "Fly around",
-      },
-      {
-        keys: ["Space"],
-        desc: "Fly up",
-      },
-      {
-        keys: ["Shift"],
-        desc: "Fly down",
-      },
-      {
-        keys: ["B"],
-        desc: "Exit Flight Mode",
-      },
-    ]);
   }
 
   private createWindParticles(): void {

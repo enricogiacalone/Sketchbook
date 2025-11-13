@@ -68,7 +68,6 @@ export class Meteorite implements IWorldEntity, IUpdatable {
 
   private onCollide(event: any): void {
     if (this.isRemoved) return;
-    console.log("Meteorite collided!");
     new Explosion(this.world, this.position, 1); // Default scale for meteorites
     this.removeFromWorld();
   }

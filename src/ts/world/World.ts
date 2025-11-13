@@ -113,17 +113,22 @@ export class World {
   private currentEnemyCount: number = 0; // New property to track active enemies
   public loadingManager: LoadingManager; // New property to store the loading manager
   private meteoriteInterval: any;
+  private onSendMessage: (message: string) => void; // New property
 
   constructor(
     worldScenePath?: any,
-    private onJoin?: (name: string) => void
+    private onJoin?: (name: string) => void,
+    onSendMessage?: (message: string) => void // New parameter
   ) {
+    this.onSendMessage = onSendMessage; // Store the callback
     this._initializeCoreManagers();
     this._initializePhysicsSettings();
     this._initializeRenderLoop();
     this._initializeStatsAndGUI();
     this._initializeCannonDebugger(); // Call the new method here
     this._initializeInputAndCamera();
+    UIManager.createChatInput(); // Create chat input
+    this._initializeChatInput(); // Initialize chat input event listeners
     this._initializeSkyAndClouds();
     this._initializePlanets();
     this._loadWorldScene(worldScenePath);
@@ -143,9 +148,17 @@ export class World {
     new PsychedelicParticles(this, 1000, this.interstellarVortex);
   }
 
-  public async addNetworkPlayer(id: string, playerData: any): Promise<void> {
-    console.log(`World: Attempting to add network player ${id} with data:`, playerData);
+  public sendMessage(message: string): void {
+    if (this.onSendMessage) {
+      this.onSendMessage(message); // Send message via the provided callback
+    }
+    // Display message in local player's speech bubble
+    if (this.player && this.player.speechBubble) {
+      this.player.speechBubble.show(message);
+    }
+  }
 
+  public async addNetworkPlayer(id: string, playerData: any): Promise<void> {
     try {
       // Load the character model for the network player
       const gltf = await this.loadingManager.loadGLTFPromise("boxman.glb");
@@ -170,8 +183,6 @@ export class World {
 
       this.add(networkCharacter); // This calls networkCharacter.addToWorld(this)
       this.networkPlayers.set(id, networkCharacter); // Store the actual NetworkPlayer instance
-
-      console.log(`NetworkPlayer ${id} (${playerData.name}) added to world.`);
     } catch (error) {
       console.error(`Failed to add network player ${id}:`, error);
     }
@@ -187,7 +198,6 @@ export class World {
   public removeNetworkPlayer(id: string): void {
     const networkCharacter = this.networkPlayers.get(id);
     if (networkCharacter) {
-      console.log(`World: Removing network player ${id}`);
       // Remove from world.characters array
       _.remove(this.characters, (char) => (char as NetworkPlayer).socketId === id);
       this.remove(networkCharacter); // This calls networkCharacter.removeFromWorld(this)
@@ -231,12 +241,45 @@ export class World {
     new UFO(this, position);
   }
 
+  private _initializeChatInput(): void {
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        const chatInput = UIManager.getChatInput();
+        if (!chatInput) return;
+
+        const chatContainer = document.getElementById("chat-input-container");
+        if (chatContainer && chatContainer.classList.contains("expanded")) {
+          // Chat input is visible, send message
+          event.preventDefault();
+          const message = chatInput.value.trim();
+          if (message.length > 0) {
+            this.sendMessage(message);
+          }
+          chatInput.value = "";
+          UIManager.setChatInputExpanded(false); // Collapse the chat input
+          this.inputManager.setPointerLock(true); // Re-enable game input
+        } else {
+          // Chat input is hidden, show it
+          event.preventDefault();
+          UIManager.setChatInputExpanded(true); // Expand the chat input
+          this.inputManager.setPointerLock(false); // Disable game input
+        }
+      } else if (event.key === "Escape") {
+        const chatContainer = document.getElementById("chat-input-container");
+        if (chatContainer && chatContainer.classList.contains("expanded")) {
+          event.preventDefault();
+          UIManager.setChatInputExpanded(false); // Collapse the chat input
+          this.inputManager.setPointerLock(true); // Re-enable game input
+        }
+      }
+    });
+  }
+
   /**
    * Initializes Cannon Debugger if Debug_Physics is true.
    */
   private _initializeCannonDebugger(): void {
     if (this.params.Debug_Physics) {
-      console.log("Cannon Debugger: Enabling on startup");
       this.cannonDebugRenderer = CannonDebugger(
         this.sceneManager.graphicsWorld,
         this.physicsManager.physicsWorld
@@ -463,7 +506,6 @@ export class World {
     });
 
     if (this.params.Debug_Physics) {
-      console.log("Cannon Debugger: Updating");
       this.cannonDebugRenderer.update();
     }
 
@@ -641,7 +683,6 @@ export class World {
     } else if (worldEntity instanceof Vehicle) {
       worldEntity.removeFromWorld(this);
     } else {
-      console.log("Entity is not a Character. Type:", typeof worldEntity);
     }
 
     this.unregisterUpdatable(worldEntity);
@@ -868,7 +909,6 @@ export class World {
     let enemyCountElement = document.getElementById("dynamic-enemy-count");
 
     if (!enemyCountElement) {
-      console.log("Creating dynamic enemy count element.");
       enemyCountElement = document.createElement("div");
       enemyCountElement.id = "dynamic-enemy-count";
       enemyCountElement.style.position = "absolute";
@@ -884,7 +924,6 @@ export class World {
       const uiContainer = document.getElementById("ui-container");
       if (uiContainer) {
         uiContainer.appendChild(enemyCountElement);
-        console.log("Dynamic enemy count element appended to ui-container.");
       } else {
         console.warn(
           "UI container not found, cannot append dynamic enemy count element."
@@ -1005,6 +1044,7 @@ export class World {
     };
 
     const gui = new GUI();
+    gui.close();
 
     // Scenario
     this.scenarioGUIFolder = gui.addFolder("Scenarios");
@@ -1055,13 +1095,11 @@ export class World {
       });
     settingsFolder.add(this.params, "Debug_Physics").onChange((enabled) => {
       if (enabled) {
-        console.log("Cannon Debugger: Enabling");
         this.cannonDebugRenderer = CannonDebugger(
           this.sceneManager.graphicsWorld,
           this.physicsManager.physicsWorld
         );
       } else {
-        console.log("Cannon Debugger: Disabling");
         this.cannonDebugRenderer.destroy();
         this.cannonDebugRenderer = undefined;
       }
@@ -1073,7 +1111,5 @@ export class World {
     settingsFolder.add(this.params, "Debug_FPS").onChange((enabled) => {
       UIManager.setFPSVisible(enabled);
     });
-
-    gui.open();
   }
 }
