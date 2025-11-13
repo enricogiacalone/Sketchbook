@@ -188,6 +188,8 @@ export class World {
     const networkCharacter = this.networkPlayers.get(id);
     if (networkCharacter) {
       console.log(`World: Removing network player ${id}`);
+      // Remove from world.characters array
+      _.remove(this.characters, (char) => (char as NetworkPlayer).socketId === id);
       this.remove(networkCharacter); // This calls networkCharacter.removeFromWorld(this)
       this.networkPlayers.delete(id);
     }
@@ -383,7 +385,19 @@ export class World {
         }).then((result) => {
           if (result.isConfirmed) {
             UIManager.setUserInterfaceVisible(true);
-            this.updateEnemyCountDisplay();
+            // Launch default scenario after user confirms name
+            let defaultScenarioID: string;
+            for (const scenario of this.scenarios) {
+              if (scenario.default) {
+                defaultScenarioID = scenario.id;
+                break;
+              }
+            }
+            if (defaultScenarioID !== undefined) {
+              this.launchScenario(defaultScenarioID);
+            }
+            this.updateEnemyCountDisplay(); // Update after scenario launch
+
             if (this.onJoin) {
               // Decouple the socket connection from the modal's promise chain
               setTimeout(() => {
@@ -576,8 +590,9 @@ export class World {
   private performRemoval(worldEntity: IWorldEntity): void {
     console.log("Performing removal for entity:", (worldEntity as any).uuid);
 
-    // Check if the removed entity is an enemy character
-    if (worldEntity instanceof Character) {
+    if (worldEntity instanceof NetworkPlayer) {
+      worldEntity.removeFromWorld(this);
+    } else if (worldEntity instanceof Character) {
       if (worldEntity.entityType === EntityType.Enemy) {
         this.currentEnemyCount--;
         this.updateEnemyCountDisplay(); // Update UI using helper method
@@ -643,15 +658,15 @@ export class World {
 
     this.sceneManager.graphicsWorld.add(gltf.scene);
 
-    // Launch default scenario
-    let defaultScenarioID: string;
-    for (const scenario of this.scenarios) {
-      if (scenario.default) {
-        defaultScenarioID = scenario.id;
-        break;
-      }
-    }
-    if (defaultScenarioID !== undefined) this.launchScenario(defaultScenarioID);
+    // Launch default scenario - This is now handled after name input in _loadWorldScene
+    // let defaultScenarioID: string;
+    // for (const scenario of this.scenarios) {
+    //   if (scenario.default) {
+    //     defaultScenarioID = scenario.id;
+    //     break;
+    //   }
+    // }
+    // if (defaultScenarioID !== undefined) this.launchScenario(defaultScenarioID);
   }
 
   /**
@@ -884,31 +899,37 @@ export class World {
   }
 
   public spawnEnemies(count: number): void {
-    this.initialEnemyCount = count; // Update initial count for the new wave
-    this.currentEnemyCount = count; // Reset current count
+    // if (!this.player) {
+    //   console.warn("Cannot spawn enemies: local player is not defined.");
+    //   return;
+    // }
+
+    this.initialEnemyCount = 0; // No enemies
+    this.currentEnemyCount = 0; // No enemies
     this.updateEnemyCountDisplay(); // Update UI using helper method
 
-    for (let i = 0; i < count; i++) {
-      this.loadingManager.loadGLTFPromise("boxman.glb")
-        .then((model) => {
-          let character = new Character(model);
-          character.name = `Enemy ${i}`; // Assign a name for debugging
-          character.entityType = EntityType.Enemy; // Assign Enemy EntityType
-          character.setBehaviour(new FollowTarget(this.characters[0])); // this.characters[0] is the player
-          character.setColor(new THREE.Color(0xff0000)); // Set enemy character color to red
-          character.createHealthBar(); // Create health bar for enemies
+    // Commenting out enemy spawning logic to disable enemies
+    // for (let i = 0; i < count; i++) {
+    //   this.loadingManager.loadGLTFPromise("boxman.glb")
+    //     .then((model) => {
+    //       let character = new Character(model);
+    //       character.name = `Enemy ${i}`; // Assign a name for debugging
+    //       character.entityType = EntityType.Enemy; // Assign Enemy EntityType
+    //       character.setBehaviour(new FollowTarget(this.player)); // Target the local player
+    //       character.setColor(new THREE.Color(0xff0000)); // Set enemy character color to red
+    //       character.createHealthBar(); // Create health bar for enemies
 
-          // Get a random spawn position
-          const x = Math.random() * 200 - 100;
-          const z = Math.random() * 100 - 50;
-          character.setPosition(x, 20, z);
+    //       // Get a random spawn position
+    //       const x = Math.random() * 200 - 100;
+    //       const z = Math.random() * 100 - 50;
+    //       character.setPosition(x, 20, z);
 
-          this.add(character);
-        })
-        .catch((error) => {
-          console.error("Error loading enemy character model:", error);
-        });
-    }
+    //       this.add(character);
+    //     })
+    //     .catch((error) => {
+    //       console.error("Error loading enemy character model:", error);
+    //     });
+    // }
   }
 
   private generateHTML(): void {

@@ -180,6 +180,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       // tslint:disable-next-line: no-bitwise
       shape.collisionFilterMask =
         CollisionGroups.Default |
+        CollisionGroups.Characters | // Added this line
         CollisionGroups.TrimeshColliders |
         CollisionGroups.Bullet;
     });

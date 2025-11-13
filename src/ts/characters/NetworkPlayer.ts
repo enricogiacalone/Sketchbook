@@ -59,6 +59,56 @@ export class NetworkPlayer extends Character {
     });
   }
 
+  public removeFromWorld(world: World): void {
+    // The World class is now responsible for removing the character from world.characters array.
+    // if (!_.includes(world.characters, this)) {
+    //   console.warn("Removing character from a world in which it does not exist.");
+    //   return;
+    // }
+
+    this.world = undefined;
+
+    world.sceneManager.graphicsWorld.remove(this);
+    world.sceneManager.graphicsWorld.remove(this.raycastBox);
+
+    this.dispose();
+  }
+
+  public dispose(): void {
+    if (this.mixer) {
+      this.mixer.stopAllAction();
+      this.mixer.uncacheRoot(this.mixer.getRoot());
+      this.mixer = undefined;
+    }
+    if (this.model) {
+      this.model.traverse((object: any) => {
+        if (object.isMesh) {
+          if (object.geometry) {
+            object.geometry.dispose();
+          }
+          if (object.material) {
+            if (Array.isArray(object.material)) {
+              object.material.forEach((material: any) => material.dispose());
+            } else {
+              object.material.dispose();
+            }
+          }
+        }
+      });
+      this.model = undefined;
+    }
+    if (this.raycastBox) {
+      this.raycastBox.geometry.dispose();
+      (this.raycastBox.material as THREE.Material).dispose();
+      this.raycastBox = undefined;
+    }
+    if (this.speechBubble) {
+      this.speechBubble.dispose();
+      this.speechBubble = undefined;
+    }
+    // Any other resources specific to NetworkPlayer
+  }
+
   public update(timeStep: number, unscaledTimeStep: number): void {
     if (this.mixer !== undefined) {
       this.mixer.update(timeStep);
