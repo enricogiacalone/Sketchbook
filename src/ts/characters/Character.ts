@@ -545,6 +545,10 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     if (this.physicsEnabled) this.rotateModel();
     if (this.mixer !== undefined) this.mixer.update(timeStep);
 
+    if (this.speechBubble) {
+      this.speechBubble.update(timeStep);
+    }
+
     // Sync physics/graphics
     if (this.physicsEnabled) {
       this.position.set(
@@ -658,12 +662,22 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
   public setAnimation(clipName: string, fadeIn: number): number {
     if (this.mixer !== undefined) {
-      // gltf
       let clip = THREE.AnimationClip.findByName(this.animations, clipName);
+      let action;
 
-      let action = this.mixer.clipAction(clip);
+      if (clip === null) {
+        // Fallback to 'idle' animation if the requested clip is not found
+        clip = THREE.AnimationClip.findByName(this.animations, "idle");
+        if (clip === null) {
+          console.error(`Animation ${clipName} not found and 'idle' fallback not found!`);
+          return 0;
+        }
+        console.warn(`Animation ${clipName} not found, falling back to 'idle'.`);
+      }
+
+      action = this.mixer.clipAction(clip);
       if (action === null) {
-        console.error(`Animation ${clipName} not found!`);
+        console.error(`Failed to create animation action for ${clipName} or 'idle' fallback!`);
         return 0;
       }
 
@@ -673,6 +687,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
       return action.getClip().duration;
     }
+    return 0;
   }
 
   public setColor(color: THREE.Color): void {

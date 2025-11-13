@@ -79,6 +79,14 @@ updateNameSpace.on("connection", (socket) => {
       socket.userData.animation = player.animation;
     }
   });
+
+  socket.on("chatMessage", (data) => {
+    // Broadcast the message to all other connected clients
+    socket.broadcast.emit("chatMessage", {
+      senderId: socket.id,
+      message: data.message,
+    });
+  });
 });
 
 // Broadcast all players' data periodically

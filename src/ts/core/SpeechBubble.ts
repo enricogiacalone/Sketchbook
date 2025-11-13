@@ -24,7 +24,7 @@ export class SpeechBubble extends THREE.Object3D {
   ];
 
   private displayTimer: number = 0;
-  private displayDuration: number = 3; // Phrase lasts for 3 seconds
+  private displayDuration: number = 5; // Phrase lasts for 5 seconds
   private defaultCharacterHeight: number = 1.8; // Reference height for scaling
 
   constructor(characterHeight: number = 1.8) {
