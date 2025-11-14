@@ -167,19 +167,6 @@ export function cannonQuat(quat: THREE.Quaternion): CANNON.Quaternion {
 export function setupMeshProperties(child: any): void {
   child.castShadow = true;
   child.receiveShadow = true;
-
-  if (child.material.map !== null) {
-    let mat = new THREE.MeshPhongMaterial();
-    mat.shininess = 0;
-    mat.name = child.material.name;
-    mat.map = child.material.map;
-    mat.map.anisotropy = 4;
-    mat.aoMap = child.material.aoMap;
-    mat.transparent = child.material.transparent;
-    // mat.skinning = child.material.skinning;
-    // mat.map.encoding = THREE.LinearEncoding;
-    child.material = mat;
-  }
 }
 
 export function detectRelativeSide(from: Object3D, to: Object3D): Side {

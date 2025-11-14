@@ -369,9 +369,9 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     // gltf.scene is already added to this.modelContainer in the constructor
 
     gltf.scene.traverse((child) => {
-      if (child.isMesh) {
-        Utils.setupMeshProperties(child);
+      Utils.setupMeshProperties(child); // Moved outside if (child.isMesh) to ensure it's always called
 
+      if (child.isMesh) {
         // Apply Toon Material
         const toonMaterial = Character.toonMaterial.clone();
         if (child.material instanceof THREE.MeshStandardMaterial || child.material instanceof THREE.MeshLambertMaterial) {

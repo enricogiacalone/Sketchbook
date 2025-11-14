@@ -3,4 +3,5 @@ export enum CollisionGroups {
   Characters = 2,
   TrimeshColliders = 4,
   Bullet = 8,
+  Tornado = 16,
 }

@@ -41,6 +41,8 @@ import { InterstellarVortex } from "./InterstellarVortex";
 import { UFO } from "./UFO";
 import { Explosion } from "../core/Explosion";
 import { AtomicExplosion } from "../core/AtomicExplosion";
+import { WeatherManager } from "~/core/WeatherManager";
+import { Tornado } from "~/world/Tornado";
 
 // Constants for cloud generation
 const CLOUD_BANK_COUNT = 4;
@@ -107,6 +109,8 @@ export class World {
   public interstellarVortex: InterstellarVortex;
   public player: Character; // Reference to the local player character
   public networkPlayers: Map<string, NetworkPlayer> = new Map(); // Map to store other players by their socket ID
+  public weatherManager: WeatherManager;
+  public tornadoes: Tornado[] = [];
 
   private lastScenarioID: string;
   private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
@@ -122,6 +126,7 @@ export class World {
   ) {
     this.onSendMessage = onSendMessage; // Store the callback
     this._initializeCoreManagers();
+    this.weatherManager = new WeatherManager(this);
     this._initializePhysicsSettings();
     this._initializeRenderLoop();
     this._initializeStatsAndGUI();
@@ -251,6 +256,44 @@ export class World {
       (Math.random() - 0.5) * 1000
     );
     new UFO(this, position);
+  }
+
+  public startRain(): void {
+    this.weatherManager.startRain();
+  }
+
+  public stopRain(): void {
+    this.weatherManager.stopRain();
+  }
+
+  public startThunderstorm(): void {
+    this.weatherManager.startThunderstorm();
+  }
+
+  public stopThunderstorm(): void {
+    this.weatherManager.stopThunderstorm();
+  }
+
+  public spawnTornado(position?: THREE.Vector3): void {
+    const spawnPosition = position || new THREE.Vector3(0, 50, 0); // Default position if none provided
+    const tornado = new Tornado(this, spawnPosition);
+    this.tornadoes.push(tornado);
+    console.log("Tornado spawned at:", spawnPosition);
+  }
+
+  public removeTornado(tornado: Tornado): void {
+    tornado.dispose();
+    _.pull(this.tornadoes, tornado);
+    console.log("Tornado removed.");
+  }
+
+  public removeLastTornado(): void {
+    if (this.tornadoes.length > 0) {
+      const lastTornado = this.tornadoes[this.tornadoes.length - 1];
+      this.removeTornado(lastTornado);
+    } else {
+      console.warn("No tornadoes to remove.");
+    }
   }
 
   private _initializeChatInput(): void {
@@ -512,9 +555,14 @@ export class World {
   public update(timeStep: number, unscaledTimeStep: number): void {
     this.physicsManager.update(timeStep);
     this.gameManager.update(timeStep, unscaledTimeStep);
+    this.weatherManager.update(timeStep);
 
     this.planets.forEach((planet) => {
       planet.update();
+    });
+
+    this.tornadoes.forEach((tornado) => {
+      tornado.update(timeStep);
     });
 
     if (this.params.Debug_Physics) {
@@ -1123,5 +1171,17 @@ export class World {
     settingsFolder.add(this.params, "Debug_FPS").onChange((enabled) => {
       UIManager.setFPSVisible(enabled);
     });
+
+    // Weather
+    let weatherFolder = gui.addFolder("Weather");
+    weatherFolder.add(this, "startRain").name("Start Rain");
+    weatherFolder.add(this, "stopRain").name("Stop Rain");
+    weatherFolder.add(this, "startThunderstorm").name("Start Thunderstorm");
+    weatherFolder.add(this, "stopThunderstorm").name("Stop Thunderstorm");
+
+    // Tornadoes
+    let tornadoFolder = gui.addFolder("Tornadoes");
+    tornadoFolder.add(this, "spawnTornado").name("Spawn Tornado");
+    tornadoFolder.add(this, "removeLastTornado").name("Remove Last Tornado");
   }
 }

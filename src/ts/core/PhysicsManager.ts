@@ -2,6 +2,7 @@ import * as CANNON from "cannon-es";
 import { World } from "~/world/World";
 import * as THREE from "three";
 import * as Utils from "~/core/FunctionLibrary";
+import { CollisionGroups } from "~/enums/CollisionGroups";
 
 // Physics Constants
 const GRAVITY_Y = -9.81;
@@ -16,6 +17,7 @@ export class PhysicsManager {
   public trimeshMaterial: CANNON.Material;
   public meteoriteMaterial: CANNON.Material;
   public characterMaterial: CANNON.Material; // New: Character material
+  public CollisionGroups = CollisionGroups; // Expose CollisionGroups
 
   constructor(world: World) {
     this.world = world;
