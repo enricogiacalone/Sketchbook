@@ -46,6 +46,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public materials: THREE.Material[] = [];
   public mixer: THREE.AnimationMixer;
   public animations: any[];
+  public currentAnimation: string;
   public speechBubble: SpeechBubble;
   public nameplate: THREE.Sprite;
 
@@ -681,6 +682,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
         return 0;
       }
 
+      this.currentAnimation = clipName;
       this.mixer.stopAllAction();
       action.fadeIn(fadeIn);
       action.play();

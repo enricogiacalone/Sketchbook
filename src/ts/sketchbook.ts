@@ -28,9 +28,7 @@ function setupSocketConnection(name: string) {
       if (world.player) {
         const playerPosition = world.player.position;
         const playerQuaternion = world.player.quaternion;
-        const playerAnimation = world.player.charState
-          ? world.player.charState.constructor.name.toLowerCase()
-          : "idle";
+        const playerAnimation = world.player.currentAnimation || "idle";
 
         chatSocket.emit("updatePlayer", {
           position: {
