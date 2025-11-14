@@ -1187,7 +1187,6 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       // Register physics
       world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
       this.characterCapsule.body.userData = this; // Set userData for collision detection
-      this.characterCapsule.body.material = this.world.physicsManager.characterMaterial; // Assign character material
 
       // Create health bar for the character
       this.createHealthBar();
