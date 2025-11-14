@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import * as _ from "lodash";
+import * as CANNON from "cannon-es";
 import { Character } from "./Character";
 import { World } from "~/world/World";
 import * as Utils from "~/core/FunctionLibrary";
@@ -35,6 +36,7 @@ export class NetworkPlayer extends Character {
     this.createNameplate(playerData.name, playerData.color);
 
     super.setPhysicsEnabled(true); // Enable physics for network players
+    this.characterCapsule.body.type = CANNON.Body.KINEMATIC;
   }
 
   public addToWorld(world: World): void {
@@ -48,6 +50,10 @@ export class NetworkPlayer extends Character {
 
     // Register character
     world.characters.push(this);
+
+    // Register physics
+    world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
+    this.characterCapsule.body.userData = this;
 
     // Add to graphicsWorld
     world.sceneManager.graphicsWorld.add(this);
@@ -117,6 +123,11 @@ export class NetworkPlayer extends Character {
     // Interpolate position and rotation
     this.position.lerp(this.targetPosition, 0.1);
     this.quaternion.slerp(this.targetQuaternion, 0.1);
+
+    if (this.characterCapsule && this.characterCapsule.body) {
+      this.characterCapsule.body.position.copy(this.position);
+      this.characterCapsule.body.quaternion.copy(this.quaternion);
+    }
 
     if (this.speechBubble) {
       this.speechBubble.update(timeStep);
