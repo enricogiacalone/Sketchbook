@@ -87,3 +87,121 @@ function setupSocketConnection(name: string) {
 
 const world = new World("world.glb", setupSocketConnection, sendChatMessage);
 UIManager.initMinimap(world);
+
+// --- Save/Load Logic ---
+
+const saveButton = document.getElementById("save-button");
+const loadButton = document.getElementById("load-button");
+
+async function saveState() {
+  if (!world.player) {
+    console.error("Player not initialized yet.");
+    return;
+  }
+
+  const charactersToSave = [];
+
+  // Add the main player
+  charactersToSave.push({
+    id: myPlayerId, // The player's socket ID
+    position: world.player.position,
+    quaternion: world.player.quaternion,
+  });
+
+  // Add other characters (if any) - assuming they have a unique ID property
+  // You might need to adjust this depending on how NPCs or other entities are managed.
+  world.characters.forEach((char) => {
+    // Avoid duplicating the player if they are in the characters list with a different ID
+    if (char.uuid !== world.player.uuid && char.charId) {
+      charactersToSave.push({
+        id: char.charId,
+        position: char.position,
+        quaternion: char.quaternion,
+      });
+    }
+  });
+
+  try {
+    const response = await fetch("http://localhost:3000/api/save", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ characters: charactersToSave }),
+    });
+
+    if (response.ok) {
+      Swal.fire({
+        title: "Salvato!",
+        text: "Lo stato della partita è stato salvato.",
+        icon: "success",
+        timer: 2000,
+        showConfirmButton: false,
+      });
+    } else {
+      throw new Error("Failed to save state");
+    }
+  } catch (error) {
+    console.error("Error saving game state:", error);
+    Swal.fire({
+      title: "Errore",
+      text: "Impossibile salvare lo stato della partita.",
+      icon: "error",
+    });
+  }
+}
+
+async function loadState() {
+  try {
+    const response = await fetch("http://localhost:3000/api/load");
+    const data = await response.json();
+
+    if (data.characters) {
+      data.characters.forEach((charData: any) => {
+        // Find the character in the world and update it
+        let character = null;
+
+        if (charData.id === myPlayerId) {
+          character = world.player;
+        } else {
+          // Find other characters by their ID
+          character = world.characters.find((c) => c.charId === charData.id);
+        }
+
+        if (character) {
+          character.setPosition(
+            charData.position_x,
+            charData.position_y,
+            charData.position_z
+          );
+          character.quaternion.set(
+            charData.quaternion_x,
+            charData.quaternion_y,
+            charData.quaternion_z,
+            charData.quaternion_w
+          );
+        }
+      });
+
+      Swal.fire({
+        title: "Caricato!",
+        text: "Lo stato della partita è stato caricato.",
+        icon: "success",
+        timer: 2000,
+        showConfirmButton: false,
+      });
+    }
+  } catch (error) {
+    console.error("Error loading game state:", error);
+    Swal.fire({
+      title: "Errore",
+      text: "Impossibile caricare lo stato della partita.",
+      icon: "error",
+    });
+  }
+}
+
+if (saveButton && loadButton) {
+  saveButton.addEventListener("click", saveState);
+  loadButton.addEventListener("click", loadState);
+}

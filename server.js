@@ -4,12 +4,14 @@ import http from "http";
 import { Server } from "socket.io";
 import dotenv from "dotenv";
 import cors from "cors";
+import sqlite3 from "sqlite3";
 
 dotenv.config();
 
 const port = process.env.PORT || 3000;
 
 const app = express();
+app.use(cors()); // Enable CORS for all routes
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -18,8 +20,89 @@ const io = new Server(server, {
   },
 });
 
+// Database setup
+const db = new sqlite3.Database("./gamestate.db", (err) => {
+  if (err) {
+    console.error("Error opening database", err.message);
+  } else {
+    console.log("Connected to the SQLite database.");
+    db.run(
+      `CREATE TABLE IF NOT EXISTS characters (
+        id TEXT PRIMARY KEY,
+        position_x REAL,
+        position_y REAL,
+        position_z REAL,
+        quaternion_w REAL,
+        quaternion_x REAL,
+        quaternion_y REAL,
+        quaternion_z REAL
+      )`,
+      (err) => {
+        if (err) {
+          console.error("Error creating table", err.message);
+        } else {
+          console.log("Characters table is ready.");
+        }
+      }
+    );
+  }
+});
+
+// Middleware to parse JSON bodies
+app.use(express.json());
+
 // Serve static files from the 'build' directory
 app.use(express.static(path.join(process.cwd(), "build")));
+
+// API endpoints for saving and loading game state
+app.post("/api/save", (req, res) => {
+  const characters = req.body.characters;
+  if (!characters || !Array.isArray(characters)) {
+    return res.status(400).json({ error: "Invalid payload" });
+  }
+
+  const stmt = db.prepare(
+    `INSERT OR REPLACE INTO characters (id, position_x, position_y, position_z, quaternion_w, quaternion_x, quaternion_y, quaternion_z)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+
+  db.serialize(() => {
+    db.run("BEGIN TRANSACTION");
+    characters.forEach((char) => {
+      stmt.run(
+        char.id,
+        char.position.x,
+        char.position.y,
+        char.position.z,
+        char.quaternion.w,
+        char.quaternion.x,
+        char.quaternion.y,
+        char.quaternion.z
+      );
+    });
+    db.run("COMMIT", (err) => {
+      if (err) {
+        res.status(500).json({ error: "Failed to commit transaction" });
+        console.error("Commit failed", err.message);
+      } else {
+        res.json({ success: true });
+        console.log(`Saved state for ${characters.length} characters.`);
+      }
+    });
+  });
+});
+
+app.get("/api/load", (req, res) => {
+  db.all("SELECT * FROM characters", [], (err, rows) => {
+    if (err) {
+      res.status(500).json({ error: "Failed to load data" });
+      console.error("Error loading data", err.message);
+    } else {
+      res.json({ characters: rows });
+      console.log(`Loaded state for ${rows.length} characters.`);
+    }
+  });
+});
 
 // For any other requests, serve the index.html from the 'build' directory
 app.get("*", (req, res) => {

@@ -10,29 +10,6 @@
   pointer-events: none;
 }
 
-.left-panel .panel-segment {
-  flex-grow: 1;
-  flex-basis: 100px;
-  padding: 20px;
-  overflow: hidden;
-}
-
-.flex-bottom {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-}
-
-.controls-title {
-  margin-bottom: 12px;
-}
-
-.ctrl-row {
-  margin-bottom: 6px;
-  display: flex;
-  align-items: center;
-}
-
 .ctrl-key {
   text-shadow: none;
   font-weight: bold;

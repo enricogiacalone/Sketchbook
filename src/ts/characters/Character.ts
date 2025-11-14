@@ -104,6 +104,20 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   constructor(gltf: any) {
     super();
 
+    // Initialize toon material if not already done
+    if (!Character.toonMaterial) {
+      const gradientMap = new THREE.DataTexture(
+        new Uint8Array([0, 0, 0, 255, 128, 128, 128, 255]), // Black, Gray
+        2,
+        1,
+        THREE.RGBAFormat
+      );
+      gradientMap.needsUpdate = true;
+      Character.toonMaterial = new THREE.MeshToonMaterial({
+        gradientMap: gradientMap,
+      });
+    }
+
     this.readCharacterData(gltf);
     this.setAnimations(gltf.animations);
 
@@ -119,7 +133,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     this.modelContainer = new THREE.Group();
     this.modelContainer.position.y = -0.55; // This might need adjustment based on actual model
     this.tiltContainer.add(this.modelContainer);
-    this.modelContainer.add(gltf.scene);
+    this.modelContainer.add(gltf.scene); // Original line: Add gltf.scene here
 
     this.mixer = new THREE.AnimationMixer(gltf.scene);
 
@@ -352,12 +366,44 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   }
 
   public readCharacterData(gltf: any): void {
+    // gltf.scene is already added to this.modelContainer in the constructor
+
     gltf.scene.traverse((child) => {
       if (child.isMesh) {
         Utils.setupMeshProperties(child);
 
-        if (child.material !== undefined) {
-          this.materials.push(child.material);
+        // Apply Toon Material
+        const toonMaterial = Character.toonMaterial.clone();
+        if (child.material instanceof THREE.MeshStandardMaterial || child.material instanceof THREE.MeshLambertMaterial) {
+          toonMaterial.color.copy(child.material.color);
+          if (child.material.map) {
+            toonMaterial.map = child.material.map;
+          }
+        } else if (Array.isArray(child.material)) {
+          // Handle multiple materials (e.g., for GLTF models with multiple parts)
+          child.material = child.material.map(mat => {
+            const newToonMat = Character.toonMaterial.clone();
+            if (mat.color) newToonMat.color.copy(mat.color);
+            if (mat.map) newToonMat.map = mat.map;
+            return newToonMat;
+          });
+        } else {
+            // Default case for other material types or if color/map not found
+            toonMaterial.color.set(0xcccccc); // A default color
+        }
+        child.material = toonMaterial;
+        this.materials.push(toonMaterial);
+
+        // Create and add outline mesh ONLY if child has a parent
+        if (child.parent) { // This check is crucial
+            const outlineMesh = child.clone();
+            const outlineMaterial = new THREE.MeshBasicMaterial({
+              color: 0x000000,
+              side: THREE.BackSide,
+            });
+            outlineMesh.material = outlineMaterial;
+            outlineMesh.scale.multiplyScalar(1.02); // Slightly larger
+            child.parent.add(outlineMesh);
         }
       }
     });
