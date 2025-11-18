@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { World } from "~/world/World";
-import { WaterShader } from "$lib/shaders/WaterShader";
+import { WaterShader } from "~/lib/shaders/WaterShader";
 import { IUpdatable } from "~/interfaces/IUpdatable";
 
 export class Ocean implements IUpdatable {

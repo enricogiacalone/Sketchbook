@@ -2,6 +2,7 @@ import { World } from "~/world/World";
 import { IInputReceiver } from "~/interfaces/IInputReceiver";
 import { EntityType } from "~/enums/EntityType";
 import { IUpdatable } from "~/interfaces/IUpdatable";
+import { Gamepad } from "./Gamepad";
 
 export class InputManager implements IUpdatable {
   public updateOrder: number = 3;
@@ -11,6 +12,8 @@ export class InputManager implements IUpdatable {
   public pointerLock: any;
   public isLocked: boolean;
   public inputReceiver: IInputReceiver;
+  public gamepad: Gamepad;
+  public deadzone: number = 0.1;
 
   public boundOnMouseDown: (evt: any) => void;
   public boundOnMouseMove: (evt: any) => void;
@@ -26,6 +29,7 @@ export class InputManager implements IUpdatable {
     this.pointerLock = world.params.Pointer_Lock;
     this.domElement = domElement || document.body;
     this.isLocked = false;
+    this.gamepad = new Gamepad();
 
     // Bindings for later event use
     // Mouse
@@ -72,8 +76,46 @@ export class InputManager implements IUpdatable {
     ) {
       this.setInputReceiver(this.world.cameraOperator);
     }
+    
+    this.gamepad.update();
+    this.handleGamepadInput();
 
     this.inputReceiver?.inputReceiverUpdate(unscaledTimeStep);
+  }
+
+  public handleGamepadInput(): void {
+    if (this.inputReceiver === undefined) return;
+
+    // Movement
+    let leftStickX = this.gamepad.getAxisValue(0);
+    let leftStickY = this.gamepad.getAxisValue(1);
+
+    if (Math.abs(leftStickX) < this.deadzone) leftStickX = 0;
+    if (Math.abs(leftStickY) < this.deadzone) leftStickY = 0;
+
+    // Camera
+    let rightStickX = this.gamepad.getAxisValue(2);
+    let rightStickY = this.gamepad.getAxisValue(3);
+
+    if (Math.abs(rightStickX) < this.deadzone) rightStickX = 0;
+    if (Math.abs(rightStickY) < this.deadzone) rightStickY = 0;
+    
+    console.log(`Left Stick: (${leftStickX}, ${leftStickY}) Right Stick: (${rightStickX}, ${rightStickY})`);
+
+
+    this.inputReceiver.handleKeyboardEvent(null, "KeyW", leftStickY < -0.5);
+    this.inputReceiver.handleKeyboardEvent(null, "KeyS", leftStickY > 0.5);
+    this.inputReceiver.handleKeyboardEvent(null, "KeyA", leftStickX < -0.5);
+    this.inputReceiver.handleKeyboardEvent(null, "KeyD", leftStickX > 0.5);
+
+    
+    this.inputReceiver.handleMouseMove(null, rightStickX * 20, rightStickY * 20);
+
+    // Actions
+    this.inputReceiver.handleKeyboardEvent(null, "Space", this.gamepad.isButtonPressed(0)); // A button
+    this.inputReceiver.handleKeyboardEvent(null, "ShiftLeft", this.gamepad.isButtonPressed(7)); // Right Trigger (R2) for running
+    this.inputReceiver.handleMouseButton(null, "mouse0", this.gamepad.isButtonPressed(2)); // X button for mouse0 (primary action)
+    this.inputReceiver.handleKeyboardEvent(null, "KeyF", this.gamepad.isButtonPressed(3)); // Triangle button for entering vehicle
   }
 
   public setInputReceiver(receiver: IInputReceiver): void {

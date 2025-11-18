@@ -1236,6 +1236,11 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
       this.characterCapsule.body.userData = this; // Set userData for collision detection
 
+      // Explicitly set the physics body's position to match the visual object's position
+      this.characterCapsule.body.position.copy(Utils.cannonVector(this.position));
+      this.characterCapsule.body.interpolatedPosition.copy(Utils.cannonVector(this.position));
+      this.characterCapsule.body.previousPosition.copy(Utils.cannonVector(this.position));
+
       // Create health bar for the character
       this.createHealthBar();
 

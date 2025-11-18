@@ -998,37 +998,48 @@ export class World {
   }
 
   public spawnEnemies(count: number): void {
-    // if (!this.player) {
-    //   console.warn("Cannot spawn enemies: local player is not defined.");
-    //   return;
-    // }
+    if (!this.player) {
+      console.warn("Cannot spawn enemies: local player is not defined.");
+      return;
+    }
 
-    this.initialEnemyCount = 0; // No enemies
-    this.currentEnemyCount = 0; // No enemies
-    this.updateEnemyCountDisplay(); // Update UI using helper method
 
-    // Commenting out enemy spawning logic to disable enemies
-    // for (let i = 0; i < count; i++) {
-    //   this.loadingManager.loadGLTFPromise("boxman.glb")
-    //     .then((model) => {
-    //       let character = new Character(model);
-    //       character.name = `Enemy ${i}`; // Assign a name for debugging
-    //       character.entityType = EntityType.Enemy; // Assign Enemy EntityType
-    //       character.setBehaviour(new FollowTarget(this.player)); // Target the local player
-    //       character.setColor(new THREE.Color(0xff0000)); // Set enemy character color to red
-    //       character.createHealthBar(); // Create health bar for enemies
 
-    //       // Get a random spawn position
-    //       const x = Math.random() * 200 - 100;
-    //       const z = Math.random() * 100 - 50;
-    //       character.setPosition(x, 20, z);
+    this.initialEnemyCount = count;
+    this.currentEnemyCount = count;
+    this.updateEnemyCountDisplay(); // Initialize enemy count display
 
-    //       this.add(character);
-    //     })
-    //     .catch((error) => {
-    //       console.error("Error loading enemy character model:", error);
-    //     });
-    // }
+    for (let i = 0; i < count; i++) {
+      this.loadingManager.loadGLTFPromise("boxman.glb")
+        .then((model) => {
+          let character = new Character(model);
+          character.name = `Enemy ${i}`; // Assign a name for debugging
+          character.entityType = EntityType.Enemy; // Assign Enemy EntityType
+          character.setBehaviour(new FollowTarget(this.player)); // Target the local player
+          character.setColor(new THREE.Color(0xff0000)); // Set enemy character color to red
+          character.createHealthBar(); // Create health bar for enemies
+
+          let spawnPosition = new THREE.Vector3();
+          if (this.paths.length > 0) {
+            const randomPath = this.paths[Math.floor(Math.random() * this.paths.length)];
+            const nodeKeys = Object.keys(randomPath.nodes);
+            const randomNodeKey = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
+            const randomNode = randomPath.nodes[randomNodeKey];
+            randomNode.object.getWorldPosition(spawnPosition);
+          } else {
+            // Fallback to broader random range if no paths are defined
+            spawnPosition.x = Math.random() * 800 - 400; // Wider range
+            spawnPosition.z = Math.random() * 800 - 400; // Wider range
+            spawnPosition.y = 20; // Keep fixed y for now, assume falling into place
+          }
+          character.setPosition(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+
+          this.add(character);
+        })
+        .catch((error) => {
+          console.error("Error loading enemy character model:", error);
+        });
+    }
   }
 
   private generateHTML(): void {
