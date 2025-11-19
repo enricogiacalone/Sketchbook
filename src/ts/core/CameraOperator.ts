@@ -144,10 +144,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
   ): void {
     // Free camera
     if (code === "KeyC" && pressed === true && event.shiftKey === true) {
-      if (this.characterCaller !== undefined) {
-        this.world.inputManager.setInputReceiver(this.characterCaller);
-        this.characterCaller = undefined;
-      }
+      this.exitFreeCamera();
     }
     else {
       for (const action in this.actions) {
@@ -159,6 +156,17 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
           }
         }
       }
+    }
+  }
+
+  public enterFreeCamera(): void {
+    // Not applicable to camera operator
+  }
+
+  public exitFreeCamera(): void {
+    if (this.characterCaller !== undefined) {
+      this.world.inputManager.setInputReceiver(this.characterCaller);
+      this.characterCaller = undefined;
     }
   }
 

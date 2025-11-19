@@ -14,4 +14,6 @@ export interface IInputReceiver {
 
   inputReceiverInit(): void;
   inputReceiverUpdate(timeStep: number): void;
+  enterFreeCamera(): void;
+  exitFreeCamera(): void;
 }

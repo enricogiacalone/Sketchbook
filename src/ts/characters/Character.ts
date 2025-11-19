@@ -419,9 +419,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     } else {
       // Free camera
       if (code === "KeyC" && pressed === true && event.shiftKey === true) {
-        this.resetControls();
-        this.world.cameraOperator.characterCaller = this;
-        this.world.inputManager.setInputReceiver(this.world.cameraOperator);
+        this.enterFreeCamera();
       } else if (
         code === "KeyR" &&
         pressed === true &&
@@ -446,6 +444,12 @@ export class Character extends THREE.Object3D implements IWorldEntity {
         }
       }
     }
+  }
+
+  public enterFreeCamera(): void {
+    this.resetControls();
+    this.world.cameraOperator.characterCaller = this;
+    this.world.inputManager.setInputReceiver(this.world.cameraOperator);
   }
 
   public handleMouseButton(

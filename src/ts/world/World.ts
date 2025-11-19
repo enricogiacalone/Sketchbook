@@ -195,6 +195,7 @@ export class World {
 
       this.add(networkCharacter); // This calls networkCharacter.addToWorld(this)
       this.networkPlayers.set(id, networkCharacter); // Store the actual NetworkPlayer instance
+      networkCharacter.createHealthBar(); // Create health bar for network players
       console.log(`Successfully added network player with ID: ${id}`);
     } catch (error) {
       console.error(`Failed to add network player ${id}:`, error);
