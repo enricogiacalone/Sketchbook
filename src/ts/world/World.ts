@@ -31,6 +31,7 @@ import { SceneManager } from "~/core/SceneManager";
 import { PhysicsManager } from "~/core/PhysicsManager";
 import { GameManager } from "~/core/GameManager";
 import CannonDebugger from "cannon-es-debugger";
+import { VehicleSpawnPoint } from "./VehicleSpawnPoint"; // Added import
 
 import { FollowTarget } from "~/characters/character_ai/FollowTarget";
 import { RandomBehaviour } from "~/characters/character_ai/RandomBehaviour";
@@ -43,6 +44,8 @@ import { Explosion } from "../core/Explosion";
 import { AtomicExplosion } from "../core/AtomicExplosion";
 import { WeatherManager } from "~/core/WeatherManager";
 import { Tornado } from "~/world/Tornado";
+import { Tree } from '@dgreenheck/ez-tree';
+import { Streetlight } from "./Streetlight";
 
 // Constants for cloud generation
 const CLOUD_BANK_COUNT = 4;

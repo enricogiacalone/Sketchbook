@@ -5,6 +5,12 @@ import { Object3D } from "three";
 import { Side } from "~/enums/Side";
 import { Space } from "~/enums/Space";
 import { SimulationFrame } from "~/physics/spring_simulation/SimulationFrame";
+import { createNoise2D } from "simplex-noise"; // Import createNoise2D
+
+// Initialize Perlin noise
+export const perlin = {
+  noise: createNoise2D(),
+};
 
 //#endregion
 
