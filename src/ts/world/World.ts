@@ -150,7 +150,9 @@ export class World {
     // Check if a specific worldScenePath is provided.
     // If not, activate procedural world generation.
     if (worldScenePath === undefined) {
+      console.log("World Constructor: Procedural world active.");
       this.proceduralWorldActive = true;
+      console.log("World Constructor: Initializing terrain, roads, village.");
       this._initializeTerrain();
       this._initializeRoads();
       this._initializeVillage();
@@ -167,6 +169,16 @@ export class World {
         });
         this.updateEnemyCountDisplay();
       };
+      console.log("World Constructor: Spawning player via CharacterSpawnPoint.");
+      const playerSpawnObject = new THREE.Object3D();
+      playerSpawnObject.position.set(0, this.terrainMaxHeight + 10, 0); // Spawn high above the max height
+      const playerSpawnPoint = new CharacterSpawnPoint(playerSpawnObject);
+      playerSpawnPoint.spawn(this.loadingManager, this, (player: Character) => {
+        player.setColor(new THREE.Color(0x0000ff));
+        this.player = player; // Assign the local player
+        this.cameraOperator.setTarget(player);
+        console.log("World Constructor: Player assigned and camera target set:", this.player);
+      });
       this.loadingManager.doneLoading(new LoadingTrackerEntry("procedural_world")); // Signal done loading
     } else {
       this._loadWorldScene(worldScenePath);
@@ -338,18 +350,16 @@ export class World {
     }
   }
 
-  public getTerrainHeightAt(x: number, z: number): number {
-    const scale = 50; // Controls the "zoom" of the noise
-    const strength = this.terrainMaxHeight; // Controls the height of the hills
-    return (
-      (Utils.perlin.noise(x / scale, z / scale, 0) +
-        0.5 * Utils.perlin.noise(x / (scale / 2), z / (scale / 2), 0) +
-        0.25 * Utils.perlin.noise(x / (scale / 4), z / (scale / 4), 0)) *
-      strength
-    );
-  }
-
-  private _initializeTerrain(): void {
+      public getTerrainHeightAt(x: number, z: number): number {
+        const scale = 50; // Controls the "zoom" of the noise
+        const strength = this.terrainMaxHeight; // Controls the height of the hills
+        return (
+            (Utils.perlin.noise(x / scale, z / scale, 0) +
+                0.5 * Utils.perlin.noise(x / (scale / 2), z / (scale / 2), 0) +
+                0.25 * Utils.perlin.noise(x / (scale / 4), z / (scale / 4), 0)) *
+            strength
+        );
+      }  private _initializeTerrain(): void {
     const terrainResolution = 256;
     const terrainWidth = this.terrainSize;
     const terrainDepth = this.terrainSize;
@@ -1376,6 +1386,7 @@ export class World {
             (player: Character) => {
               player.setColor(new THREE.Color(0x0000ff)); // Set main character color to blue
               this.player = player; // Assign the local player
+              this.cameraOperator.setTarget(player);
               this.spawnEnemies(5);
             }
           );

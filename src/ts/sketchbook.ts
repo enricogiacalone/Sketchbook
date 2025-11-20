@@ -85,7 +85,7 @@ function setupSocketConnection(name: string) {
   });
 }
 
-const world = new World("world.glb", setupSocketConnection, sendChatMessage);
+const world = new World(undefined, setupSocketConnection, sendChatMessage);
 UIManager.initMinimap(world);
 
 // --- Save/Load Logic ---
