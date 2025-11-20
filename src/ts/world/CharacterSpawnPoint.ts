@@ -34,7 +34,7 @@ export class CharacterSpawnPoint implements ISpawnPoint {
 
         if (world.physicsManager.physicsWorld.raycastClosest(rayFrom, rayTo, {}, raycastResult)) {
           if (raycastResult.hasHit) {
-            worldPos.y = raycastResult.hitPointWorld.y + 0.5; // Spawn slightly above the ground hit point
+            worldPos.y = raycastResult.hitPointWorld.y + 1.0; // Spawn a bit higher above the ground hit point to prevent falling through
             console.log("CharacterSpawnPoint: Raycast hit:", raycastResult.hasHit, "at", raycastResult.hitPointWorld.y);
           } else {
             console.log("CharacterSpawnPoint: Raycast did not hit anything.");

@@ -455,12 +455,11 @@ export class World {
     });
     const hfBody = new CANNON.Body({ mass: 0 });
     hfBody.addShape(hfShape);
-    hfBody.position.set(
-      -terrainWidth / 2,
-      -1, // Adjust as needed to align with visual mesh
-      -terrainDepth / 2
-    );
-    this.physicsManager.physicsWorld.addBody(hfBody);
+        hfBody.position.set(
+            -terrainWidth / 2,
+            0, // Align physics body base with visual mesh base
+            -terrainDepth / 2
+        );    this.physicsManager.physicsWorld.addBody(hfBody);
   }
 
   private _initializeRoads(): void {
