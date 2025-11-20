@@ -32,6 +32,7 @@ import { PhysicsManager } from "~/core/PhysicsManager";
 import { GameManager } from "~/core/GameManager";
 import CannonDebugger from "cannon-es-debugger";
 import { VehicleSpawnPoint } from "./VehicleSpawnPoint"; // Added import
+import { LoadingTrackerEntry } from "~/core/LoadingTrackerEntry";
 
 import { FollowTarget } from "~/characters/character_ai/FollowTarget";
 import { RandomBehaviour } from "~/characters/character_ai/RandomBehaviour";
@@ -44,7 +45,7 @@ import { Explosion } from "../core/Explosion";
 import { AtomicExplosion } from "../core/AtomicExplosion";
 import { WeatherManager } from "~/core/WeatherManager";
 import { Tornado } from "~/world/Tornado";
-import { Tree } from '@dgreenheck/ez-tree';
+import { Tree } from "@dgreenheck/ez-tree";
 import { Streetlight } from "./Streetlight";
 
 // Constants for cloud generation
@@ -121,10 +122,9 @@ export class World {
   public streetlights: any[] = []; // Assuming Streetlight class will be created/imported later
   public grassMaterial: THREE.ShaderMaterial; // Assuming this will be initialized later
 
-  private lastScenarioID: string;
-  private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
-  private currentEnemyCount: number = 0; // New property to track active enemies
   public loadingManager: LoadingManager; // New property to store the loading manager
+
+  private lastScenarioID: string;
   private meteoriteInterval: any;
   private onSendMessage: (message: string) => void; // New property
 
@@ -138,13 +138,14 @@ export class World {
     this.weatherManager = new WeatherManager(this);
     this._initializePhysicsSettings();
     this._initializeRenderLoop();
-    this._initializeStatsAndGUI();
+    this._initializeStatsAndGUI(); // Initialize params first
     this._initializeCannonDebugger(); // Call the new method here
     this._initializeInputAndCamera();
     UIManager.createChatInput(); // Create chat input
     this._initializeChatInput(); // Initialize chat input event listeners
     this._initializeSkyAndClouds();
     this._initializePlanets();
+    this.loadingManager = new LoadingManager(this); // Then initialize loadingManager
 
     // Check if a specific worldScenePath is provided.
     // If not, activate procedural world generation.
@@ -153,6 +154,20 @@ export class World {
       this._initializeTerrain();
       this._initializeRoads();
       this._initializeVillage();
+      // Manually signal loading completion for procedural world
+      this.loadingManager.onFinishedCallback = () => {
+        this.update(1, 1);
+        this.setTimeScale(1);
+        UIManager.setUserInterfaceVisible(true);
+        UIManager.setLoadingScreenVisible(false); // Hide loading screen
+        Swal.fire({
+          icon: "success",
+          title: "Hello procedural world!",
+          buttonsStyling: false,
+        });
+        this.updateEnemyCountDisplay();
+      };
+      this.loadingManager.doneLoading(new LoadingTrackerEntry("procedural_world")); // Signal done loading
     } else {
       this._loadWorldScene(worldScenePath);
     }
@@ -187,7 +202,9 @@ export class World {
     try {
       // If a player with this ID already exists, remove it first to prevent duplicates
       if (this.networkPlayers.has(id)) {
-        console.warn(`Network player with ID ${id} already exists. Removing old instance.`);
+        console.warn(
+          `Network player with ID ${id} already exists. Removing old instance.`
+        );
         this.removeNetworkPlayer(id);
       }
 
@@ -233,12 +250,17 @@ export class World {
     const networkCharacter = this.networkPlayers.get(id);
     if (networkCharacter) {
       // Remove from world.characters array
-      _.remove(this.characters, (char) => (char as NetworkPlayer).socketId === id);
+      _.remove(
+        this.characters,
+        (char) => (char as NetworkPlayer).socketId === id
+      );
       this.remove(networkCharacter); // This calls networkCharacter.removeFromWorld(this)
       this.networkPlayers.delete(id);
       console.log(`Successfully removed network player with ID: ${id}`);
     } else {
-      console.warn(`Attempted to remove non-existent network player with ID: ${id}`);
+      console.warn(
+        `Attempted to remove non-existent network player with ID: ${id}`
+      );
     }
   }
 
@@ -320,10 +342,10 @@ export class World {
     const scale = 50; // Controls the "zoom" of the noise
     const strength = this.terrainMaxHeight; // Controls the height of the hills
     return (
-        (Utils.perlin.noise(x / scale, z / scale, 0) +
-            0.5 * Utils.perlin.noise(x / (scale / 2), z / (scale / 2), 0) +
-            0.25 * Utils.perlin.noise(x / (scale / 4), z / (scale / 4), 0)) *
-        strength
+      (Utils.perlin.noise(x / scale, z / scale, 0) +
+        0.5 * Utils.perlin.noise(x / (scale / 2), z / (scale / 2), 0) +
+        0.25 * Utils.perlin.noise(x / (scale / 4), z / (scale / 4), 0)) *
+      strength
     );
   }
 
@@ -333,10 +355,10 @@ export class World {
     const terrainDepth = this.terrainSize;
 
     const geometry = new THREE.PlaneGeometry(
-        terrainWidth,
-        terrainDepth,
-        terrainResolution - 1,
-        terrainResolution - 1
+      terrainWidth,
+      terrainDepth,
+      terrainResolution - 1,
+      terrainResolution - 1
     );
     geometry.rotateX(-Math.PI / 2);
 
@@ -344,31 +366,31 @@ export class World {
     const heights: number[][] = [];
 
     for (let i = 0; i < terrainResolution; i++) {
-        heights.push([]);
-        for (let j = 0; j < terrainResolution; j++) {
-            const x = positions[i * terrainResolution * 3 + j * 3];
-            const z = positions[i * terrainResolution * 3 + j * 3 + 2];
-            const y = this.getTerrainHeightAt(x, z);
-            positions[i * terrainResolution * 3 + j * 3 + 1] = y;
-            heights[i].push(y);
-        }
+      heights.push([]);
+      for (let j = 0; j < terrainResolution; j++) {
+        const x = positions[i * terrainResolution * 3 + j * 3];
+        const z = positions[i * terrainResolution * 3 + j * 3 + 2];
+        const y = this.getTerrainHeightAt(x, z);
+        positions[i * terrainResolution * 3 + j * 3 + 1] = y;
+        heights[i].push(y);
+      }
     }
     geometry.computeVertexNormals();
 
     // Create custom grass material
     this.grassMaterial = new THREE.ShaderMaterial({
-        uniforms: {
-            uGrassColor: { value: new THREE.Color(0x7c9b5f) },
-            uDirtColor: { value: new THREE.Color(0x8b5a2b) },
-            uSnowColor: { value: new THREE.Color(0xffffff) },
-            uRockyColor: { value: new THREE.Color(0x808080) },
-            uGrassHeight: { value: this.terrainMaxHeight * 0.2 },
-            uDirtHeight: { value: this.terrainMaxHeight * 0.1 },
-            uSnowHeight: { value: this.terrainMaxHeight * 0.8 },
-            uRockyHeight: { value: this.terrainMaxHeight * 0.4 },
-            uTime: { value: 0.0 }, // For potential animation
-        },
-        vertexShader: `
+      uniforms: {
+        uGrassColor: { value: new THREE.Color(0x7c9b5f) },
+        uDirtColor: { value: new THREE.Color(0x8b5a2b) },
+        uSnowColor: { value: new THREE.Color(0xffffff) },
+        uRockyColor: { value: new THREE.Color(0x808080) },
+        uGrassHeight: { value: this.terrainMaxHeight * 0.2 },
+        uDirtHeight: { value: this.terrainMaxHeight * 0.1 },
+        uSnowHeight: { value: this.terrainMaxHeight * 0.8 },
+        uRockyHeight: { value: this.terrainMaxHeight * 0.4 },
+        uTime: { value: 0.0 }, // For potential animation
+      },
+      vertexShader: `
             varying vec3 vNormal;
             varying vec3 vPosition;
             void main() {
@@ -377,7 +399,7 @@ export class World {
                 gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
             }
         `,
-        fragmentShader: `
+      fragmentShader: `
             uniform vec3 uGrassColor;
             uniform vec3 uDirtColor;
             uniform vec3 uSnowColor;
@@ -419,14 +441,14 @@ export class World {
 
     // Physics
     const hfShape = new CANNON.Heightfield(heights, {
-        elementSize: terrainWidth / (terrainResolution - 1),
+      elementSize: terrainWidth / (terrainResolution - 1),
     });
     const hfBody = new CANNON.Body({ mass: 0 });
     hfBody.addShape(hfShape);
     hfBody.position.set(
-        -terrainWidth / 2,
-        -1, // Adjust as needed to align with visual mesh
-        -terrainDepth / 2
+      -terrainWidth / 2,
+      -1, // Adjust as needed to align with visual mesh
+      -terrainDepth / 2
     );
     this.physicsManager.physicsWorld.addBody(hfBody);
   }
@@ -437,103 +459,103 @@ export class World {
     const roadPhysicsBodies: CANNON.Body[] = [];
 
     const createRoadSegment = (x1, z1, x2, z2) => {
-        const roadMaterial = new THREE.MeshStandardMaterial({
-            color: 0x3a3a3a,
-            roughness: 0.8,
-            metalness: 0.1,
-        });
+      const roadMaterial = new THREE.MeshStandardMaterial({
+        color: 0x3a3a3a,
+        roughness: 0.8,
+        metalness: 0.1,
+      });
 
-        // Calculate segment direction and normal
-        const dir = new THREE.Vector3(x2 - x1, 0, z2 - z1).normalize();
-        const perp = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(
-            roadWidth / 2
-        );
+      // Calculate segment direction and normal
+      const dir = new THREE.Vector3(x2 - x1, 0, z2 - z1).normalize();
+      const perp = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(
+        roadWidth / 2
+      );
 
-        // Get terrain heights for all four corners
-        const y1 = this.getTerrainHeightAt(x1, z1);
-        const y2 = this.getTerrainHeightAt(x2, z2);
+      // Get terrain heights for all four corners
+      const y1 = this.getTerrainHeightAt(x1, z1);
+      const y2 = this.getTerrainHeightAt(x2, z2);
 
-        // Vertices for the road segment, adjusted for terrain height
-        const v0 = new THREE.Vector3(x1 - perp.x, y1, z1 - perp.z);
-        const v1 = new THREE.Vector3(x1 + perp.x, y1, z1 + perp.z);
-        const v2 = new THREE.Vector3(x2 - perp.x, y2, z2 - perp.z);
-        const v3 = new THREE.Vector3(x2 + perp.x, y2, z2 + perp.z);
+      // Vertices for the road segment, adjusted for terrain height
+      const v0 = new THREE.Vector3(x1 - perp.x, y1, z1 - perp.z);
+      const v1 = new THREE.Vector3(x1 + perp.x, y1, z1 + perp.z);
+      const v2 = new THREE.Vector3(x2 - perp.x, y2, z2 - perp.z);
+      const v3 = new THREE.Vector3(x2 + perp.x, y2, z2 + perp.z);
 
-        const roadGeometry = new THREE.BufferGeometry();
-        const vertices = new Float32Array([
-            v0.x,
-            v0.y,
-            v0.z, // 0
-            v1.x,
-            v1.y,
-            v1.z, // 1
-            v2.x,
-            v2.y,
-            v2.z, // 2
-            v3.x,
-            v3.y,
-            v3.z, // 3
-        ]);
+      const roadGeometry = new THREE.BufferGeometry();
+      const vertices = new Float32Array([
+        v0.x,
+        v0.y,
+        v0.z, // 0
+        v1.x,
+        v1.y,
+        v1.z, // 1
+        v2.x,
+        v2.y,
+        v2.z, // 2
+        v3.x,
+        v3.y,
+        v3.z, // 3
+      ]);
 
-        const indices = new Uint32Array([0, 1, 2, 2, 1, 3]);
+      const indices = new Uint32Array([0, 1, 2, 2, 1, 3]);
 
-        roadGeometry.setAttribute(
-            "position",
-            new THREE.BufferAttribute(vertices, 3)
-        );
-        roadGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
-        roadGeometry.computeVertexNormals();
+      roadGeometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(vertices, 3)
+      );
+      roadGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
+      roadGeometry.computeVertexNormals();
 
-        const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
-        roadMesh.castShadow = true; // Roads can cast shadows too
-        this.sceneManager.graphicsWorld.add(roadMesh);
+      const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
+      roadMesh.castShadow = true; // Roads can cast shadows too
+      this.sceneManager.graphicsWorld.add(roadMesh);
 
-        // Create physics body for the road segment
-        const physicsVertices = new Float32Array([
-            v0.x,
-            v0.y,
-            v0.z,
-            v1.x,
-            v1.y,
-            v1.z,
-            v2.x,
-            v2.y,
-            v2.z,
-            v3.x,
-            v3.y,
-            v3.z,
-        ]);
-        const physicsIndices = new Uint16Array([0, 1, 2, 2, 1, 3]);
-        const trimeshShape = new CANNON.Trimesh(
-            physicsVertices as any,
-            physicsIndices as any
-        );
-        const roadBody = new CANNON.Body({
-            mass: 0,
-            material: this.physicsManager.trimeshMaterial,
-        });
-        roadBody.addShape(trimeshShape);
-        roadPhysicsBodies.push(roadBody);
+      // Create physics body for the road segment
+      const physicsVertices = new Float32Array([
+        v0.x,
+        v0.y,
+        v0.z,
+        v1.x,
+        v1.y,
+        v1.z,
+        v2.x,
+        v2.y,
+        v2.z,
+        v3.x,
+        v3.y,
+        v3.z,
+      ]);
+      const physicsIndices = new Uint16Array([0, 1, 2, 2, 1, 3]);
+      const trimeshShape = new CANNON.Trimesh(
+        physicsVertices as any,
+        physicsIndices as any
+      );
+      const roadBody = new CANNON.Body({
+        mass: 0,
+        material: this.physicsManager.trimeshMaterial,
+      });
+      roadBody.addShape(trimeshShape);
+      roadPhysicsBodies.push(roadBody);
 
-        return roadMesh;
+      return roadMesh;
     };
 
     // Main road along X-axis
     for (let i = -roadSegments / 2; i < roadSegments / 2; i++) {
-        const x1 = (i / roadSegments) * this.terrainSize;
-        const x2 = ((i + 1) / roadSegments) * this.terrainSize;
-        createRoadSegment(x1, 0, x2, 0);
+      const x1 = (i / roadSegments) * this.terrainSize;
+      const x2 = ((i + 1) / roadSegments) * this.terrainSize;
+      createRoadSegment(x1, 0, x2, 0);
     }
 
     // Main road along Z-axis
     for (let i = -roadSegments / 2; i < roadSegments / 2; i++) {
-        const z1 = (i / roadSegments) * this.terrainSize;
-        const z2 = ((i + 1) / roadSegments) * this.terrainSize;
-        createRoadSegment(0, z1, 0, z2);
+      const z1 = (i / roadSegments) * this.terrainSize;
+      const z2 = ((i + 1) / roadSegments) * this.terrainSize;
+      createRoadSegment(0, z1, 0, z2);
     }
 
     roadPhysicsBodies.forEach((body) =>
-        this.physicsManager.physicsWorld.addBody(body)
+      this.physicsManager.physicsWorld.addBody(body)
     );
   }
 
@@ -542,42 +564,42 @@ export class World {
     const ezTreeCount = 75; // Same count as before for now
 
     for (let i = 0; i < ezTreeCount; i++) {
-        const x = Math.random() * this.terrainSize - this.terrainSize / 2;
-        const z = Math.random() * this.terrainSize - this.terrainSize / 2;
-        const y = this.getTerrainHeightAt(x, z); // Use terrain height
+      const x = Math.random() * this.terrainSize - this.terrainSize / 2;
+      const z = Math.random() * this.terrainSize - this.terrainSize / 2;
+      const y = this.getTerrainHeightAt(x, z); // Use terrain height
 
-        const tree = new Tree();
-        tree.options = tree.options || {}; // Initialize options if undefined
-        tree.options.trunk = tree.options.trunk || {}; // Initialize trunk options if undefined
-        tree.options.seed = 1; // Fixed seed for debugging
-        tree.options.trunk.length = 5; // Fixed trunk length for debugging
-        tree.options.branch.levels = 2; // Fixed branch levels for debugging
-        tree.generate(); // Generate the Three.js objects
+      const tree = new Tree();
+      tree.options = tree.options || {}; // Initialize options if undefined
+      tree.options.trunk = tree.options.trunk || {}; // Initialize trunk options if undefined
+      tree.options.seed = 1; // Fixed seed for debugging
+      tree.options.trunk.length = 5; // Fixed trunk length for debugging
+      tree.options.branch.levels = 2; // Fixed branch levels for debugging
+      tree.generate(); // Generate the Three.js objects
 
-        // Position the tree
-        tree.position.set(x, y, z); // Adjust y to be above ground
+      // Position the tree
+      tree.position.set(x, y, z); // Adjust y to be above ground
 
-        // Add to scene
-        this.sceneManager.graphicsWorld.add(tree);
+      // Add to scene
+      this.sceneManager.graphicsWorld.add(tree);
 
-        // Add physics body for the tree (simplified for now, using a cylinder for the main trunk)
-        const trunkPhysicsHeight = tree.options.trunk.length;
-        const trunkPhysicsRadius = 0.7; // Fixed radius to avoid NaN issues
+      // Add physics body for the tree (simplified for now, using a cylinder for the main trunk)
+      const trunkPhysicsHeight = tree.options.trunk.length;
+      const trunkPhysicsRadius = 0.7; // Fixed radius to avoid NaN issues
 
-        const trunkPhysicsShape = new CANNON.Cylinder(
-            trunkPhysicsRadius,
-            trunkPhysicsRadius,
-            trunkPhysicsHeight,
-            12
-        );
-        const trunkPhysicsBody = new CANNON.Body({
-            mass: 0, // Static tree
-            material: this.physicsManager.trimeshMaterial,
-            collisionFilterGroup: CollisionGroups.TrimeshColliders, // Explicitly assign to TrimeshColliders group
-        });
-        trunkPhysicsBody.addShape(trunkPhysicsShape);
-        trunkPhysicsBody.position.set(x, y + trunkPhysicsHeight / 2, z); // Center of the physics body at y + half_height
-        this.physicsManager.physicsWorld.addBody(trunkPhysicsBody);
+      const trunkPhysicsShape = new CANNON.Cylinder(
+        trunkPhysicsRadius,
+        trunkPhysicsRadius,
+        trunkPhysicsHeight,
+        12
+      );
+      const trunkPhysicsBody = new CANNON.Body({
+        mass: 0, // Static tree
+        material: this.physicsManager.trimeshMaterial,
+        collisionFilterGroup: CollisionGroups.TrimeshColliders, // Explicitly assign to TrimeshColliders group
+      });
+      trunkPhysicsBody.addShape(trunkPhysicsShape);
+      trunkPhysicsBody.position.set(x, y + trunkPhysicsHeight / 2, z); // Center of the physics body at y + half_height
+      this.physicsManager.physicsWorld.addBody(trunkPhysicsBody);
     }
 
     // Add Village
@@ -589,116 +611,116 @@ export class World {
     const buildingCount = 8;
 
     const houseBodyMaterial = new THREE.MeshStandardMaterial({
-        color: 0x8b4513,
+      color: 0x8b4513,
     }); // Brown walls
     const houseRoofMaterial = new THREE.MeshStandardMaterial({
-        color: 0xa00000,
+      color: 0xa00000,
     }); // Red roof
     const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x5a2d0c }); // Dark wood
     const windowMaterial = new THREE.MeshStandardMaterial({
-        color: 0x87ceeb,
-        transparent: true,
-        opacity: 0.8,
+      color: 0x87ceeb,
+      transparent: true,
+      opacity: 0.8,
     });
 
     for (let i = 0; i < buildingCount; i++) {
-        // Random position within village radius
+      // Random position within village radius
 
-        const angle = Math.random() * Math.PI * 2;
+      const angle = Math.random() * Math.PI * 2;
 
-        const radius = Math.random() * villageRadius;
+      const radius = Math.random() * villageRadius;
 
-        const x = villageCenter.x + Math.cos(angle) * radius;
+      const x = villageCenter.x + Math.cos(angle) * radius;
 
-        const z = villageCenter.z + Math.sin(angle) * radius;
+      const z = villageCenter.z + Math.sin(angle) * radius;
 
-        const baseHeight = this.getTerrainHeightAt(x, z);
+      const baseHeight = this.getTerrainHeightAt(x, z);
 
-        // House dimensions
+      // House dimensions
 
-        const houseWidth = THREE.MathUtils.randFloat(4, 7);
+      const houseWidth = THREE.MathUtils.randFloat(4, 7);
 
-        const houseDepth = THREE.MathUtils.randFloat(4, 7);
+      const houseDepth = THREE.MathUtils.randFloat(4, 7);
 
-        const houseHeight = THREE.MathUtils.randFloat(5, 8);
+      const houseHeight = THREE.MathUtils.randFloat(5, 8);
 
-        const roofHeight = THREE.MathUtils.randFloat(2, 4);
+      const roofHeight = THREE.MathUtils.randFloat(2, 4);
 
-        // House Body (Visual)
+      // House Body (Visual)
 
-        const houseBodyGeometry = new THREE.BoxGeometry(
-            houseWidth,
-            houseHeight,
-            houseDepth
-        );
+      const houseBodyGeometry = new THREE.BoxGeometry(
+        houseWidth,
+        houseHeight,
+        houseDepth
+      );
 
-        const houseBodyMesh = new THREE.Mesh(
-            houseBodyGeometry,
-            houseBodyMaterial
-        );
+      const houseBodyMesh = new THREE.Mesh(
+        houseBodyGeometry,
+        houseBodyMaterial
+      );
 
-        houseBodyMesh.position.set(x, baseHeight + houseHeight / 2, z);
+      houseBodyMesh.position.set(x, baseHeight + houseHeight / 2, z);
 
-        houseBodyMesh.castShadow = true;
+      houseBodyMesh.castShadow = true;
 
-        houseBodyMesh.receiveShadow = true;
+      houseBodyMesh.receiveShadow = true;
 
-        this.sceneManager.graphicsWorld.add(houseBodyMesh);
+      this.sceneManager.graphicsWorld.add(houseBodyMesh);
 
-        // House Roof (Visual)
+      // House Roof (Visual)
 
-        const houseRoofGeometry = new THREE.ConeGeometry(
-            Math.max(houseWidth, houseDepth) / 1.5,
-            roofHeight,
-            4
-        ); // Square pyramid
+      const houseRoofGeometry = new THREE.ConeGeometry(
+        Math.max(houseWidth, houseDepth) / 1.5,
+        roofHeight,
+        4
+      ); // Square pyramid
 
-        const houseRoofMesh = new THREE.Mesh(
-            houseRoofGeometry,
-            houseRoofMaterial
-        );
+      const houseRoofMesh = new THREE.Mesh(
+        houseRoofGeometry,
+        houseRoofMaterial
+      );
 
-        houseRoofMesh.position.set(
-            x,
-            baseHeight + houseHeight + roofHeight / 2,
-            z
-        );
+      houseRoofMesh.position.set(
+        x,
+        baseHeight + houseHeight + roofHeight / 2,
+        z
+      );
 
-        houseRoofMesh.castShadow = true;
+      houseRoofMesh.castShadow = true;
 
-        houseRoofMesh.receiveShadow = true;
+      houseRoofMesh.receiveShadow = true;
 
-        this.sceneManager.graphicsWorld.add(houseRoofMesh);
+      this.sceneManager.graphicsWorld.add(houseRoofMesh);
 
-        // House Body (Physics)
+      // House Body (Physics)
 
-        const physicsBodyShape = new CANNON.Box(
-            new CANNON.Vec3(houseWidth / 2, houseHeight / 2, houseDepth / 2)
-        );
+      const physicsBodyShape = new CANNON.Box(
+        new CANNON.Vec3(houseWidth / 2, houseHeight / 2, houseDepth / 2)
+      );
 
-        const physicsBody = new CANNON.Body({
-            mass: 0,
-            material: this.physicsManager.trimeshMaterial,
-        });
+      const physicsBody = new CANNON.Body({
+        mass: 0,
+        material: this.physicsManager.trimeshMaterial,
+      });
 
-        physicsBody.addShape(physicsBodyShape);
+      physicsBody.addShape(physicsBodyShape);
 
-        physicsBody.position.set(x, baseHeight + houseHeight / 2, z);
+      physicsBody.position.set(x, baseHeight + houseHeight / 2, z);
 
-        this.physicsManager.physicsWorld.addBody(physicsBody);
+      this.physicsManager.physicsWorld.addBody(physicsBody);
     }
 
     // Add Streetlights around the village
     const streetlightCount = 6;
     for (let i = 0; i < streetlightCount; i++) {
-        const angle = (i / streetlightCount) * Math.PI * 2;
-        const radius = villageRadius + 15; // Place streetlights outside the village
-        const x = villageCenter.x + Math.cos(angle) * radius;
-        const z = villageCenter.z + Math.sin(angle) * radius;
-        const y = this.getTerrainHeightAt(x, z); // Get terrain height
+      const angle = (i / streetlightCount) * Math.PI * 2;
+      const radius = villageRadius + 15; // Place streetlights outside the village
+      const x = villageCenter.x + Math.cos(angle) * radius;
+      const z = villageCenter.z + Math.sin(angle) * radius;
+      const y = this.getTerrainHeightAt(x, z); // Get terrain height
 
-        const streetlight = new Streetlight(this, new THREE.Vector3(x, y, z));
-        this.streetlights.push(streetlight);
+      const streetlight = new Streetlight(this, new THREE.Vector3(x, y, z));
+      this.streetlights.push(streetlight);
     }
 
     // Add boundary walls
@@ -707,19 +729,19 @@ export class World {
     const halfSize = this.terrainSize / 2;
 
     const wallMaterial = new THREE.MeshBasicMaterial({
-        color: 0x888888,
-        transparent: true,
-        opacity: 0.5,
+      color: 0x888888,
+      transparent: true,
+      opacity: 0.5,
     });
 
     // Wall X+
     const wallXP = new THREE.Mesh(
-        new THREE.BoxGeometry(
-            wallThickness,
-            wallHeight,
-            this.terrainSize + wallThickness
-        ),
-        wallMaterial
+      new THREE.BoxGeometry(
+        wallThickness,
+        wallHeight,
+        this.terrainSize + wallThickness
+      ),
+      wallMaterial
     );
     wallXP.position.set(halfSize, wallHeight / 2, 0);
     wallXP.receiveShadow = false;
@@ -727,12 +749,12 @@ export class World {
 
     // Wall X-
     const wallXN = new THREE.Mesh(
-        new THREE.BoxGeometry(
-            wallThickness,
-            wallHeight,
-            this.terrainSize + wallThickness
-        ),
-        wallMaterial
+      new THREE.BoxGeometry(
+        wallThickness,
+        wallHeight,
+        this.terrainSize + wallThickness
+      ),
+      wallMaterial
     );
     wallXN.position.set(-halfSize, wallHeight / 2, 0);
     wallXN.receiveShadow = false;
@@ -740,12 +762,12 @@ export class World {
 
     // Wall Z+
     const wallZP = new THREE.Mesh(
-        new THREE.BoxGeometry(
-            this.terrainSize + wallThickness,
-            wallHeight,
-            wallThickness
-        ),
-        wallMaterial
+      new THREE.BoxGeometry(
+        this.terrainSize + wallThickness,
+        wallHeight,
+        wallThickness
+      ),
+      wallMaterial
     );
     wallZP.position.set(0, wallHeight / 2, halfSize);
     wallZP.receiveShadow = false;
@@ -753,12 +775,12 @@ export class World {
 
     // Wall Z-
     const wallZN = new THREE.Mesh(
-        new THREE.BoxGeometry(
-            this.terrainSize + wallThickness,
-            wallHeight,
-            wallThickness
-        ),
-        wallMaterial
+      new THREE.BoxGeometry(
+        this.terrainSize + wallThickness,
+        wallHeight,
+        wallThickness
+      ),
+      wallMaterial
     );
     wallZN.position.set(0, wallHeight / 2, -halfSize);
     wallZN.receiveShadow = false;
@@ -1007,15 +1029,6 @@ export class World {
             footer: "Please check the browser console for more details.",
           });
         });
-    } else {
-      UIManager.setUserInterfaceVisible(true);
-      UIManager.setLoadingScreenVisible(false);
-      Swal.fire({
-        icon: "success",
-        title: "Hello world!",
-        buttonsStyling: false,
-      });
-      this.updateEnemyCountDisplay(); // Update counter after UI is visible
     }
   }
 
@@ -1189,9 +1202,8 @@ export class World {
         (worldEntity as Character).characterCapsule &&
         (worldEntity as Character).characterCapsule.body
       ) {
-        (
-          worldEntity as Character
-        ).characterCapsule.body.collisionResponse = false;
+        (worldEntity as Character).characterCapsule.body.collisionResponse =
+          false;
         (worldEntity as Character).characterCapsule.body.mass = 0;
         (worldEntity as Character).characterCapsule.body.sleep();
         this.physicsManager.bodiesToRemove.push(
@@ -1505,14 +1517,13 @@ export class World {
       return;
     }
 
-
-
     this.initialEnemyCount = count;
     this.currentEnemyCount = count;
     this.updateEnemyCountDisplay(); // Initialize enemy count display
 
     for (let i = 0; i < count; i++) {
-      this.loadingManager.loadGLTFPromise("boxman.glb")
+      this.loadingManager
+        .loadGLTFPromise("boxman.glb")
         .then((model) => {
           let character = new Character(model);
           character.name = `Enemy ${i}`; // Assign a name for debugging
@@ -1523,9 +1534,11 @@ export class World {
 
           let spawnPosition = new THREE.Vector3();
           if (this.paths.length > 0) {
-            const randomPath = this.paths[Math.floor(Math.random() * this.paths.length)];
+            const randomPath =
+              this.paths[Math.floor(Math.random() * this.paths.length)];
             const nodeKeys = Object.keys(randomPath.nodes);
-            const randomNodeKey = nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
+            const randomNodeKey =
+              nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
             const randomNode = randomPath.nodes[randomNodeKey];
             randomNode.object.getWorldPosition(spawnPosition);
           } else {
@@ -1534,7 +1547,11 @@ export class World {
             spawnPosition.z = Math.random() * 800 - 400; // Wider range
             spawnPosition.y = 20; // Keep fixed y for now, assume falling into place
           }
-          character.setPosition(spawnPosition.x, spawnPosition.y, spawnPosition.z);
+          character.setPosition(
+            spawnPosition.x,
+            spawnPosition.y,
+            spawnPosition.z
+          );
 
           this.add(character);
         })
