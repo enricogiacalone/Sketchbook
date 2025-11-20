@@ -48,6 +48,9 @@ import { Tornado } from "~/world/Tornado";
 import { Tree } from "@dgreenheck/ez-tree";
 import { Streetlight } from "./Streetlight";
 
+import grassFragment from "../../lib/shaders/procedural_grass_fragment.glsl?raw";
+import grassVertex from "../../lib/shaders/procedural_grass_vertex.glsl?raw";
+
 // Constants for cloud generation
 const CLOUD_BANK_COUNT = 4;
 const CLOUDS_PER_BANK = 10;
@@ -124,9 +127,14 @@ export class World {
 
   public loadingManager: LoadingManager; // New property to store the loading manager
 
-  private lastScenarioID: string;
+  private terrainHeights: number[] = [];
+  private groundPositionAttribute: THREE.BufferAttribute;
+  private terrainSegments: number;
+  private currentEnemyCount: number = 0; // New property to track active enemies
+  private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
   private meteoriteInterval: any;
-  private onSendMessage: (message: string) => void; // New property
+
+  private lastScenarioID: string;
 
   constructor(
     worldScenePath?: any,
