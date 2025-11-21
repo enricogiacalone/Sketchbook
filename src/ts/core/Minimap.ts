@@ -29,7 +29,7 @@ export class Minimap implements IUpdatable {
     this.healthBar = document.querySelector("#health-bar .bar-arc-fill");
     this.armorBar = document.querySelector("#armor-bar .bar-arc-fill");
 
-    this.world.registerUpdatable(this);
+    this.world.entityManager.registerUpdatable(this);
   }
 
   public update(timestep: number): void {

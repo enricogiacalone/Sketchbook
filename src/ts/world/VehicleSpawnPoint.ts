@@ -34,13 +34,13 @@ export class VehicleSpawnPoint implements ISpawnPoint {
 
         vehicle.setPosition(worldPos.x, worldPos.y + 1, worldPos.z);
         vehicle.collision.quaternion.copy(Utils.cannonQuat(worldQuat));
-        world.add(vehicle);
+        world.entityManager.add(vehicle);
 
         if (this.driver !== undefined) {
           loadingManager.loadGLTFPromise("boxman.glb")
             .then((charModel) => {
               let character = new Character(charModel);
-              world.add(character);
+              world.entityManager.add(character);
               character.teleportToVehicle(vehicle, vehicle.seats[0]);
 
               if (this.driver === "player") {

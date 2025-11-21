@@ -51,7 +51,7 @@ export class Bullet extends THREE.Mesh implements IUpdatable {
 
     this.world.physicsManager.physicsWorld.addBody(this.body);
     this.world.sceneManager.graphicsWorld.add(this);
-    this.world.registerUpdatable(this);
+    this.world.entityManager.registerUpdatable(this);
 
     this.trail = new BulletTrail(this.world, this.position); // Initialize BulletTrail
   }
@@ -93,7 +93,7 @@ export class Bullet extends THREE.Mesh implements IUpdatable {
   private removeBullet(): void {
     this.world.physicsManager.physicsWorld.removeBody(this.body);
     this.world.sceneManager.graphicsWorld.remove(this);
-    this.world.unregisterUpdatable(this);
+    this.world.entityManager.unregisterUpdatable(this);
     this.trail.removeTrail(); // Remove the bullet trail
   }
 }

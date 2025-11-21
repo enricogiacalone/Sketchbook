@@ -32,7 +32,7 @@ export class BulletImpactEffect extends THREE.Mesh implements IUpdatable {
     this.setRotationFromQuaternion(quaternion);
 
     this.world.sceneManager.graphicsWorld.add(this);
-    this.world.registerUpdatable(this);
+    this.world.entityManager.registerUpdatable(this);
   }
 
   public update(timeStep: number): void {
@@ -53,7 +53,7 @@ export class BulletImpactEffect extends THREE.Mesh implements IUpdatable {
 
   private removeEffect(): void {
     this.world.sceneManager.graphicsWorld.remove(this);
-    this.world.unregisterUpdatable(this);
+    this.world.entityManager.unregisterUpdatable(this);
     this.geometry.dispose();
     if (this.material instanceof THREE.Material) {
       this.material.dispose();

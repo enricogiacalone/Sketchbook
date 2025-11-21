@@ -32,7 +32,7 @@ export class BulletTrail extends THREE.Object3D implements IUpdatable {
     this.add(this.line);
 
     this.world.sceneManager.graphicsWorld.add(this);
-    this.world.registerUpdatable(this);
+    this.world.entityManager.registerUpdatable(this);
   }
 
   public addPoint(position: THREE.Vector3): void {
@@ -82,7 +82,7 @@ export class BulletTrail extends THREE.Object3D implements IUpdatable {
 
   public removeTrail(): void {
     this.world.sceneManager.graphicsWorld.remove(this);
-    this.world.unregisterUpdatable(this);
+    this.world.entityManager.unregisterUpdatable(this);
     this.line.geometry.dispose();
     if (this.line.material instanceof THREE.Material) {
       this.line.material.dispose();

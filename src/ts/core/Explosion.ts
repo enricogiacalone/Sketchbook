@@ -41,7 +41,7 @@ export class Explosion extends THREE.Group implements IUpdatable {
     this.damage *= explosionScale;
 
     this.world.sceneManager.graphicsWorld.add(this);
-    this.world.registerUpdatable(this);
+    this.world.entityManager.registerUpdatable(this);
 
     this.createParticles();
     this.applyRadiusDamage();
@@ -162,7 +162,7 @@ export class Explosion extends THREE.Group implements IUpdatable {
     // If all particles are dead, remove the explosion group itself
     if (allParticlesDead && this.particles.length === 0) {
       this.world.sceneManager.graphicsWorld.remove(this);
-      this.world.unregisterUpdatable(this);
+      this.world.entityManager.unregisterUpdatable(this);
     }
   }
 }

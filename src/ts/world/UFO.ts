@@ -42,7 +42,7 @@ export class UFO implements IWorldEntity, IUpdatable {
     this.targetPosition = this.getRandomTargetPosition();
 
     this.world.sceneManager.graphicsWorld.add(this.mesh);
-    this.world.registerUpdatable(this);
+    this.world.entityManager.registerUpdatable(this);
   }
 
   public update(timeStep: number): void {
@@ -74,7 +74,7 @@ export class UFO implements IWorldEntity, IUpdatable {
 
   public removeFromWorld(): void {
     this.world.sceneManager.graphicsWorld.remove(this.mesh);
-    this.world.unregisterUpdatable(this);
+    this.world.entityManager.unregisterUpdatable(this);
   }
 
   private getRandomTargetPosition(): THREE.Vector3 {

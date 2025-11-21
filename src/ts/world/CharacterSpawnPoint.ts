@@ -51,7 +51,7 @@ export class CharacterSpawnPoint implements ISpawnPoint {
         player.setOrientation(forward, true);
 
         console.log("CharacterSpawnPoint: Adding player to world and taking control.");
-        world.add(player);
+        world.entityManager.add(player);
         player.takeControl();
         console.log("CharacterSpawnPoint: Player instance:", player);
 

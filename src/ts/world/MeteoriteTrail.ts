@@ -50,7 +50,7 @@ export class MeteoriteTrail extends THREE.Object3D implements IUpdatable {
     this.add(this.particles);
 
     this.world.sceneManager.graphicsWorld.add(this);
-    this.world.registerUpdatable(this);
+    this.world.entityManager.registerUpdatable(this);
   }
 
   public update(timeStep: number): void {
@@ -99,7 +99,7 @@ export class MeteoriteTrail extends THREE.Object3D implements IUpdatable {
 
   public removeFromWorld(): void {
     this.world.sceneManager.graphicsWorld.remove(this);
-    this.world.unregisterUpdatable(this);
+    this.world.entityManager.unregisterUpdatable(this);
     this.particles.geometry.dispose();
     if (this.particles.material instanceof THREE.Material) {
       this.particles.material.dispose();

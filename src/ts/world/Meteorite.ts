@@ -45,7 +45,7 @@ export class Meteorite implements IWorldEntity, IUpdatable {
 
     this.world.sceneManager.graphicsWorld.add(this.mesh);
     this.world.physicsManager.physicsWorld.addBody(this.body);
-    this.world.registerUpdatable(this);
+    this.world.entityManager.registerUpdatable(this);
 
     this.trail = new MeteoriteTrail(this.world, this);
   }
@@ -63,7 +63,7 @@ export class Meteorite implements IWorldEntity, IUpdatable {
     this.isRemoved = true;
     this.world.sceneManager.graphicsWorld.remove(this.mesh);
     this.world.physicsManager.bodiesToRemove.push(this.body);
-    this.world.unregisterUpdatable(this);
+    this.world.entityManager.unregisterUpdatable(this);
   }
 
   private onCollide(event: any): void {

@@ -39,7 +39,7 @@ export class AtomicExplosion extends THREE.Group implements IUpdatable {
     this.flashMesh.position.copy(position);
     this.world.sceneManager.graphicsWorld.add(this.flashMesh);
 
-    this.world.registerUpdatable(this);
+    this.world.entityManager.registerUpdatable(this);
   }
 
   public update(timeStep: number): void {
@@ -87,7 +87,7 @@ export class AtomicExplosion extends THREE.Group implements IUpdatable {
         this.state = "done";
       }
     } else if (this.state === "done") {
-      this.world.unregisterUpdatable(this);
+      this.world.entityManager.unregisterUpdatable(this);
     }
   }
 }

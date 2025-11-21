@@ -70,8 +70,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
       shoot: new KeyBinding("Mouse0"),
     };
 
-    world.registerUpdatable(this);
-  }
+            world.entityManager.registerUpdatable(this);  }
 
   public setSensitivity(
     sensitivityX: number,

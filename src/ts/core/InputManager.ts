@@ -65,8 +65,7 @@ export class InputManager implements IUpdatable {
     document.addEventListener("keydown", this.boundOnKeyDown, false);
     document.addEventListener("keyup", this.boundOnKeyUp, false);
 
-    world.registerUpdatable(this);
-  }
+            world.entityManager.registerUpdatable(this);  }
 
   public update(timestep: number, unscaledTimeStep: number): void {
     if (

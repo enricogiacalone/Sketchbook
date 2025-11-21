@@ -1,8 +1,6 @@
 import * as CANNON from "cannon-es";
 import { NetworkPlayer } from "~/characters/NetworkPlayer";
 
-import { Tree } from "@dgreenheck/ez-tree";
-
 import * as _ from "lodash";
 import Swal from "sweetalert2";
 import * as THREE from "three";
@@ -14,6 +12,8 @@ import { Character } from "~/characters/Character";
 import { CameraOperator } from "~/core/CameraOperator";
 import * as Utils from "~/core/FunctionLibrary";
 import { GameManager } from "~/core/GameManager";
+import { EntityManager } from "~/core/EntityManager";
+import { ScenarioManager } from "~/game/ScenarioManager";
 import { InfoStack } from "~/core/InfoStack";
 import { InputManager } from "~/core/InputManager";
 import { LoadingManager } from "~/core/LoadingManager";
@@ -34,6 +34,7 @@ import { Path } from "~/world/Path";
 import { Scenario } from "~/world/Scenario";
 import { Sky } from "~/world/Sky";
 import { Streetlight } from "~/world/Streetlight";
+import { Trees } from "~/world/Trees";
 import { VehicleSpawnPoint } from "~/world/VehicleSpawnPoint";
 import { Grass } from "~/world/Grass";
 import { Road } from "~/world/Road";
@@ -47,8 +48,6 @@ import { Meteorite } from "./Meteorite";
 import { Planet } from "./Planet";
 import { PsychedelicParticles } from "./PsychedelicParticles";
 import { UFO } from "./UFO";
-
-
 
 // Constants for cloud generation
 const CLOUD_BANK_COUNT = 4;
@@ -111,11 +110,14 @@ export class World {
   public characters: Character[] = [];
   public vehicles: Vehicle[] = [];
   public paths: Path[] = [];
-  public scenarioGUIFolder: any;
   public updatables: IUpdatable[] = [];
+
+
   public sceneManager: SceneManager;
   public physicsManager: PhysicsManager;
   public gameManager: GameManager;
+  public scenarioManager: ScenarioManager;
+
   public interstellarVortex: InterstellarVortex;
   public player: Character; // Reference to the local player character
   public networkPlayers: Map<string, NetworkPlayer> = new Map(); // Map to store other players by their socket ID
@@ -127,11 +129,6 @@ export class World {
   private groundPositionAttribute: THREE.BufferAttribute;
   private terrainSegments: number; // New property for terrain segments
 
-
-  private lastScenarioID: string;
-
-  private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
-  private currentEnemyCount: number = 0; // New property to track active enemies
   public loadingManager: LoadingManager; // New property to store the loading manager
   private meteoriteInterval: any;
   private onSendMessage: (message: string) => void; // New property
@@ -219,7 +216,7 @@ export class World {
       networkCharacter.targetPosition.copy(networkCharacter.position);
       networkCharacter.targetQuaternion.copy(networkCharacter.quaternion);
 
-      this.add(networkCharacter); // This calls networkCharacter.addToWorld(this)
+      this.entityManager.add(networkCharacter); // This calls networkCharacter.addToWorld(this)
       this.networkPlayers.set(id, networkCharacter); // Store the actual NetworkPlayer instance
       networkCharacter.createHealthBar(); // Create health bar for network players
       console.log(`Successfully added network player with ID: ${id}`);
@@ -244,7 +241,7 @@ export class World {
         this.characters,
         (char) => (char as NetworkPlayer).socketId === id
       );
-      this.remove(networkCharacter); // This calls networkCharacter.removeFromWorld(this)
+      this.entityManager.remove(networkCharacter); // This calls networkCharacter.removeFromWorld(this)
       this.networkPlayers.delete(id);
       console.log(`Successfully removed network player with ID: ${id}`);
     } else {
@@ -426,6 +423,8 @@ export class World {
     this.sceneManager = new SceneManager(this);
     this.physicsManager = new PhysicsManager(this);
     this.gameManager = new GameManager(this);
+    this.entityManager = new EntityManager(this);
+
     this.generateHTML();
   }
 
@@ -457,7 +456,13 @@ export class World {
     this.stats = new Stats();
     this.stats.dom.id = "stats";
     document.getElementById("ui-container").appendChild(this.stats.dom);
-    this.createParamsGUI(this); // Pass 'this' (World instance) as scope
+    const gui = this.createParamsGUI(this); // Pass 'this' (World instance) as scope and store the gui object
+
+    // Scenario GUI folder initialization
+    const scenarioGUIFolder = gui.addFolder("Scenarios");
+    scenarioGUIFolder.open();
+
+    this.scenarioManager = new ScenarioManager(this, scenarioGUIFolder); // Instantiate ScenarioManager here
   }
 
   /**
@@ -661,57 +666,20 @@ export class World {
     groundBody.addShape(trimeshShape);
     this.physicsManager.physicsWorld.addBody(groundBody);
 
-    this.grass = new Grass(this, terrainSize, terrainMaxHeight, terrainSegments);
-    this.add(this.grass);
+    this.grass = new Grass(
+      this,
+      terrainSize,
+      terrainMaxHeight,
+      terrainSegments
+    );
+    this.entityManager.add(this.grass);
 
     this.road = new Road(this, terrainSize, terrainSegments);
-    this.add(this.road);
+    this.entityManager.add(this.road);
 
-
-
-
-
-    // Create trees using @dgreenheck/ez-tree
-    const ezTreeCount = 75; // Same count as before for now
-
-    for (let i = 0; i < ezTreeCount; i++) {
-      const x = Math.random() * terrainSize - terrainSize / 2;
-      const z = Math.random() * terrainSize - terrainSize / 2;
-      const y = this.getTerrainHeightAt(x, z); // Use terrain height
-
-      const tree = new Tree();
-      tree.options = tree.options || {}; // Initialize options if undefined
-      tree.options.trunk = tree.options.trunk || {}; // Initialize trunk options if undefined
-      tree.options.seed = 1; // Fixed seed for debugging
-      tree.options.trunk.length = 5; // Fixed trunk length for debugging
-      tree.options.branch.levels = 2; // Fixed branch levels for debugging
-      tree.generate(); // Generate the Three.js objects
-
-      // Position the tree
-      tree.position.set(x, y, z); // Adjust y to be above ground
-
-      // Add to scene
-      this.sceneManager.graphicsWorld.add(tree);
-
-      // Add physics body for the tree (simplified for now, using a cylinder for the main trunk)
-      const trunkPhysicsHeight = tree.options.trunk.length;
-      const trunkPhysicsRadius = 0.7; // Fixed radius to avoid NaN issues
-
-      const trunkPhysicsShape = new CANNON.Cylinder(
-        trunkPhysicsRadius,
-        trunkPhysicsRadius,
-        trunkPhysicsHeight,
-        12
-      );
-      const trunkPhysicsBody = new CANNON.Body({
-        mass: 0, // Static tree
-        material: this.physicsManager.trimeshMaterial,
-        collisionFilterGroup: CollisionGroups.TrimeshColliders, // Explicitly assign to TrimeshColliders group
-      });
-      trunkPhysicsBody.addShape(trunkPhysicsShape);
-      trunkPhysicsBody.position.set(x, y + trunkPhysicsHeight / 2, z); // Center of the physics body at y + half_height
-      this.physicsManager.physicsWorld.addBody(trunkPhysicsBody);
-    }
+    // Create trees
+    const trees = new Trees(this, terrainSize);
+    trees.generateTrees();
 
     // Add Village
 
@@ -904,8 +872,9 @@ export class World {
     playerSpawnPoint.spawn(this.loadingManager, this, (player: Character) => {
       player.setColor(new THREE.Color(0x0000ff));
       this.player = player;
+      this.entityManager.add(player); // Add player through entity manager
       // Now that the player is spawned, spawn enemies
-      this.spawnEnemies(5); // Re-enable enemies
+      this.scenarioManager.spawnEnemies(5); // Re-enable enemies
     });
 
     // Spawn vehicles
@@ -924,8 +893,6 @@ export class World {
     this.weatherManager.update(timeStep);
 
     this.streetlights.forEach((light) => light.update(this.sky.timeOfDay));
-
-
 
     this.planets.forEach((planet) => {
       planet.update();
@@ -1028,111 +995,17 @@ export class World {
     this.timeScaleTarget = value;
   }
 
-  public add(worldEntity: IWorldEntity): void {
-    worldEntity.addToWorld(this);
-    if (this.isUpdatable(worldEntity)) {
-      this.registerUpdatable(worldEntity);
-    }
-  }
 
-  public registerUpdatable(registree: IUpdatable): void {
-    this.updatables.push(registree);
-    this.updatables.sort((a, b) => (a.updateOrder > b.updateOrder ? 1 : -1));
-  }
 
-  public remove(worldEntity: IWorldEntity): void {
-    // Special handling for local player death
-    if (worldEntity === this.player) {
-      document.exitPointerLock();
-      this.player = undefined;
 
-      // Immediately remove player from the world
-      this.performRemoval(worldEntity);
 
-      // Then, show respawn modal
-      Swal.fire({
-        title: "You Died",
-        text: "You can rejoin the game.",
-        confirmButtonText: "Respawn",
-        buttonsStyling: false,
-        allowOutsideClick: false,
-        allowEscapeKey: false,
-      }).then(() => {
-        this.restartScenario();
-      });
 
-      // Stop further execution for local player death
-      return;
-    }
 
-    this.performRemoval(worldEntity);
-  }
 
-  private isUpdatable(entity: IWorldEntity): entity is IUpdatable {
-    return (entity as IUpdatable).update !== undefined && (entity as IUpdatable).updateOrder !== undefined;
-  }
 
-  private performRemoval(worldEntity: IWorldEntity): void {
-    console.log("Performing removal for entity:", (worldEntity as any).uuid);
 
-    if (worldEntity instanceof NetworkPlayer) {
-      worldEntity.removeFromWorld(this);
-    } else if (worldEntity instanceof Character) {
-      if (worldEntity.entityType === EntityType.Enemy) {
-        this.currentEnemyCount--;
-        this.updateEnemyCountDisplay(); // Update UI using helper method
-        if (this.currentEnemyCount <= 0) {
-          this.spawnEnemies(this.initialEnemyCount * 2);
-        }
-      }
 
-      if (this.inputManager.inputReceiver === worldEntity) {
-        this.inputManager.inputReceiver = undefined;
-      }
 
-      _.pull(this.characters, worldEntity as Character);
-
-      if (
-        (worldEntity as Character).characterCapsule &&
-        (worldEntity as Character).characterCapsule.body
-      ) {
-        (worldEntity as Character).characterCapsule.body.collisionResponse =
-          false;
-        (worldEntity as Character).characterCapsule.body.mass = 0;
-        (worldEntity as Character).characterCapsule.body.sleep();
-        this.physicsManager.bodiesToRemove.push(
-          (worldEntity as Character).characterCapsule.body
-        );
-      }
-
-      this.sceneManager.graphicsWorld.remove(worldEntity as Character);
-      console.log(
-        `Entity ${(worldEntity as any).uuid} removed from scene graph.`
-      );
-      if ((worldEntity as Character).raycastBox) {
-        this.sceneManager.graphicsWorld.remove(
-          (worldEntity as Character).raycastBox
-        );
-      }
-      if (
-        (worldEntity as Character).healthBarContainer &&
-        (worldEntity as Character).healthBarContainer.parent
-      ) {
-        (worldEntity as Character).healthBarContainer.parent.remove(
-          (worldEntity as Character).healthBarContainer
-        );
-      }
-    } else if (worldEntity instanceof Vehicle) {
-      worldEntity.removeFromWorld(this);
-    } else {
-    }
-
-    this.unregisterUpdatable(worldEntity);
-  }
-
-  public unregisterUpdatable(registree: IUpdatable): void {
-    _.pull(this.updatables, registree);
-  }
 
   public loadScene(loadingManager: LoadingManager, gltf: any): void {
     gltf.scene.traverse((child) => {
@@ -1187,7 +1060,7 @@ export class World {
         this.sky.csm.setupMaterial(child.material);
 
         if (child.material.name === MATERIAL_NAME_OCEAN) {
-          this.registerUpdatable(new Ocean(child, this));
+          this.entityManager.registerUpdatable(new Ocean(child, this));
         }
       }
 
@@ -1234,110 +1107,6 @@ export class World {
     }
   }
 
-  public launchScenario(scenarioID: string): void {
-    console.log(`Launching scenario: ${scenarioID}`);
-    this.lastScenarioID = scenarioID;
-
-    this.clearEntities();
-    this.updateEnemyCountDisplay(); // Initialize enemy count display
-
-    // Launch default scenario
-    for (const scenario of this.scenarios) {
-      if (scenario.id === scenarioID || scenario.spawnAlways) {
-        // If it's the default scenario, use hard-coded spawn points for variety
-        if (scenario.default) {
-          const customSpawnPointsData = [
-            { position: new THREE.Vector3(0, 10, 0) },
-            { position: new THREE.Vector3(50, 10, 20) },
-            { position: new THREE.Vector3(-30, 10, -40) },
-            { position: new THREE.Vector3(20, 10, 60) },
-            { position: new THREE.Vector3(-60, 10, 10) },
-          ];
-
-          const spawnPoints = customSpawnPointsData.map((sp) => {
-            const object = new THREE.Object3D();
-            object.position.copy(sp.position);
-            return new CharacterSpawnPoint(object);
-          });
-
-          const randomSpawnPoint =
-            spawnPoints[Math.floor(Math.random() * spawnPoints.length)];
-
-          randomSpawnPoint.spawn(
-            this.loadingManager,
-            this,
-            (player: Character) => {
-              player.setColor(new THREE.Color(0x0000ff)); // Set main character color to blue
-              this.player = player; // Assign the local player
-              this.spawnEnemies(5);
-            }
-          );
-        } else {
-          // For other scenarios, use the spawn points from the GLTF file
-          const playerSpawnPoints: CharacterSpawnPoint[] = [];
-          scenario.spawnPoints.forEach((sp) => {
-            if (sp instanceof CharacterSpawnPoint) {
-              playerSpawnPoints.push(sp);
-            }
-          });
-
-          if (playerSpawnPoints.length > 0) {
-            const randomSpawnPoint =
-              playerSpawnPoints[
-                Math.floor(Math.random() * playerSpawnPoints.length)
-              ];
-            randomSpawnPoint.spawn(
-              this.loadingManager,
-              this,
-              (player: Character) => {
-                player.setColor(new THREE.Color(0x0000ff));
-                this.player = player;
-                this.spawnEnemies(5);
-              }
-            );
-          } else {
-            scenario.launch(this.loadingManager, this);
-          }
-        }
-      }
-    }
-  }
-
-  public restartScenario(): void {
-    if (this.lastScenarioID !== undefined) {
-      document.exitPointerLock();
-      this.launchScenario(this.lastScenarioID);
-    } else {
-      console.warn("Can't restart scenario. Last scenarioID is undefined.");
-    }
-  }
-
-  public clearEntities(): void {
-    const networkPlayers: NetworkPlayer[] = [];
-    for (const character of this.characters) {
-      if (character instanceof NetworkPlayer) {
-        networkPlayers.push(character);
-      } else {
-        this.unregisterUpdatable(character);
-        if (character.characterCapsule?.body) {
-          this.physicsManager.bodiesToRemove.push(
-            character.characterCapsule.body
-          );
-        }
-        this.sceneManager.graphicsWorld.remove(character);
-        if (this.inputManager.inputReceiver === character) {
-          this.inputManager.inputReceiver = undefined;
-        }
-      }
-    }
-    this.characters = networkPlayers;
-
-    for (const vehicle of this.vehicles) {
-      this.remove(vehicle);
-    }
-    this.vehicles = [];
-  }
-
   public scrollTheTimeScale(scrollAmount: number): void {
     // Changing time scale with scroll wheel
     const timeScaleBottomLimit = 0.003;
@@ -1370,94 +1139,6 @@ export class World {
     });
 
     document.getElementById("controls").innerHTML = html;
-  }
-
-  private updateEnemyCountDisplay(): void {
-    let enemyCountElement = document.getElementById("dynamic-enemy-count");
-
-    if (!enemyCountElement) {
-      enemyCountElement = document.createElement("div");
-      enemyCountElement.id = "dynamic-enemy-count";
-      enemyCountElement.style.position = "absolute";
-      enemyCountElement.style.top = "10px";
-      enemyCountElement.style.left = "10px";
-      enemyCountElement.style.color = "white";
-      enemyCountElement.style.fontSize = "24px";
-      enemyCountElement.style.zIndex = "100000";
-      enemyCountElement.style.backgroundColor = "rgba(0,0,0,0.5)";
-      enemyCountElement.style.padding = "5px";
-      enemyCountElement.style.borderRadius = "5px";
-
-      const uiContainer = document.getElementById("ui-container");
-      if (uiContainer) {
-        uiContainer.appendChild(enemyCountElement);
-      } else {
-        console.warn(
-          "UI container not found, cannot append dynamic enemy count element."
-        );
-        return;
-      }
-    }
-
-    if (enemyCountElement) {
-      enemyCountElement.innerHTML = `Enemies: ${this.currentEnemyCount}`;
-    }
-  }
-
-  public spawnEnemies(count: number): void {
-    console.log(`Attempting to spawn ${count} enemies.`);
-    if (!this.player) {
-      console.warn("Cannot spawn enemies: local player is not defined.");
-      return;
-    }
-
-    this.initialEnemyCount = count;
-    this.currentEnemyCount = count;
-    this.updateEnemyCountDisplay(); // Initialize enemy count display
-
-    for (let i = 0; i < count; i++) {
-      this.loadingManager
-        .loadGLTFPromise("boxman.glb")
-        .then((model) => {
-          let character = new Character(model);
-          character.name = `Enemy ${i}`; // Assign a name for debugging
-          character.entityType = EntityType.Enemy; // Assign Enemy EntityType
-          character.setBehaviour(new FollowTarget(this.player)); // Target the local player
-          character.setColor(new THREE.Color(0xff0000)); // Set enemy character color to red
-          character.createHealthBar(); // Create health bar for enemies
-
-          let spawnPosition = new THREE.Vector3();
-          if (this.paths.length > 0) {
-            const randomPath =
-              this.paths[Math.floor(Math.random() * this.paths.length)];
-            const nodeKeys = Object.keys(randomPath.nodes);
-            const randomNodeKey =
-              nodeKeys[Math.floor(Math.random() * nodeKeys.length)];
-            const randomNode = randomPath.nodes[randomNodeKey];
-            randomNode.object.getWorldPosition(spawnPosition);
-          } else {
-            // Fallback to broader random range if no paths are defined
-            spawnPosition.x = Math.random() * 800 - 400; // Wider range
-            spawnPosition.z = Math.random() * 800 - 400; // Wider range
-            spawnPosition.y = 20; // Keep fixed y for now, assume falling into place
-            console.log("DEBUG: Procedural world spawnPosition calculated:", spawnPosition.x, spawnPosition.y, spawnPosition.z);
-          }
-          character.setPosition(
-            spawnPosition.x,
-            spawnPosition.y,
-            spawnPosition.z
-          );
-
-          this.add(character);
-          console.log(
-            `Spawned enemy '${character.name}' at physics body position:`,
-            character.characterCapsule.body.position.toArray()
-          );
-        })
-        .catch((error) => {
-          console.error("Error loading enemy character model:", error);
-        });
-    }
   }
 
   private generateHTML(): void {
@@ -1519,50 +1200,71 @@ export class World {
     document.body.appendChild(uiContainerDiv);
   }
 
-  private createParamsGUI(scope: World): void {
+  private createParamsGUI(scope: World): GUI {
     this.params = {
       Pointer_Lock: true,
+
       Mouse_Sensitivity: 0.3,
+
       Time_Scale: 1,
+
       Shadows: true,
+
       FXAA: true,
+
       Debug_Physics: false,
+
       Debug_FPS: false,
+
       Sun_Elevation: 50,
+
       Sun_Rotation: 145,
     };
 
     const gui = new GUI();
+
     gui.close();
 
-    // Scenario
-    this.scenarioGUIFolder = gui.addFolder("Scenarios");
-    this.scenarioGUIFolder.open();
-
     // World
+
     let worldFolder = gui.addFolder("World");
+
     worldFolder
+
       .add(this.params, "Time_Scale", 0, 1)
+
       .listen()
+
       .onChange((value) => {
         scope.timeScaleTarget = value;
       });
+
     worldFolder
+
       .add(this.params, "Sun_Elevation", 0, 180)
+
       .listen()
+
       .onChange((value) => {
         scope.sky.phi = value;
       });
+
     worldFolder
+
       .add(this.params, "Sun_Rotation", 0, 360)
+
       .listen()
+
       .onChange((value) => {
         scope.sky.theta = value;
       });
 
     // Input
+
     let settingsFolder = gui.addFolder("Settings");
+
     settingsFolder.add(this.params, "FXAA");
+
     settingsFolder.add(this.params, "Shadows").onChange((enabled) => {
       if (enabled) {
         this.sky.csm.lights.forEach((light) => {
@@ -1574,22 +1276,29 @@ export class World {
         });
       }
     });
+
     settingsFolder.add(this.params, "Pointer_Lock").onChange((enabled) => {
       scope.inputManager.setPointerLock(enabled);
     });
+
     settingsFolder
+
       .add(this.params, "Mouse_Sensitivity", 0, 1)
+
       .onChange((value) => {
         scope.cameraOperator.setSensitivity(value, value * 0.8);
       });
+
     settingsFolder.add(this.params, "Debug_Physics").onChange((enabled) => {
       if (enabled) {
         this.cannonDebugRenderer = CannonDebugger(
           this.sceneManager.graphicsWorld,
+
           this.physicsManager.physicsWorld
         );
       } else {
         this.cannonDebugRenderer.destroy();
+
         this.cannonDebugRenderer = undefined;
       }
 
@@ -1597,20 +1306,31 @@ export class World {
         char.raycastBox.visible = enabled;
       });
     });
+
     settingsFolder.add(this.params, "Debug_FPS").onChange((enabled) => {
       UIManager.setFPSVisible(enabled);
     });
 
     // Weather
+
     let weatherFolder = gui.addFolder("Weather");
+
     weatherFolder.add(this, "startRain").name("Start Rain");
+
     weatherFolder.add(this, "stopRain").name("Stop Rain");
+
     weatherFolder.add(this, "startThunderstorm").name("Start Thunderstorm");
+
     weatherFolder.add(this, "stopThunderstorm").name("Stop Thunderstorm");
 
     // Tornadoes
+
     let tornadoFolder = gui.addFolder("Tornadoes");
+
     tornadoFolder.add(this, "spawnTornado").name("Spawn Tornado");
+
     tornadoFolder.add(this, "removeLastTornado").name("Remove Last Tornado");
+
+    return gui;
   }
 }

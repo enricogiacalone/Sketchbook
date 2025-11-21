@@ -85,7 +85,7 @@ export class PsychedelicParticles extends THREE.Object3D implements IUpdatable {
     this.add(this.particles);
 
     this.world.sceneManager.graphicsWorld.add(this);
-    this.world.registerUpdatable(this);
+    this.world.entityManager.registerUpdatable(this);
   }
 
   public update(timeStep: number): void {
