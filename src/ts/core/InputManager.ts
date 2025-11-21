@@ -76,7 +76,7 @@ export class InputManager implements IUpdatable {
     ) {
       this.setInputReceiver(this.world.cameraOperator);
     }
-    
+
     this.gamepad.update();
     this.handleGamepadInput();
 
@@ -99,23 +99,41 @@ export class InputManager implements IUpdatable {
 
     if (Math.abs(rightStickX) < this.deadzone) rightStickX = 0;
     if (Math.abs(rightStickY) < this.deadzone) rightStickY = 0;
-    
-    console.log(`Left Stick: (${leftStickX}, ${leftStickY}) Right Stick: (${rightStickX}, ${rightStickY})`);
 
+    // console.log(`Left Stick: (${leftStickX}, ${leftStickY}) Right Stick: (${rightStickX}, ${rightStickY})`);
 
     this.inputReceiver.handleKeyboardEvent(null, "KeyW", leftStickY < -0.5);
     this.inputReceiver.handleKeyboardEvent(null, "KeyS", leftStickY > 0.5);
     this.inputReceiver.handleKeyboardEvent(null, "KeyA", leftStickX < -0.5);
     this.inputReceiver.handleKeyboardEvent(null, "KeyD", leftStickX > 0.5);
 
-    
-    this.inputReceiver.handleMouseMove(null, rightStickX * 20, rightStickY * 20);
+    this.inputReceiver.handleMouseMove(
+      null,
+      rightStickX * 20,
+      rightStickY * 20
+    );
 
     // Actions
-    this.inputReceiver.handleKeyboardEvent(null, "Space", this.gamepad.isButtonPressed(0)); // A button
-    this.inputReceiver.handleKeyboardEvent(null, "ShiftLeft", this.gamepad.isButtonPressed(7)); // Right Trigger (R2) for running
-    this.inputReceiver.handleMouseButton(null, "mouse0", this.gamepad.isButtonPressed(2)); // X button for mouse0 (primary action)
-    this.inputReceiver.handleKeyboardEvent(null, "KeyF", this.gamepad.isButtonPressed(3)); // Triangle button for entering vehicle
+    this.inputReceiver.handleKeyboardEvent(
+      null,
+      "Space",
+      this.gamepad.isButtonPressed(0)
+    ); // A button
+    this.inputReceiver.handleKeyboardEvent(
+      null,
+      "ShiftLeft",
+      this.gamepad.isButtonPressed(7)
+    ); // Right Trigger (R2) for running
+    this.inputReceiver.handleMouseButton(
+      null,
+      "mouse0",
+      this.gamepad.isButtonPressed(2)
+    ); // X button for mouse0 (primary action)
+    this.inputReceiver.handleKeyboardEvent(
+      null,
+      "KeyF",
+      this.gamepad.isButtonPressed(3)
+    ); // Triangle button for entering vehicle
     if (this.gamepad.isButtonPressed(5)) {
       if (this.inputReceiver === this.world.cameraOperator) {
         this.inputReceiver.exitFreeCamera();
@@ -123,7 +141,11 @@ export class InputManager implements IUpdatable {
         this.inputReceiver.enterFreeCamera();
       }
     }
-    this.inputReceiver.handleKeyboardEvent(null, "KeyB", this.gamepad.isButtonPressed(4)); // L1 for flight mode
+    this.inputReceiver.handleKeyboardEvent(
+      null,
+      "KeyB",
+      this.gamepad.isButtonPressed(4)
+    ); // L1 for flight mode
   }
 
   public setInputReceiver(receiver: IInputReceiver): void {

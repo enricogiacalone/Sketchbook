@@ -35,6 +35,8 @@ import { Scenario } from "~/world/Scenario";
 import { Sky } from "~/world/Sky";
 import { Streetlight } from "~/world/Streetlight";
 import { VehicleSpawnPoint } from "~/world/VehicleSpawnPoint";
+import { Grass } from "~/world/Grass";
+import { Road } from "~/world/Road";
 
 import { FollowTarget } from "~/characters/character_ai/FollowTarget";
 import { WeatherManager } from "~/core/WeatherManager";
@@ -46,8 +48,7 @@ import { Planet } from "./Planet";
 import { PsychedelicParticles } from "./PsychedelicParticles";
 import { UFO } from "./UFO";
 
-import grassFragment from "../../lib/shaders/procedural_grass_fragment.glsl?raw";
-import grassVertex from "../../lib/shaders/procedural_grass_vertex.glsl?raw";
+
 
 // Constants for cloud generation
 const CLOUD_BANK_COUNT = 4;
@@ -86,6 +87,8 @@ export class World {
   public terrainSize: number;
   public stats: Stats;
   public sky: Sky;
+  public grass: Grass;
+  public road: Road;
   public clouds: Cloud[] = [];
   public planets: Planet[] = [];
   public parallelPairs: any[];
@@ -124,7 +127,7 @@ export class World {
   private groundPositionAttribute: THREE.BufferAttribute;
   private terrainSegments: number; // New property for terrain segments
 
-  private grassMaterial: THREE.ShaderMaterial;
+
   private lastScenarioID: string;
 
   private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
@@ -138,11 +141,16 @@ export class World {
     private onJoin?: (name: string) => void,
     onSendMessage?: (message: string) => void // New parameter
   ) {
+    console.log("World constructor called.");
     this.onSendMessage = onSendMessage; // Store the callback
+    console.log("Calling _initializeCoreManagers...");
     this._initializeCoreManagers();
+    console.log("Calling _initializePhysicsSettings...");
     this.weatherManager = new WeatherManager(this);
     this._initializePhysicsSettings();
+    console.log("Calling _initializeRenderLoop...");
     this._initializeRenderLoop();
+    console.log("Calling _initializeStatsAndGUI...");
     this._initializeStatsAndGUI();
     this._initializeCannonDebugger(); // Call the new method here
     const axesHelper = new THREE.AxesHelper(10); // Visual aid for world origin
@@ -519,6 +527,75 @@ export class World {
     }
   }
 
+  private _postLoadingSetup(worldScenePath?: any): void {
+    this.update(1, 1);
+    this.setTimeScale(1);
+
+    Swal.fire({
+      title: "Welcome to Sketchbook!",
+      text: "Feel free to explore the world and interact with available vehicles. There are also various scenarios ready to launch from the right panel.",
+      footer:
+        '<a href="https://github.com/swift502/Sketchbook" target="_blank">GitHub page</a><a href="https://discord.gg/fGuEqCe" target="_blank">Discord server</a>',
+      input: "text",
+      inputLabel: "Your Name",
+      inputPlaceholder: "Enter your name...",
+      confirmButtonText: "Join",
+      buttonsStyling: false,
+      allowOutsideClick: false,
+      allowEscapeKey: false,
+      inputValidator: (value) => {
+        if (!value) {
+          return "You need to write something!";
+        }
+        return null;
+      },
+    }).then((result) => {
+      if (result.isConfirmed) {
+        UIManager.setUserInterfaceVisible(true);
+        UIManager.setLoadingScreenVisible(false); // Hide loading screen after user joins
+
+        // Load GLTF or create procedural world based on worldScenePath
+        if (worldScenePath !== undefined) {
+          this.loadingManager
+            .loadGLTFPromise(worldScenePath)
+            .then((gltf) => {
+              this.loadScene(this.loadingManager, gltf);
+            })
+            .catch((error) => {
+              console.error("Error loading world scene:", error);
+              Swal.fire({
+                icon: "error",
+                title: "Failed to load world",
+                text: error.message,
+                footer: "Please check the browser console for more details.",
+              });
+            });
+        } else {
+          console.log(
+            "worldScenePath is undefined, creating procedural world."
+          );
+          this.createProceduralWorld();
+        }
+
+        // Handle onJoin logic
+        if (this.onJoin) {
+          setTimeout(() => {
+            try {
+              this.onJoin(result.value);
+            } catch (error) {
+              console.error("Error initiating socket connection:", error);
+              Swal.fire({
+                icon: "error",
+                title: "Connection Error",
+                text: `An error occurred: ${error.message}`,
+              });
+            }
+          }, 10);
+        }
+      }
+    });
+  }
+
   /**
    * Handles loading the world scene, if a path is provided.
    * @param worldScenePath Optional path to the GLTF scene to load.
@@ -526,98 +603,11 @@ export class World {
   private _loadWorldScene(worldScenePath?: any): void {
     this.loadingManager = new LoadingManager(this); // Initialize loadingManager unconditionally
 
-    if (worldScenePath !== undefined) {
-      this.loadingManager.onFinishedCallback = () => {
-        this.update(1, 1);
-        this.setTimeScale(1);
-
-        Swal.fire({
-          title: "Welcome to Sketchbook!",
-          text: "Feel free to explore the world and interact with available vehicles. There are also various scenarios ready to launch from the right panel.",
-          footer:
-            '<a href="https://github.com/swift502/Sketchbook" target="_blank">GitHub page</a><a href="https://discord.gg/fGuEqCe" target="_blank">Discord server</a>',
-          input: "text",
-          inputLabel: "Your Name",
-          inputPlaceholder: "Enter your name...",
-          confirmButtonText: "Join",
-          buttonsStyling: false,
-          allowOutsideClick: false,
-          allowEscapeKey: false,
-          inputValidator: (value) => {
-            if (!value) {
-              return "You need to write something!";
-            }
-            return null; // Explicitly return null on successful validation
-          },
-        }).then((result) => {
-          if (result.isConfirmed) {
-            UIManager.setUserInterfaceVisible(true);
-            // Launch default scenario after user confirms name
-            let defaultScenarioID: string;
-            for (const scenario of this.scenarios) {
-              if (scenario.default) {
-                defaultScenarioID = scenario.id;
-                break;
-              }
-            }
-            if (defaultScenarioID !== undefined) {
-              this.launchScenario(defaultScenarioID);
-            }
-            this.updateEnemyCountDisplay(); // Update after scenario launch
-
-            if (this.onJoin) {
-              // Decouple the socket connection from the modal's promise chain
-              setTimeout(() => {
-                try {
-                  this.onJoin(result.value);
-                } catch (error) {
-                  console.error("Error initiating socket connection:", error);
-                  Swal.fire({
-                    icon: "error",
-                    title: "Connection Error",
-                    text: `An error occurred: ${error.message}`,
-                  });
-                }
-              }, 10); // Use a small delay
-            }
-          }
-        });
-      };
-      this.loadingManager
-        .loadGLTFPromise(worldScenePath)
-        .then((gltf) => {
-          this.loadScene(this.loadingManager, gltf);
-          // Call launchScenario with the provided callback
-          let defaultScenarioID: string;
-          for (const scenario of this.scenarios) {
-            if (scenario.default) {
-              defaultScenarioID = scenario.id;
-              break;
-            }
-          }
-          if (defaultScenarioID !== undefined)
-            this.launchScenario(defaultScenarioID);
-        })
-        .catch((error) => {
-          console.error("Error loading world scene:", error);
-          Swal.fire({
-            icon: "error",
-            title: "Failed to load world",
-            text: error.message,
-            footer: "Please check the browser console for more details.",
-          });
-        });
-    } else {
-      // Create a simple procedural world if no scene is provided
-      this.createProceduralWorld();
-      UIManager.setUserInterfaceVisible(true);
-      UIManager.setLoadingScreenVisible(false);
-      this.update(1, 1);
-      this.setTimeScale(1);
-    }
+    this._postLoadingSetup(worldScenePath); // Call the new method
   }
 
   private createProceduralWorld(): void {
+    console.log("createProceduralWorld called.");
     // Terrain dimensions
     const terrainSize = 300;
     const terrainSegments = 20; // Reduced for performance
@@ -671,178 +661,15 @@ export class World {
     groundBody.addShape(trimeshShape);
     this.physicsManager.physicsWorld.addBody(groundBody);
 
-    // Create procedural grass using an instanced mesh with a shader material
+    this.grass = new Grass(this, terrainSize, terrainMaxHeight, terrainSegments);
+    this.add(this.grass);
 
-    const grassCount = 60000; // Reduced for performance
+    this.road = new Road(this, terrainSize, terrainSegments);
+    this.add(this.road);
 
-    const grassBaseGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
 
-    this.grassMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-      },
 
-      vertexShader: grassVertex,
 
-      fragmentShader: grassFragment,
-
-      side: THREE.DoubleSide,
-    });
-
-    const grassMesh = new THREE.InstancedMesh(
-      grassBaseGeometry,
-      this.grassMaterial,
-      grassCount
-    );
-
-    this.sceneManager.graphicsWorld.add(grassMesh);
-
-    const dummy = new THREE.Object3D();
-
-    for (let i = 0; i < grassCount; i++) {
-      const x = Math.random() * terrainSize - terrainSize / 2;
-
-      const z = Math.random() * terrainSize - terrainSize / 2;
-
-      const y = Math.sin(x / 30) * Math.cos(z / 20) * terrainMaxHeight;
-
-      dummy.position.set(x, y, z);
-
-      dummy.updateMatrix();
-
-      grassMesh.setMatrixAt(i, dummy.matrix);
-    }
-
-    grassMesh.instanceMatrix.needsUpdate = true;
-
-    // Create procedural roads
-    const roadWidth = 8;
-    const roadSegments = this.terrainSegments * 2; // More segments for smoother roads
-    const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
-    const roadGeometry = new THREE.BufferGeometry();
-    const roadPhysicsBodies: CANNON.Body[] = [];
-
-    // Helper function to create a road segment
-    const createRoadSegment = (
-      x1: number,
-      z1: number,
-      x2: number,
-      z2: number
-    ): THREE.Mesh => {
-      const y1 = this.getTerrainHeightAt(x1, z1);
-      const y2 = this.getTerrainHeightAt(x2, z2);
-
-      // Calculate perpendicular vector for road width
-      const dir = new THREE.Vector3(x2 - x1, y2 - y1, z2 - z1).normalize();
-      const up = new THREE.Vector3(0, 1, 0);
-      const perp = new THREE.Vector3()
-        .crossVectors(dir, up)
-        .normalize()
-        .multiplyScalar(roadWidth / 2);
-
-      const v0 = new THREE.Vector3(x1 - perp.x, y1, z1 - perp.z);
-      const v1 = new THREE.Vector3(x1 + perp.x, y1, z1 + perp.z);
-      const v2 = new THREE.Vector3(x2 - perp.x, y2, z2 - perp.z);
-      const v3 = new THREE.Vector3(x2 + perp.x, y2, z2 + perp.z);
-
-      const positions = new Float32Array([
-        v0.x,
-        v0.y + 0.05,
-        v0.z, // Slightly above terrain to prevent z-fighting
-        v1.x,
-        v1.y + 0.05,
-        v1.z,
-        v2.x,
-        v2.y + 0.05,
-        v2.z,
-
-        v2.x,
-        v2.y + 0.05,
-        v2.z,
-        v1.x,
-        v1.y + 0.05,
-        v1.z,
-        v3.x,
-        v3.y + 0.05,
-        v3.z,
-      ]);
-
-      const normals = new Float32Array([
-        0, 1, 0, 0, 1, 0, 0, 1, 0,
-
-        0, 1, 0, 0, 1, 0, 0, 1, 0,
-      ]);
-
-      const uvs = new Float32Array([
-        0, 0, 1, 0, 0, 1,
-
-        0, 1, 1, 0, 1, 1,
-      ]);
-
-      const segmentGeometry = new THREE.BufferGeometry();
-      segmentGeometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(positions, 3)
-      );
-      segmentGeometry.setAttribute(
-        "normal",
-        new THREE.BufferAttribute(normals, 3)
-      );
-      segmentGeometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-      segmentGeometry.computeVertexNormals(); // Recalculate normals for smooth shading
-
-      const roadMesh = new THREE.Mesh(segmentGeometry, roadMaterial);
-      roadMesh.receiveShadow = true;
-      roadMesh.castShadow = true; // Roads can cast shadows too
-      this.sceneManager.graphicsWorld.add(roadMesh);
-
-      // Create physics body for the road segment
-      const physicsVertices = new Float32Array([
-        v0.x,
-        v0.y,
-        v0.z,
-        v1.x,
-        v1.y,
-        v1.z,
-        v2.x,
-        v2.y,
-        v2.z,
-        v3.x,
-        v3.y,
-        v3.z,
-      ]);
-      const physicsIndices = new Uint16Array([0, 1, 2, 2, 1, 3]);
-      const trimeshShape = new CANNON.Trimesh(
-        physicsVertices as any,
-        physicsIndices as any
-      );
-      const roadBody = new CANNON.Body({
-        mass: 0,
-        material: this.physicsManager.trimeshMaterial,
-      });
-      roadBody.addShape(trimeshShape);
-      roadPhysicsBodies.push(roadBody);
-
-      return roadMesh;
-    };
-
-    // Main road along X-axis
-    for (let i = -roadSegments / 2; i < roadSegments / 2; i++) {
-      const x1 = (i / roadSegments) * this.terrainSize;
-      const x2 = ((i + 1) / roadSegments) * this.terrainSize;
-      createRoadSegment(x1, 0, x2, 0);
-    }
-
-    // Main road along Z-axis
-    for (let i = -roadSegments / 2; i < roadSegments / 2; i++) {
-      const z1 = (i / roadSegments) * this.terrainSize;
-      const z2 = ((i + 1) / roadSegments) * this.terrainSize;
-      createRoadSegment(0, z1, 0, z2);
-    }
-
-    roadPhysicsBodies.forEach((body) =>
-      this.physicsManager.physicsWorld.addBody(body)
-    );
 
     // Create trees using @dgreenheck/ez-tree
     const ezTreeCount = 75; // Same count as before for now
@@ -1077,6 +904,8 @@ export class World {
     playerSpawnPoint.spawn(this.loadingManager, this, (player: Character) => {
       player.setColor(new THREE.Color(0x0000ff));
       this.player = player;
+      // Now that the player is spawned, spawn enemies
+      this.spawnEnemies(5); // Re-enable enemies
     });
 
     // Spawn vehicles
@@ -1096,9 +925,7 @@ export class World {
 
     this.streetlights.forEach((light) => light.update(this.sky.timeOfDay));
 
-    if (this.grassMaterial) {
-      this.grassMaterial.uniforms.uTime.value += unscaledTimeStep;
-    }
+
 
     this.planets.forEach((planet) => {
       planet.update();
@@ -1203,7 +1030,9 @@ export class World {
 
   public add(worldEntity: IWorldEntity): void {
     worldEntity.addToWorld(this);
-    this.registerUpdatable(worldEntity);
+    if (this.isUpdatable(worldEntity)) {
+      this.registerUpdatable(worldEntity);
+    }
   }
 
   public registerUpdatable(registree: IUpdatable): void {
@@ -1237,6 +1066,10 @@ export class World {
     }
 
     this.performRemoval(worldEntity);
+  }
+
+  private isUpdatable(entity: IWorldEntity): entity is IUpdatable {
+    return (entity as IUpdatable).update !== undefined && (entity as IUpdatable).updateOrder !== undefined;
   }
 
   private performRemoval(worldEntity: IWorldEntity): void {
@@ -1402,6 +1235,7 @@ export class World {
   }
 
   public launchScenario(scenarioID: string): void {
+    console.log(`Launching scenario: ${scenarioID}`);
     this.lastScenarioID = scenarioID;
 
     this.clearEntities();
@@ -1571,6 +1405,7 @@ export class World {
   }
 
   public spawnEnemies(count: number): void {
+    console.log(`Attempting to spawn ${count} enemies.`);
     if (!this.player) {
       console.warn("Cannot spawn enemies: local player is not defined.");
       return;
@@ -1605,6 +1440,7 @@ export class World {
             spawnPosition.x = Math.random() * 800 - 400; // Wider range
             spawnPosition.z = Math.random() * 800 - 400; // Wider range
             spawnPosition.y = 20; // Keep fixed y for now, assume falling into place
+            console.log("DEBUG: Procedural world spawnPosition calculated:", spawnPosition.x, spawnPosition.y, spawnPosition.z);
           }
           character.setPosition(
             spawnPosition.x,
@@ -1613,6 +1449,10 @@ export class World {
           );
 
           this.add(character);
+          console.log(
+            `Spawned enemy '${character.name}' at physics body position:`,
+            character.characterCapsule.body.position.toArray()
+          );
         })
         .catch((error) => {
           console.error("Error loading enemy character model:", error);
