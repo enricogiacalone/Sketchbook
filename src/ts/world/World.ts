@@ -1,18 +1,24 @@
-import { NetworkPlayer } from "~/characters/NetworkPlayer";
 import * as CANNON from "cannon-es";
+import { NetworkPlayer } from "~/characters/NetworkPlayer";
+
+import { Tree } from "@dgreenheck/ez-tree";
 
 import * as _ from "lodash";
 import Swal from "sweetalert2";
 import * as THREE from "three";
 
-import Stats from "stats.js";
+import CannonDebugger from "cannon-es-debugger";
 import { GUI } from "lil-gui";
+import Stats from "stats.js";
 import { Character } from "~/characters/Character";
 import { CameraOperator } from "~/core/CameraOperator";
 import * as Utils from "~/core/FunctionLibrary";
+import { GameManager } from "~/core/GameManager";
 import { InfoStack } from "~/core/InfoStack";
 import { InputManager } from "~/core/InputManager";
 import { LoadingManager } from "~/core/LoadingManager";
+import { PhysicsManager } from "~/core/PhysicsManager";
+import { SceneManager } from "~/core/SceneManager";
 import { UIManager } from "~/core/UIManager";
 import { CollisionGroups } from "~/enums/CollisionGroups";
 import { EntityType } from "~/enums/EntityType"; // Added import for EntityType
@@ -21,32 +27,24 @@ import { IWorldEntity } from "~/interfaces/IWorldEntity";
 import { BoxCollider } from "~/physics/colliders/BoxCollider";
 import { TrimeshCollider } from "~/physics/colliders/TrimeshCollider";
 import { Vehicle } from "~/vehicles/Vehicle";
+import { CharacterSpawnPoint } from "~/world/CharacterSpawnPoint";
+import { Cloud } from "~/world/Cloud";
 import { Ocean } from "~/world/Ocean";
 import { Path } from "~/world/Path";
 import { Scenario } from "~/world/Scenario";
-import { CharacterSpawnPoint } from "~/world/CharacterSpawnPoint";
 import { Sky } from "~/world/Sky";
-import { Cloud } from "~/world/Cloud";
-import { SceneManager } from "~/core/SceneManager";
-import { PhysicsManager } from "~/core/PhysicsManager";
-import { GameManager } from "~/core/GameManager";
-import CannonDebugger from "cannon-es-debugger";
-import { VehicleSpawnPoint } from "./VehicleSpawnPoint"; // Added import
-import { LoadingTrackerEntry } from "~/core/LoadingTrackerEntry";
+import { Streetlight } from "~/world/Streetlight";
+import { VehicleSpawnPoint } from "~/world/VehicleSpawnPoint";
 
 import { FollowTarget } from "~/characters/character_ai/FollowTarget";
-import { RandomBehaviour } from "~/characters/character_ai/RandomBehaviour";
-import { Planet } from "./Planet";
-import { Meteorite } from "./Meteorite";
-import { PsychedelicParticles } from "./PsychedelicParticles";
-import { InterstellarVortex } from "./InterstellarVortex";
-import { UFO } from "./UFO";
-import { Explosion } from "../core/Explosion";
-import { AtomicExplosion } from "../core/AtomicExplosion";
 import { WeatherManager } from "~/core/WeatherManager";
 import { Tornado } from "~/world/Tornado";
-import { Tree } from "@dgreenheck/ez-tree";
-import { Streetlight } from "./Streetlight";
+import { AtomicExplosion } from "../core/AtomicExplosion";
+import { InterstellarVortex } from "./InterstellarVortex";
+import { Meteorite } from "./Meteorite";
+import { Planet } from "./Planet";
+import { PsychedelicParticles } from "./PsychedelicParticles";
+import { UFO } from "./UFO";
 
 import grassFragment from "../../lib/shaders/procedural_grass_fragment.glsl?raw";
 import grassVertex from "../../lib/shaders/procedural_grass_vertex.glsl?raw";
@@ -84,6 +82,8 @@ const USER_DATA_SCENARIO = "scenario";
 const MATERIAL_NAME_OCEAN = "ocean";
 
 export class World {
+  public proceduralWorldActive: boolean = false;
+  public terrainSize: number;
   public stats: Stats;
   public sky: Sky;
   public clouds: Cloud[] = [];
@@ -118,23 +118,20 @@ export class World {
   public networkPlayers: Map<string, NetworkPlayer> = new Map(); // Map to store other players by their socket ID
   public weatherManager: WeatherManager;
   public tornadoes: Tornado[] = [];
-
-  public terrainSize: number = 300;
-  public terrainMaxHeight: number = 20;
-  public proceduralWorldActive: boolean = false; // Initialize as false, set to true when procedural world is loaded
-  public streetlights: any[] = []; // Assuming Streetlight class will be created/imported later
-  public grassMaterial: THREE.ShaderMaterial; // Assuming this will be initialized later
-
-  public loadingManager: LoadingManager; // New property to store the loading manager
+  public streetlights: Streetlight[] = [];
 
   private terrainHeights: number[] = [];
   private groundPositionAttribute: THREE.BufferAttribute;
-  private terrainSegments: number;
-  private currentEnemyCount: number = 0; // New property to track active enemies
-  private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
-  private meteoriteInterval: any;
+  private terrainSegments: number; // New property for terrain segments
 
+  private grassMaterial: THREE.ShaderMaterial;
   private lastScenarioID: string;
+
+  private initialEnemyCount: number = 0; // New property to store the initial count of enemies in a wave
+  private currentEnemyCount: number = 0; // New property to track active enemies
+  public loadingManager: LoadingManager; // New property to store the loading manager
+  private meteoriteInterval: any;
+  private onSendMessage: (message: string) => void; // New property
 
   constructor(
     worldScenePath?: any,
@@ -146,58 +143,23 @@ export class World {
     this.weatherManager = new WeatherManager(this);
     this._initializePhysicsSettings();
     this._initializeRenderLoop();
-    this._initializeStatsAndGUI(); // Initialize params first
+    this._initializeStatsAndGUI();
     this._initializeCannonDebugger(); // Call the new method here
+    const axesHelper = new THREE.AxesHelper(10); // Visual aid for world origin
+    this.sceneManager.graphicsWorld.add(axesHelper);
     this._initializeInputAndCamera();
     UIManager.createChatInput(); // Create chat input
     this._initializeChatInput(); // Initialize chat input event listeners
     this._initializeSkyAndClouds();
     this._initializePlanets();
-    this.loadingManager = new LoadingManager(this); // Then initialize loadingManager
+    this._loadWorldScene(worldScenePath);
 
-    // Check if a specific worldScenePath is provided.
-    // If not, activate procedural world generation.
-    if (worldScenePath === undefined) {
-      console.log("World Constructor: Procedural world active.");
-      this.proceduralWorldActive = true;
-      console.log("World Constructor: Initializing terrain, roads, village.");
-      this._initializeTerrain();
-      this._initializeRoads();
-      this._initializeVillage();
-      // Manually signal loading completion for procedural world
-      this.loadingManager.onFinishedCallback = () => {
-        this.update(1, 1);
-        this.setTimeScale(1);
-        UIManager.setUserInterfaceVisible(true);
-        UIManager.setLoadingScreenVisible(false); // Hide loading screen
-        Swal.fire({
-          icon: "success",
-          title: "Hello procedural world!",
-          buttonsStyling: false,
-        });
-        this.updateEnemyCountDisplay();
-      };
-      console.log("World Constructor: Spawning player via CharacterSpawnPoint.");
-      const playerSpawnObject = new THREE.Object3D();
-      playerSpawnObject.position.set(0, this.terrainMaxHeight + 10, 0); // Spawn high above the max height
-      const playerSpawnPoint = new CharacterSpawnPoint(playerSpawnObject);
-      playerSpawnPoint.spawn(this.loadingManager, this, (player: Character) => {
-        player.setColor(new THREE.Color(0x0000ff));
-        this.player = player; // Assign the local player
-        this.cameraOperator.setTarget(player);
-        console.log("World Constructor: Player assigned and camera target set:", this.player);
-      });
-      this.loadingManager.doneLoading(new LoadingTrackerEntry("procedural_world")); // Signal done loading
-    } else {
-      this._loadWorldScene(worldScenePath);
-    }
+    this.render(this);
 
-    this.render(this); // This should be called after world initialization
-
-    this.meteoriteInterval = setInterval(
-      () => this.spawnMeteorShower(2, new THREE.Vector3(0, 200, 0)),
-      2000
-    );
+    // this.meteoriteInterval = setInterval(
+    //   () => this.spawnMeteorShower(2, new THREE.Vector3(0, 200, 0)),
+    //   2000
+    // );
 
     this.interstellarVortex = new InterstellarVortex(
       this,
@@ -358,450 +320,49 @@ export class World {
     }
   }
 
-      public getTerrainHeightAt(x: number, z: number): number {
-        const scale = 50; // Controls the "zoom" of the noise
-        const strength = this.terrainMaxHeight; // Controls the height of the hills
-        return (
-            (Utils.perlin.noise(x / scale, z / scale, 0) +
-                0.5 * Utils.perlin.noise(x / (scale / 2), z / (scale / 2), 0) +
-                0.25 * Utils.perlin.noise(x / (scale / 4), z / (scale / 4), 0)) *
-            strength
-        );
-      }  private _initializeTerrain(): void {
-    const terrainResolution = 256;
-    const terrainWidth = this.terrainSize;
-    const terrainDepth = this.terrainSize;
-
-    const geometry = new THREE.PlaneGeometry(
-      terrainWidth,
-      terrainDepth,
-      terrainResolution - 1,
-      terrainResolution - 1
-    );
-    geometry.rotateX(-Math.PI / 2);
-
-    const positions = geometry.attributes.position.array as Float32Array;
-    const heights: number[][] = [];
-
-    for (let i = 0; i < terrainResolution; i++) {
-      heights.push([]);
-      for (let j = 0; j < terrainResolution; j++) {
-        const x = positions[i * terrainResolution * 3 + j * 3];
-        const z = positions[i * terrainResolution * 3 + j * 3 + 2];
-        const y = this.getTerrainHeightAt(x, z);
-        positions[i * terrainResolution * 3 + j * 3 + 1] = y;
-        heights[i].push(y);
-      }
-    }
-    geometry.computeVertexNormals();
-
-    // Create custom grass material
-    this.grassMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        uGrassColor: { value: new THREE.Color(0x7c9b5f) },
-        uDirtColor: { value: new THREE.Color(0x8b5a2b) },
-        uSnowColor: { value: new THREE.Color(0xffffff) },
-        uRockyColor: { value: new THREE.Color(0x808080) },
-        uGrassHeight: { value: this.terrainMaxHeight * 0.2 },
-        uDirtHeight: { value: this.terrainMaxHeight * 0.1 },
-        uSnowHeight: { value: this.terrainMaxHeight * 0.8 },
-        uRockyHeight: { value: this.terrainMaxHeight * 0.4 },
-        uTime: { value: 0.0 }, // For potential animation
-      },
-      vertexShader: `
-            varying vec3 vNormal;
-            varying vec3 vPosition;
-            void main() {
-                vNormal = normal;
-                vPosition = position;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-        `,
-      fragmentShader: `
-            uniform vec3 uGrassColor;
-            uniform vec3 uDirtColor;
-            uniform vec3 uSnowColor;
-            uniform vec3 uRockyColor;
-            uniform float uGrassHeight;
-            uniform float uDirtHeight;
-            uniform float uSnowHeight;
-            uniform float uRockyHeight;
-            uniform float uTime; // For potential animation
-
-            varying vec3 vNormal;
-            varying vec3 vPosition;
-
-            void main() {
-                vec3 color;
-                float height = vPosition.y;
-
-                if (height > uSnowHeight) {
-                    color = uSnowColor; // Snow on highest peaks
-                } else if (height > uRockyHeight && dot(vNormal, vec3(0,1,0)) < 0.7) {
-                    color = uRockyColor; // Rocky slopes
-                } else if (height > uGrassHeight) {
-                    color = uGrassColor; // Grass on mid-height
-                } else if (height > uDirtHeight) {
-                    color = uDirtColor; // Dirt in lower areas
-                } else {
-                    color = uDirtColor; // Base dirt
-                }
-
-                gl_FragColor = vec4(color, 1.0);
-            }
-        `,
-    });
-
-    const terrainMesh = new THREE.Mesh(geometry, this.grassMaterial);
-    terrainMesh.receiveShadow = true;
-    terrainMesh.castShadow = true;
-    this.sceneManager.graphicsWorld.add(terrainMesh);
-
-    // Physics
-    const hfShape = new CANNON.Heightfield(heights, {
-      elementSize: terrainWidth / (terrainResolution - 1),
-    });
-    const hfBody = new CANNON.Body({ mass: 0 });
-    hfBody.addShape(hfShape);
-        hfBody.position.set(
-            -terrainWidth / 2,
-            0, // Align physics body base with visual mesh base
-            -terrainDepth / 2
-        );    this.physicsManager.physicsWorld.addBody(hfBody);
-  }
-
-  private _initializeRoads(): void {
-    const roadWidth = 8;
-    const roadSegments = 10;
-    const roadPhysicsBodies: CANNON.Body[] = [];
-
-    const createRoadSegment = (x1, z1, x2, z2) => {
-      const roadMaterial = new THREE.MeshStandardMaterial({
-        color: 0x3a3a3a,
-        roughness: 0.8,
-        metalness: 0.1,
-      });
-
-      // Calculate segment direction and normal
-      const dir = new THREE.Vector3(x2 - x1, 0, z2 - z1).normalize();
-      const perp = new THREE.Vector3(-dir.z, 0, dir.x).multiplyScalar(
-        roadWidth / 2
-      );
-
-      // Get terrain heights for all four corners
-      const y1 = this.getTerrainHeightAt(x1, z1);
-      const y2 = this.getTerrainHeightAt(x2, z2);
-
-      // Vertices for the road segment, adjusted for terrain height
-      const v0 = new THREE.Vector3(x1 - perp.x, y1, z1 - perp.z);
-      const v1 = new THREE.Vector3(x1 + perp.x, y1, z1 + perp.z);
-      const v2 = new THREE.Vector3(x2 - perp.x, y2, z2 - perp.z);
-      const v3 = new THREE.Vector3(x2 + perp.x, y2, z2 + perp.z);
-
-      const roadGeometry = new THREE.BufferGeometry();
-      const vertices = new Float32Array([
-        v0.x,
-        v0.y,
-        v0.z, // 0
-        v1.x,
-        v1.y,
-        v1.z, // 1
-        v2.x,
-        v2.y,
-        v2.z, // 2
-        v3.x,
-        v3.y,
-        v3.z, // 3
-      ]);
-
-      const indices = new Uint32Array([0, 1, 2, 2, 1, 3]);
-
-      roadGeometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(vertices, 3)
-      );
-      roadGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
-      roadGeometry.computeVertexNormals();
-
-      const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
-      roadMesh.castShadow = true; // Roads can cast shadows too
-      this.sceneManager.graphicsWorld.add(roadMesh);
-
-      // Create physics body for the road segment
-      const physicsVertices = new Float32Array([
-        v0.x,
-        v0.y,
-        v0.z,
-        v1.x,
-        v1.y,
-        v1.z,
-        v2.x,
-        v2.y,
-        v2.z,
-        v3.x,
-        v3.y,
-        v3.z,
-      ]);
-      const physicsIndices = new Uint16Array([0, 1, 2, 2, 1, 3]);
-      const trimeshShape = new CANNON.Trimesh(
-        physicsVertices as any,
-        physicsIndices as any
-      );
-      const roadBody = new CANNON.Body({
-        mass: 0,
-        material: this.physicsManager.trimeshMaterial,
-      });
-      roadBody.addShape(trimeshShape);
-      roadPhysicsBodies.push(roadBody);
-
-      return roadMesh;
-    };
-
-    // Main road along X-axis
-    for (let i = -roadSegments / 2; i < roadSegments / 2; i++) {
-      const x1 = (i / roadSegments) * this.terrainSize;
-      const x2 = ((i + 1) / roadSegments) * this.terrainSize;
-      createRoadSegment(x1, 0, x2, 0);
+  /**
+   * Returns the terrain height at a given (x, z) coordinate.
+   * Interpolates from the generated terrain geometry.
+   * @param x World X coordinate
+   * @param z World Z coordinate
+   * @returns Terrain height (Y coordinate)
+   */
+  public getTerrainHeightAt(x: number, z: number): number {
+    if (
+      !this.proceduralWorldActive ||
+      !this.groundPositionAttribute ||
+      !this.terrainHeights
+    ) {
+      return 0; // Fallback or error if not in procedural world or terrain data not available
     }
 
-    // Main road along Z-axis
-    for (let i = -roadSegments / 2; i < roadSegments / 2; i++) {
-      const z1 = (i / roadSegments) * this.terrainSize;
-      const z2 = ((i + 1) / roadSegments) * this.terrainSize;
-      createRoadSegment(0, z1, 0, z2);
-    }
-
-    roadPhysicsBodies.forEach((body) =>
-      this.physicsManager.physicsWorld.addBody(body)
-    );
-  }
-
-  private _initializeVillage(): void {
-    // Create trees using @dgreenheck/ez-tree
-    const ezTreeCount = 75; // Same count as before for now
-
-    for (let i = 0; i < ezTreeCount; i++) {
-      const x = Math.random() * this.terrainSize - this.terrainSize / 2;
-      const z = Math.random() * this.terrainSize - this.terrainSize / 2;
-      const y = this.getTerrainHeightAt(x, z); // Use terrain height
-
-      const tree = new Tree();
-      tree.options = tree.options || {}; // Initialize options if undefined
-      tree.options.trunk = tree.options.trunk || {}; // Initialize trunk options if undefined
-      tree.options.seed = 1; // Fixed seed for debugging
-      tree.options.trunk.length = 5; // Fixed trunk length for debugging
-      tree.options.branch.levels = 2; // Fixed branch levels for debugging
-      tree.generate(); // Generate the Three.js objects
-
-      // Position the tree
-      tree.position.set(x, y, z); // Adjust y to be above ground
-
-      // Add to scene
-      this.sceneManager.graphicsWorld.add(tree);
-
-      // Add physics body for the tree (simplified for now, using a cylinder for the main trunk)
-      const trunkPhysicsHeight = tree.options.trunk.length;
-      const trunkPhysicsRadius = 0.7; // Fixed radius to avoid NaN issues
-
-      const trunkPhysicsShape = new CANNON.Cylinder(
-        trunkPhysicsRadius,
-        trunkPhysicsRadius,
-        trunkPhysicsHeight,
-        12
-      );
-      const trunkPhysicsBody = new CANNON.Body({
-        mass: 0, // Static tree
-        material: this.physicsManager.trimeshMaterial,
-        collisionFilterGroup: CollisionGroups.TrimeshColliders, // Explicitly assign to TrimeshColliders group
-      });
-      trunkPhysicsBody.addShape(trunkPhysicsShape);
-      trunkPhysicsBody.position.set(x, y + trunkPhysicsHeight / 2, z); // Center of the physics body at y + half_height
-      this.physicsManager.physicsWorld.addBody(trunkPhysicsBody);
-    }
-
-    // Add Village
-
-    const villageCenter = new THREE.Vector3(0, 0, 0);
-
-    const villageRadius = 40;
-
-    const buildingCount = 8;
-
-    const houseBodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x8b4513,
-    }); // Brown walls
-    const houseRoofMaterial = new THREE.MeshStandardMaterial({
-      color: 0xa00000,
-    }); // Red roof
-    const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x5a2d0c }); // Dark wood
-    const windowMaterial = new THREE.MeshStandardMaterial({
-      color: 0x87ceeb,
-      transparent: true,
-      opacity: 0.8,
-    });
-
-    for (let i = 0; i < buildingCount; i++) {
-      // Random position within village radius
-
-      const angle = Math.random() * Math.PI * 2;
-
-      const radius = Math.random() * villageRadius;
-
-      const x = villageCenter.x + Math.cos(angle) * radius;
-
-      const z = villageCenter.z + Math.sin(angle) * radius;
-
-      const baseHeight = this.getTerrainHeightAt(x, z);
-
-      // House dimensions
-
-      const houseWidth = THREE.MathUtils.randFloat(4, 7);
-
-      const houseDepth = THREE.MathUtils.randFloat(4, 7);
-
-      const houseHeight = THREE.MathUtils.randFloat(5, 8);
-
-      const roofHeight = THREE.MathUtils.randFloat(2, 4);
-
-      // House Body (Visual)
-
-      const houseBodyGeometry = new THREE.BoxGeometry(
-        houseWidth,
-        houseHeight,
-        houseDepth
-      );
-
-      const houseBodyMesh = new THREE.Mesh(
-        houseBodyGeometry,
-        houseBodyMaterial
-      );
-
-      houseBodyMesh.position.set(x, baseHeight + houseHeight / 2, z);
-
-      houseBodyMesh.castShadow = true;
-
-      houseBodyMesh.receiveShadow = true;
-
-      this.sceneManager.graphicsWorld.add(houseBodyMesh);
-
-      // House Roof (Visual)
-
-      const houseRoofGeometry = new THREE.ConeGeometry(
-        Math.max(houseWidth, houseDepth) / 1.5,
-        roofHeight,
-        4
-      ); // Square pyramid
-
-      const houseRoofMesh = new THREE.Mesh(
-        houseRoofGeometry,
-        houseRoofMaterial
-      );
-
-      houseRoofMesh.position.set(
-        x,
-        baseHeight + houseHeight + roofHeight / 2,
-        z
-      );
-
-      houseRoofMesh.castShadow = true;
-
-      houseRoofMesh.receiveShadow = true;
-
-      this.sceneManager.graphicsWorld.add(houseRoofMesh);
-
-      // House Body (Physics)
-
-      const physicsBodyShape = new CANNON.Box(
-        new CANNON.Vec3(houseWidth / 2, houseHeight / 2, houseDepth / 2)
-      );
-
-      const physicsBody = new CANNON.Body({
-        mass: 0,
-        material: this.physicsManager.trimeshMaterial,
-      });
-
-      physicsBody.addShape(physicsBodyShape);
-
-      physicsBody.position.set(x, baseHeight + houseHeight / 2, z);
-
-      this.physicsManager.physicsWorld.addBody(physicsBody);
-    }
-
-    // Add Streetlights around the village
-    const streetlightCount = 6;
-    for (let i = 0; i < streetlightCount; i++) {
-      const angle = (i / streetlightCount) * Math.PI * 2;
-      const radius = villageRadius + 15; // Place streetlights outside the village
-      const x = villageCenter.x + Math.cos(angle) * radius;
-      const z = villageCenter.z + Math.sin(angle) * radius;
-      const y = this.getTerrainHeightAt(x, z); // Get terrain height
-
-      const streetlight = new Streetlight(this, new THREE.Vector3(x, y, z));
-      this.streetlights.push(streetlight);
-    }
-
-    // Add boundary walls
-    const wallHeight = 50;
-    const wallThickness = 1;
     const halfSize = this.terrainSize / 2;
 
-    const wallMaterial = new THREE.MeshBasicMaterial({
-      color: 0x888888,
-      transparent: true,
-      opacity: 0.5,
-    });
+    // Normalize world coordinates to terrain grid (0 to terrainSegments)
+    // Map world X from [-halfSize, halfSize] to [0, terrainSize]
+    // Map world Z from [-halfSize, halfSize] to [0, terrainSize]
+    const mappedX = x + halfSize;
+    const mappedZ = z + halfSize;
 
-    // Wall X+
-    const wallXP = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        wallThickness,
-        wallHeight,
-        this.terrainSize + wallThickness
-      ),
-      wallMaterial
+    // Convert to grid coordinates
+    const gridX = Math.floor(
+      (mappedX / this.terrainSize) * this.terrainSegments
     );
-    wallXP.position.set(halfSize, wallHeight / 2, 0);
-    wallXP.receiveShadow = false;
-    this.sceneManager.graphicsWorld.add(wallXP);
+    const gridZ = Math.floor(
+      (mappedZ / this.terrainSize) * this.terrainSegments
+    );
 
-    // Wall X-
-    const wallXN = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        wallThickness,
-        wallHeight,
-        this.terrainSize + wallThickness
-      ),
-      wallMaterial
-    );
-    wallXN.position.set(-halfSize, wallHeight / 2, 0);
-    wallXN.receiveShadow = false;
-    this.sceneManager.graphicsWorld.add(wallXN);
+    // Clamp to ensure we are within bounds
+    const clampedGridX = THREE.MathUtils.clamp(gridX, 0, this.terrainSegments);
+    const clampedGridZ = THREE.MathUtils.clamp(gridZ, 0, this.terrainSegments);
 
-    // Wall Z+
-    const wallZP = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        this.terrainSize + wallThickness,
-        wallHeight,
-        wallThickness
-      ),
-      wallMaterial
-    );
-    wallZP.position.set(0, wallHeight / 2, halfSize);
-    wallZP.receiveShadow = false;
-    this.sceneManager.graphicsWorld.add(wallZP);
+    // Calculate index in the 1D heights array
+    // Assuming vertices are stored row by row (z-major or x-major depending on generation)
+    // and the PlaneGeometry creates (segments + 1) vertices per side.
+    const index = clampedGridZ * (this.terrainSegments + 1) + clampedGridX;
 
-    // Wall Z-
-    const wallZN = new THREE.Mesh(
-      new THREE.BoxGeometry(
-        this.terrainSize + wallThickness,
-        wallHeight,
-        wallThickness
-      ),
-      wallMaterial
-    );
-    wallZN.position.set(0, wallHeight / 2, -halfSize);
-    wallZN.receiveShadow = false;
-    this.sceneManager.graphicsWorld.add(wallZN);
+    // Direct lookup. For smoother results, bilinear interpolation across the 4 nearest grid points would be needed.
+    return this.terrainHeights[index] || 0;
   }
 
   private _initializeChatInput(): void {
@@ -1046,7 +607,484 @@ export class World {
             footer: "Please check the browser console for more details.",
           });
         });
+    } else {
+      // Create a simple procedural world if no scene is provided
+      this.createProceduralWorld();
+      UIManager.setUserInterfaceVisible(true);
+      UIManager.setLoadingScreenVisible(false);
+      this.update(1, 1);
+      this.setTimeScale(1);
     }
+  }
+
+  private createProceduralWorld(): void {
+    // Terrain dimensions
+    const terrainSize = 300;
+    const terrainSegments = 20; // Reduced for performance
+    const terrainMaxHeight = 10;
+
+    this.terrainSize = terrainSize;
+    this.terrainSegments = terrainSegments; // Store terrainSegments
+    this.proceduralWorldActive = true;
+
+    // Create terrain geometry
+    const groundGeometry = new THREE.PlaneGeometry(
+      terrainSize,
+      terrainSize,
+      terrainSegments,
+      terrainSegments
+    );
+    groundGeometry.rotateX(-Math.PI / 2);
+
+    // Generate heightmap data using a simple noise function
+    const heights = [];
+    const positionAttribute = groundGeometry.attributes.position;
+    for (let i = 0; i < positionAttribute.count; i++) {
+      const x = positionAttribute.getX(i);
+      const z = positionAttribute.getZ(i);
+      // Simple sine-based noise for rolling hills
+      const y = Math.sin(x / 30) * Math.cos(z / 20) * terrainMaxHeight;
+      positionAttribute.setY(i, y);
+      heights.push(y);
+    }
+    this.terrainHeights = heights; // Store for lookup
+    this.groundPositionAttribute = positionAttribute as THREE.BufferAttribute; // Store for lookup
+    groundGeometry.computeVertexNormals();
+
+    const groundMaterial = new THREE.MeshStandardMaterial({
+      color: 0x33691e, // A grassy green color
+    });
+    const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+    groundMesh.receiveShadow = true;
+    this.sceneManager.graphicsWorld.add(groundMesh);
+
+    // Create physics for the terrain using a Trimesh
+    const vertices = (
+      groundGeometry.attributes.position as THREE.BufferAttribute
+    ).array;
+    const indices = (groundGeometry.index as THREE.BufferAttribute).array;
+    const trimeshShape = new CANNON.Trimesh(vertices as any, indices as any);
+    const groundBody = new CANNON.Body({
+      mass: 0,
+      material: this.physicsManager.trimeshMaterial,
+    });
+    groundBody.addShape(trimeshShape);
+    this.physicsManager.physicsWorld.addBody(groundBody);
+
+    // Create procedural grass using an instanced mesh with a shader material
+
+    const grassCount = 60000; // Reduced for performance
+
+    const grassBaseGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
+
+    this.grassMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+      },
+
+      vertexShader: grassVertex,
+
+      fragmentShader: grassFragment,
+
+      side: THREE.DoubleSide,
+    });
+
+    const grassMesh = new THREE.InstancedMesh(
+      grassBaseGeometry,
+      this.grassMaterial,
+      grassCount
+    );
+
+    this.sceneManager.graphicsWorld.add(grassMesh);
+
+    const dummy = new THREE.Object3D();
+
+    for (let i = 0; i < grassCount; i++) {
+      const x = Math.random() * terrainSize - terrainSize / 2;
+
+      const z = Math.random() * terrainSize - terrainSize / 2;
+
+      const y = Math.sin(x / 30) * Math.cos(z / 20) * terrainMaxHeight;
+
+      dummy.position.set(x, y, z);
+
+      dummy.updateMatrix();
+
+      grassMesh.setMatrixAt(i, dummy.matrix);
+    }
+
+    grassMesh.instanceMatrix.needsUpdate = true;
+
+    // Create procedural roads
+    const roadWidth = 8;
+    const roadSegments = this.terrainSegments * 2; // More segments for smoother roads
+    const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    const roadGeometry = new THREE.BufferGeometry();
+    const roadPhysicsBodies: CANNON.Body[] = [];
+
+    // Helper function to create a road segment
+    const createRoadSegment = (
+      x1: number,
+      z1: number,
+      x2: number,
+      z2: number
+    ): THREE.Mesh => {
+      const y1 = this.getTerrainHeightAt(x1, z1);
+      const y2 = this.getTerrainHeightAt(x2, z2);
+
+      // Calculate perpendicular vector for road width
+      const dir = new THREE.Vector3(x2 - x1, y2 - y1, z2 - z1).normalize();
+      const up = new THREE.Vector3(0, 1, 0);
+      const perp = new THREE.Vector3()
+        .crossVectors(dir, up)
+        .normalize()
+        .multiplyScalar(roadWidth / 2);
+
+      const v0 = new THREE.Vector3(x1 - perp.x, y1, z1 - perp.z);
+      const v1 = new THREE.Vector3(x1 + perp.x, y1, z1 + perp.z);
+      const v2 = new THREE.Vector3(x2 - perp.x, y2, z2 - perp.z);
+      const v3 = new THREE.Vector3(x2 + perp.x, y2, z2 + perp.z);
+
+      const positions = new Float32Array([
+        v0.x,
+        v0.y + 0.05,
+        v0.z, // Slightly above terrain to prevent z-fighting
+        v1.x,
+        v1.y + 0.05,
+        v1.z,
+        v2.x,
+        v2.y + 0.05,
+        v2.z,
+
+        v2.x,
+        v2.y + 0.05,
+        v2.z,
+        v1.x,
+        v1.y + 0.05,
+        v1.z,
+        v3.x,
+        v3.y + 0.05,
+        v3.z,
+      ]);
+
+      const normals = new Float32Array([
+        0, 1, 0, 0, 1, 0, 0, 1, 0,
+
+        0, 1, 0, 0, 1, 0, 0, 1, 0,
+      ]);
+
+      const uvs = new Float32Array([
+        0, 0, 1, 0, 0, 1,
+
+        0, 1, 1, 0, 1, 1,
+      ]);
+
+      const segmentGeometry = new THREE.BufferGeometry();
+      segmentGeometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(positions, 3)
+      );
+      segmentGeometry.setAttribute(
+        "normal",
+        new THREE.BufferAttribute(normals, 3)
+      );
+      segmentGeometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+      segmentGeometry.computeVertexNormals(); // Recalculate normals for smooth shading
+
+      const roadMesh = new THREE.Mesh(segmentGeometry, roadMaterial);
+      roadMesh.receiveShadow = true;
+      roadMesh.castShadow = true; // Roads can cast shadows too
+      this.sceneManager.graphicsWorld.add(roadMesh);
+
+      // Create physics body for the road segment
+      const physicsVertices = new Float32Array([
+        v0.x,
+        v0.y,
+        v0.z,
+        v1.x,
+        v1.y,
+        v1.z,
+        v2.x,
+        v2.y,
+        v2.z,
+        v3.x,
+        v3.y,
+        v3.z,
+      ]);
+      const physicsIndices = new Uint16Array([0, 1, 2, 2, 1, 3]);
+      const trimeshShape = new CANNON.Trimesh(
+        physicsVertices as any,
+        physicsIndices as any
+      );
+      const roadBody = new CANNON.Body({
+        mass: 0,
+        material: this.physicsManager.trimeshMaterial,
+      });
+      roadBody.addShape(trimeshShape);
+      roadPhysicsBodies.push(roadBody);
+
+      return roadMesh;
+    };
+
+    // Main road along X-axis
+    for (let i = -roadSegments / 2; i < roadSegments / 2; i++) {
+      const x1 = (i / roadSegments) * this.terrainSize;
+      const x2 = ((i + 1) / roadSegments) * this.terrainSize;
+      createRoadSegment(x1, 0, x2, 0);
+    }
+
+    // Main road along Z-axis
+    for (let i = -roadSegments / 2; i < roadSegments / 2; i++) {
+      const z1 = (i / roadSegments) * this.terrainSize;
+      const z2 = ((i + 1) / roadSegments) * this.terrainSize;
+      createRoadSegment(0, z1, 0, z2);
+    }
+
+    roadPhysicsBodies.forEach((body) =>
+      this.physicsManager.physicsWorld.addBody(body)
+    );
+
+    // Create trees using @dgreenheck/ez-tree
+    const ezTreeCount = 75; // Same count as before for now
+
+    for (let i = 0; i < ezTreeCount; i++) {
+      const x = Math.random() * terrainSize - terrainSize / 2;
+      const z = Math.random() * terrainSize - terrainSize / 2;
+      const y = this.getTerrainHeightAt(x, z); // Use terrain height
+
+      const tree = new Tree();
+      tree.options = tree.options || {}; // Initialize options if undefined
+      tree.options.trunk = tree.options.trunk || {}; // Initialize trunk options if undefined
+      tree.options.seed = 1; // Fixed seed for debugging
+      tree.options.trunk.length = 5; // Fixed trunk length for debugging
+      tree.options.branch.levels = 2; // Fixed branch levels for debugging
+      tree.generate(); // Generate the Three.js objects
+
+      // Position the tree
+      tree.position.set(x, y, z); // Adjust y to be above ground
+
+      // Add to scene
+      this.sceneManager.graphicsWorld.add(tree);
+
+      // Add physics body for the tree (simplified for now, using a cylinder for the main trunk)
+      const trunkPhysicsHeight = tree.options.trunk.length;
+      const trunkPhysicsRadius = 0.7; // Fixed radius to avoid NaN issues
+
+      const trunkPhysicsShape = new CANNON.Cylinder(
+        trunkPhysicsRadius,
+        trunkPhysicsRadius,
+        trunkPhysicsHeight,
+        12
+      );
+      const trunkPhysicsBody = new CANNON.Body({
+        mass: 0, // Static tree
+        material: this.physicsManager.trimeshMaterial,
+        collisionFilterGroup: CollisionGroups.TrimeshColliders, // Explicitly assign to TrimeshColliders group
+      });
+      trunkPhysicsBody.addShape(trunkPhysicsShape);
+      trunkPhysicsBody.position.set(x, y + trunkPhysicsHeight / 2, z); // Center of the physics body at y + half_height
+      this.physicsManager.physicsWorld.addBody(trunkPhysicsBody);
+    }
+
+    // Add Village
+
+    const villageCenter = new THREE.Vector3(0, 0, 0);
+
+    const villageRadius = 40;
+
+    const buildingCount = 8;
+
+    const houseBodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8b4513,
+    }); // Brown walls
+    const houseRoofMaterial = new THREE.MeshStandardMaterial({
+      color: 0xa00000,
+    }); // Red roof
+    const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x5a2d0c }); // Dark wood
+    const windowMaterial = new THREE.MeshStandardMaterial({
+      color: 0x87ceeb,
+      transparent: true,
+      opacity: 0.8,
+    });
+
+    for (let i = 0; i < buildingCount; i++) {
+      // Random position within village radius
+
+      const angle = Math.random() * Math.PI * 2;
+
+      const radius = Math.random() * villageRadius;
+
+      const x = villageCenter.x + Math.cos(angle) * radius;
+
+      const z = villageCenter.z + Math.sin(angle) * radius;
+
+      const baseHeight = Math.sin(x / 30) * Math.cos(z / 20) * terrainMaxHeight;
+
+      // House dimensions
+
+      const houseWidth = THREE.MathUtils.randFloat(4, 7);
+
+      const houseDepth = THREE.MathUtils.randFloat(4, 7);
+
+      const houseHeight = THREE.MathUtils.randFloat(5, 8);
+
+      const roofHeight = THREE.MathUtils.randFloat(2, 4);
+
+      // House Body (Visual)
+
+      const houseBodyGeometry = new THREE.BoxGeometry(
+        houseWidth,
+        houseHeight,
+        houseDepth
+      );
+
+      const houseBodyMesh = new THREE.Mesh(
+        houseBodyGeometry,
+        houseBodyMaterial
+      );
+
+      houseBodyMesh.position.set(x, baseHeight + houseHeight / 2, z);
+
+      houseBodyMesh.castShadow = true;
+
+      houseBodyMesh.receiveShadow = true;
+
+      this.sceneManager.graphicsWorld.add(houseBodyMesh);
+
+      // House Roof (Visual)
+
+      const houseRoofGeometry = new THREE.ConeGeometry(
+        Math.max(houseWidth, houseDepth) / 1.5,
+        roofHeight,
+        4
+      ); // Square pyramid
+
+      const houseRoofMesh = new THREE.Mesh(
+        houseRoofGeometry,
+        houseRoofMaterial
+      );
+
+      houseRoofMesh.position.set(
+        x,
+        baseHeight + houseHeight + roofHeight / 2,
+        z
+      );
+
+      houseRoofMesh.castShadow = true;
+
+      houseRoofMesh.receiveShadow = true;
+
+      this.sceneManager.graphicsWorld.add(houseRoofMesh);
+
+      // House Body (Physics)
+
+      const physicsBodyShape = new CANNON.Box(
+        new CANNON.Vec3(houseWidth / 2, houseHeight / 2, houseDepth / 2)
+      );
+
+      const physicsBody = new CANNON.Body({
+        mass: 0,
+        material: this.physicsManager.trimeshMaterial,
+      });
+
+      physicsBody.addShape(physicsBodyShape);
+
+      physicsBody.position.set(x, baseHeight + houseHeight / 2, z);
+
+      this.physicsManager.physicsWorld.addBody(physicsBody);
+    }
+
+    // Add Streetlights around the village
+    const streetlightCount = 6;
+    for (let i = 0; i < streetlightCount; i++) {
+      const angle = (i / streetlightCount) * Math.PI * 2;
+      const radius = villageRadius + 15; // Place streetlights outside the village
+      const x = villageCenter.x + Math.cos(angle) * radius;
+      const z = villageCenter.z + Math.sin(angle) * radius;
+      const y = Math.sin(x / 30) * Math.cos(z / 20) * terrainMaxHeight; // Get terrain height
+
+      const streetlight = new Streetlight(this, new THREE.Vector3(x, y, z));
+      this.streetlights.push(streetlight);
+    }
+
+    // Add boundary walls
+    const wallHeight = 50;
+    const wallThickness = 1;
+    const halfSize = terrainSize / 2;
+
+    const wallMaterial = new THREE.MeshBasicMaterial({
+      color: 0x888888,
+      transparent: true,
+      opacity: 0.5,
+    });
+
+    // Wall X+
+    const wallXP = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        wallThickness,
+        wallHeight,
+        terrainSize + wallThickness
+      ),
+      wallMaterial
+    );
+    wallXP.position.set(halfSize, wallHeight / 2, 0);
+    wallXP.receiveShadow = false;
+    this.sceneManager.graphicsWorld.add(wallXP);
+
+    // Wall X-
+    const wallXN = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        wallThickness,
+        wallHeight,
+        terrainSize + wallThickness
+      ),
+      wallMaterial
+    );
+    wallXN.position.set(-halfSize, wallHeight / 2, 0);
+    wallXN.receiveShadow = false;
+    this.sceneManager.graphicsWorld.add(wallXN);
+
+    // Wall Z+
+    const wallZP = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        terrainSize + wallThickness,
+        wallHeight,
+        wallThickness
+      ),
+      wallMaterial
+    );
+    wallZP.position.set(0, wallHeight / 2, halfSize);
+    wallZP.receiveShadow = false;
+    this.sceneManager.graphicsWorld.add(wallZP);
+
+    // Wall Z-
+    const wallZN = new THREE.Mesh(
+      new THREE.BoxGeometry(
+        terrainSize + wallThickness,
+        wallHeight,
+        wallThickness
+      ),
+      wallMaterial
+    );
+    wallZN.position.set(0, wallHeight / 2, -halfSize);
+    wallZN.receiveShadow = false;
+    this.sceneManager.graphicsWorld.add(wallZN);
+
+    // Spawn player (using the existing raycast logic which will now work with the new terrain)
+    const playerSpawnObject = new THREE.Object3D();
+    playerSpawnObject.position.set(0, terrainMaxHeight + 10, 0); // Spawn high above the max height
+    const playerSpawnPoint = new CharacterSpawnPoint(playerSpawnObject);
+    playerSpawnPoint.spawn(this.loadingManager, this, (player: Character) => {
+      player.setColor(new THREE.Color(0x0000ff));
+      this.player = player;
+    });
+
+    // Spawn vehicles
+    const carSpawnObject = new THREE.Object3D();
+    carSpawnObject.position.set(10, terrainMaxHeight + 10, 0);
+    const carSpawnPoint = new VehicleSpawnPoint(carSpawnObject);
+    carSpawnPoint.type = "car";
+    carSpawnPoint.spawn(this.loadingManager, this);
   }
 
   // Update
@@ -1055,6 +1093,12 @@ export class World {
     this.physicsManager.update(timeStep);
     this.gameManager.update(timeStep, unscaledTimeStep);
     this.weatherManager.update(timeStep);
+
+    this.streetlights.forEach((light) => light.update(this.sky.timeOfDay));
+
+    if (this.grassMaterial) {
+      this.grassMaterial.uniforms.uTime.value += unscaledTimeStep;
+    }
 
     this.planets.forEach((planet) => {
       planet.update();
@@ -1069,9 +1113,9 @@ export class World {
     }
 
     // Spawn UFOs
-    if (Math.random() < 0.002) {
-      this.spawnUFO();
-    }
+    // if (Math.random() < 0.002) {
+    //   this.spawnUFO();
+    // }
 
     // Spawn Atomic Bombs
     // if (Math.random() < 0.001) {
@@ -1358,8 +1402,6 @@ export class World {
   }
 
   public launchScenario(scenarioID: string): void {
-    if (this.proceduralWorldActive) return;
-
     this.lastScenarioID = scenarioID;
 
     this.clearEntities();
@@ -1393,7 +1435,6 @@ export class World {
             (player: Character) => {
               player.setColor(new THREE.Color(0x0000ff)); // Set main character color to blue
               this.player = player; // Assign the local player
-              this.cameraOperator.setTarget(player);
               this.spawnEnemies(5);
             }
           );
