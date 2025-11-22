@@ -641,7 +641,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     } else {
       controlsToShow = this._getDefaultControls();
     }
-    this.world.updateControls(controlsToShow);
+    this.world.worldUIManager.setControls(controlsToShow);
   }
 
   private _getDefaultControls(): any[] {

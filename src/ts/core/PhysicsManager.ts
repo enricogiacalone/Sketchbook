@@ -125,17 +125,27 @@ export class PhysicsManager {
   }
 
   private _handleCharacterOutOfBounds(character: Character): void {
-    if (this.world.isOutOfBounds(character.characterCapsule.body.position)) {
-      this.world.outOfBoundsRespawn(character.characterCapsule.body);
+    if (
+      this.world.worldBuilder.isOutOfBounds(
+        character.characterCapsule.body.position
+      )
+    ) {
+      this.world.worldBuilder.outOfBoundsRespawn(
+        character.characterCapsule.body
+      );
     }
   }
 
   private _handleVehicleOutOfBounds(vehicle: Vehicle): void {
-    if (this.world.isOutOfBounds(vehicle.rayCastVehicle.chassisBody.position)) {
+    if (
+      this.world.worldBuilder.isOutOfBounds(
+        vehicle.rayCastVehicle.chassisBody.position
+      )
+    ) {
       let worldPos = new THREE.Vector3();
       vehicle.spawnPoint.getWorldPosition(worldPos);
       worldPos.y += 1;
-      this.world.outOfBoundsRespawn(
+      this.world.worldBuilder.outOfBoundsRespawn(
         vehicle.rayCastVehicle.chassisBody,
         Utils.cannonVector(worldPos)
       );

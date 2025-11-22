@@ -7,6 +7,7 @@ import { Character } from "~/characters/Character";
 import _ from "lodash";
 import { IUpdatable } from "~/interfaces/IUpdatable";
 import { UIManager } from "./UIManager";
+import { WorldUIManager } from "~/ui/WorldUIManager";
 import * as CANNON from "cannon-es";
 import { Bullet } from "./Bullet";
 
@@ -16,7 +17,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
   public world: World;
   public camera: THREE.Camera;
   public target: THREE.Vector3;
-  public sensitivity: THREE.Vector2;
+  public sensitivity: THREE.Vector2; // Keep this as it's used internally
   public radius: number = 1;
   public theta: number;
   public phi: number;
@@ -39,16 +40,21 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
 
   public characterCaller: Character;
 
+  private worldGUI: WorldGUI;
+  private worldUIManager: WorldUIManager;
+
   constructor(
     world: World,
     camera: THREE.Camera,
-    sensitivityX: number = 1,
-    sensitivityY: number = sensitivityX * 0.8
+    worldGUI: WorldGUI,
+    worldUIManager: WorldUIManager
   ) {
     this.world = world;
     this.camera = camera;
     this.target = new THREE.Vector3();
-    this.sensitivity = new THREE.Vector2(sensitivityX, sensitivityY);
+    this.worldGUI = worldGUI;
+    this.worldUIManager = worldUIManager;
+    this.sensitivity = new THREE.Vector2(this.worldGUI.params.Mouse_Sensitivity, this.worldGUI.params.Mouse_Sensitivity * 0.8);
 
     this.movementSpeed = 0.06;
     this.radius = 3;
@@ -70,13 +76,16 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
       shoot: new KeyBinding("Mouse0"),
     };
 
-            world.entityManager.registerUpdatable(this);  }
+    world.entityManager.registerUpdatable(this);  }
+
+  public setWorldUIManager(worldUIManager: WorldUIManager): void {
+    this.worldUIManager = worldUIManager;
+  }
 
   public setSensitivity(
-    sensitivityX: number,
-    sensitivityY: number = sensitivityX
+    // Remove parameters, as it will use worldGUI.params
   ): void {
-    this.sensitivity = new THREE.Vector2(sensitivityX, sensitivityY);
+    this.sensitivity = new THREE.Vector2(this.worldGUI.params.Mouse_Sensitivity, this.worldGUI.params.Mouse_Sensitivity * 0.8);
   }
 
   public setRadius(value: number, instantly: boolean = false): void {
@@ -236,7 +245,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
     this.setRadius(0, true);
     // this.world.dirLight.target = this.world.camera;
 
-    this.world.updateControls([
+    this.worldUIManager.setControls([
       {
         keys: ["W", "S", "A", "D"],
         desc: "Move around",

@@ -9,7 +9,13 @@ export class Road implements IWorldEntity {
   private roadPhysicsBodies: CANNON.Body[] = [];
   private world: World; // Store world reference to access getTerrainHeightAt
 
-  constructor(world: World, terrainSize: number, terrainSegments: number) {
+  constructor(
+    world: World,
+    terrainSize: number,
+    terrainSegments: number,
+    groundGeometry: THREE.PlaneGeometry,
+    terrainMaxHeight: number
+  ) {
     this.world = world;
     const roadWidth = 8;
     const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
@@ -22,8 +28,18 @@ export class Road implements IWorldEntity {
       x2: number,
       z2: number
     ): void => {
-      const y1 = this.world.getTerrainHeightAt(x1, z1);
-      const y2 = this.world.getTerrainHeightAt(x2, z2);
+      const y1 = this.world.worldBuilder.getTerrainHeightAt(
+        x1,
+        z1,
+        groundGeometry,
+        terrainMaxHeight
+      );
+      const y2 = this.world.worldBuilder.getTerrainHeightAt(
+        x2,
+        z2,
+        groundGeometry,
+        terrainMaxHeight
+      );
 
       // Calculate perpendicular vector for road width
       const dir = new THREE.Vector3(x2 - x1, y2 - y1, z2 - z1).normalize();
@@ -133,14 +149,18 @@ export class Road implements IWorldEntity {
   }
 
   public addToWorld(world: World): void {
-    this.roadMeshes.forEach((mesh) => world.sceneManager.graphicsWorld.add(mesh));
+    this.roadMeshes.forEach((mesh) =>
+      world.sceneManager.graphicsWorld.add(mesh)
+    );
     this.roadPhysicsBodies.forEach((body) =>
       world.physicsManager.physicsWorld.addBody(body)
     );
   }
 
   public removeFromWorld(world: World): void {
-    this.roadMeshes.forEach((mesh) => world.sceneManager.graphicsWorld.remove(mesh));
+    this.roadMeshes.forEach((mesh) =>
+      world.sceneManager.graphicsWorld.remove(mesh)
+    );
     this.roadPhysicsBodies.forEach((body) =>
       world.physicsManager.physicsWorld.removeBody(body)
     );

@@ -198,7 +198,7 @@ export class Helicopter extends Vehicle implements IControllable, IWorldEntity {
   public inputReceiverInit(): void {
     super.inputReceiverInit();
 
-    this.world.updateControls([
+    this.world.worldUIManager.setControls([
       {
         keys: ["Shift"],
         desc: "Ascend",

@@ -248,9 +248,7 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
     this.world.cameraOperator.move(deltaX, deltaY);
   }
 
-  public handleMouseWheel(event: WheelEvent, value: number): void {
-    this.world.scrollTheTimeScale(value);
-  }
+  public handleMouseWheel(event: WheelEvent, value: number): void {}
 
   public inputReceiverInit(): void {
     this.collision.allowSleep = false;

@@ -2,8 +2,9 @@ import * as THREE from "three";
 import * as CANNON from "cannon-es";
 import { World } from "./World";
 import { PhysicsManager } from "../core/PhysicsManager";
+import { IUpdatable } from "../interfaces/IUpdatable";
 
-export class Planet {
+export class Planet implements IUpdatable {
   public mesh: THREE.Mesh;
   public body: CANNON.Body;
 
@@ -39,6 +40,15 @@ export class Planet {
   public update(): void {
     this.mesh.position.copy(this.body.position as any);
     this.mesh.quaternion.copy(this.body.quaternion as any);
+  }
+
+  public addToWorld(world: World): void {
+    // Already added in constructor
+  }
+
+  public removeFromWorld(world: World): void {
+    world.sceneManager.graphicsWorld.remove(this.mesh);
+    world.physicsManager.physicsWorld.removeBody(this.body);
   }
 
   private createPlanetTexture(color: THREE.Color): THREE.CanvasTexture {

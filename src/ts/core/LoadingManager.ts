@@ -16,7 +16,7 @@ export class LoadingManager {
     this.world = world;
     this.gltfLoader = new GLTFLoader();
 
-    this.world.setTimeScale(0);
+
     UIManager.setUserInterfaceVisible(false);
     UIManager.setLoadingScreenVisible(true);
   }

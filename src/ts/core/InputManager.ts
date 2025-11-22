@@ -24,10 +24,13 @@ export class InputManager implements IUpdatable {
   public boundOnKeyDown: (evt: any) => void;
   public boundOnKeyUp: (evt: any) => void;
 
-  constructor(world: World, domElement: HTMLElement) {
+  private worldGUI: WorldGUI; // Add worldGUI property
+
+  constructor(world: World, domElement: HTMLElement, worldGUI: WorldGUI) {
     this.world = world;
-    this.pointerLock = world.params.Pointer_Lock;
     this.domElement = domElement || document.body;
+    this.worldGUI = worldGUI; // Assign worldGUI
+    this.setPointerLock(this.worldGUI.params.Pointer_Lock); // Use worldGUI.params
     this.isLocked = false;
     this.gamepad = new Gamepad();
 
@@ -65,7 +68,8 @@ export class InputManager implements IUpdatable {
     document.addEventListener("keydown", this.boundOnKeyDown, false);
     document.addEventListener("keyup", this.boundOnKeyUp, false);
 
-            world.entityManager.registerUpdatable(this);  }
+    world.entityManager.registerUpdatable(this);
+  }
 
   public update(timestep: number, unscaledTimeStep: number): void {
     if (

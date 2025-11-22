@@ -57,9 +57,9 @@ function setupSocketConnection(name: string) {
 
       if (playerData.id !== myPlayerId) {
         if (!world.networkPlayers.has(playerData.id)) {
-          world.addNetworkPlayer(playerData.id, playerData);
+          world.networkManager.addNetworkPlayer(playerData.id, playerData);
         } else {
-          world.updateNetworkPlayer(playerData.id, playerData);
+          world.networkManager.updateNetworkPlayer(playerData.id, playerData);
         }
       }
     });
@@ -67,7 +67,7 @@ function setupSocketConnection(name: string) {
     // Remove disconnected players
     world.networkPlayers.forEach((networkPlayer, id) => {
       if (!serverPlayerIds.has(id)) {
-        world.removeNetworkPlayer(id);
+        world.networkManager.removeNetworkPlayer(id);
       }
     });
   });

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { World } from "~/world/World";
+import { WorldGUI } from "~/debug/WorldGUI";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass";
@@ -22,9 +23,11 @@ export class SceneManager {
   public camera: THREE.PerspectiveCamera;
   public graphicsWorld: THREE.Scene;
   public composer: EffectComposer;
+  private worldGUI: WorldGUI; // Add worldGUI property
 
-  constructor(world: World) {
+  constructor(world: World, worldGUI: WorldGUI) {
     this.world = world;
+    this.worldGUI = worldGUI; // Assign worldGUI
     this.graphicsWorld = new THREE.Scene();
 
     this._initializeRenderer();
@@ -112,7 +115,7 @@ export class SceneManager {
   }
 
   public render(): void {
-    if (this.world.params.FXAA) this.composer.render();
+    if (this.worldGUI.params.FXAA) this.composer.render();
     else this.renderer.render(this.graphicsWorld, this.camera);
   }
 }

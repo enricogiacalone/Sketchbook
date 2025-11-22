@@ -10,6 +10,7 @@ export class UFO implements IWorldEntity, IUpdatable {
   public updateOrder: number = 2;
 
   public mesh: THREE.Mesh;
+  public isRemoved: boolean = false; // Added isRemoved property
 
   private world: World;
   private speed: number = 5;
@@ -18,6 +19,8 @@ export class UFO implements IWorldEntity, IUpdatable {
 
   private laserFireInterval: number = 3; // Seconds between laser fires
   private laserFireTimer: number = 0;
+  private lifeTime: number = 30; // UFO will disappear after 30 seconds
+  private age: number = 0; // Current age of the UFO
 
   constructor(world: World, position: THREE.Vector3) {
     this.world = world;
@@ -46,6 +49,14 @@ export class UFO implements IWorldEntity, IUpdatable {
   }
 
   public update(timeStep: number): void {
+    if (this.isRemoved) return; // If already removed, do nothing
+
+    this.age += timeStep;
+    if (this.age > this.lifeTime) {
+      this.removeFromWorld();
+      return;
+    }
+
     const distanceToTarget = this.mesh.position.distanceTo(this.targetPosition);
 
     if (distanceToTarget < 10) {
@@ -73,7 +84,11 @@ export class UFO implements IWorldEntity, IUpdatable {
   }
 
   public removeFromWorld(): void {
+    if (this.isRemoved) return; // Prevent multiple removals
+    this.isRemoved = true;
     this.world.sceneManager.graphicsWorld.remove(this.mesh);
+    this.mesh.geometry.dispose(); // Dispose of geometry
+    (this.mesh.material as THREE.Material).dispose(); // Dispose of material
     this.world.entityManager.unregisterUpdatable(this);
   }
 
@@ -87,7 +102,9 @@ export class UFO implements IWorldEntity, IUpdatable {
   private fireLaser(): void {
     const start = this.mesh.position.clone();
     const end = this.getRandomGroundPosition();
-    this.world.registerUpdatable(new LaserBeam(this.world, start, end));
+    this.world.entityManager.registerUpdatable(
+      new LaserBeam(this.world, start, end)
+    );
   }
 
   private getRandomGroundPosition(): THREE.Vector3 {

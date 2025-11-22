@@ -307,7 +307,7 @@ export class Car extends Vehicle implements IControllable {
   public inputReceiverInit(): void {
     super.inputReceiverInit();
 
-    this.world.updateControls([
+    this.world.worldUIManager.setControls([
       {
         keys: ["W", "S"],
         desc: "Accelerate, Brake / Reverse",
