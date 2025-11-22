@@ -193,8 +193,6 @@ setInterval(() => {
   updateNameSpace.emit("playerData", playerData);
 }, 50); // 20 updates per second
 
-
-
 server.listen(port, () => {
   console.log(`Server listening on port ${port}`);
 });

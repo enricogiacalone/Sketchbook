@@ -36,19 +36,36 @@ export class Trees {
       const tree = new Tree();
       tree.options = tree.options || {};
       tree.options.trunk = tree.options.trunk || {};
-      tree.options.seed = 1;
-      tree.options.trunk.length = 5;
-      tree.options.branch.levels = 2;
+      tree.options.branch = tree.options.branch || {};
+
+      // Randomize tree properties
+      tree.options.seed = Math.random(); // Unique seed for each tree
+      tree.options.trunk.length = 3 + Math.random() * 4; // Trunk length between 3 and 7
+      tree.options.branch.levels = 1 + Math.floor(Math.random() * 3); // Branch levels between 1 and 3
+
       tree.generate();
+
+      // Randomize scale
+      const scale = 0.75 + Math.random() * 0.5; // Scale between 0.75 and 1.25
+      tree.scale.set(scale, scale, scale);
+
+      // Randomize rotation
+      tree.rotation.y = Math.random() * Math.PI * 2; // Random rotation around Y-axis
 
       tree.position.set(x, y, z);
 
       this.world.sceneManager.graphicsWorld.add(tree);
 
-      const trunkPhysicsHeight = tree.options.trunk.length;
+      // Adjust physics body to match randomized scale and position
+      const trunkPhysicsHeight = tree.options.trunk.length * scale; // Scale trunk height
       const treePhysicsBody = new CANNON.Body({
         mass: 0,
-        shape: new CANNON.Cylinder(0.5, 0.5, trunkPhysicsHeight, 8),
+        shape: new CANNON.Cylinder(
+          0.5 * scale,
+          0.5 * scale,
+          trunkPhysicsHeight,
+          8
+        ), // Scale radius too
         position: new CANNON.Vec3(x, y + trunkPhysicsHeight / 2, z),
       });
       this.world.physicsManager.physicsWorld.addBody(treePhysicsBody);

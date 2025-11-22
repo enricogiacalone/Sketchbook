@@ -54,7 +54,10 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
     this.target = new THREE.Vector3();
     this.worldGUI = worldGUI;
     this.worldUIManager = worldUIManager;
-    this.sensitivity = new THREE.Vector2(this.worldGUI.params.Mouse_Sensitivity, this.worldGUI.params.Mouse_Sensitivity * 0.8);
+    this.sensitivity = new THREE.Vector2(
+      this.worldGUI.params.Mouse_Sensitivity,
+      this.worldGUI.params.Mouse_Sensitivity * 0.8
+    );
 
     this.movementSpeed = 0.06;
     this.radius = 3;
@@ -76,20 +79,27 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
       shoot: new KeyBinding("Mouse0"),
     };
 
-    world.entityManager.registerUpdatable(this);  }
+    world.entityManager.registerUpdatable(this);
+  }
 
   public setWorldUIManager(worldUIManager: WorldUIManager): void {
     this.worldUIManager = worldUIManager;
   }
 
-  public setSensitivity(
-    // Remove parameters, as it will use worldGUI.params
-  ): void {
-    this.sensitivity = new THREE.Vector2(this.worldGUI.params.Mouse_Sensitivity, this.worldGUI.params.Mouse_Sensitivity * 0.8);
+  public setSensitivity() // Remove parameters, as it will use worldGUI.params
+  : void {
+    this.sensitivity = new THREE.Vector2(
+      this.worldGUI.params.Mouse_Sensitivity,
+      this.worldGUI.params.Mouse_Sensitivity * 0.8
+    );
   }
 
   public setRadius(value: number, instantly: boolean = false): void {
-    this.targetRadius = THREE.MathUtils.clamp(value, this.minRadius, this.maxRadius);
+    this.targetRadius = THREE.MathUtils.clamp(
+      value,
+      this.minRadius,
+      this.maxRadius
+    );
     if (instantly === true) {
       this.radius = this.targetRadius;
     }
@@ -153,8 +163,7 @@ export class CameraOperator implements IInputReceiver, IUpdatable {
     // Free camera
     if (code === "KeyC" && pressed === true && event.shiftKey === true) {
       this.exitFreeCamera();
-    }
-    else {
+    } else {
       for (const action in this.actions) {
         if (this.actions.hasOwnProperty(action)) {
           const binding = this.actions[action];

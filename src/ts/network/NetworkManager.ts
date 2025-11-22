@@ -24,10 +24,14 @@ export class NetworkManager {
         this.removeNetworkPlayer(id);
       }
 
-      const gltf = await this.world.loadingManager.loadGLTFPromise(
-        "boxman.glb"
+      const gltf =
+        await this.world.loadingManager.loadGLTFPromise("boxman.glb");
+      const networkCharacter = new NetworkPlayer(
+        gltf,
+        this.world,
+        id,
+        playerData
       );
-      const networkCharacter = new NetworkPlayer(gltf, this.world, id, playerData);
 
       networkCharacter.position.set(
         playerData.position_x,

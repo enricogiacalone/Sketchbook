@@ -16,7 +16,6 @@ export class LoadingManager {
     this.world = world;
     this.gltfLoader = new GLTFLoader();
 
-
     UIManager.setUserInterfaceVisible(false);
     UIManager.setLoadingScreenVisible(true);
   }
@@ -51,7 +50,9 @@ export class LoadingManager {
             (error) => {
               console.error(error);
               this.doneLoading(trackerEntry); // Mark as done even on error
-              reject(new Error(`Failed to parse GLTF file at '${path}': ${error}`));
+              reject(
+                new Error(`Failed to parse GLTF file at '${path}': ${error}`)
+              );
             }
           );
         })

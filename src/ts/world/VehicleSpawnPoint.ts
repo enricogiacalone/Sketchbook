@@ -22,7 +22,8 @@ export class VehicleSpawnPoint implements ISpawnPoint {
   }
 
   public spawn(loadingManager: LoadingManager, world: World): void {
-    loadingManager.loadGLTFPromise(this.type + ".glb")
+    loadingManager
+      .loadGLTFPromise(this.type + ".glb")
       .then((model: any) => {
         let vehicle: Vehicle = this.getNewVehicleByType(model, this.type);
         vehicle.spawnPoint = this.object;
@@ -37,7 +38,8 @@ export class VehicleSpawnPoint implements ISpawnPoint {
         world.entityManager.add(vehicle);
 
         if (this.driver !== undefined) {
-          loadingManager.loadGLTFPromise("boxman.glb")
+          loadingManager
+            .loadGLTFPromise("boxman.glb")
             .then((charModel) => {
               let character = new Character(charModel);
               world.entityManager.add(character);
@@ -54,7 +56,10 @@ export class VehicleSpawnPoint implements ISpawnPoint {
 
                       for (const nodeName in path.nodes) {
                         if (
-                          Object.prototype.hasOwnProperty.call(path.nodes, nodeName)
+                          Object.prototype.hasOwnProperty.call(
+                            path.nodes,
+                            nodeName
+                          )
                         ) {
                           const node = path.nodes[nodeName];
 
@@ -68,13 +73,18 @@ export class VehicleSpawnPoint implements ISpawnPoint {
                   }
 
                   if (!nodeFound) {
-                    console.error("Path node " + this.firstAINode + "not found.");
+                    console.error(
+                      "Path node " + this.firstAINode + "not found."
+                    );
                   }
                 }
               }
             })
             .catch((error) => {
-              console.error("Error loading character model for vehicle driver:", error);
+              console.error(
+                "Error loading character model for vehicle driver:",
+                error
+              );
             });
         }
       })

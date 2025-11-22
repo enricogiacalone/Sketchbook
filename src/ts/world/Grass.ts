@@ -6,12 +6,18 @@ import { IWorldEntity } from "~/interfaces/IWorldEntity"; // Import IWorldEntity
 import grassFragment from "../../lib/shaders/procedural_grass_fragment.glsl?raw";
 import grassVertex from "../../lib/shaders/procedural_grass_vertex.glsl?raw";
 
-export class Grass implements IUpdatable, IWorldEntity { // Implement IWorldEntity
+export class Grass implements IUpdatable, IWorldEntity {
+  // Implement IWorldEntity
   public updateOrder: number = 2; // Sky is 1, so grass can be 2
   private grassMaterial: THREE.ShaderMaterial;
   private grassMesh: THREE.InstancedMesh;
 
-  constructor(world: World, terrainSize: number, terrainMaxHeight: number, terrainSegments: number) {
+  constructor(
+    world: World,
+    terrainSize: number,
+    terrainMaxHeight: number,
+    terrainSegments: number
+  ) {
     const grassCount = 60000; // Reduced for performance
 
     const grassBaseGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
@@ -61,4 +67,3 @@ export class Grass implements IUpdatable, IWorldEntity { // Implement IWorldEnti
     }
   }
 }
-

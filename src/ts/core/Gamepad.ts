@@ -27,7 +27,7 @@ export class Gamepad {
     if (this.gamepad) {
       // Get the latest gamepad state
       this.gamepad = navigator.getGamepads()[this.gamepad.index];
-      
+
       // Update button and axis states
       this.buttons = this.gamepad.buttons.map((button: any) => button.pressed);
       this.axes = this.gamepad.axes.map((axis: any) => axis);

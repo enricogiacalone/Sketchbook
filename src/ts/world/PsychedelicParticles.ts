@@ -146,21 +146,28 @@ export class PsychedelicParticles extends THREE.Object3D implements IUpdatable {
         }
       }
 
-      // // Attraction to vortex
-      // const distanceToVortex = pos.distanceTo(vortexCenter);
-      // if (distanceToVortex > 5) { // Don't attract if too close to avoid extreme forces
-      //     const attraction = new THREE.Vector3().subVectors(vortexCenter, pos).normalize().multiplyScalar(200 / (distanceToVortex * distanceToVortex));
-      //     this.velocities[i].add(attraction.multiplyScalar(timeStep));
-      // } else {
-      //     // Absorb and re-emit
-      //     positions.setXYZ(
-      //         i,
-      //         (Math.random() - 0.5) * 400,
-      //         Math.random() * 200,
-      //         (Math.random() - 0.5) * 400
-      //     );
-      //     this.velocities[i].set(0, 0, 0); // Reset velocity
-      // }
+      // Attraction to vortex
+      if (this.vortex) {
+        const vortexCenter = this.vortex.center;
+        const distanceToVortex = pos.distanceTo(vortexCenter);
+        if (distanceToVortex > 5) {
+          // Don't attract if too close to avoid extreme forces
+          const attraction = new THREE.Vector3()
+            .subVectors(vortexCenter, pos)
+            .normalize()
+            .multiplyScalar(200 / (distanceToVortex * distanceToVortex));
+          this.velocities[i].add(attraction.multiplyScalar(timeStep));
+        } else {
+          // Absorb and re-emit
+          positions.setXYZ(
+            i,
+            this.vortex.center.x + (Math.random() - 0.5) * 400,
+            this.vortex.center.y + Math.random() * 200,
+            this.vortex.center.z + (Math.random() - 0.5) * 400
+          );
+          this.velocities[i].set(0, 0, 0); // Reset velocity
+        }
+      }
 
       // Update position and velocity
       positions.setXYZ(

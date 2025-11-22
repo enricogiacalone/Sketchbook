@@ -11,12 +11,7 @@ export class NetworkPlayer extends Character {
   public targetQuaternion: THREE.Quaternion;
   private currentAnimation: string;
 
-  constructor(
-    gltf: any,
-    world: World,
-    socketId: string,
-    playerData: any
-  ) {
+  constructor(gltf: any, world: World, socketId: string, playerData: any) {
     super(gltf);
     this.tiltContainer.add(this.modelContainer);
 

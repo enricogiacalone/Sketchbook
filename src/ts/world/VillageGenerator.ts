@@ -104,7 +104,7 @@ export class VillageGenerator {
     }
 
     // Add Streetlights around the village
-    const streetlightCount = 6;
+    const streetlightCount = 8;
     for (let i = 0; i < streetlightCount; i++) {
       const angle = (i / streetlightCount) * Math.PI * 2;
       const radius = villageRadius + 15; // Place streetlights outside the village
@@ -214,23 +214,28 @@ export class VillageGenerator {
     const irregularCircleRadius = villageRadius + 25; // Base radius for the irregular circle, slightly larger than village
     const irregularityFactor = 8; // Controls how much the circle deviates from perfect
     const numWallSegments = 40; // Number of segments to make up the irregular circle
-    const wallHeight = 10;
-    const wallThickness = 1;
+    const wallThickness = 1; // Define wallThickness here
 
     const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x777777 }); // Grey stone
+
+    // Define consistent Y coordinates for the wall
+    const wallTopY = terrainMaxHeight + 10; // Consistent top for walking
+    const wallBottomY = -(terrainMaxHeight + 5); // Fixed bottom to avoid holes, extending below lowest terrain point
+    const consistentWallHeight = wallTopY - wallBottomY;
 
     const irregularPoints: THREE.Vector3[] = [];
 
     for (let i = 0; i < numWallSegments; i++) {
       const angle = (i / numWallSegments) * Math.PI * 2;
       const baseRadius = irregularCircleRadius;
-      const currentRadius = baseRadius + (Math.random() - 0.5) * irregularityFactor * 2; // Add random offset
+      const currentRadius =
+        baseRadius + (Math.random() - 0.5) * irregularityFactor * 2; // Add random offset
 
       const x = villageCenter.x + currentRadius * Math.cos(angle);
       const z = villageCenter.z + currentRadius * Math.sin(angle);
-      const y = this.world.worldBuilder.getTerrainHeightAt(x, z, this.groundGeometry, terrainMaxHeight);
 
-      irregularPoints.push(new THREE.Vector3(x, y, z));
+      // Points are generated at wallBottomY for the base of the wall segments
+      irregularPoints.push(new THREE.Vector3(x, wallBottomY, z));
     }
 
     // Connect points to form the irregular wall
@@ -240,29 +245,111 @@ export class VillageGenerator {
 
       const midX = (startPoint.x + endPoint.x) / 2;
       const midZ = (startPoint.z + endPoint.z) / 2;
-      const midY = (startPoint.y + endPoint.y) / 2;
 
       const segmentLength = startPoint.distanceTo(endPoint);
-      const rotationY = Math.atan2(endPoint.x - startPoint.x, endPoint.z - startPoint.z);
+      const rotationY = Math.atan2(
+        endPoint.x - startPoint.x,
+        endPoint.z - startPoint.z
+      );
 
-      const wallSegmentGeometry = new THREE.BoxGeometry(wallThickness, wallHeight, segmentLength);
+      // Wall segment geometry uses consistent height
+      const wallSegmentGeometry = new THREE.BoxGeometry(
+        wallThickness,
+        consistentWallHeight,
+        segmentLength
+      );
       const wallSegmentMesh = new THREE.Mesh(wallSegmentGeometry, wallMaterial);
-      wallSegmentMesh.position.set(midX, midY + wallHeight / 2, midZ);
+      // Positioned such that its bottom is at wallBottomY and top at wallTopY
+      wallSegmentMesh.position.set(
+        midX,
+        wallBottomY + consistentWallHeight / 2,
+        midZ
+      );
       wallSegmentMesh.rotation.y = rotationY;
       wallSegmentMesh.castShadow = true;
       wallSegmentMesh.receiveShadow = true;
       this.world.sceneManager.graphicsWorld.add(wallSegmentMesh);
 
       // Physics for wall segment
-      const wallPhysicsShape = new CANNON.Box(new CANNON.Vec3(wallThickness / 2, wallHeight / 2, segmentLength / 2));
+      const wallPhysicsShape = new CANNON.Box(
+        new CANNON.Vec3(
+          wallThickness / 2,
+          consistentWallHeight / 2,
+          segmentLength / 2
+        )
+      );
       const wallPhysicsBody = new CANNON.Body({
         mass: 0,
         material: this.physicsManager.trimeshMaterial,
       });
       wallPhysicsBody.addShape(wallPhysicsShape);
-      wallPhysicsBody.position.copy(new CANNON.Vec3(midX, midY + wallHeight / 2, midZ));
-      wallPhysicsBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), rotationY);
+      wallPhysicsBody.position.copy(
+        new CANNON.Vec3(midX, wallBottomY + consistentWallHeight / 2, midZ)
+      );
+      wallPhysicsBody.quaternion.setFromAxisAngle(
+        new CANNON.Vec3(0, 1, 0),
+        rotationY
+      );
       this.world.physicsManager.physicsWorld.addBody(wallPhysicsBody);
+    }
+
+    // Generate towers along the irregular wall
+    const numTowers = 8; // Number of towers
+    const towerHeight = consistentWallHeight + 5; // Towers taller than wall
+    const towerRadius = 3; // Radius of the towers
+    const towerMaterial = new THREE.MeshStandardMaterial({ color: 0x666666 }); // Darker grey stone
+
+    for (let i = 0; i < numTowers; i++) {
+      const angle = (i / numTowers) * Math.PI * 2;
+      const towerX = villageCenter.x + irregularCircleRadius * Math.cos(angle);
+      const towerZ = villageCenter.z + irregularCircleRadius * Math.sin(angle);
+
+      // Tower Base (Visual)
+      const towerBaseGeometry = new THREE.CylinderGeometry(
+        towerRadius,
+        towerRadius,
+        towerHeight,
+        16
+      );
+      const towerBaseMesh = new THREE.Mesh(towerBaseGeometry, towerMaterial);
+      towerBaseMesh.position.set(towerX, wallBottomY + towerHeight / 2, towerZ); // Positioned on wallBottomY
+      towerBaseMesh.castShadow = true;
+      towerBaseMesh.receiveShadow = true;
+      this.world.sceneManager.graphicsWorld.add(towerBaseMesh);
+
+      // Tower Top Platform (Visual) - simple box
+      const platformHeight = 1;
+      const platformGeometry = new THREE.BoxGeometry(
+        towerRadius * 2.2,
+        platformHeight,
+        towerRadius * 2.2
+      );
+      const platformMesh = new THREE.Mesh(platformGeometry, towerMaterial);
+      platformMesh.position.set(
+        towerX,
+        wallBottomY + towerHeight + platformHeight / 2,
+        towerZ
+      );
+      platformMesh.castShadow = true;
+      platformMesh.receiveShadow = true;
+      this.world.sceneManager.graphicsWorld.add(platformMesh);
+
+      // Tower Physics Body (simplified as a single cylinder for the base)
+      const towerPhysicsShape = new CANNON.Cylinder(
+        towerRadius,
+        towerRadius,
+        towerHeight,
+        16
+      );
+      const towerPhysicsBody = new CANNON.Body({
+        mass: 0,
+        material: this.physicsManager.trimeshMaterial,
+      });
+      towerPhysicsBody.addShape(towerPhysicsShape);
+      towerPhysicsBody.position.copy(
+        new CANNON.Vec3(towerX, wallBottomY + towerHeight / 2, towerZ)
+      );
+      this.world.physicsManager.physicsWorld.addBody(towerPhysicsBody);
     }
   }
 }

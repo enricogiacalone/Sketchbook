@@ -374,36 +374,40 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       if (child.isMesh) {
         // Apply Toon Material
         const toonMaterial = Character.toonMaterial.clone();
-        if (child.material instanceof THREE.MeshStandardMaterial || child.material instanceof THREE.MeshLambertMaterial) {
+        if (
+          child.material instanceof THREE.MeshStandardMaterial ||
+          child.material instanceof THREE.MeshLambertMaterial
+        ) {
           toonMaterial.color.copy(child.material.color);
           if (child.material.map) {
             toonMaterial.map = child.material.map;
           }
         } else if (Array.isArray(child.material)) {
           // Handle multiple materials (e.g., for GLTF models with multiple parts)
-          child.material = child.material.map(mat => {
+          child.material = child.material.map((mat) => {
             const newToonMat = Character.toonMaterial.clone();
             if (mat.color) newToonMat.color.copy(mat.color);
             if (mat.map) newToonMat.map = mat.map;
             return newToonMat;
           });
         } else {
-            // Default case for other material types or if color/map not found
-            toonMaterial.color.set(0xcccccc); // A default color
+          // Default case for other material types or if color/map not found
+          toonMaterial.color.set(0xcccccc); // A default color
         }
         child.material = toonMaterial;
         this.materials.push(toonMaterial);
 
         // Create and add outline mesh ONLY if child has a parent
-        if (child.parent) { // This check is crucial
-            const outlineMesh = child.clone();
-            const outlineMaterial = new THREE.MeshBasicMaterial({
-              color: 0x000000,
-              side: THREE.BackSide,
-            });
-            outlineMesh.material = outlineMaterial;
-            outlineMesh.scale.multiplyScalar(1.02); // Slightly larger
-            child.parent.add(outlineMesh);
+        if (child.parent) {
+          // This check is crucial
+          const outlineMesh = child.clone();
+          const outlineMaterial = new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            side: THREE.BackSide,
+          });
+          outlineMesh.material = outlineMaterial;
+          outlineMesh.scale.multiplyScalar(1.02); // Slightly larger
+          child.parent.add(outlineMesh);
         }
       }
     });
@@ -720,15 +724,21 @@ export class Character extends THREE.Object3D implements IWorldEntity {
         // Fallback to 'idle' animation if the requested clip is not found
         clip = THREE.AnimationClip.findByName(this.animations, "idle");
         if (clip === null) {
-          console.error(`Animation ${clipName} not found and 'idle' fallback not found!`);
+          console.error(
+            `Animation ${clipName} not found and 'idle' fallback not found!`
+          );
           return 0;
         }
-        console.warn(`Animation ${clipName} not found, falling back to 'idle'.`);
+        console.warn(
+          `Animation ${clipName} not found, falling back to 'idle'.`
+        );
       }
 
       action = this.mixer.clipAction(clip);
       if (action === null) {
-        console.error(`Failed to create animation action for ${clipName} or 'idle' fallback!`);
+        console.error(
+          `Failed to create animation action for ${clipName} or 'idle' fallback!`
+        );
         return 0;
       }
 
@@ -1261,7 +1271,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   }
 
   public removeFromWorld(world: World): void {
-    // Delegate removal to the world, which handles enemy count and physics body removal
-    world.remove(this);
+    // Delegate removal to the EntityManager, which handles enemy count and physics body removal
+    world.entityManager.remove(this);
   }
 }

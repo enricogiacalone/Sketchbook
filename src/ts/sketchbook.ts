@@ -72,17 +72,19 @@ function setupSocketConnection(name: string) {
     });
   });
 
-  chatSocket.on("chatMessage", (data: { senderId: string; message: string }) => {
-    if (data.senderId !== myPlayerId) {
-      const networkPlayer = world.networkPlayers.get(data.senderId);
-      if (networkPlayer) {
-        networkPlayer.displayMessage(data.message);
+  chatSocket.on(
+    "chatMessage",
+    (data: { senderId: string; message: string }) => {
+      if (data.senderId !== myPlayerId) {
+        const networkPlayer = world.networkPlayers.get(data.senderId);
+        if (networkPlayer) {
+          networkPlayer.displayMessage(data.message);
+        }
       }
     }
-  });
+  );
 
-  chatSocket.on("disconnect", () => {
-  });
+  chatSocket.on("disconnect", () => {});
 }
 
 const world = new World(undefined, setupSocketConnection, sendChatMessage);

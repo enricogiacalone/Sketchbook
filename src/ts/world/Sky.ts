@@ -13,7 +13,7 @@ export class Sky extends THREE.Object3D implements IUpdatable {
   public timeOfDay: number = 12; // 0-24 hours
 
   // Constants for day/night cycle
-  private readonly DAY_LENGTH: number = 60; // seconds for a full day (24 hours)
+  private readonly DAY_LENGTH: number = 120; // seconds for a full day (24 hours) - Longer day
   private readonly SUNRISE_HOUR: number = 6;
   private readonly SUNSET_HOUR: number = 18;
   private readonly NOON_HOUR: number = 12;
@@ -35,7 +35,7 @@ export class Sky extends THREE.Object3D implements IUpdatable {
 
   private hemiLight: THREE.HemisphereLight;
   private maxHemiIntensity: number = 0.9;
-  private minHemiIntensity: number = 0.3;
+  private minHemiIntensity: number = 0.05; // Decreased for darker night
 
   private skyMesh: THREE.Mesh;
   private skyMaterial: THREE.ShaderMaterial;
@@ -109,7 +109,7 @@ export class Sky extends THREE.Object3D implements IUpdatable {
     // _phi goes from 0 (midnight) to 180 (noon) and back to 0 (midnight)
     // A simplified sine wave can approximate this
     const hourFactor = (this.timeOfDay - this.NOON_HOUR) / 12; // -1 at midnight, 0 at noon, 1 at next midnight
-    this._phi = 90 - (Math.sin(hourFactor * Math.PI) * 90); // 0-180 degrees, 90 is directly overhead
+    this._phi = 90 - Math.sin(hourFactor * Math.PI) * 90; // 0-180 degrees, 90 is directly overhead
 
     // Calculate sun azimuth (_theta) - roughly based on time of day
     // This makes the sun move across the sky
@@ -148,8 +148,10 @@ export class Sky extends THREE.Object3D implements IUpdatable {
       elevationFactor * (this.maxHemiIntensity - this.minHemiIntensity);
 
     // Adjust hemisphere light color for sunset/sunrise
-    const sunsetFactor = 1 - Math.max(0, (Math.abs(this.timeOfDay - this.NOON_HOUR) - 3) / 9); // Peaks at sunset/sunrise hours (e.g., 6 and 18)
-    const nightFactor = 1 - Math.max(0, (Math.abs(this.timeOfDay - this.MIDNIGHT_HOUR) - 3) / 9); // Peaks at midnight
+    const sunsetFactor =
+      1 - Math.max(0, (Math.abs(this.timeOfDay - this.NOON_HOUR) - 3) / 9); // Peaks at sunset/sunrise hours (e.g., 6 and 18)
+    const nightFactor =
+      1 - Math.max(0, (Math.abs(this.timeOfDay - this.MIDNIGHT_HOUR) - 3) / 9); // Peaks at midnight
 
     // Daytime color
     let r = 0.59;
@@ -160,7 +162,10 @@ export class Sky extends THREE.Object3D implements IUpdatable {
     let groundB = 0.75;
 
     // Sunset/sunrise colors
-    if (this.timeOfDay > this.SUNRISE_HOUR - 3 && this.timeOfDay < this.SUNRISE_HOUR + 3) {
+    if (
+      this.timeOfDay > this.SUNRISE_HOUR - 3 &&
+      this.timeOfDay < this.SUNRISE_HOUR + 3
+    ) {
       // Sunrise window
       const factor = 1 - Math.abs(this.timeOfDay - this.SUNRISE_HOUR) / 3;
       r = THREE.MathUtils.lerp(r, 0.9, factor); // More red
@@ -169,7 +174,10 @@ export class Sky extends THREE.Object3D implements IUpdatable {
       groundR = THREE.MathUtils.lerp(groundR, 0.3, factor);
       groundG = THREE.MathUtils.lerp(groundG, 0.1, factor);
       groundB = THREE.MathUtils.lerp(groundB, 0.05, factor);
-    } else if (this.timeOfDay > this.SUNSET_HOUR - 3 && this.timeOfDay < this.SUNSET_HOUR + 3) {
+    } else if (
+      this.timeOfDay > this.SUNSET_HOUR - 3 &&
+      this.timeOfDay < this.SUNSET_HOUR + 3
+    ) {
       // Sunset window
       const factor = 1 - Math.abs(this.timeOfDay - this.SUNSET_HOUR) / 3;
       r = THREE.MathUtils.lerp(r, 0.9, factor); // More red
@@ -178,11 +186,18 @@ export class Sky extends THREE.Object3D implements IUpdatable {
       groundR = THREE.MathUtils.lerp(groundR, 0.3, factor);
       groundG = THREE.MathUtils.lerp(groundG, 0.1, factor);
       groundB = THREE.MathUtils.lerp(groundB, 0.05, factor);
-    } else if (this.timeOfDay < this.SUNRISE_HOUR - 3 || this.timeOfDay > this.SUNSET_HOUR + 3) {
+    } else if (
+      this.timeOfDay < this.SUNRISE_HOUR - 3 ||
+      this.timeOfDay > this.SUNSET_HOUR + 3
+    ) {
       // Nighttime
-      const nightStrength = Math.max(0, Math.min(1,
-        Math.pow(Math.abs(this.timeOfDay - this.NOON_HOUR) - 6, 2) / 36 // Quadratic falloff from night to day
-      ));
+      const nightStrength = Math.max(
+        0,
+        Math.min(
+          1,
+          Math.pow(Math.abs(this.timeOfDay - this.NOON_HOUR) - 6, 2) / 36 // Quadratic falloff from night to day
+        )
+      );
       r = THREE.MathUtils.lerp(r, 0.05, nightStrength);
       g = THREE.MathUtils.lerp(g, 0.05, nightStrength);
       b = THREE.MathUtils.lerp(b, 0.15, nightStrength);
@@ -199,33 +214,50 @@ export class Sky extends THREE.Object3D implements IUpdatable {
     // Get the main directional light from CSM
     const mainLight = this.csm.lights[0];
     if (mainLight) {
-      const elevationFactor = Math.max(0, Math.sin((this._phi * Math.PI) / 180)); // 0-1 based on sun elevation
+      const elevationFactor = Math.max(
+        0,
+        Math.sin((this._phi * Math.PI) / 180)
+      ); // 0-1 based on sun elevation
 
       // Adjust intensity
-      mainLight.intensity = this.csm.lightIntensity * elevationFactor * 0.75 + 0.25; // Never goes completely dark
+      mainLight.intensity =
+        this.csm.lightIntensity * elevationFactor * 0.75 + 0.25; // Never goes completely dark
 
       // Adjust color for sunset/sunrise
       let r = 1.0;
       let g = 1.0;
       let b = 1.0;
 
-      if (this.timeOfDay > this.SUNRISE_HOUR - 3 && this.timeOfDay < this.SUNRISE_HOUR + 3) {
+      if (
+        this.timeOfDay > this.SUNRISE_HOUR - 3 &&
+        this.timeOfDay < this.SUNRISE_HOUR + 3
+      ) {
         // Sunrise window
         const factor = 1 - Math.abs(this.timeOfDay - this.SUNRISE_HOUR) / 3;
         r = THREE.MathUtils.lerp(r, 1.0, factor);
         g = THREE.MathUtils.lerp(g, 0.7, factor);
         b = THREE.MathUtils.lerp(b, 0.4, factor);
-      } else if (this.timeOfDay > this.SUNSET_HOUR - 3 && this.timeOfDay < this.SUNSET_HOUR + 3) {
+      } else if (
+        this.timeOfDay > this.SUNSET_HOUR - 3 &&
+        this.timeOfDay < this.SUNSET_HOUR + 3
+      ) {
         // Sunset window
         const factor = 1 - Math.abs(this.timeOfDay - this.SUNSET_HOUR) / 3;
         r = THREE.MathUtils.lerp(r, 1.0, factor);
         g = THREE.MathUtils.lerp(g, 0.7, factor);
         b = THREE.MathUtils.lerp(b, 0.4, factor);
-      } else if (this.timeOfDay < this.SUNRISE_HOUR - 3 || this.timeOfDay > this.SUNSET_HOUR + 3) {
+      } else if (
+        this.timeOfDay < this.SUNRISE_HOUR - 3 ||
+        this.timeOfDay > this.SUNSET_HOUR + 3
+      ) {
         // Nighttime
-        const nightStrength = Math.max(0, Math.min(1,
-          Math.pow(Math.abs(this.timeOfDay - this.NOON_HOUR) - 6, 2) / 36
-        ));
+        const nightStrength = Math.max(
+          0,
+          Math.min(
+            1,
+            Math.pow(Math.abs(this.timeOfDay - this.NOON_HOUR) - 6, 2) / 36
+          )
+        );
         r = THREE.MathUtils.lerp(r, 0.1, nightStrength);
         g = THREE.MathUtils.lerp(g, 0.1, nightStrength);
         b = THREE.MathUtils.lerp(b, 0.2, nightStrength);
@@ -235,4 +267,3 @@ export class Sky extends THREE.Object3D implements IUpdatable {
     }
   }
 }
-

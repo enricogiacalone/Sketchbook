@@ -27,7 +27,7 @@ export class UIManager {
     const chatContainer = document.createElement("div");
     chatContainer.id = CHAT_INPUT_CONTAINER_ID;
     chatContainer.classList.add("collapsed"); // Start collapsed
-    
+
     const chatInput = document.createElement("input");
     chatInput.id = CHAT_INPUT_ID;
     chatInput.type = "text";
@@ -45,7 +45,10 @@ export class UIManager {
 
     // Add event listener to collapse when clicking outside
     document.addEventListener("click", (event) => {
-      if (!chatContainer.contains(event.target as Node) && !chatContainer.classList.contains("collapsed")) {
+      if (
+        !chatContainer.contains(event.target as Node) &&
+        !chatContainer.classList.contains("collapsed")
+      ) {
         UIManager.setChatInputExpanded(false);
       }
     });

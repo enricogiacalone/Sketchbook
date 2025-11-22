@@ -109,7 +109,11 @@ export class SpeechBubble extends THREE.Object3D {
       this.initialTextMeshHeight
     );
     this.textMesh = new THREE.Mesh(textGeometry, this.textMaterial);
-    this.textMesh.position.set(0, characterHeight + (1.0 + 0.4) * scaleFactor, 0.02); // Slightly in front of the bubble
+    this.textMesh.position.set(
+      0,
+      characterHeight + (1.0 + 0.4) * scaleFactor,
+      0.02
+    ); // Slightly in front of the bubble
     this.textMesh.renderOrder = 1000; // Ensure text renders on top of the bubble
     this.add(this.textMesh);
 

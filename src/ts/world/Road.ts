@@ -18,7 +18,11 @@ export class Road implements IWorldEntity {
   ) {
     this.world = world;
     const roadWidth = 8;
-    const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    const roadMaterial = new THREE.MeshStandardMaterial({
+      color: 0x555555, // Darker, stone-like grey
+      roughness: 0.8, // Make it look a bit rougher
+      metalness: 0.1,
+    });
     const roadSegments = terrainSegments * 2; // More segments for smoother roads
 
     // Helper function to create a road segment
@@ -49,6 +53,8 @@ export class Road implements IWorldEntity {
         .normalize()
         .multiplyScalar(roadWidth / 2);
 
+      const sunkenOffset = -0.1; // Slightly sink the road into the ground
+
       const rv0 = new THREE.Vector3(x1 - perp.x, y1, z1 - perp.z);
       const rv1 = new THREE.Vector3(x1 + perp.x, y1, z1 + perp.z);
       const rv2 = new THREE.Vector3(x2 - perp.x, y2, z2 - perp.z);
@@ -56,23 +62,23 @@ export class Road implements IWorldEntity {
 
       const positions = new Float32Array([
         rv0.x,
-        rv0.y + 0.05,
-        rv0.z, // Slightly above terrain to prevent z-fighting
+        rv0.y + sunkenOffset,
+        rv0.z, // Slightly below terrain
         rv1.x,
-        rv1.y + 0.05,
+        rv1.y + sunkenOffset,
         rv1.z,
         rv2.x,
-        rv2.y + 0.05,
+        rv2.y + sunkenOffset,
         rv2.z,
 
         rv2.x,
-        rv2.y + 0.05,
+        rv2.y + sunkenOffset,
         rv2.z,
         rv1.x,
-        rv1.y + 0.05,
+        rv1.y + sunkenOffset,
         rv1.z,
         rv3.x,
-        rv3.y + 0.05,
+        rv3.y + sunkenOffset,
         rv3.z,
       ]);
 
@@ -105,19 +111,19 @@ export class Road implements IWorldEntity {
       roadMesh.castShadow = true; // Roads can cast shadows too
       this.roadMeshes.push(roadMesh); // Add to local array
 
-      // Create physics body for the road segment
+      // Create physics body for the road segment (its position should match the visual one)
       const physicsVertices = new Float32Array([
         rv0.x,
-        rv0.y,
+        rv0.y + sunkenOffset,
         rv0.z,
         rv1.x,
-        rv1.y,
+        rv1.y + sunkenOffset,
         rv1.z,
         rv2.x,
-        rv2.y,
+        rv2.y + sunkenOffset,
         rv2.z,
         rv3.x,
-        rv3.y,
+        rv3.y + sunkenOffset,
         rv3.z,
       ]);
       const physicsIndices = new Uint16Array([0, 1, 2, 2, 1, 3]);
