@@ -8,4 +8,5 @@ export enum EntityType {
   System,
   Meteorite,
   UFO,
+  Streetlight,
 }

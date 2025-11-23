@@ -48,7 +48,7 @@ export class WeatherManager {
     this.rainParticles = new THREE.Points(rainGeometry, rainMaterial);
     this.world.sceneManager.graphicsWorld.add(this.rainParticles);
     this.isRaining = true;
-    console.log("Rain started.");
+    
   }
 
   public stopRain(): void {
@@ -59,7 +59,7 @@ export class WeatherManager {
     (this.rainParticles.material as THREE.Material).dispose();
     this.rainParticles = null;
     this.isRaining = false;
-    console.log("Rain stopped.");
+    
   }
 
   public startThunderstorm(): void {
@@ -78,7 +78,7 @@ export class WeatherManager {
     this.world.sceneManager.graphicsWorld.fog = this.fog;
 
     this.lightningTimer = this.lightningInterval; // Initial delay before first lightning
-    console.log("Thunderstorm started.");
+    
   }
 
   public stopThunderstorm(): void {
@@ -97,7 +97,7 @@ export class WeatherManager {
     this.world.sceneManager.graphicsWorld.fog = null;
     this.fog = null;
 
-    console.log("Thunderstorm stopped.");
+    
   }
 
   public update(deltaTime: number): void {

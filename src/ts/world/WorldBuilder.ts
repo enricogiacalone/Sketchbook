@@ -19,6 +19,7 @@ import { Road } from "./Road";
 import { UIManager } from "../core/UIManager";
 import * as Utils from "../core/FunctionLibrary";
 import { CollisionGroups } from "../enums/CollisionGroups";
+import { TerrainGrid, TerrainCellType } from "./TerrainGrid"; // New Import
 
 // Constants for GLTF userData
 const USER_DATA_PHYSICS = "physics";
@@ -78,9 +79,6 @@ export class WorldBuilder {
               });
             });
         } else {
-          console.log(
-            "worldScenePath is undefined, creating procedural world."
-          );
           this.createProceduralWorld();
         }
 
@@ -123,7 +121,7 @@ export class WorldBuilder {
     const terrainMaxHeight = 10;
 
     this.world.terrainSize = terrainSize;
-
+    this.world.terrainSegments = terrainSegments;
     this.world.proceduralWorldActive = true;
 
     const groundGeometry = new THREE.PlaneGeometry(
@@ -197,17 +195,11 @@ export class WorldBuilder {
 
     this.world.physicsManager.physicsWorld.addBody(groundBody);
 
-    this.world.grass = new Grass(
-      this.world,
+    // 1. Initialize terrainGrid
 
-      terrainSize,
+    this.world.terrainGrid = new TerrainGrid(terrainSize, 1); // Initialize TerrainGrid with 1 unit per cell
 
-      terrainMaxHeight,
-
-      terrainSegments
-    );
-
-    this.world.entityManager.add(this.world.grass);
+    // 2. Generate Road (and mark grid cells as Road)
 
     this.world.road = new Road(
       this.world,
@@ -218,34 +210,49 @@ export class WorldBuilder {
 
       groundGeometry,
 
-      terrainMaxHeight
+      terrainMaxHeight,
+
+      this.world.terrainGrid // Pass terrainGrid
     );
 
     this.world.entityManager.add(this.world.road);
 
-    const trees = new Trees(
+    // 3. Generate Grass (and skip Road cells)
+
+    this.world.grass = new Grass(
       this.world,
 
       terrainSize,
 
-      groundGeometry,
+      terrainMaxHeight,
 
-      terrainMaxHeight
+      terrainSegments,
+
+      this.world.terrainGrid // Pass terrainGrid
     );
 
-    trees.generateTrees();
+    this.world.entityManager.add(this.world.grass);
 
+    // 5. Generate Village (houses, and skip Road, Grass, Trees cells)
     const villageGenerator = new VillageGenerator(
       this.world,
-
       this.world.entityManager,
-
       this.world.physicsManager,
-
-      groundGeometry
+      groundGeometry,
+      this.world.terrainGrid // Pass terrainGrid
     );
-
     villageGenerator.generateVillage(terrainMaxHeight);
+
+    // 4. Generate Trees (and skip Road and Grass cells)
+    const trees = new Trees(
+      this.world,
+      terrainSize,
+      groundGeometry,
+      terrainMaxHeight,
+      this.world.terrainGrid, // Pass terrainGrid
+      villageGenerator // Pass VillageGenerator
+    );
+    trees.generateTrees();
 
     const wallGenerator = new WallGenerator(this.world);
 

@@ -13,7 +13,7 @@ export class Sky extends THREE.Object3D implements IUpdatable {
   public timeOfDay: number = 12; // 0-24 hours
 
   // Constants for day/night cycle
-  private readonly DAY_LENGTH: number = 120; // seconds for a full day (24 hours) - Longer day
+  private readonly DAY_LENGTH: number = 240; // seconds for a full day (24 hours) - Longer day
   private readonly SUNRISE_HOUR: number = 6;
   private readonly SUNSET_HOUR: number = 18;
   private readonly NOON_HOUR: number = 12;

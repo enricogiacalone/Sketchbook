@@ -31,6 +31,8 @@ import { InterstellarVortex } from "./InterstellarVortex";
 import { Planet } from "./Planet";
 import { PlanetsGenerator } from "./PlanetsGenerator";
 import { PsychedelicParticles } from "./PsychedelicParticles";
+import { TerrainGrid, TerrainCellType } from "./TerrainGrid"; // Import TerrainGrid and TerrainCellType
+import { VillageGenerator } from "./VillageGenerator";
 import { WorldBuilder } from "./WorldBuilder";
 
 export class World {
@@ -75,7 +77,9 @@ export class World {
   public player: Character; // Reference to the local player character
   public networkPlayers: Map<string, NetworkPlayer> = new Map(); // Map to store other players by their socket ID
   public weatherManager: WeatherManager;
-  public streetlights: Streetlight[] = [];
+
+  public terrainGrid: TerrainGrid; // New: Terrain grid for parametric generation
+  public villageGenerator: VillageGenerator;
 
   public terrainHeights: number[] = [];
   public groundPositionAttribute: THREE.BufferAttribute;
@@ -213,16 +217,10 @@ export class World {
     this.physicsManager.update(timeStep);
     this.gameManager.update(timeStep, unscaledTimeStep);
     this.weatherManager.update(timeStep);
-
-    this.streetlights.forEach((light) => light.update(this.sky.timeOfDay));
+    this.worldEventSpawner.update(timeStep);
 
     if (this.worldGUI.params.Debug_Physics) {
       this.cannonDebugRenderer.update();
-    }
-
-    // Spawn UFOs
-    if (Math.random() < 0.002) {
-      this.worldEventSpawner.spawnUFO();
     }
   }
 

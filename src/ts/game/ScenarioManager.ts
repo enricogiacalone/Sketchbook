@@ -22,7 +22,7 @@ export class ScenarioManager {
   }
 
   public launchScenario(scenarioID: string): void {
-    console.log(`Launching scenario: ${scenarioID}`);
+    
     this.lastScenarioID = scenarioID;
 
     this.clearEntities();
@@ -158,7 +158,7 @@ export class ScenarioManager {
   }
 
   public spawnEnemies(count: number): void {
-    console.log(`Attempting to spawn ${count} enemies.`);
+    
     if (!this.world.player) {
       console.warn("Cannot spawn enemies: local player is not defined.");
       return;
@@ -196,12 +196,6 @@ export class ScenarioManager {
             spawnPosition.x = Math.random() * 800 - 400; // Wider range
             spawnPosition.z = Math.random() * 800 - 400; // Wider range
             spawnPosition.y = 20; // Keep fixed y for now, assume falling into place
-            console.log(
-              "DEBUG: Procedural world spawnPosition calculated:",
-              spawnPosition.x,
-              spawnPosition.y,
-              spawnPosition.z
-            );
           }
           character.setPosition(
             spawnPosition.x,
@@ -210,10 +204,6 @@ export class ScenarioManager {
           );
 
           this.world.entityManager.add(character);
-          console.log(
-            `Spawned enemy '${character.name}' at physics body position:`,
-            character.characterCapsule.body.position.toArray()
-          );
         })
         .catch((error) => {
           console.error("Error loading enemy character model:", error);

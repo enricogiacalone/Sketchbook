@@ -70,7 +70,7 @@ export class EntityManager {
   }
 
   private performRemoval(worldEntity: IWorldEntity): void {
-    console.log("Performing removal for entity:", (worldEntity as any).uuid);
+    
 
     if (worldEntity instanceof NetworkPlayer) {
       worldEntity.removeFromWorld(this.world);
@@ -106,9 +106,6 @@ export class EntityManager {
       }
 
       this.world.sceneManager.graphicsWorld.remove(worldEntity as Character);
-      console.log(
-        `Entity ${(worldEntity as any).uuid} removed from scene graph.`
-      );
       if ((worldEntity as Character).raycastBox) {
         this.world.sceneManager.graphicsWorld.remove(
           (worldEntity as Character).raycastBox

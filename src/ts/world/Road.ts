@@ -1,132 +1,100 @@
-import * as CANNON from "cannon-es";
 import * as THREE from "three";
-import { IWorldEntity } from "~/interfaces/IWorldEntity";
-import { World } from "./World";
+import * as CANNON from "cannon-es";
+import { TerrainGrid, TerrainCellType } from "./TerrainGrid"; // New: Import TerrainGrid and TerrainCellType
 import * as Utils from "~/core/FunctionLibrary"; // Assuming Utils is needed for cannonVector/cannonQuat
 
 export class Road implements IWorldEntity {
   private roadMeshes: THREE.Mesh[] = [];
   private roadPhysicsBodies: CANNON.Body[] = [];
   private world: World; // Store world reference to access getTerrainHeightAt
+  private terrainGrid: TerrainGrid; // New: Store terrainGrid
 
   constructor(
     world: World,
     terrainSize: number,
     terrainSegments: number,
     groundGeometry: THREE.PlaneGeometry,
-    terrainMaxHeight: number
+    terrainMaxHeight: number,
+    terrainGrid: TerrainGrid // New: Accept terrainGrid
   ) {
     this.world = world;
+    this.terrainGrid = terrainGrid; // Store terrainGrid
     const roadWidth = 8;
     const roadMaterial = new THREE.MeshStandardMaterial({
       color: 0x555555, // Darker, stone-like grey
       roughness: 0.8, // Make it look a bit rougher
       metalness: 0.1,
     });
-    const roadSegments = terrainSegments * 2; // More segments for smoother roads
+    const roadSegmentsAlongLength = terrainSegments * 2; // More segments for smoother roads
+    const roadSegmentsAcrossWidth = 10; // Increased for better terrain conformity
 
-    // Helper function to create a road segment
-    const createRoadSegment = (
-      x1: number,
-      z1: number,
-      x2: number,
-      z2: number
+    const yOffset = 0.1; // Increased offset to keep road slightly above terrain
+
+    // Function to generate a road section along a given axis
+    const generateRoadSection = (
+      axis: "x" | "z",
+      length: number,
+      positionOffset: THREE.Vector3
     ): void => {
-      const y1 = this.world.worldBuilder.getTerrainHeightAt(
-        x1,
-        z1,
-        groundGeometry,
-        terrainMaxHeight
-      );
-      const y2 = this.world.worldBuilder.getTerrainHeightAt(
-        x2,
-        z2,
-        groundGeometry,
-        terrainMaxHeight
+      const roadGeometry = new THREE.PlaneGeometry(
+        axis === "x" ? length : roadWidth,
+        axis === "z" ? length : roadWidth,
+        axis === "x" ? roadSegmentsAlongLength : roadSegmentsAcrossWidth,
+        axis === "z" ? roadSegmentsAlongLength : roadSegmentsAcrossWidth
       );
 
-      // Calculate perpendicular vector for road width
-      const dir = new THREE.Vector3(x2 - x1, y2 - y1, z2 - z1).normalize();
-      const up = new THREE.Vector3(0, 1, 0);
-      const perp = new THREE.Vector3()
-        .crossVectors(dir, up)
-        .normalize()
-        .multiplyScalar(roadWidth / 2);
+      // Rotate geometry if along Z-axis
+      if (axis === "z") {
+        roadGeometry.rotateY(Math.PI / 2); // Rotate to align with Z-axis
+      }
+      roadGeometry.rotateX(-Math.PI / 2); // Lay flat on XZ plane
 
-      const sunkenOffset = -0.1; // Slightly sink the road into the ground
+      const positionAttribute = roadGeometry.attributes.position;
+      const tempVector = new THREE.Vector3();
 
-      const rv0 = new THREE.Vector3(x1 - perp.x, y1, z1 - perp.z);
-      const rv1 = new THREE.Vector3(x1 + perp.x, y1, z1 + perp.z);
-      const rv2 = new THREE.Vector3(x2 - perp.x, y2, z2 - perp.z);
-      const rv3 = new THREE.Vector3(x2 + perp.x, y2, z2 + perp.z);
+      // Determine road bounds for marking terrainGrid
+      let minX_road = Infinity;
+      let maxX_road = -Infinity;
+      let minZ_road = Infinity;
+      let maxZ_road = -Infinity;
 
-      const positions = new Float32Array([
-        rv0.x,
-        rv0.y + sunkenOffset,
-        rv0.z, // Slightly below terrain
-        rv1.x,
-        rv1.y + sunkenOffset,
-        rv1.z,
-        rv2.x,
-        rv2.y + sunkenOffset,
-        rv2.z,
+      for (let i = 0; i < positionAttribute.count; i++) {
+        tempVector.fromBufferAttribute(positionAttribute, i);
 
-        rv2.x,
-        rv2.y + sunkenOffset,
-        rv2.z,
-        rv1.x,
-        rv1.y + sunkenOffset,
-        rv1.z,
-        rv3.x,
-        rv3.y + sunkenOffset,
-        rv3.z,
-      ]);
+        // Apply global position offset to tempVector before sampling terrain height
+        const globalX = tempVector.x + positionOffset.x;
+        const globalZ = tempVector.z + positionOffset.z;
 
-      const normals = new Float32Array([
-        0, 1, 0, 0, 1, 0, 0, 1, 0,
+        // Update road bounds
+        minX_road = Math.min(minX_road, globalX);
+        maxX_road = Math.max(maxX_road, globalX);
+        minZ_road = Math.min(minZ_road, globalZ);
+        maxZ_road = Math.max(maxZ_road, globalZ);
 
-        0, 1, 0, 0, 1, 0, 0, 1, 0,
-      ]);
 
-      const uvs = new Float32Array([
-        0, 0, 1, 0, 0, 1,
+        const y = this.world.worldBuilder.getTerrainHeightAt(
+          globalX,
+          globalZ,
+          groundGeometry,
+          terrainMaxHeight
+        );
 
-        0, 1, 1, 0, 1, 1,
-      ]);
+        positionAttribute.setY(i, y + yOffset);
+      }
+      positionAttribute.needsUpdate = true; // Mark as updated
 
-      const segmentGeometry = new THREE.BufferGeometry();
-      segmentGeometry.setAttribute(
-        "position",
-        new THREE.BufferAttribute(positions, 3)
-      );
-      segmentGeometry.setAttribute(
-        "normal",
-        new THREE.BufferAttribute(normals, 3)
-      );
-      segmentGeometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-      segmentGeometry.computeVertexNormals(); // Recalculate normals for smooth shading
+      roadGeometry.computeVertexNormals(); // Recalculate normals after Y-adjustments
 
-      const roadMesh = new THREE.Mesh(segmentGeometry, roadMaterial);
+      const roadMesh = new THREE.Mesh(roadGeometry, roadMaterial);
+      roadMesh.position.copy(positionOffset); // Apply main offset
       roadMesh.receiveShadow = true;
-      roadMesh.castShadow = true; // Roads can cast shadows too
-      this.roadMeshes.push(roadMesh); // Add to local array
+      roadMesh.castShadow = true;
+      this.roadMeshes.push(roadMesh);
 
-      // Create physics body for the road segment (its position should match the visual one)
-      const physicsVertices = new Float32Array([
-        rv0.x,
-        rv0.y + sunkenOffset,
-        rv0.z,
-        rv1.x,
-        rv1.y + sunkenOffset,
-        rv1.z,
-        rv2.x,
-        rv2.y + sunkenOffset,
-        rv2.z,
-        rv3.x,
-        rv3.y + sunkenOffset,
-        rv3.z,
-      ]);
-      const physicsIndices = new Uint16Array([0, 1, 2, 2, 1, 3]);
+      // Create physics body from the same geometry
+      const physicsVertices = (roadGeometry.attributes.position as THREE.BufferAttribute).array;
+      const physicsIndices = (roadGeometry.index as THREE.BufferAttribute).array;
+
       const trimeshShape = new CANNON.Trimesh(
         physicsVertices as any,
         physicsIndices as any
@@ -136,22 +104,18 @@ export class Road implements IWorldEntity {
         material: world.physicsManager.trimeshMaterial,
       });
       roadBody.addShape(trimeshShape);
-      this.roadPhysicsBodies.push(roadBody); // Add to local array
+      roadBody.position.copy(Utils.cannonVector(positionOffset));
+      this.roadPhysicsBodies.push(roadBody);
+
+      // Mark area in terrain grid as Road
+      this.terrainGrid.markArea(minX_road, minZ_road, maxX_road, maxZ_road, TerrainCellType.Road);
     };
 
-    // Main road along X-axis
-    for (let i = -roadSegments / 2; i < roadSegments / 2; i++) {
-      const x1 = (i / roadSegments) * terrainSize;
-      const x2 = ((i + 1) / roadSegments) * terrainSize;
-      createRoadSegment(x1, 0, x2, 0);
-    }
+    // Generate Main road along X-axis
+    generateRoadSection("x", terrainSize, new THREE.Vector3(0, 0, 0));
 
-    // Main road along Z-axis
-    for (let i = -roadSegments / 2; i < roadSegments / 2; i++) {
-      const z1 = (i / roadSegments) * terrainSize;
-      const z2 = ((i + 1) / roadSegments) * terrainSize;
-      createRoadSegment(0, z1, 0, z2);
-    }
+    // Generate Main road along Z-axis
+    generateRoadSection("z", terrainSize, new THREE.Vector3(0, 0, 0));
   }
 
   public addToWorld(world: World): void {

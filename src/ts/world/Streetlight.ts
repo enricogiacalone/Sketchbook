@@ -1,7 +1,11 @@
 import * as THREE from "three";
+import { EntityType } from "~/enums/EntityType";
+import { IWorldEntity } from "~/interfaces/IWorldEntity";
 import { World } from "./World";
 
-export class Streetlight extends THREE.Object3D {
+export class Streetlight extends THREE.Object3D implements IWorldEntity {
+  public updateOrder: number = 2; // For example, update after characters
+  public entityType: EntityType = EntityType.Streetlight;
   private world: World;
   private pole: THREE.Mesh;
   private lamp: THREE.Mesh;
@@ -36,23 +40,30 @@ export class Streetlight extends THREE.Object3D {
     this.pointLight.shadow.camera.far = 100; // Increased to match light distance
 
     this.position.copy(position);
+  }
+
+  public addToWorld(world: World): void {
+    this.world = world;
     this.world.sceneManager.graphicsWorld.add(this);
   }
 
-      public turnOn(): void {
-          this.pointLight.intensity = 8; // Further increased intensity (to 8)
-          this.pointLight.distance = 150; // Further increased reach
-          this.pointLight.decay = 0.5; // Even slower falloff
-          this.pointLight.shadow.camera.far = 150; // Updated to match new distance
-          console.log('Streetlight turned ON');
-      }
-  public turnOff(): void {
-    this.pointLight.intensity = 0;
-    console.log('Streetlight turned OFF');
+  public removeFromWorld(world: World): void {
+    this.world.sceneManager.graphicsWorld.remove(this);
   }
 
-  public update(timeOfDay: number): void {
-    const isNightTime = timeOfDay >= 18 || timeOfDay < 6;
+  public turnOn(): void {
+    this.pointLight.intensity = 8; // Further increased intensity (to 8)
+    this.pointLight.distance = 150; // Further increased reach
+    this.pointLight.decay = 0.5; // Even slower falloff
+    this.pointLight.shadow.camera.far = 150; // Updated to match new distance
+  }
+  public turnOff(): void {
+    this.pointLight.intensity = 0;
+  }
+
+  public update(timeStep: number): void {
+    const isNightTime =
+      this.world.sky.timeOfDay >= 18 || this.world.sky.timeOfDay < 6;
     if (isNightTime) {
       this.turnOn();
     } else {

@@ -1,26 +1,29 @@
 import * as THREE from "three";
-import * as CANNON from "cannon-es";
-import { World } from "./World";
+import { TerrainGrid, TerrainCellType } from "./TerrainGrid"; // New: Import TerrainGrid and TerrainCellType
 import { Streetlight } from "./Streetlight";
 import { EntityManager } from "~/core/EntityManager"; // Assuming EntityManager is used for adding entities
 import { PhysicsManager } from "~/core/PhysicsManager"; // Assuming PhysicsManager for materials
+import * as CANNON from "cannon-es";
 
 export class VillageGenerator {
   private world: World;
   private entityManager: EntityManager;
   private physicsManager: PhysicsManager;
   private groundGeometry: THREE.PlaneGeometry; // Add groundGeometry property
+  private terrainGrid: TerrainGrid; // New: Store terrainGrid
 
   constructor(
     world: World,
     entityManager: EntityManager,
     physicsManager: PhysicsManager,
-    groundGeometry: THREE.PlaneGeometry
+    groundGeometry: THREE.PlaneGeometry,
+    terrainGrid: TerrainGrid // New: Accept terrainGrid
   ) {
     this.world = world;
     this.entityManager = entityManager;
     this.physicsManager = physicsManager;
     this.groundGeometry = groundGeometry; // Assign groundGeometry
+    this.terrainGrid = terrainGrid; // Store terrainGrid
   }
 
   public generateVillage(terrainMaxHeight: number): void {
@@ -47,60 +50,76 @@ export class VillageGenerator {
       const radius = Math.random() * villageRadius;
       const x = villageCenter.x + Math.cos(angle) * radius;
       const z = villageCenter.z + Math.sin(angle) * radius;
-      const baseHeight = Math.sin(x / 30) * Math.cos(z / 20) * terrainMaxHeight;
 
       // House dimensions
       const houseWidth = THREE.MathUtils.randFloat(4, 7);
       const houseDepth = THREE.MathUtils.randFloat(4, 7);
       const houseHeight = THREE.MathUtils.randFloat(5, 8);
-      const roofHeight = THREE.MathUtils.randFloat(2, 4);
 
-      // House Body (Visual)
-      const houseBodyGeometry = new THREE.BoxGeometry(
-        houseWidth,
-        houseHeight,
-        houseDepth
-      );
-      const houseBodyMesh = new THREE.Mesh(
-        houseBodyGeometry,
-        houseBodyMaterial
-      );
-      houseBodyMesh.position.set(x, baseHeight + houseHeight / 2, z);
-      houseBodyMesh.castShadow = true;
-      houseBodyMesh.receiveShadow = true;
-      this.world.sceneManager.graphicsWorld.add(houseBodyMesh);
+      // Check if the area for the house is clear before placing
+      const halfHouseWidth = houseWidth / 2;
+      const halfHouseDepth = houseDepth / 2;
 
-      // House Roof (Visual)
-      const houseRoofGeometry = new THREE.ConeGeometry(
-        Math.max(houseWidth, houseDepth) / 1.5,
-        roofHeight,
-        4
-      ); // Square pyramid
-      const houseRoofMesh = new THREE.Mesh(
-        houseRoofGeometry,
-        houseRoofMaterial
-      );
-      houseRoofMesh.position.set(
-        x,
-        baseHeight + houseHeight + roofHeight / 2,
-        z
-      );
-      houseRoofMesh.rotation.y = Math.PI / 4; // Rotate by 45 degrees
-      houseRoofMesh.castShadow = true;
-      houseRoofMesh.receiveShadow = true;
-      this.world.sceneManager.graphicsWorld.add(houseRoofMesh);
+      // Define a small bounding box for the house for grid check
+      let houseMinX = x - halfHouseWidth;
+      let houseMaxX = x + halfHouseWidth;
+      let houseMinZ = z - halfHouseDepth;
+      let houseMaxZ = z + halfHouseDepth;
 
-      // House Body (Physics)
-      const physicsBodyShape = new CANNON.Box(
-        new CANNON.Vec3(houseWidth / 2, houseHeight / 2, houseDepth / 2)
-      );
-      const physicsBody = new CANNON.Body({
-        mass: 0,
-        material: this.physicsManager.trimeshMaterial,
-      });
-      physicsBody.addShape(physicsBodyShape);
-      physicsBody.position.set(x, baseHeight + houseHeight / 2, z);
-      this.physicsManager.physicsWorld.addBody(physicsBody);
+      if (!this.terrainGrid.isOccupied(x, z)) { // Check only center for simplicity
+        // Mark the area as Building
+        this.terrainGrid.markArea(houseMinX, houseMinZ, houseMaxX, houseMaxZ, TerrainCellType.Building);
+
+        const baseHeight = Math.sin(x / 30) * Math.cos(z / 20) * terrainMaxHeight;
+        const roofHeight = THREE.MathUtils.randFloat(2, 4);
+
+        // House Body (Visual)
+        const houseBodyGeometry = new THREE.BoxGeometry(
+          houseWidth,
+          houseHeight,
+          houseDepth
+        );
+        const houseBodyMesh = new THREE.Mesh(
+          houseBodyGeometry,
+          houseBodyMaterial
+        );
+        houseBodyMesh.position.set(x, baseHeight + houseHeight / 2, z);
+        houseBodyMesh.castShadow = true;
+        houseBodyMesh.receiveShadow = true;
+        this.world.sceneManager.graphicsWorld.add(houseBodyMesh);
+
+        // House Roof (Visual)
+        const houseRoofGeometry = new THREE.ConeGeometry(
+          Math.max(houseWidth, houseDepth) / 1.5,
+          roofHeight,
+          4
+        ); // Square pyramid
+        const houseRoofMesh = new THREE.Mesh(
+          houseRoofGeometry,
+          houseRoofMaterial
+        );
+        houseRoofMesh.position.set(
+          x,
+          baseHeight + houseHeight + roofHeight / 2,
+          z
+        );
+        houseRoofMesh.rotation.y = Math.PI / 4; // Rotate by 45 degrees
+        houseRoofMesh.castShadow = true;
+        houseRoofMesh.receiveShadow = true;
+        this.world.sceneManager.graphicsWorld.add(houseRoofMesh);
+
+        // House Body (Physics)
+        const physicsBodyShape = new CANNON.Box(
+          new CANNON.Vec3(houseWidth / 2, houseHeight / 2, houseDepth / 2)
+        );
+        const physicsBody = new CANNON.Body({
+          mass: 0,
+          material: this.physicsManager.trimeshMaterial,
+        });
+        physicsBody.addShape(physicsBodyShape);
+        physicsBody.position.set(x, baseHeight + houseHeight / 2, z);
+        this.physicsManager.physicsWorld.addBody(physicsBody);
+      }
     }
 
     // Add Streetlights around the village
@@ -121,7 +140,7 @@ export class VillageGenerator {
         this.world,
         new THREE.Vector3(x, y, z)
       );
-      this.world.streetlights.push(streetlight);
+      this.entityManager.add(streetlight);
     }
 
     // Add a Well to the village

@@ -60,13 +60,13 @@ export class WorldEventSpawner {
     const spawnPosition = position || new THREE.Vector3(0, 50, 0); // Default position if none provided
     const tornado = new Tornado(this.world, spawnPosition);
     this.tornadoes.push(tornado);
-    console.log("Tornado spawned at:", spawnPosition);
+    
   }
 
   public removeTornado(tornado: Tornado): void {
     tornado.dispose();
     _.pull(this.tornadoes, tornado);
-    console.log("Tornado removed.");
+    
   }
 
   public removeLastTornado(): void {
@@ -79,6 +79,11 @@ export class WorldEventSpawner {
   }
 
   public update(timeStep: number): void {
+    // Spawn UFOs
+    if (Math.random() < 0.002) {
+      this.spawnUFO();
+    }
+
     // Update and clean up meteorites
     for (let i = this.meteorites.length - 1; i >= 0; i--) {
       const meteorite = this.meteorites[i];
