@@ -21,6 +21,9 @@ import * as Utils from "../core/FunctionLibrary";
 import { CollisionGroups } from "../enums/CollisionGroups";
 import { TerrainGrid, TerrainCellType } from "./TerrainGrid"; // New Import
 
+import { Sky } from "./Sky";
+import { Stylizer } from "~/core/Stylizer"; // Import Stylizer
+
 // Constants for GLTF userData
 const USER_DATA_PHYSICS = "physics";
 const USER_DATA_TYPE_BOX = "box";
@@ -37,6 +40,7 @@ export class WorldBuilder {
   }
 
   private _postLoadingSetup(worldScenePath?: any): void {
+    Stylizer.initializeToonMaterial(); // Initialize toon material once
     this.world.update(1, 1);
     this.world.setTimeScale(1);
 
@@ -123,6 +127,9 @@ export class WorldBuilder {
     this.world.terrainSize = terrainSize;
     this.world.terrainSegments = terrainSegments;
     this.world.proceduralWorldActive = true;
+
+    // Initialize Sky
+    this.world.sky = new Sky(this.world);
 
     const groundGeometry = new THREE.PlaneGeometry(
       terrainSize,
@@ -324,7 +331,10 @@ export class WorldBuilder {
     if (child.hasOwnProperty("userData")) {
       if (child.type === "Mesh") {
         Utils.setupMeshProperties(child);
-        this.world.sky.csm.setupMaterial(child.material);
+        Stylizer.applyToonStyle(child as THREE.Mesh);
+        if (this.world.sky) {
+          this.world.sky.csm.setupMaterial(child.material);
+        }
 
         if (child.material.name === MATERIAL_NAME_OCEAN) {
           this.world.entityManager.registerUpdatable(
@@ -365,11 +375,11 @@ export class WorldBuilder {
         }
 
         if (child.userData.data === USER_DATA_PATH) {
-          this.world.paths.push(new Path(child));
+          this.world.entityManager.paths.push(new Path(child));
         }
 
         if (child.userData.data === USER_DATA_SCENARIO) {
-          this.world.scenarios.push(new Scenario(child, this.world));
+          this.world.entityManager.scenarios.push(new Scenario(child, this.world));
         }
       }
     }

@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { World } from "./World";
 import { Planet } from "./Planet";
+import { Sky } from "./Sky"; // Import Sky
 
 // Constants for planet generation
 const PLANET_COUNT = 3;
@@ -12,7 +12,7 @@ const PLANET_POSITION_RANDOM_Y = 200;
 const PLANET_POSITION_RANDOM_Z = 1500;
 
 export class PlanetsGenerator {
-  constructor(private world: World) {}
+  constructor(private sky: Sky) {}
 
   public generate(): void {
     for (let i = 0; i < PLANET_COUNT; i++) {
@@ -23,8 +23,8 @@ export class PlanetsGenerator {
       );
       const size = PLANET_SIZE_BASE + Math.random() * PLANET_SIZE_RANDOM;
       const planet = new Planet(
-        this.world,
-        this.world.physicsManager,
+        this.sky.world, // Pass the world from the sky instance
+        this.sky.world.physicsManager,
         color,
         size
       );
@@ -34,8 +34,8 @@ export class PlanetsGenerator {
         (Math.random() - 0.5) * PLANET_POSITION_RANDOM_Z
       );
       planet.mesh.renderOrder = -1; // Render planets behind clouds
-      this.world.planets.push(planet);
-      this.world.entityManager.add(planet);
+      this.sky.planets.push(planet);
+      this.sky.world.entityManager.add(planet);
     }
   }
 }

@@ -34,6 +34,7 @@ import { Explosion } from "~/core/Explosion"; // Added import // Added import
 
 import { SpeechBubble } from "~/core/SpeechBubble";
 import { Bullet } from "../core/Bullet";
+import { Stylizer } from "~/core/Stylizer";
 
 export class Character extends THREE.Object3D implements IWorldEntity {
   public updateOrder: number = 1;
@@ -104,21 +105,17 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   constructor(gltf: any) {
     super();
 
-    // Initialize toon material if not already done
-    if (!Character.toonMaterial) {
-      const gradientMap = new THREE.DataTexture(
-        new Uint8Array([0, 0, 0, 255, 128, 128, 128, 255]), // Black, Gray
-        2,
-        1,
-        THREE.RGBAFormat
-      );
-      gradientMap.needsUpdate = true;
-      Character.toonMaterial = new THREE.MeshToonMaterial({
-        gradientMap: gradientMap,
-      });
-    }
+    gltf.scene.traverse((child) => {
+      if (child.isMesh) {
+        Stylizer.applyToonStyle(child as THREE.Mesh);
+        if (Array.isArray(child.material)) {
+          this.materials.push(...(child.material as THREE.Material[]));
+        } else {
+          this.materials.push(child.material as THREE.Material);
+        }
+      }
+    });
 
-    this.readCharacterData(gltf);
     this.setAnimations(gltf.animations);
 
     // Calculate character height from GLTF scene bounding box
@@ -365,53 +362,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     }
   }
 
-  public readCharacterData(gltf: any): void {
-    // gltf.scene is already added to this.modelContainer in the constructor
 
-    gltf.scene.traverse((child) => {
-      Utils.setupMeshProperties(child); // Moved outside if (child.isMesh) to ensure it's always called
-
-      if (child.isMesh) {
-        // Apply Toon Material
-        const toonMaterial = Character.toonMaterial.clone();
-        if (
-          child.material instanceof THREE.MeshStandardMaterial ||
-          child.material instanceof THREE.MeshLambertMaterial
-        ) {
-          toonMaterial.color.copy(child.material.color);
-          if (child.material.map) {
-            toonMaterial.map = child.material.map;
-          }
-        } else if (Array.isArray(child.material)) {
-          // Handle multiple materials (e.g., for GLTF models with multiple parts)
-          child.material = child.material.map((mat) => {
-            const newToonMat = Character.toonMaterial.clone();
-            if (mat.color) newToonMat.color.copy(mat.color);
-            if (mat.map) newToonMat.map = mat.map;
-            return newToonMat;
-          });
-        } else {
-          // Default case for other material types or if color/map not found
-          toonMaterial.color.set(0xcccccc); // A default color
-        }
-        child.material = toonMaterial;
-        this.materials.push(toonMaterial);
-
-        // Create and add outline mesh ONLY if child has a parent
-        if (child.parent) {
-          // This check is crucial
-          const outlineMesh = child.clone();
-          const outlineMaterial = new THREE.MeshBasicMaterial({
-            color: 0x000000,
-            side: THREE.BackSide,
-          });
-          outlineMesh.material = outlineMaterial;
-          outlineMesh.scale.multiplyScalar(1.02); // Slightly larger
-          child.parent.add(outlineMesh);
-        }
-      }
-    });
-  }
 
   public handleKeyboardEvent(
     event: KeyboardEvent,
@@ -850,7 +801,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
 
     // Find best vehicle
     let vehicleFinder = new ClosestObjectFinder<Vehicle>(this.position, 10);
-    this.world.vehicles.forEach((vehicle) => {
+    this.world.entityManager.vehicles.forEach((vehicle) => {
       vehicleFinder.consider(vehicle, vehicle.position);
     });
 
@@ -992,9 +943,9 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       const currentVehicle = this.occupyingSeat.vehicle;
 
       // If this is the main character, make all other characters in the same vehicle exit
-      if (this === this.world.characters[0]) {
+      if (this === this.world.entityManager.characters[0]) {
         // Check if this is the main character
-        this.world.characters.forEach((otherCharacter) => {
+        this.world.entityManager.characters.forEach((otherCharacter) => {
           if (
             otherCharacter !== this &&
             otherCharacter.occupyingSeat?.vehicle === currentVehicle
@@ -1234,7 +1185,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   }
 
   public addToWorld(world: World): void {
-    if (_.includes(world.characters, this)) {
+    if (_.includes(world.entityManager.characters, this)) {
       console.warn("Adding character to a world in which it already exists.");
     } else {
       // Set world
@@ -1244,7 +1195,7 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       this.setState(new Idle(this));
 
       // Register character
-      world.characters.push(this);
+      world.entityManager.characters.push(this);
 
       // Register physics
       world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);

@@ -69,7 +69,7 @@ export class NetworkManager {
     const networkCharacter = this.world.networkPlayers.get(id);
     if (networkCharacter) {
       _.remove(
-        this.world.characters,
+        this.world.entityManager.characters,
         (char) => (char as NetworkPlayer).socketId === id
       );
       this.world.entityManager.remove(networkCharacter);

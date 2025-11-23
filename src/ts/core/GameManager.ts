@@ -16,7 +16,7 @@ export class GameManager {
   }
 
   public update(timeStep: number, unscaledTimeStep: number): void {
-    this.world.updatables.forEach((entity) => {
+    this.world.entityManager.updatables.forEach((entity) => {
       entity.update(timeStep, unscaledTimeStep);
     });
 

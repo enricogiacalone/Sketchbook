@@ -1,21 +1,25 @@
 import * as THREE from "three";
 import { IUpdatable } from "~/interfaces/IUpdatable";
-import { World } from "~/world/World";
+import { Sky } from "./Sky"; // Import Sky
 import { createNoise3D } from "simplex-noise";
 import { InterstellarVortex } from "./InterstellarVortex";
 
 export class PsychedelicParticles extends THREE.Object3D implements IUpdatable {
   public updateOrder: number = 10;
 
-  private world: World;
+  private sky: Sky; // Change from world to sky
   private particles: THREE.Points;
   private velocities: THREE.Vector3[] = [];
   private simplex: any;
   private vortex: InterstellarVortex | null;
 
-  constructor(world: World, count: number, vortex: InterstellarVortex | null) {
+  constructor(
+    sky: Sky, // Change from world to sky
+    count: number,
+    vortex: InterstellarVortex | null
+  ) {
     super();
-    this.world = world;
+    this.sky = sky; // Assign sky
     this.simplex = createNoise3D();
     this.vortex = vortex;
 
@@ -84,8 +88,8 @@ export class PsychedelicParticles extends THREE.Object3D implements IUpdatable {
     this.particles = new THREE.Points(geometry, material);
     this.add(this.particles);
 
-    this.world.sceneManager.graphicsWorld.add(this);
-    this.world.entityManager.registerUpdatable(this);
+    this.sky.world.sceneManager.graphicsWorld.add(this);
+    this.sky.world.entityManager.registerUpdatable(this);
   }
 
   public update(timeStep: number): void {
@@ -95,11 +99,11 @@ export class PsychedelicParticles extends THREE.Object3D implements IUpdatable {
       .velocity as THREE.BufferAttribute;
     const sizes = this.particles.geometry.attributes
       .size as THREE.BufferAttribute;
-    const time = this.world.clock.getElapsedTime();
+    const time = this.sky.world.clock.getElapsedTime();
     (this.particles.material as THREE.ShaderMaterial).uniforms.time.value =
       time;
 
-    const player = this.world.characters[0];
+    const player = this.sky.world.entityManager.characters[0];
     // const vortexCenter = this.vortex.position; // Assuming vortex position is its center
 
     for (let i = 0; i < positions.count; i++) {

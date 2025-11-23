@@ -33,7 +33,7 @@ export class Minimap implements IUpdatable {
   }
 
   public update(timestep: number): void {
-    const player = this.world.characters[0];
+    const player = this.world.entityManager.characters[0];
     if (!player) return;
 
     // Rotate minimap container inversely to player's yaw
@@ -77,7 +77,7 @@ export class Minimap implements IUpdatable {
     this.updateHealthArmor(player);
 
     // Update enemy dots
-    const enemies = this.world.characters.filter(
+    const enemies = this.world.entityManager.characters.filter(
       (c) => c.entityType === EntityType.Enemy
     );
     this.updateIcons(
@@ -91,7 +91,7 @@ export class Minimap implements IUpdatable {
 
     // Update vehicle icons
     this.updateIcons(
-      this.world.vehicles,
+      this.world.entityManager.vehicles,
       this.vehicleIcons,
       "minimap-vehicle",
       player,

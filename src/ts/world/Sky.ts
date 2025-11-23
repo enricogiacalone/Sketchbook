@@ -3,6 +3,12 @@ import { CSM } from "three/addons/csm/CSM.js";
 import { SkyShader } from "~/lib/shaders/SkyShader";
 import { IUpdatable } from "~/interfaces/IUpdatable";
 import { World } from "~/world/World";
+import { Cloud } from "./Cloud";
+import { CloudsGenerator } from "./CloudsGenerator";
+import { InterstellarVortex } from "./InterstellarVortex";
+import { Planet } from "./Planet";
+import { PlanetsGenerator } from "./PlanetsGenerator";
+import { PsychedelicParticles } from "./PsychedelicParticles";
 
 export class Sky extends THREE.Object3D implements IUpdatable {
   public updateOrder: number = 5;
@@ -18,6 +24,11 @@ export class Sky extends THREE.Object3D implements IUpdatable {
   private readonly SUNSET_HOUR: number = 18;
   private readonly NOON_HOUR: number = 12;
   private readonly MIDNIGHT_HOUR: number = 0;
+
+  public clouds: Cloud[] = [];
+  public planets: Planet[] = [];
+  public interstellarVortex: InterstellarVortex;
+  public psychedelicParticles: PsychedelicParticles;
 
   set theta(value: number) {
     this._theta = value;
@@ -83,6 +94,24 @@ export class Sky extends THREE.Object3D implements IUpdatable {
 
     // Initial sun position and light settings based on initial timeOfDay
     this.updateSunAndLighting();
+
+    // Initialize Sky and Clouds
+    const cloudsGenerator = new CloudsGenerator(this);
+    cloudsGenerator.generate();
+
+    // Initialize Planets
+    const planetsGenerator = new PlanetsGenerator(this);
+    planetsGenerator.generate();
+    this.interstellarVortex = new InterstellarVortex(
+      this,
+      new THREE.Vector3(0, 500, 0),
+      2000
+    );
+    this.psychedelicParticles = new PsychedelicParticles(
+      this, // Pass the Sky instance
+      5000,
+      this.interstellarVortex
+    );
 
     world.sceneManager.graphicsWorld.add(this);
     this.world.entityManager.registerUpdatable(this);

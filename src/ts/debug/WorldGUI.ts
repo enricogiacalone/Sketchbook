@@ -111,7 +111,7 @@ export class WorldGUI {
         this.world.cannonDebugRenderer = undefined;
       }
 
-      this.world.characters.forEach((char) => {
+      this.world.entityManager.characters.forEach((char) => {
         char.raycastBox.visible = enabled;
       });
     });

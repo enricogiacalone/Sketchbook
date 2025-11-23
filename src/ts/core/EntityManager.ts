@@ -7,9 +7,17 @@ import { NetworkPlayer } from "~/characters/NetworkPlayer";
 import { EntityType } from "~/enums/EntityType";
 import { IUpdatable } from "~/interfaces/IUpdatable";
 import { IWorldEntity } from "~/interfaces/IWorldEntity";
+import { Path } from "~/world/Path";
+import { Scenario } from "~/world/Scenario";
+import { Vehicle } from "~/vehicles/Vehicle";
 import { World } from "~/world/World"; // Import World
 
 export class EntityManager {
+  public scenarios: Scenario[] = [];
+  public characters: Character[] = [];
+  public vehicles: Vehicle[] = [];
+  public paths: Path[] = [];
+  public updatables: IUpdatable[] = [];
   private world: World;
 
   constructor(world: World) {
@@ -52,14 +60,14 @@ export class EntityManager {
   }
 
   public registerUpdatable(registree: IUpdatable): void {
-    this.world.updatables.push(registree);
-    this.world.updatables.sort((a, b) =>
+    this.updatables.push(registree);
+    this.updatables.sort((a, b) =>
       a.updateOrder > b.updateOrder ? 1 : -1
     );
   }
 
   public unregisterUpdatable(registree: IUpdatable): void {
-    _.pull(this.world.updatables, registree);
+    _.pull(this.updatables, registree);
   }
 
   private isUpdatable(entity: IWorldEntity): entity is IUpdatable {
@@ -90,7 +98,7 @@ export class EntityManager {
         this.world.inputManager.inputReceiver = undefined;
       }
 
-      _.pull(this.world.characters, worldEntity as Character);
+      _.pull(this.characters, worldEntity as Character);
 
       if (
         (worldEntity as Character).characterCapsule &&

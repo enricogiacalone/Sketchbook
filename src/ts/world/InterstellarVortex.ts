@@ -1,12 +1,12 @@
 import * as THREE from "three";
 import { IUpdatable } from "~/interfaces/IUpdatable";
-import { World } from "~/world/World";
+import { Sky } from "./Sky"; // Import Sky
 import { createNoise3D } from "simplex-noise";
 
 export class InterstellarVortex extends THREE.Object3D implements IUpdatable {
   public updateOrder: number = 10;
 
-  private world: World;
+  private sky: Sky; // Change from world to sky
   private particles: THREE.Points;
   private velocities: THREE.Vector3[] = [];
   private simplex: any;
@@ -17,12 +17,12 @@ export class InterstellarVortex extends THREE.Object3D implements IUpdatable {
   private particleCount: number;
 
   constructor(
-    world: World,
+    sky: Sky, // Change from world to sky
     center: THREE.Vector3,
     particleCount: number = 2000 // Revert particle count
   ) {
     super();
-    this.world = world;
+    this.sky = sky; // Assign sky
     this.center = center;
     this.particleCount = particleCount;
     this.simplex = createNoise3D();
@@ -91,8 +91,8 @@ export class InterstellarVortex extends THREE.Object3D implements IUpdatable {
     this.particles = new THREE.Points(geometry, material);
     this.add(this.particles);
 
-    this.world.sceneManager.graphicsWorld.add(this);
-    this.world.entityManager.registerUpdatable(this);
+    this.sky.world.sceneManager.graphicsWorld.add(this);
+    this.sky.world.entityManager.registerUpdatable(this);
   }
 
   public update(timeStep: number): void {
@@ -102,7 +102,7 @@ export class InterstellarVortex extends THREE.Object3D implements IUpdatable {
       .customColor as THREE.BufferAttribute;
     const sizes = this.particles.geometry.attributes
       .size as THREE.BufferAttribute;
-    const time = this.world.clock.getElapsedTime();
+    const time = this.sky.world.clock.getElapsedTime();
 
     for (let i = 0; i < this.particleCount; i++) {
       const pos = new THREE.Vector3(
@@ -184,8 +184,8 @@ export class InterstellarVortex extends THREE.Object3D implements IUpdatable {
   }
 
   public removeFromWorld(): void {
-    this.world.sceneManager.graphicsWorld.remove(this);
-    this.world.entityManager.unregisterUpdatable(this);
+    this.sky.world.sceneManager.graphicsWorld.remove(this);
+    this.sky.world.entityManager.unregisterUpdatable(this);
     this.particles.geometry.dispose();
     if (this.particles.material instanceof THREE.Material) {
       this.particles.material.dispose();

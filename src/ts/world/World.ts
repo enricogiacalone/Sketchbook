@@ -14,25 +14,10 @@ import { UIManager } from "~/core/UIManager";
 import { WeatherManager } from "~/core/WeatherManager";
 import { WorldGUI } from "~/debug/WorldGUI";
 import { ScenarioManager } from "~/game/ScenarioManager";
-import { IUpdatable } from "~/interfaces/IUpdatable";
 import { WorldUIManager } from "~/ui/WorldUIManager";
-import { Vehicle } from "~/vehicles/Vehicle";
-import { Cloud } from "~/world/Cloud";
-import { Grass } from "~/world/Grass";
-import { Path } from "~/world/Path";
-import { Road } from "~/world/Road";
-import { Scenario } from "~/world/Scenario";
 import { Sky } from "~/world/Sky";
-import { Streetlight } from "~/world/Streetlight";
 import { WorldEventSpawner } from "~/world/WorldEventSpawner";
 import { NetworkManager } from "../network/NetworkManager";
-import { CloudsGenerator } from "./CloudsGenerator";
-import { InterstellarVortex } from "./InterstellarVortex";
-import { Planet } from "./Planet";
-import { PlanetsGenerator } from "./PlanetsGenerator";
-import { PsychedelicParticles } from "./PsychedelicParticles";
-import { TerrainGrid, TerrainCellType } from "./TerrainGrid"; // Import TerrainGrid and TerrainCellType
-import { VillageGenerator } from "./VillageGenerator";
 import { WorldBuilder } from "./WorldBuilder";
 
 export class World {
@@ -40,10 +25,6 @@ export class World {
   public terrainSize: number;
   public stats: Stats;
   public sky: Sky;
-  public grass: Grass;
-  public road: Road;
-  public clouds: Cloud[] = [];
-  public planets: Planet[] = [];
   public parallelPairs: any[];
   public physicsFrameRate: number;
   public physicsFrameTime: number;
@@ -59,12 +40,6 @@ export class World {
   public cameraOperator: CameraOperator;
   public timeScaleTarget: number = 1;
 
-  public scenarios: Scenario[] = [];
-  public characters: Character[] = [];
-  public vehicles: Vehicle[] = [];
-  public paths: Path[] = [];
-  public updatables: IUpdatable[] = [];
-
   public sceneManager: SceneManager;
   public physicsManager: PhysicsManager;
   public gameManager: GameManager;
@@ -73,17 +48,9 @@ export class World {
   public worldUIManager: WorldUIManager;
   public worldGUI: WorldGUI;
   public cannonDebugRenderer: any;
-  public interstellarVortex: InterstellarVortex;
   public player: Character; // Reference to the local player character
   public networkPlayers: Map<string, NetworkPlayer> = new Map(); // Map to store other players by their socket ID
   public weatherManager: WeatherManager;
-
-  public terrainGrid: TerrainGrid; // New: Terrain grid for parametric generation
-  public villageGenerator: VillageGenerator;
-
-  public terrainHeights: number[] = [];
-  public groundPositionAttribute: THREE.BufferAttribute;
-  public terrainSegments: number; // New property for terrain segments
 
   public loadingManager: LoadingManager; // New property to store the loading manager
   public onJoin: (name: string) => void;
@@ -171,22 +138,6 @@ export class World {
     this.gameManager.setWorldGUI(this.worldGUI); // Set worldGUI for GameManager here
 
     this.setTimeScale(1); // Set initial time scale after all managers are initialized
-
-    this.sky = new Sky(this);
-
-    // Initialize Sky and Clouds
-    const cloudsGenerator = new CloudsGenerator(this);
-    cloudsGenerator.generate();
-
-    // Initialize Planets
-    const planetsGenerator = new PlanetsGenerator(this);
-    planetsGenerator.generate();
-    this.interstellarVortex = new InterstellarVortex(
-      this,
-      new THREE.Vector3(0, 500, 0),
-      2000
-    );
-    new PsychedelicParticles(this, 5000, this.interstellarVortex);
 
     this.worldBuilder = new WorldBuilder(this);
     this.worldBuilder.load(worldScenePath);

@@ -29,7 +29,7 @@ export class ScenarioManager {
     this.updateEnemyCountDisplay(); // Initialize enemy count display
 
     // Launch default scenario
-    for (const scenario of this.world.scenarios) {
+    for (const scenario of this.world.entityManager.scenarios) {
       if (scenario.id === scenarioID || scenario.spawnAlways) {
         // If it's the default scenario, use hard-coded spawn points for variety
         if (scenario.default) {
@@ -101,7 +101,7 @@ export class ScenarioManager {
 
   public clearEntities(): void {
     const networkPlayers: NetworkPlayer[] = [];
-    for (const character of this.world.characters) {
+    for (const character of this.world.entityManager.characters) {
       if (character instanceof NetworkPlayer) {
         networkPlayers.push(character);
       } else {
@@ -117,12 +117,12 @@ export class ScenarioManager {
         }
       }
     }
-    this.world.characters = networkPlayers;
+    this.world.entityManager.characters = networkPlayers;
 
-    for (const vehicle of this.world.vehicles) {
+    for (const vehicle of this.world.entityManager.vehicles) {
       this.world.entityManager.remove(vehicle);
     }
-    this.world.vehicles = [];
+    this.world.entityManager.vehicles = [];
   }
 
   private updateEnemyCountDisplay(): void {
@@ -181,10 +181,10 @@ export class ScenarioManager {
           character.createHealthBar(); // Create health bar for enemies
 
           let spawnPosition = new THREE.Vector3();
-          if (this.world.paths.length > 0) {
+          if (this.world.entityManager.paths.length > 0) {
             const randomPath =
-              this.world.paths[
-                Math.floor(Math.random() * this.world.paths.length)
+              this.world.entityManager.paths[
+                Math.floor(Math.random() * this.world.entityManager.paths.length)
               ];
             const nodeKeys = Object.keys(randomPath.nodes);
             const randomNodeKey =

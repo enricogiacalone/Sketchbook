@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { World } from "./World";
 import { Cloud } from "./Cloud";
+import { Sky } from "./Sky"; // Import Sky
 
 // Constants for cloud generation
 const CLOUD_BANK_COUNT = 4;
@@ -18,7 +18,7 @@ const CLOUD_OPACITY_BASE = 0.5;
 const CLOUD_OPACITY_RANDOM = 0.5;
 
 export class CloudsGenerator {
-  constructor(private world: World) {}
+  constructor(private sky: Sky) {}
 
   public generate(): void {
     for (let i = 0; i < CLOUD_BANK_COUNT; i++) {
@@ -30,7 +30,7 @@ export class CloudsGenerator {
 
       for (let j = 0; j < CLOUDS_PER_BANK; j++) {
         const cloud = new Cloud(
-          this.world,
+          this.sky.world, // Pass the world from the sky instance
           CLOUD_SIZE_BASE + Math.random() * CLOUD_SIZE_RANDOM,
           CLOUD_OPACITY_BASE + Math.random() * CLOUD_OPACITY_RANDOM
         );
@@ -39,7 +39,7 @@ export class CloudsGenerator {
           bankCenter.y + (Math.random() - 0.5) * CLOUD_POSITION_RANDOM_Y,
           bankCenter.z + (Math.random() - 0.5) * CLOUD_POSITION_RANDOM_Z
         );
-        this.world.clouds.push(cloud);
+        this.sky.clouds.push(cloud);
       }
     }
   }

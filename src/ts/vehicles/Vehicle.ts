@@ -11,6 +11,7 @@ import { World } from "~/world/World";
 import { VehicleSeat } from "./VehicleSeat";
 import { Wheel } from "./Wheel";
 import _ from "lodash";
+import { Stylizer } from "~/core/Stylizer";
 
 export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
   public updateOrder: number = 2;
@@ -309,13 +310,13 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
   }
 
   public addToWorld(world: World): void {
-    if (_.includes(world.vehicles, this)) {
-      console.warn("Adding character to a world in which it already exists.");
+    if (_.includes(world.entityManager.vehicles, this)) {
+      console.warn("Adding vehicle to a world in which it already exists.");
     } else if (this.rayCastVehicle === undefined) {
       console.error("Trying to create vehicle without raycastVehicleComponent");
     } else {
       this.world = world;
-      world.vehicles.push(this);
+      world.entityManager.vehicles.push(this);
       world.sceneManager.graphicsWorld.add(this);
       // world.physicsWorld.addBody(this.collision);
       this.rayCastVehicle.addToWorld(world.physicsManager.physicsWorld);
@@ -331,13 +332,13 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
   }
 
   public removeFromWorld(world: World): void {
-    if (!_.includes(world.vehicles, this)) {
+    if (!_.includes(world.entityManager.vehicles, this)) {
       console.warn(
         "Removing character from a world in which it isn't present."
       );
     } else {
       this.world = undefined;
-      _.pull(world.vehicles, this);
+      _.pull(world.entityManager.vehicles, this);
       world.sceneManager.graphicsWorld.remove(this);
       // world.physicsWorld.remove(this.collision);
       this.rayCastVehicle.removeFromWorld(world.physicsManager.physicsWorld);
@@ -351,10 +352,11 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
   public readVehicleData(gltf: any): void {
     gltf.scene.traverse((child) => {
       if (child.isMesh) {
-        Utils.setupMeshProperties(child);
-
-        if (child.material !== undefined) {
-          this.materials.push(child.material);
+        Stylizer.applyToonStyle(child as THREE.Mesh);
+        if (Array.isArray(child.material)) {
+          this.materials.push(...(child.material as THREE.Material[]));
+        } else {
+          this.materials.push(child.material as THREE.Material);
         }
       }
 

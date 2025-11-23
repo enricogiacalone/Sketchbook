@@ -87,16 +87,16 @@ export class PhysicsManager {
   }
 
   private _onPreStep(): void {
-    this.world.characters.forEach((character) => {
+    this.world.entityManager.characters.forEach((character) => {
       character.physicsPreStep(character.characterCapsule.body, character);
     });
-    this.world.vehicles.forEach((vehicle) => {
+    this.world.entityManager.vehicles.forEach((vehicle) => {
       vehicle.physicsPreStep(vehicle.collision);
     });
   }
 
   private _onPostStep(): void {
-    this.world.characters.forEach((character) => {
+    this.world.entityManager.characters.forEach((character) => {
       character.physicsPostStep(character.characterCapsule.body, character);
     });
   }
@@ -106,11 +106,11 @@ export class PhysicsManager {
 
     this.physicsWorld.step(this.world.physicsFrameTime, timeStep);
 
-    this.world.characters.forEach((char) => {
+    this.world.entityManager.characters.forEach((char) => {
       this._handleCharacterOutOfBounds(char);
     });
 
-    this.world.vehicles.forEach((vehicle) => {
+    this.world.entityManager.vehicles.forEach((vehicle) => {
       this._handleVehicleOutOfBounds(vehicle);
     });
   }
