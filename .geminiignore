@@ -1,0 +1,25 @@
+# Node modules
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.tsbuildinfo
+
+# 3D Assets & Binary files
+public/*.glb
+public/*.ico
+src/blend/
+src/img/
+favicon.ico
+
+# Database
+gamestate.db
+
+# Git
+.git/
+
+# IDE & OS files
+.vscode/
+.idea/
+.DS_Store

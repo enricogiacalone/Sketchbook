@@ -15,7 +15,6 @@ export class NetworkManager {
   }
 
   public async addNetworkPlayer(id: string, playerData: any): Promise<void> {
-    
     try {
       if (this.world.networkPlayers.has(id)) {
         console.warn(
@@ -51,7 +50,6 @@ export class NetworkManager {
       this.world.entityManager.add(networkCharacter);
       this.world.networkPlayers.set(id, networkCharacter);
       networkCharacter.createHealthBar();
-      
     } catch (error) {
       console.error(`Failed to add network player ${id}:`, error);
     }
@@ -65,7 +63,6 @@ export class NetworkManager {
   }
 
   public removeNetworkPlayer(id: string): void {
-    
     const networkCharacter = this.world.networkPlayers.get(id);
     if (networkCharacter) {
       _.remove(
@@ -74,7 +71,6 @@ export class NetworkManager {
       );
       this.world.entityManager.remove(networkCharacter);
       this.world.networkPlayers.delete(id);
-      
     } else {
       console.warn(
         `Attempted to remove non-existent network player with ID: ${id}`

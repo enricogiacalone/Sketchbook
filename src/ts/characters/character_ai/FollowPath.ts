@@ -41,7 +41,6 @@ export class FollowPath extends FollowTarget implements ICharacterAI {
       this.character.controlledObject as unknown as Vehicle
     ).collision.velocity.length();
 
-    
     if (slowDownAngle < 0.7 && viewVector.length() < 50 && speed > 10) {
       this.character.controlledObject.triggerAction("reverse", true);
       this.character.controlledObject.triggerAction("throttle", false);

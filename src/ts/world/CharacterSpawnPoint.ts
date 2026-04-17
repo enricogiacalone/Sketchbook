@@ -21,12 +21,10 @@ export class CharacterSpawnPoint implements ISpawnPoint {
     loadingManager
       .loadGLTFPromise("boxman.glb")
       .then((model) => {
-        
         let player = new Character(model);
 
         let worldPos = new THREE.Vector3();
         this.object.getWorldPosition(worldPos);
-        
 
         // --- NEW LOGIC FOR GROUND RAYCASTING ---
         const raycastResult = new CANNON.RaycastResult();
@@ -47,14 +45,11 @@ export class CharacterSpawnPoint implements ISpawnPoint {
         ) {
           if (raycastResult.hasHit) {
             worldPos.y = raycastResult.hitPointWorld.y + 1.0; // Spawn a bit higher above the ground hit point to prevent falling through
-            
           } else {
-            
           }
         } else {
-          
         }
-        
+
         // --- END NEW LOGIC ---
 
         player.setPosition(worldPos.x, worldPos.y, worldPos.z);
@@ -62,10 +57,8 @@ export class CharacterSpawnPoint implements ISpawnPoint {
         let forward = Utils.getForward(this.object);
         player.setOrientation(forward, true);
 
-        
         world.entityManager.add(player);
         player.takeControl();
-        
 
         if (callback) {
           callback(player);

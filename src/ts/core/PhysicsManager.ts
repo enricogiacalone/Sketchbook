@@ -104,7 +104,9 @@ export class PhysicsManager {
   public update(timeStep: number): void {
     this._processDeferredBodyRemovals();
 
-    this.physicsWorld.step(this.world.physicsFrameTime, timeStep);
+    // Use fixed time step for deterministic physics
+    // We step the world using the physicsFrameTime defined in World.ts
+    this.physicsWorld.step(this.world.physicsFrameTime, timeStep, this.world.physicsMaxPrediction);
 
     this.world.entityManager.characters.forEach((char) => {
       this._handleCharacterOutOfBounds(char);
@@ -116,12 +118,20 @@ export class PhysicsManager {
   }
 
   private _processDeferredBodyRemovals(): void {
-    for (let i = 0; i < this.bodiesToRemove.length; i++) {
-      const body = this.bodiesToRemove[i];
+    if (this.bodiesToRemove.length === 0) return;
+
+    for (const body of this.bodiesToRemove) {
       this.physicsWorld.removeBody(body);
-      body.world = null; // Explicitly nullify world reference
+      
+      // Clear references to help GC
+      body.world = null;
+      if (body.shapes) body.shapes.length = 0;
+      if (body.massProperties) {
+          body.inertia.set(0, 0, 0);
+          body.invInertia.set(0, 0, 0);
+      }
     }
-    this.bodiesToRemove.length = 0; // Clear the list
+    this.bodiesToRemove.length = 0;
   }
 
   private _handleCharacterOutOfBounds(character: Character): void {

@@ -20,27 +20,49 @@ import { WorldEventSpawner } from "~/world/WorldEventSpawner";
 import { NetworkManager } from "../network/NetworkManager";
 import { WorldBuilder } from "./WorldBuilder";
 
+/**
+ * The core engine class that coordinates all game subsystems.
+ * Responsible for the render loop, physics step, and manager initialization.
+ */
 export class World {
+  /** Flag to indicate if the current world was procedurally generated. */
   public proceduralWorldActive: boolean = false;
+  /** Size of the terrain grid (if applicable). */
   public terrainSize: number;
+  /** Performance monitor (FPS/Frame time). */
   public stats: Stats;
+  /** Skybox and weather effects manager. */
   public sky: Sky;
+  /** Parallel physics pairs for collision detection. */
   public parallelPairs: any[];
+  /** Target physics updates per second. */
   public physicsFrameRate: number;
+  /** Time delta for each physics step. */
   public physicsFrameTime: number;
+  /** Maximum number of physics steps to predict per frame to maintain sync. */
   public physicsMaxPrediction: number;
+  /** High-precision clock for frame delta calculation. */
   public clock: THREE.Clock;
+  /** Render time delta of the current frame. */
   public renderDelta: number;
+  /** Logic time delta for gameplay updates. */
   public logicDelta: number;
   public requestDelta: number;
   public sinceLastFrame: number;
   public justRendered: boolean;
+  
+  /** Manages all dynamic entities in the world. */
   public entityManager: EntityManager;
+  /** Handles keyboard, mouse, and gamepad input. */
   public inputManager: InputManager;
+  /** Controls camera behavior and positioning. */
   public cameraOperator: CameraOperator;
+  /** Global time scale multiplier (useful for slow motion). */
   public timeScaleTarget: number = 1;
 
+  /** Manages the Three.js scene, lights, and rendering. */
   public sceneManager: SceneManager;
+  /** Manages the Cannon-es physics world and simulation. */
   public physicsManager: PhysicsManager;
   public gameManager: GameManager;
   public scenarioManager: ScenarioManager;
@@ -48,16 +70,25 @@ export class World {
   public worldUIManager: WorldUIManager;
   public worldGUI: WorldGUI;
   public cannonDebugRenderer: any;
-  public player: Character; // Reference to the local player character
-  public networkPlayers: Map<string, NetworkPlayer> = new Map(); // Map to store other players by their socket ID
+  /** Reference to the local player's character. */
+  public player: Character; 
+  /** Registry of all other players in the session. */
+  public networkPlayers: Map<string, NetworkPlayer> = new Map(); 
   public weatherManager: WeatherManager;
 
-  public loadingManager: LoadingManager; // New property to store the loading manager
+  public loadingManager: LoadingManager; 
+  /** Callback triggered when a player joins. */
   public onJoin: (name: string) => void;
-  public onSendMessage: (message: string) => void; // New property
+  public onSendMessage: (message: string) => void; 
   public networkManager: NetworkManager;
   public worldBuilder: WorldBuilder;
 
+  /**
+   * Initializes a new Sketchbook World.
+   * @param worldScenePath Optional path to a GLTF scene to load.
+   * @param onJoin Optional callback for socket initialization.
+   * @param onSendMessage Optional callback for chat messages.
+   */
   constructor(
     worldScenePath?: any,
     onJoin?: (name: string) => void,

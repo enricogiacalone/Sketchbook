@@ -66,11 +66,19 @@ export class VillageGenerator {
       let houseMinZ = z - halfHouseDepth;
       let houseMaxZ = z + halfHouseDepth;
 
-      if (!this.terrainGrid.isOccupied(x, z)) { // Check only center for simplicity
+      if (!this.terrainGrid.isOccupied(x, z)) {
+        // Check only center for simplicity
         // Mark the area as Building
-        this.terrainGrid.markArea(houseMinX, houseMinZ, houseMaxX, houseMaxZ, TerrainCellType.Building);
+        this.terrainGrid.markArea(
+          houseMinX,
+          houseMinZ,
+          houseMaxX,
+          houseMaxZ,
+          TerrainCellType.Building
+        );
 
-        const baseHeight = Math.sin(x / 30) * Math.cos(z / 20) * terrainMaxHeight;
+        const baseHeight =
+          Math.sin(x / 30) * Math.cos(z / 20) * terrainMaxHeight;
         const roofHeight = THREE.MathUtils.randFloat(2, 4);
 
         // House Body (Visual)

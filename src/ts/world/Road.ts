@@ -71,7 +71,6 @@ export class Road implements IWorldEntity {
         minZ_road = Math.min(minZ_road, globalZ);
         maxZ_road = Math.max(maxZ_road, globalZ);
 
-
         const y = this.world.worldBuilder.getTerrainHeightAt(
           globalX,
           globalZ,
@@ -92,8 +91,11 @@ export class Road implements IWorldEntity {
       this.roadMeshes.push(roadMesh);
 
       // Create physics body from the same geometry
-      const physicsVertices = (roadGeometry.attributes.position as THREE.BufferAttribute).array;
-      const physicsIndices = (roadGeometry.index as THREE.BufferAttribute).array;
+      const physicsVertices = (
+        roadGeometry.attributes.position as THREE.BufferAttribute
+      ).array;
+      const physicsIndices = (roadGeometry.index as THREE.BufferAttribute)
+        .array;
 
       const trimeshShape = new CANNON.Trimesh(
         physicsVertices as any,
@@ -108,7 +110,13 @@ export class Road implements IWorldEntity {
       this.roadPhysicsBodies.push(roadBody);
 
       // Mark area in terrain grid as Road
-      this.terrainGrid.markArea(minX_road, minZ_road, maxX_road, maxZ_road, TerrainCellType.Road);
+      this.terrainGrid.markArea(
+        minX_road,
+        minZ_road,
+        maxX_road,
+        maxZ_road,
+        TerrainCellType.Road
+      );
     };
 
     // Generate Main road along X-axis

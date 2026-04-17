@@ -49,21 +49,58 @@ export class WorldBuilder {
       text: "Feel free to explore the world and interact with available vehicles. There are also various scenarios ready to launch from the right panel.",
       footer:
         '<a href="https://github.com/swift502/Sketchbook" target="_blank">GitHub page</a><a href="https://discord.gg/fGuEqCe" target="_blank">Discord server</a>',
-      input: "text",
-      inputLabel: "Your Name",
-      inputPlaceholder: "Enter your name...",
+      html: `
+        <div style="margin-top: 20px;">
+          <label for="swal-input-name" style="display: block; margin-bottom: 5px; font-weight: bold;">Your Name</label>
+          <input id="swal-input-name" class="swal2-input" placeholder="Enter your name..." style="margin-top: 0;">
+        </div>
+        <div style="margin-top: 20px;">
+          <label style="display: block; margin-bottom: 10px; font-weight: bold;">Control Method</label>
+          <div style="display: flex; justify-content: space-around;">
+            <label style="cursor: pointer;">
+              <input type="radio" name="control-method" value="keyboard" checked style="margin-right: 5px;"> Keyboard
+            </label>
+            <label style="cursor: pointer;">
+              <input type="radio" name="control-method" value="gamepad" style="margin-right: 5px;"> Gamepad
+            </label>
+          </div>
+        </div>
+      `,
+      focusConfirm: false,
       confirmButtonText: "Join",
       buttonsStyling: false,
       allowOutsideClick: false,
       allowEscapeKey: false,
-      inputValidator: (value) => {
-        if (!value) {
-          return "You need to write something!";
+      preConfirm: () => {
+        const name = (
+          document.getElementById("swal-input-name") as HTMLInputElement
+        ).value;
+        const controlMethod = (
+          document.querySelector(
+            'input[name="control-method"]:checked'
+          ) as HTMLInputElement
+        ).value;
+
+        if (!name) {
+          Swal.showValidationMessage("You need to write a name!");
+          return false;
         }
-        return null;
+
+        return { name, controlMethod };
       },
     }).then((result) => {
       if (result.isConfirmed) {
+        const { name, controlMethod } = result.value;
+
+        // Set control method preference
+        if (controlMethod === "gamepad") {
+          console.log("Gamepad control method selected");
+          this.world.inputManager?.setControlMethod("gamepad");
+        } else {
+          console.log("Keyboard control method selected");
+          this.world.inputManager?.setControlMethod("keyboard");
+        }
+
         UIManager.setUserInterfaceVisible(true);
         UIManager.setLoadingScreenVisible(false);
 
@@ -89,7 +126,7 @@ export class WorldBuilder {
         if (this.world.onJoin) {
           setTimeout(() => {
             try {
-              this.world.onJoin(result.value);
+              this.world.onJoin(name);
             } catch (error) {
               console.error("Error initiating socket connection:", error);
               Swal.fire({
@@ -379,7 +416,9 @@ export class WorldBuilder {
         }
 
         if (child.userData.data === USER_DATA_SCENARIO) {
-          this.world.entityManager.scenarios.push(new Scenario(child, this.world));
+          this.world.entityManager.scenarios.push(
+            new Scenario(child, this.world)
+          );
         }
       }
     }

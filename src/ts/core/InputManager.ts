@@ -14,6 +14,7 @@ export class InputManager implements IUpdatable {
   public inputReceiver: IInputReceiver;
   public gamepad: Gamepad;
   public deadzone: number = 0.1;
+  public controlMethod: string = "keyboard"; // Default control method
 
   public boundOnMouseDown: (evt: any) => void;
   public boundOnMouseMove: (evt: any) => void;
@@ -80,10 +81,16 @@ export class InputManager implements IUpdatable {
       this.setInputReceiver(this.world.cameraOperator);
     }
 
-    this.gamepad.update();
-    this.handleGamepadInput();
+    if (this.controlMethod === "gamepad") {
+      this.gamepad.update();
+      this.handleGamepadInput();
+    }
 
     this.inputReceiver?.inputReceiverUpdate(unscaledTimeStep);
+  }
+
+  public setControlMethod(method: string): void {
+    this.controlMethod = method;
   }
 
   public handleGamepadInput(): void {
@@ -200,13 +207,17 @@ export class InputManager implements IUpdatable {
       this.domElement.addEventListener("mouseup", this.boundOnMouseUp, false);
     }
 
-    if (this.inputReceiver !== undefined) {
+    if (
+      this.inputReceiver !== undefined &&
+      this.controlMethod === "keyboard"
+    ) {
       this.inputReceiver.handleMouseButton(event, "mouse" + event.button, true);
     }
   }
 
   public onMouseMove(event: MouseEvent): void {
     if (this.inputReceiver !== undefined) {
+      // Allow mouse movement regardless of control method to allow camera control
       this.inputReceiver.handleMouseMove(
         event,
         event.movementX,
@@ -229,7 +240,10 @@ export class InputManager implements IUpdatable {
       );
     }
 
-    if (this.inputReceiver !== undefined) {
+    if (
+      this.inputReceiver !== undefined &&
+      this.controlMethod === "keyboard"
+    ) {
       this.inputReceiver.handleMouseButton(
         event,
         "mouse" + event.button,
@@ -239,19 +253,19 @@ export class InputManager implements IUpdatable {
   }
 
   public onKeyDown(event: KeyboardEvent): void {
-    if (this.inputReceiver !== undefined) {
+    if (this.inputReceiver !== undefined && this.controlMethod === "keyboard") {
       this.inputReceiver.handleKeyboardEvent(event, event.code, true);
     }
   }
 
   public onKeyUp(event: KeyboardEvent): void {
-    if (this.inputReceiver !== undefined) {
+    if (this.inputReceiver !== undefined && this.controlMethod === "keyboard") {
       this.inputReceiver.handleKeyboardEvent(event, event.code, false);
     }
   }
 
   public onMouseWheelMove(event: WheelEvent): void {
-    if (this.inputReceiver !== undefined) {
+    if (this.inputReceiver !== undefined && this.controlMethod === "keyboard") {
       this.inputReceiver.handleMouseWheel(event, event.deltaY);
     }
   }

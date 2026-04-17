@@ -22,7 +22,6 @@ export class ScenarioManager {
   }
 
   public launchScenario(scenarioID: string): void {
-    
     this.lastScenarioID = scenarioID;
 
     this.clearEntities();
@@ -158,7 +157,6 @@ export class ScenarioManager {
   }
 
   public spawnEnemies(count: number): void {
-    
     if (!this.world.player) {
       console.warn("Cannot spawn enemies: local player is not defined.");
       return;
@@ -184,7 +182,9 @@ export class ScenarioManager {
           if (this.world.entityManager.paths.length > 0) {
             const randomPath =
               this.world.entityManager.paths[
-                Math.floor(Math.random() * this.world.entityManager.paths.length)
+                Math.floor(
+                  Math.random() * this.world.entityManager.paths.length
+                )
               ];
             const nodeKeys = Object.keys(randomPath.nodes);
             const randomNodeKey =

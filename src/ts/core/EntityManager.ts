@@ -61,9 +61,7 @@ export class EntityManager {
 
   public registerUpdatable(registree: IUpdatable): void {
     this.updatables.push(registree);
-    this.updatables.sort((a, b) =>
-      a.updateOrder > b.updateOrder ? 1 : -1
-    );
+    this.updatables.sort((a, b) => (a.updateOrder > b.updateOrder ? 1 : -1));
   }
 
   public unregisterUpdatable(registree: IUpdatable): void {
@@ -78,60 +76,24 @@ export class EntityManager {
   }
 
   private performRemoval(worldEntity: IWorldEntity): void {
-    
+    // Each entity is now responsible for its own cleanup logic
+    // within its removeFromWorld method.
+    worldEntity.removeFromWorld(this.world);
 
-    if (worldEntity instanceof NetworkPlayer) {
-      worldEntity.removeFromWorld(this.world);
-    } else if (worldEntity instanceof Character) {
-      if (worldEntity.entityType === EntityType.Enemy) {
-        this.world.scenarioManager.currentEnemyCount--;
-        this.world.scenarioManager.updateEnemyCountDisplay(); // Update UI using helper method
-        if (this.world.scenarioManager.currentEnemyCount <= 0) {
-          // Access initialEnemyCount through scenarioManager
-          this.world.scenarioManager.spawnEnemies(
-            this.world.scenarioManager.initialEnemyCount * 2
-          );
-        }
-      }
-
-      if (this.world.inputManager.inputReceiver === worldEntity) {
-        this.world.inputManager.inputReceiver = undefined;
-      }
-
-      _.pull(this.characters, worldEntity as Character);
-
-      if (
-        (worldEntity as Character).characterCapsule &&
-        (worldEntity as Character).characterCapsule.body
-      ) {
-        (worldEntity as Character).characterCapsule.body.collisionResponse =
-          false;
-        (worldEntity as Character).characterCapsule.body.mass = 0;
-        (worldEntity as Character).characterCapsule.body.sleep();
-        this.world.physicsManager.bodiesToRemove.push(
-          (worldEntity as Character).characterCapsule.body
-        );
-      }
-
-      this.world.sceneManager.graphicsWorld.remove(worldEntity as Character);
-      if ((worldEntity as Character).raycastBox) {
-        this.world.sceneManager.graphicsWorld.remove(
-          (worldEntity as Character).raycastBox
-        );
-      }
-      if (
-        (worldEntity as Character).healthBarContainer &&
-        (worldEntity as Character).healthBarContainer.parent
-      ) {
-        (worldEntity as Character).healthBarContainer.parent.remove(
-          (worldEntity as Character).healthBarContainer
-        );
-      }
-    } else if (worldEntity instanceof Vehicle) {
-      worldEntity.removeFromWorld(this.world);
-    } else {
+    // Common cleanup logic for all updatable entities
+    if (this.isUpdatable(worldEntity)) {
+      this.unregisterUpdatable(worldEntity);
     }
 
-    this.unregisterUpdatable(worldEntity);
+    // Maintain lists
+    if (worldEntity instanceof Character) {
+      _.pull(this.characters, worldEntity);
+    } else if (worldEntity instanceof Vehicle) {
+      _.pull(this.vehicles, worldEntity);
+    } else if (worldEntity instanceof Scenario) {
+      _.pull(this.scenarios, worldEntity);
+    } else if (worldEntity instanceof Path) {
+      _.pull(this.paths, worldEntity);
+    }
   }
 }

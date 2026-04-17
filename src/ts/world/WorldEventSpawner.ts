@@ -60,13 +60,11 @@ export class WorldEventSpawner {
     const spawnPosition = position || new THREE.Vector3(0, 50, 0); // Default position if none provided
     const tornado = new Tornado(this.world, spawnPosition);
     this.tornadoes.push(tornado);
-    
   }
 
   public removeTornado(tornado: Tornado): void {
     tornado.dispose();
     _.pull(this.tornadoes, tornado);
-    
   }
 
   public removeLastTornado(): void {

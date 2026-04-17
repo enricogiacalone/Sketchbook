@@ -362,8 +362,6 @@ export class Character extends THREE.Object3D implements IWorldEntity {
     }
   }
 
-
-
   public handleKeyboardEvent(
     event: KeyboardEvent,
     code: string,
@@ -1222,7 +1220,34 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   }
 
   public removeFromWorld(world: World): void {
-    // Delegate removal to the EntityManager, which handles enemy count and physics body removal
-    world.entityManager.remove(this);
+    if (this.entityType === EntityType.Enemy) {
+      world.scenarioManager.currentEnemyCount--;
+      world.scenarioManager.updateEnemyCountDisplay();
+      if (world.scenarioManager.currentEnemyCount <= 0) {
+        world.scenarioManager.spawnEnemies(world.scenarioManager.initialEnemyCount * 2);
+      }
+    }
+
+    if (world.inputManager.inputReceiver === this) {
+      world.inputManager.inputReceiver = undefined;
+    }
+
+    if (this.characterCapsule && this.characterCapsule.body) {
+      this.characterCapsule.body.collisionResponse = false;
+      this.characterCapsule.body.mass = 0;
+      this.characterCapsule.body.sleep();
+      world.physicsManager.bodiesToRemove.push(this.characterCapsule.body);
+    }
+
+    world.sceneManager.graphicsWorld.remove(this);
+    if (this.raycastBox) {
+      world.sceneManager.graphicsWorld.remove(this.raycastBox);
+    }
+    if (this.healthBarContainer && this.healthBarContainer.parent) {
+      this.healthBarContainer.parent.remove(this.healthBarContainer);
+    }
+    if (this.speechBubble) {
+        this.speechBubble.removeFromWorld(world);
+    }
   }
 }
