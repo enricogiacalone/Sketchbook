@@ -105,7 +105,7 @@ app.get("/api/load", (req, res) => {
 });
 
 // For any other requests, serve the index.html from the 'build' directory
-app.get("(.*)", (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(process.cwd(), "build", "index.html"));
 });
 

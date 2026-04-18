@@ -15,7 +15,7 @@ const CAMERA_FAR = 1010;
 
 // Renderer Constants
 const TONE_MAPPING_EXPOSURE = 1.0;
-const SHADOW_MAP_TYPE = THREE.PCFSoftShadowMap;
+const SHADOW_MAP_TYPE = THREE.PCFShadowMap; // Changed from PCFSoftShadowMap to PCFShadowMap
 
 export class SceneManager {
   public world: World;
@@ -67,55 +67,47 @@ export class SceneManager {
   }
 
   /**
-   * Initializes post-processing effects (EffectComposer, RenderPass, FXAAShader).
+   * Initializes the post-processing effects.
    */
   private _initializePostProcessing(): void {
-    let renderPass = new RenderPass(this.graphicsWorld, this.camera);
-    let fxaaPass = new ShaderPass(FXAAShader);
-
-    // FXAA
-    let pixelRatio = this.renderer.getPixelRatio();
-    fxaaPass.material["uniforms"].resolution.value.x =
-      1 / (window.innerWidth * pixelRatio);
-    fxaaPass.material["uniforms"].resolution.value.y =
-      1 / (window.innerHeight * pixelRatio);
-
-    // Composer
     this.composer = new EffectComposer(this.renderer);
-    this.composer.addPass(renderPass);
+    this.composer.addPass(new RenderPass(this.graphicsWorld, this.camera));
+
+    const fxaaPass = new ShaderPass(FXAAShader);
+    fxaaPass.uniforms.resolution.value.set(
+      1 / (window.innerWidth * this.renderer.getPixelRatio()),
+      1 / (window.innerHeight * this.renderer.getPixelRatio())
+    );
     this.composer.addPass(fxaaPass);
   }
 
   /**
-   * Appends the renderer's DOM element to the document body and sets its ID.
+   * Sets up the canvas element.
    */
   private _setupCanvas(): void {
-    document.body.appendChild(this.renderer.domElement);
-    this.renderer.domElement.id = "canvas";
+    const container = document.getElementById("canvas");
+    if (container) {
+      container.appendChild(this.renderer.domElement);
+    } else {
+      document.body.appendChild(this.renderer.domElement);
+    }
   }
 
+  /**
+   * Renders the scene.
+   */
+  public render(): void {
+    this.composer.render();
+  }
+
+  /**
+   * Handles the window resize event.
+   */
   public onWindowResize(): void {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
+
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-
-    let pixelRatio = this.renderer.getPixelRatio();
-    // Ensure fxaaPass is a ShaderPass before accessing its uniforms
-    const fxaaPass = this.composer.passes[1] as ShaderPass;
-    if (fxaaPass && fxaaPass.uniforms && fxaaPass.uniforms["resolution"]) {
-      fxaaPass.uniforms["resolution"].value.set(
-        1 / (window.innerWidth * pixelRatio),
-        1 / (window.innerHeight * pixelRatio)
-      );
-    }
-    this.composer.setSize(
-      window.innerWidth * pixelRatio,
-      window.innerHeight * pixelRatio
-    );
-  }
-
-  public render(): void {
-    if (this.worldGUI.params.FXAA) this.composer.render();
-    else this.renderer.render(this.graphicsWorld, this.camera);
+    this.composer.setSize(window.innerWidth, window.innerHeight);
   }
 }

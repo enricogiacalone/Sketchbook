@@ -35,13 +35,23 @@
   },
   "homepage": "https://github.com/swift502/Sketchbook",
   "devDependencies": {
+    "@react-three/cannon": "^6.6.0",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.0",
     "@types/lodash": "^4.17.20",
     "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/three": "^0.183.1",
+    "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
     "nodemon": "^3.1.11",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "three-stdlib": "^2.36.1",
     "typescript": "^6.0.2",
-    "vite": "^8.0.3"
+    "vite": "^8.0.3",
+    "zustand": "^5.0.12"
   },
   "dependencies": {
     "@dgreenheck/ez-tree": "^1.0.0",

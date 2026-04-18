@@ -1,29 +1,11 @@
 <!doctype html>
 <html>
   <head>
-    <title>Sketchbook</title>
+    <title>Sketchbook AI</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
   </head>
-
   <body>
-    <div id="crosshair"></div>
-    <div id="game-state-controls">
-      <button id="save-button">Salva Stato</button>
-      <button id="load-button">Carica Stato</button>
-    </div>
-    <div id="minimap-container">
-      <div id="minimap-player"></div>
-      <div id="minimap-north">N</div>
-    </div>
-    <div id="health-bar-container">
-      <div id="health-bar" class="bar-arc">
-        <div class="bar-arc-fill"></div>
-      </div>
-    </div>
-    <div id="armor-bar-container">
-      <div id="armor-bar" class="bar-arc">
-        <div class="bar-arc-fill"></div>
-      </div>
-    </div>
-    <script type="module" src="/src/ts/sketchbook.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
