@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { useStore } from "../store";
 import SpeechBubble from "./UI/SpeechBubble";
 import { useSpringVector } from "../hooks/useSpringVector";
+import Explosion from "./Environment/Explosion";
 
 interface EnemyProps {
   id: string;
@@ -20,6 +21,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
   const { playerPos, updateEntity, removeEntity } = useStore();
 
   const [health, setHealth] = useState(100);
+  const [isExploded, setIsExploded] = useState(false);
   const [currentAnim, setCurrentAnim] = useState("idle");
   const [message, setMessage] = useState("");
 
@@ -33,11 +35,30 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
     fixedRotation: true,
     material: "slippery",
     collisionFilterGroup: 2,
+    collisionFilterMask: 1 | 2 | 4,
     shapes: [
       { type: "Sphere", args: [radius], position: [0, 0, 0] },
       { type: "Sphere", args: [radius], position: [0, height / 2, 0] },
       { type: "Sphere", args: [radius], position: [0, -height / 2, 0] },
     ],
+    onCollide: (e) => {
+      if (
+        (e.body.collisionFilterGroup === 4 ||
+          e.body.userData?.type === "bullet") &&
+        health > 0
+      ) {
+        setHealth((prev) => {
+          const next = Math.max(0, prev - 25); // Increased damage
+          if (next <= 0) {
+            setIsExploded(true);
+          } else {
+            setMessage("OUCH!");
+            setTimeout(() => setMessage(""), 1000);
+          }
+          return next;
+        });
+      }
+    },
   }));
 
   const velocity = useRef([0, 0, 0]);
@@ -64,7 +85,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
   ];
 
   useFrame((state, delta) => {
-    if (!ref.current) return;
+    if (!ref.current || health <= 0) return;
 
     const enemyPos = new THREE.Vector3(...position.current);
     const targetPos = new THREE.Vector3(...playerPos);
@@ -77,19 +98,17 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
 
     if (direction.lengthSq() > 0.001) {
       direction.normalize();
-      // targetRotation uses Math.atan2(x, z) which is compatible with Three.js forward (+Z)
       const targetRotation = Math.atan2(direction.x, direction.z);
       let diff = targetRotation - modelRotation.current;
       while (diff < -Math.PI) diff += Math.PI * 2;
       while (diff > Math.PI) diff -= Math.PI * 2;
-      modelRotation.current += diff * 0.15; // Increased responsiveness
+      modelRotation.current += diff * 0.15;
     }
 
     velocitySim.target.current.set(0, 0, isMoving ? moveSpeed : 0);
     velocitySim.simulate(delta);
 
     const arcadeVelMagnitude = velocitySim.position.current.z;
-    // Calculate world velocity based on current model rotation
     const worldVel = new THREE.Vector3(
       Math.sin(modelRotation.current),
       0,
@@ -123,23 +142,32 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
   });
 
   useEffect(() => {
-    Object.values(actions).forEach((action) => action?.stop());
-    if (actions[currentAnim]) {
-      actions[currentAnim].reset().fadeIn(0.2).play();
+    if (health > 0) {
+      Object.values(actions).forEach((action) => action?.stop());
+      if (actions[currentAnim]) {
+        actions[currentAnim].reset().fadeIn(0.2).play();
+      }
     }
-  }, [currentAnim, actions]);
+  }, [currentAnim, actions, health]);
 
-  useEffect(() => {
-    return () => removeEntity(id);
-  }, [id, removeEntity]);
-
-  if (health <= 0) return null;
+  if (isExploded) {
+    return (
+      <Explosion
+        position={[
+          position.current[0],
+          position.current[1],
+          position.current[2],
+        ]}
+        color="#ff4400"
+        scale={1.5}
+        onFinish={() => removeEntity(id)}
+      />
+    );
+  }
 
   return (
     <group ref={ref}>
-      {/* Visual representation with manual rotation */}
       <group rotation={[0, modelRotation.current, 0]}>
-        {/* Nameplate */}
         <Html position={[0, 1.8, 0]} center distanceFactor={10}>
           <div
             style={{
@@ -157,7 +185,6 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
           </div>
         </Html>
 
-        {/* Health Bar */}
         <group position={[0, 1.5, 0]}>
           <mesh>
             <planeGeometry args={[0.8, 0.1]} />

@@ -69,10 +69,6 @@ const NetworkPlayer: React.FC<{ data: NetworkPlayerData }> = ({ data }) => {
 
       <SpeechBubble message={data.lastMessage || ""} position={[0, 1.2, 0]} />
 
-      {/* Adjust visual model offset. 
-          If only the head was visible with -0.8, we need to move it UP.
-          Trying -0.3 instead of -0.8 to bring more of the body above ground.
-      */}
       <group position={[0, 0, 0]}>
         <primitive object={clonedScene} />
       </group>
