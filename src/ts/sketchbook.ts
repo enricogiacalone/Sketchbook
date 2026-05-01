@@ -87,8 +87,8 @@ function setupSocketConnection(name: string) {
   chatSocket.on("disconnect", () => {});
 }
 
-const world = new World(undefined, setupSocketConnection, sendChatMessage);
-UIManager.initMinimap(world);
+// const world = new World(undefined, setupSocketConnection, sendChatMessage);
+// UIManager.initMinimap(world);
 
 // --- Save/Load Logic ---
 

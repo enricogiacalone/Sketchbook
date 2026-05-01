@@ -8,8 +8,9 @@ import { useStore } from '../../store';
 
 const Airplane: React.FC = () => {
   const { scene } = useGLTF('airplane.glb');
+  const clonedScene = useMemo(() => scene.clone(), [scene]);
   const input = useInput();
-  const { currentControllable, setCurrentControllable } = useStore();
+  const { currentControllable, setCurrentControllable, updateEntity } = useStore();
   const [ready, setReady] = useState(false);
 
   const chassisArgs: [number, number, number] = [1.5, 1, 4];
@@ -19,15 +20,24 @@ const Airplane: React.FC = () => {
     args: chassisArgs,
     mass: 50,
     position: [-10, 15, -10],
-    collisionFilterGroup: 1,
+    collisionFilterGroup: 1, // Default
+    collisionFilterMask: -1, // Collide with everything
   }));
 
   const velocity = useRef([0, 0, 0]);
   useEffect(() => {
     const unsubVel = chassisApi.velocity.subscribe((v) => (velocity.current = v));
-    const unsubPos = chassisApi.position.subscribe(() => setReady(true));
+    const unsubPos = chassisApi.position.subscribe((p) => {
+        if (p) {
+            updateEntity('airplane-1', { 
+                type: 'airplane', 
+                position: p as [number, number, number] 
+            });
+            setReady(true);
+        }
+    });
     return () => { unsubVel(); unsubPos(); };
-  }, [chassisApi]);
+  }, [chassisApi, updateEntity]);
 
   const [enginePower, setEnginePower] = useState(0);
   const rotorRef = useRef<THREE.Object3D>();
@@ -89,7 +99,7 @@ const Airplane: React.FC = () => {
     const drag = currentSpeed * 0.01 * enginePower;
     chassisApi.applyImpulse([-velVec.x * drag, -velVec.y * drag, -velVec.z * drag], [0, 0, 0]);
 
-    if (input.enter) {
+    if (input.consumeJustPressed('enter')) {
         setCurrentControllable('player');
     }
   });
@@ -98,7 +108,7 @@ const Airplane: React.FC = () => {
     <mesh ref={chassisRef}>
       <boxGeometry args={chassisArgs} />
       <meshStandardMaterial visible={false} />
-      <primitive object={scene} position={[0, -0.5, 0]} />
+      <primitive object={clonedScene} position={[0, -0.5, 0]} />
     </mesh>
   );
 };

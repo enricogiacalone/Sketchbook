@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useBox } from '@react-three/cannon';
 import { useGLTF } from '@react-three/drei';
@@ -8,8 +8,9 @@ import { useStore } from '../../store';
 
 const Helicopter: React.FC = () => {
   const { scene } = useGLTF('heli.glb');
+  const clonedScene = useMemo(() => scene.clone(), [scene]);
   const input = useInput();
-  const { currentControllable, setCurrentControllable } = useStore();
+  const { currentControllable, setCurrentControllable, updateEntity } = useStore();
   const [ready, setReady] = useState(false);
 
   const chassisArgs: [number, number, number] = [1.2, 1.5, 4];
@@ -17,15 +18,24 @@ const Helicopter: React.FC = () => {
     mass: 50,
     position: [-15, 20, 15],
     args: chassisArgs,
-    collisionFilterGroup: 1,
+    collisionFilterGroup: 1, // Default
+    collisionFilterMask: -1, // Collide with everything
   }));
 
   const velocity = useRef([0, 0, 0]);
   useEffect(() => {
     const unsubVel = api.velocity.subscribe((v) => (velocity.current = v));
-    const unsubPos = api.position.subscribe(() => setReady(true));
+    const unsubPos = api.position.subscribe((p) => {
+        if (p) {
+            updateEntity('heli-1', { 
+                type: 'helicopter', 
+                position: p as [number, number, number] 
+            });
+            setReady(true);
+        }
+    });
     return () => { unsubVel(); unsubPos(); };
-  }, [api]);
+  }, [api, updateEntity]);
 
   const [enginePower, setEnginePower] = useState(0);
   const rotorsRef = useRef<THREE.Object3D[]>([]);
@@ -101,7 +111,7 @@ const Helicopter: React.FC = () => {
     if (input.left) api.applyTorque([forward.x * torqueFactor, forward.y * torqueFactor, forward.z * torqueFactor]);
     if (input.right) api.applyTorque([-forward.x * torqueFactor, -forward.y * torqueFactor, -forward.z * torqueFactor]);
 
-    if (input.enter) {
+    if (input.consumeJustPressed('enter')) {
         setCurrentControllable('player');
     }
   });
@@ -110,7 +120,7 @@ const Helicopter: React.FC = () => {
     <mesh ref={ref}>
         <boxGeometry args={chassisArgs} />
         <meshStandardMaterial visible={false} />
-        <primitive object={scene} position={[0, -0.5, 0]} />
+        <primitive object={clonedScene} position={[0, -0.5, 0]} />
     </mesh>
   );
 };

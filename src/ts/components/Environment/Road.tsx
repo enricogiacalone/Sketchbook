@@ -14,7 +14,7 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
   const segmentsAcross = 10;
   const yOffset = 0.15;
 
-  const { vertices, indices } = useMemo(() => {
+  const { vertices, physicsIndices, visualIndices } = useMemo(() => {
     const geometry = new THREE.PlaneGeometry(
         axis === 'x' ? size : roadWidth,
         axis === 'z' ? size : roadWidth,
@@ -32,15 +32,21 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
     }
     geometry.computeVertexNormals();
 
+    const rawIndices = geometry.index?.array || new Uint32Array();
+
     return {
         vertices: pos.array as Float32Array,
-        indices: geometry.index?.array as Uint16Array
+        physicsIndices: new Int32Array(rawIndices),
+        visualIndices: new Uint32Array(rawIndices)
     };
   }, [axis, size]);
 
   const [ref] = useTrimesh<THREE.Mesh>(() => ({
-    args: [vertices, indices],
+    type: 'Static',
+    args: [vertices, physicsIndices],
     mass: 0,
+    collisionFilterGroup: 4, 
+    collisionFilterMask: -1, 
   }));
 
   return (
@@ -52,11 +58,11 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
                 array={vertices}
                 itemSize={3}
             />
-            {indices && (
+            {visualIndices && (
                 <bufferAttribute
                     attach="index"
-                    count={indices.length}
-                    array={indices}
+                    count={visualIndices.length}
+                    array={visualIndices}
                     itemSize={1}
                 />
             )}

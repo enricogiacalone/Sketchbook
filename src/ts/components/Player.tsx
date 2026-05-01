@@ -1,55 +1,55 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { useCompoundBody } from "@react-three/cannon";
+import { useSphere } from "@react-three/cannon";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import * as THREE from "three";
+import { SkeletonUtils } from "three-stdlib";
 import { useInput } from "../hooks/useInput";
 import { useNetwork } from "../hooks/useNetwork";
-import { useSpringVector } from "../hooks/useSpringVector";
 import { useThirdPersonCamera } from "../hooks/useThirdPersonCamera";
 import { useStore } from "../store";
+import { getTerrainHeight } from "./Environment/Terrain";
 import NetworkPlayer from "./NetworkPlayer";
 import SpeechBubble from "./UI/SpeechBubble";
 import Bullet from "./Bullet";
 
 const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const input = useInput();
-  const { camera } = useThree();
   const { scene, animations } = useGLTF("boxman.glb");
-  const { actions } = useAnimations(animations, scene);
-  const { currentControllable, setCurrentControllable, setPlayerInfo, playerMessage } = useStore();
+  const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  const { actions } = useAnimations(animations, clonedScene);
+  const { currentControllable, setCurrentControllable, setPlayerInfo, playerMessage, entities, setIsLoading } = useStore();
+
+  useEffect(() => {
+    if (scene) setIsLoading(false);
+  }, [scene, setIsLoading]);
 
   const [posState, setPosState] = useState<[number, number, number]>([0, 5, 0]);
   const [quatState, setQuatState] = useState<number[]>([0, 0, 0, 1]);
   const [currentAnim, setCurrentAnim] = useState("idle");
   const currentAnimRef = useRef("idle");
 
-  // Shooting state
   const [bullets, setBullets] = useState<{ id: string, pos: [number, number, number], vel: [number, number, number] }[]>([]);
   const lastFireTime = useRef(0);
-  const fireRate = 200; // ms between shots
-
+  
   const { remotePlayers, sendChatMessage } = useNetwork(userName, posState, quatState, currentAnim);
 
-  const moveSpeed = 4;
-  const sprintMultiplier = 2.5;
-  const radius = 0.3;
-  const height = 1;
-  const jumpForce = 6;
+  // Constants
+  const RUN_SPEED = 7;
+  const SPRINT_SPEED = RUN_SPEED * 2.0;
+  const JUMP_FORCE = 8;
+  const RADIUS = 0.4;
 
-  const velocitySim = useSpringVector(60, 0.7);
-
-  const [ref, api] = useCompoundBody<THREE.Group>(() => ({
+  // 1. Solid Physics Body (Sphere is the most reliable for character controllers)
+  const [ref, api] = useSphere<THREE.Group>(() => ({
     mass: 1,
     position: [0, 15, 0],
+    args: [RADIUS],
     fixedRotation: true,
+    linearDamping: 0.05,
     material: "slippery",
-    collisionFilterGroup: 2, 
-    shapes: [
-      { type: "Sphere", args: [radius], position: [0, 0, 0] },
-      { type: "Sphere", args: [radius], position: [0, height / 2, 0] },
-      { type: "Sphere", args: [radius], position: [0, -height / 2, 0] },
-    ],
+    collisionFilterGroup: 2,
+    collisionFilterMask: -1,
   }));
 
   const velocity = useRef([0, 0, 0]);
@@ -58,25 +58,19 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const position = useRef([0, 0, 0]);
   useEffect(() => api.position.subscribe((p) => (position.current = p)), [api.position]);
 
+  const modelRotation = useRef(0);
   const isGrounded = useRef(true);
   const jumpPressed = useRef(false);
-
+  
   const playerTarget = useMemo(() => new THREE.Vector3(), []);
-  const { theta } = useThirdPersonCamera(
-    playerTarget,
-    currentControllable === "player"
-  );
-
-  const modelRotation = useRef(0);
+  const { theta } = useThirdPersonCamera(playerTarget, currentControllable === "player");
 
   const playAnim = (name: string) => {
     if (currentAnimRef.current === name) return;
     currentAnimRef.current = name;
     setCurrentAnim(name);
-    Object.values(actions).forEach((action) => action?.stop());
-    if (actions[name]) {
-        actions[name].reset().fadeIn(0.15).play();
-    }
+    Object.values(actions).forEach((action) => action?.fadeOut(0.1));
+    if (actions[name]) actions[name].reset().fadeIn(0.1).play();
   };
 
   const removeBullet = useCallback((id: string) => {
@@ -84,83 +78,108 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   }, []);
 
   useFrame((state, delta) => {
-    if (!ref.current || !scene || currentControllable !== "player") {
-      api.velocity.set(0, 0, 0);
+    if (!ref.current || !clonedScene || currentControllable !== "player") {
+      api.velocity.set(0, velocity.current[1], 0);
       return;
     }
 
-    playerTarget.set(position.current[0], position.current[1], position.current[2]);
-    isGrounded.current = Math.abs(velocity.current[1]) < 0.2;
+    // Sync camera target
+    playerTarget.set(position.current[0], position.current[1] + 1.0, position.current[2]);
+    
+    // 2. Ground Detection & Height Following
+    const terrainY = getTerrainHeight(position.current[0], position.current[2]);
+    // The sphere center is RADIUS (0.4) above the ground when standing
+    const distToGround = position.current[1] - (terrainY + RADIUS);
+    
+    isGrounded.current = distToGround < 0.2 && velocity.current[1] < 1.0;
 
-    // 1. Directional Logic
+    // 3. Movement Direction (Always relative to camera view)
     const thetaRad = THREE.MathUtils.degToRad(theta.current);
-    const cameraForward = new THREE.Vector3(Math.sin(thetaRad), 0, Math.cos(thetaRad)).normalize().negate();
-    const cameraRight = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), cameraForward).normalize();
+    const forward = new THREE.Vector3(Math.sin(thetaRad), 0, Math.cos(thetaRad)).normalize().negate();
+    const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
 
-    const desiredMove = new THREE.Vector3(0, 0, 0);
-    if (input.forward) desiredMove.add(cameraForward);
-    if (input.backward) desiredMove.add(cameraForward.clone().negate());
-    if (input.left) desiredMove.add(cameraRight.clone().negate());
-    if (input.right) desiredMove.add(cameraRight);
+    const moveDir = new THREE.Vector3(0, 0, 0);
+    if (input.forward) moveDir.add(forward);
+    if (input.backward) moveDir.add(forward.clone().negate());
+    if (input.left) moveDir.add(right.clone().negate());
+    if (input.right) moveDir.add(right);
 
-    const isMoving = desiredMove.lengthSq() > 0.01;
+    const isMoving = moveDir.lengthSq() > 0.001;
+    let targetVel = new THREE.Vector3(0, 0, 0);
+
     if (isMoving) {
-      desiredMove.normalize();
-      const targetRotation = Math.atan2(desiredMove.x, desiredMove.z);
+      moveDir.normalize();
+      const speed = input.shift ? SPRINT_SPEED : RUN_SPEED;
+      targetVel.copy(moveDir).multiplyScalar(speed);
+      
+      // Smoothly rotate character to face movement
+      const targetRotation = Math.atan2(moveDir.x, moveDir.z);
       let diff = targetRotation - modelRotation.current;
       while (diff < -Math.PI) diff += Math.PI * 2;
       while (diff > Math.PI) diff -= Math.PI * 2;
-      modelRotation.current += diff * 0.15;
+      modelRotation.current += diff * 0.2;
     }
 
-    // 2. Movement Simulation
-    const targetSpeed = isMoving ? (input.shift ? moveSpeed * sprintMultiplier : moveSpeed) : 0;
-    const airInfluence = isGrounded.current ? 1 : 0.2; 
-    velocitySim.target.current.set(0, 0, targetSpeed);
-    velocitySim.simulate(delta * airInfluence);
-
-    const arcadeVelMagnitude = velocitySim.position.current.z;
-    const worldVel = new THREE.Vector3(
-      Math.sin(modelRotation.current),
-      0,
-      Math.cos(modelRotation.current)
-    ).multiplyScalar(arcadeVelMagnitude);
-
-    if (input.jump && isGrounded.current && !jumpPressed.current) {
-        api.velocity.set(worldVel.x, jumpForce, worldVel.z);
-        jumpPressed.current = true;
+    // 4. Vertical Logic (Jump & Ground Snapping)
+    let yVel = velocity.current[1];
+    
+    if (isGrounded.current) {
+        if (input.consumeJustPressed('jump')) {
+            yVel = JUMP_FORCE;
+        } else {
+            // Ground Snapping: keep sphere pinned to terrain
+            // target position.y = terrainY + RADIUS
+            const yCorrection = (terrainY + RADIUS - position.current[1]) * 10;
+            yVel = yCorrection; 
+        }
     } else {
-        api.velocity.set(worldVel.x, velocity.current[1], worldVel.z);
+        // Air control: blend horizontal input into current air velocity
+        const airInfluence = 0.05;
+        targetVel.x = THREE.MathUtils.lerp(velocity.current[0], targetVel.x, airInfluence);
+        targetVel.z = THREE.MathUtils.lerp(velocity.current[2], targetVel.z, airInfluence);
     }
-    if (!input.jump) jumpPressed.current = false;
 
-    // 3. Shooting Logic
-    if (input.primary && state.clock.elapsedTime * 1000 - lastFireTime.current > fireRate) {
+    // 5. Apply Final Velocity
+    api.velocity.set(targetVel.x, yVel, targetVel.z);
+
+    // 6. Combat Logic
+    if (input.primary && state.clock.elapsedTime * 1000 - lastFireTime.current > 200) {
         const bulletId = `bullet-${Date.now()}`;
         const bulletDir = new THREE.Vector3(Math.sin(modelRotation.current), 0, Math.cos(modelRotation.current));
-        const bulletVel: [number, number, number] = [bulletDir.x * 50, 0, bulletDir.z * 50];
-        const bulletPos: [number, number, number] = [
-            position.current[0] + bulletDir.x * 0.5,
-            position.current[1] + 0.5,
-            position.current[2] + bulletDir.z * 0.5
-        ];
-        
-        setBullets(prev => [...prev, { id: bulletId, pos: bulletPos, vel: bulletVel }]);
+        setBullets(prev => [...prev, { 
+            id: bulletId, 
+            pos: [position.current[0] + bulletDir.x * 0.5, position.current[1] + 0.2, position.current[2] + bulletDir.z * 0.5], 
+            vel: [bulletDir.x * 50, 0, bulletDir.z * 50] 
+        }]);
         lastFireTime.current = state.clock.elapsedTime * 1000;
     }
 
-    // 4. Animation Selection
+    // 7. Animation State Machine
     let nextAnim = "idle";
-    if (!isGrounded.current && Math.abs(velocity.current[1]) > 0.5) {
-        if (velocity.current[1] > 0.5) nextAnim = isMoving ? "jump_running" : "jump_idle";
-        else nextAnim = "falling";
-    } else {
-        nextAnim = isMoving ? (input.shift ? "sprint" : "run") : "idle";
+    const hSpeed = new THREE.Vector2(velocity.current[0], velocity.current[2]).length();
+    
+    if (!isGrounded.current && velocity.current[1] < -3.0) {
+        nextAnim = "falling";
+    } else if (!isGrounded.current && velocity.current[1] > 1.0) {
+        nextAnim = isMoving ? "jump_running" : "jump_idle";
+    } else if (hSpeed > 0.5) {
+        nextAnim = hSpeed > RUN_SPEED * 1.5 ? "sprint" : "run";
     }
     playAnim(nextAnim);
 
-    // 5. Stores update
+    // 8. Stores & Networking
     setPlayerInfo([position.current[0], position.current[1], position.current[2]], modelRotation.current);
+
+    if (input.consumeJustPressed('enter')) {
+        const pPos = new THREE.Vector3(position.current[0], 0, position.current[2]);
+        entities.forEach((e) => {
+          if (['car', 'airplane', 'helicopter'].includes(e.type)) {
+            if (pPos.distanceTo(new THREE.Vector3(e.position[0], 0, e.position[2])) < 8) {
+              setCurrentControllable(e.type as any);
+            }
+          }
+        });
+    }
     
     if (state.clock.getElapsedTime() % 0.05 < 0.02) { 
         setPosState([position.current[0], position.current[1], position.current[2]]);
@@ -169,29 +188,16 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     }
   });
 
-  useEffect(() => {
-    if (playerMessage) sendChatMessage(playerMessage);
-  }, [playerMessage, sendChatMessage]);
-
-  useEffect(() => {
-    if (currentControllable !== "player") {
-      api.collisionFilterGroup.set(0); 
-      api.velocity.set(0, 0, 0);
-    } else {
-      api.collisionFilterGroup.set(2);
-    }
-  }, [currentControllable, api]);
-
   return (
     <>
       <group ref={ref} visible={currentControllable === "player"}>
-        <SpeechBubble message={playerMessage} position={[0, 1.2, 0]} />
         <group rotation={[0, modelRotation.current, 0]}>
-          <primitive object={scene} position={[0, -0.8, 0]} />
+          <primitive object={clonedScene} position={[0, -RADIUS, 0]} />
         </group>
+        <SpeechBubble message={playerMessage} position={[0, 1.2, 0]} />
       </group>
-      {Array.from(remotePlayers.values()).map((playerData) => (
-        <NetworkPlayer key={playerData.id} data={playerData} />
+      {Array.from(remotePlayers.values()).map((p) => (
+        <NetworkPlayer key={p.id} data={p} />
       ))}
       {bullets.map(b => (
         <Bullet key={b.id} id={b.id} position={b.pos} velocity={b.vel} onKill={removeBullet} />

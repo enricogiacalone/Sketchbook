@@ -1,6 +1,6 @@
 import React, { Suspense, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Physics } from "@react-three/cannon";
+import { Physics, Debug } from "@react-three/cannon";
 import { Environment } from "@react-three/drei";
 import Scene from "./Scene";
 import Sky from "./components/Environment/Sky";
@@ -53,13 +53,24 @@ const App: React.FC = () => {
 
             <Physics
               gravity={[0, -9.81, 0]}
-              tolerance={0.001}
+              tolerance={0.0001}
               allowSleep={false}
-              iterations={15}
+              iterations={30}
+              stepSize={1 / 120}
               defaultContactMaterial={{
-                friction: 0,
+                friction: 0.1,
                 restitution: 0,
+                contactEquationStiffness: 1e8,
+                contactEquationRelaxation: 3,
               }}
+              contactMaterials={[
+                {
+                  friction: 0, // Zero friction for the player on ground to avoid sticking to slopes
+                  restitution: 0,
+                  materialA: "slippery",
+                  materialB: "ground",
+                }
+              ]}
             >
               {/* Scene contains the world environment */}
               <Scene />

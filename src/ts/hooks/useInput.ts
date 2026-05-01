@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 export const useInput = () => {
   const [input, setInput] = useState({
@@ -20,6 +20,10 @@ export const useInput = () => {
     secondary: false,
   });
 
+  // Refs are better for "just pressed" as they don't trigger re-renders 
+  // and are immediate for useFrame consumption.
+  const justPressed = useRef<Record<string, boolean>>({});
+
   const keys = {
     KeyW: 'forward',
     KeyS: 'backward',
@@ -39,25 +43,39 @@ export const useInput = () => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (keys[e.code]) {
-        setInput((prev) => ({ ...prev, [keys[e.code]]: true }));
+      const action = keys[e.code];
+      if (action) {
+        setInput((prev) => {
+            if (!prev[action]) justPressed.current[action] = true;
+            return { ...prev, [action]: true };
+        });
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (keys[e.code]) {
-        setInput((prev) => ({ ...prev, [keys[e.code]]: false }));
+      const action = keys[e.code];
+      if (action) {
+        setInput((prev) => ({ ...prev, [action]: false }));
+        justPressed.current[action] = false;
       }
     };
 
     const handleMouseDown = (e: MouseEvent) => {
-        if (e.button === 0) setInput((prev) => ({ ...prev, primary: true }));
-        if (e.button === 2) setInput((prev) => ({ ...prev, secondary: true }));
+        const action = e.button === 0 ? 'primary' : (e.button === 2 ? 'secondary' : null);
+        if (action) {
+            setInput(prev => {
+                if (!prev[action]) justPressed.current[action] = true;
+                return { ...prev, [action]: true };
+            });
+        }
     };
 
     const handleMouseUp = (e: MouseEvent) => {
-        if (e.button === 0) setInput((prev) => ({ ...prev, primary: false }));
-        if (e.button === 2) setInput((prev) => ({ ...prev, secondary: false }));
+        const action = e.button === 0 ? 'primary' : (e.button === 2 ? 'secondary' : null);
+        if (action) {
+            setInput(prev => ({ ...prev, [action]: false }));
+            justPressed.current[action] = false;
+        }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -73,5 +91,13 @@ export const useInput = () => {
     };
   }, []);
 
-  return input;
+  const consumeJustPressed = (action: string) => {
+    if (justPressed.current[action]) {
+        justPressed.current[action] = false;
+        return true;
+    }
+    return false;
+  };
+
+  return { ...input, consumeJustPressed };
 };

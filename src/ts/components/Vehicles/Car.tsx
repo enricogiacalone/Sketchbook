@@ -1,6 +1,6 @@
 import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useBox, useRaycastVehicle } from '@react-three/cannon';
+import { useBox } from '@react-three/cannon';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useInput } from '../../hooks/useInput';
@@ -8,116 +8,89 @@ import { useStore } from '../../store';
 
 const Car: React.FC = () => {
   const { scene } = useGLTF('car.glb');
+  const clonedScene = useMemo(() => {
+    const s = scene.clone();
+    s.traverse((child) => {
+      // Hide all wheel models as requested
+      if (child.userData.data === 'wheel' || child.name.toLowerCase().includes('wheel')) {
+        child.visible = false;
+      }
+    });
+    return s;
+  }, [scene]);
+  
   const input = useInput();
-  const { currentControllable, setCurrentControllable } = useStore();
+  const { currentControllable, setCurrentControllable, updateEntity } = useStore();
   const [isReady, setIsReady] = useState(false);
 
   const chassisArgs: [number, number, number] = [1.2, 0.7, 3];
-  const wheelRadius = 0.35;
 
-  // Chassis Body
+  // Chassis Body - Now the ONLY physical body for the car
   const [chassisRef, chassisApi] = useBox<THREE.Mesh>(() => ({
     allowSleep: false,
     args: chassisArgs,
-    mass: 150, // Più pesante per stabilità
+    mass: 150,
     position: [10, 15, 0],
-    collisionFilterGroup: 1,
+    linearDamping: 0.5,
+    angularDamping: 0.5,
+    collisionFilterGroup: 1, // Default
+    collisionFilterMask: -1, // Collide with everything
   }));
 
-  // Wheel Refs - Creati con useRef in modo stabile
-  const w1 = useRef<THREE.Mesh>(null);
-  const w2 = useRef<THREE.Mesh>(null);
-  const w3 = useRef<THREE.Mesh>(null);
-  const w4 = useRef<THREE.Mesh>(null);
-  const wheelRefs = useMemo(() => [w1, w2, w3, w4], []);
-
-  const wheelInfos = useMemo(() => {
-    const common = { 
-        radius: wheelRadius, 
-        directionLocal: [0, -1, 0], 
-        suspensionStiffness: 30, 
-        suspensionRestLength: 0.3, 
-        axleLocal: [-1, 0, 0], 
-        frictionSlip: 5, 
-        dampingRelaxation: 2.3, 
-        dampingCompression: 4.4,
-        maxSuspensionForce: 100000,
-        rollInfluence: 0.01
-    };
-    return [
-        { ...common, chassisConnectionPointLocal: [-0.75, -0.1, 1.2] },
-        { ...common, chassisConnectionPointLocal: [0.75, -0.1, 1.2] },
-        { ...common, chassisConnectionPointLocal: [-0.75, -0.1, -1.2] },
-        { ...common, chassisConnectionPointLocal: [0.75, -0.1, -1.2] },
-    ];
-  }, []);
-
-  const [vehicleRef, vehicleApi] = useRaycastVehicle<THREE.Group>(() => ({
-    chassisBody: chassisRef,
-    wheelInfos,
-    wheels: wheelRefs as any,
-  }));
-
+  const velocity = useRef([0, 0, 0]);
   useEffect(() => {
-    const unsub = chassisApi.position.subscribe(() => setIsReady(true));
-    return unsub;
-  }, [chassisApi]);
+    const unsubVel = chassisApi.velocity.subscribe(v => velocity.current = v);
+    const unsubPos = chassisApi.position.subscribe((p) => {
+      if (p) {
+        updateEntity('car-1', { 
+          type: 'car', 
+          position: p as [number, number, number] 
+        });
+        setIsReady(true);
+      }
+    });
+    return () => { unsubVel(); unsubPos(); };
+  }, [chassisApi, updateEntity]);
 
-  useFrame(() => {
-    if (!isReady || currentControllable !== 'car') return;
+  useFrame((state, delta) => {
+    if (!isReady || currentControllable !== 'car' || !chassisRef.current) return;
 
-    const engineForce = 1500;
-    const steerValue = 0.5;
+    const moveSpeed = 30;
+    const turnSpeed = 2;
+    
+    const quat = chassisRef.current.quaternion;
+    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
 
-    // Steering
-    if (input.left) {
-        vehicleApi.setSteeringValue(steerValue, 0);
-        vehicleApi.setSteeringValue(steerValue, 1);
-    } else if (input.right) {
-        vehicleApi.setSteeringValue(-steerValue, 0);
-        vehicleApi.setSteeringValue(-steerValue, 1);
-    } else {
-        vehicleApi.setSteeringValue(0, 0);
-        vehicleApi.setSteeringValue(0, 1);
-    }
-
-    // Engine
+    // Simple movement logic without wheels
     if (input.forward) {
-        vehicleApi.applyEngineForce(-engineForce, 2);
-        vehicleApi.applyEngineForce(-engineForce, 3);
-    } else if (input.backward) {
-        vehicleApi.applyEngineForce(engineForce, 2);
-        vehicleApi.applyEngineForce(engineForce, 3);
-    } else {
-        vehicleApi.applyEngineForce(0, 2);
-        vehicleApi.applyEngineForce(0, 3);
+        chassisApi.applyImpulse([forward.x * moveSpeed, forward.y * moveSpeed, forward.z * moveSpeed], [0, 0, 0]);
+    }
+    if (input.backward) {
+        chassisApi.applyImpulse([-forward.x * moveSpeed, -forward.y * moveSpeed, -forward.z * moveSpeed], [0, 0, 0]);
     }
 
-    if (input.jump) {
-        for(let i=0; i<4; i++) vehicleApi.setBrake(20, i);
-    } else {
-        for(let i=0; i<4; i++) vehicleApi.setBrake(0, i);
+    if (input.left) {
+        chassisApi.applyTorque([0, turnSpeed * 50, 0]);
+    }
+    if (input.right) {
+        chassisApi.applyTorque([0, -turnSpeed * 50, 0]);
     }
 
-    if (input.enter) setCurrentControllable('player');
+    // Dampen rotation when not turning
+    if (!input.left && !input.right) {
+        chassisApi.angularVelocity.set(0, 0, 0);
+    }
+
+    if (input.consumeJustPressed('enter')) setCurrentControllable('player');
   });
 
   return (
-    <group ref={vehicleRef}>
-      <mesh ref={chassisRef}>
-        <boxGeometry args={chassisArgs} />
-        <meshStandardMaterial visible={false} />
-        <primitive object={scene} position={[0, -0.4, 0]} />
-      </mesh>
-      {wheelRefs.map((ref, i) => (
-        <mesh ref={ref as any} key={i}>
-          <mesh rotation={[0, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[wheelRadius, wheelRadius, 0.2, 16]} />
-            <meshStandardMaterial color="#222" />
-          </mesh>
-        </mesh>
-      ))}
-    </group>
+    <mesh ref={chassisRef}>
+      <boxGeometry args={chassisArgs} />
+      <meshStandardMaterial visible={false} />
+      <primitive object={clonedScene} position={[0, -0.4, 0]} />
+    </mesh>
   );
 };
 
