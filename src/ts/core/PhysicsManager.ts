@@ -60,27 +60,39 @@ export class PhysicsManager {
     );
     this.physicsWorld.addContactMaterial(meteoriteMeteoriteContactMaterial);
 
-    // New: Contact material for character-character collisions
-    const characterCharacterContactMaterial = new CANNON.ContactMaterial(
-      this.characterMaterial,
-      this.characterMaterial,
+    // Default contact material for general physics
+    const defaultContactMaterial = new CANNON.ContactMaterial(
+      new CANNON.Material("default"),
+      new CANNON.Material("default"),
       {
-        friction: 0.1, // Low friction to allow sliding past each other
-        restitution: 0.0, // No bounce
+        friction: 0.3,
+        restitution: 0.2,
       }
     );
-    this.physicsWorld.addContactMaterial(characterCharacterContactMaterial);
+    this.physicsWorld.defaultContactMaterial = defaultContactMaterial;
 
-    // New: Contact material for character-trimesh (ground) collisions
+    // Specialized material for characters (Ultra-slippery for movement)
     const characterTrimeshContactMaterial = new CANNON.ContactMaterial(
       this.characterMaterial,
       this.trimeshMaterial,
       {
-        friction: 0.0, // Characters should not stick to the ground
-        restitution: 0.0, // No bounce
+        friction: 0.0, // Absolute zero friction to prevent sticking
+        restitution: 0.0,
+        contactEquationStiffness: 1e8, // Extremely stiff
+        contactEquationRelaxation: 3,
       }
     );
     this.physicsWorld.addContactMaterial(characterTrimeshContactMaterial);
+
+    const characterCharacterContactMaterial = new CANNON.ContactMaterial(
+      this.characterMaterial,
+      this.characterMaterial,
+      {
+        friction: 0.1,
+        restitution: 0.0,
+      }
+    );
+    this.physicsWorld.addContactMaterial(characterCharacterContactMaterial);
 
     this.physicsWorld.addEventListener("preStep", () => this._onPreStep());
     this.physicsWorld.addEventListener("postStep", () => this._onPostStep());

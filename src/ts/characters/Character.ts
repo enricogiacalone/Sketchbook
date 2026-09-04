@@ -84,8 +84,8 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   // Ray casting
   public rayResult: CANNON.RaycastResult = new CANNON.RaycastResult();
   public rayHasHit: boolean = false;
-  public rayCastLength: number = 0.55;
-  public raySafeOffset: number = 0.03;
+  public rayCastLength: number = 0.9; // Increased for a larger grounding buffer
+  public raySafeOffset: number = 0.05;
   public wantsToJump: boolean = false;
   public initJumpSpeed: number = -1;
   public groundImpactData: GroundImpactData = new GroundImpactData();
@@ -94,6 +94,9 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   public world: World;
   public charState: ICharacterState;
   public behaviour: ICharacterAI;
+
+  // Suspension target height
+  private suspensionTarget: number = 0.6; 
 
   // Vehicles
   public controlledObject: IControllable;
@@ -185,8 +188,8 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       // tslint:disable-next-line: no-bitwise
       shape.collisionFilterMask =
         CollisionGroups.Default |
-        CollisionGroups.Characters | // Added this line
-        CollisionGroups.TrimeshColliders |
+        CollisionGroups.Characters |
+        CollisionGroups.TrimeshColliders | // RE-ENABLE: Critical for stability
         CollisionGroups.Bullet;
     });
     this.characterCapsule.body.allowSleep = false;
@@ -1025,159 +1028,66 @@ export class Character extends THREE.Object3D implements IWorldEntity {
   }
 
   public physicsPostStep(body: CANNON.Body, character: Character): void {
-    // Get velocities
-    let simulatedVelocity = new THREE.Vector3(
-      body.velocity.x,
-      body.velocity.y,
-      body.velocity.z
-    );
-
-    // Take local velocity
-    let arcadeVelocity = new THREE.Vector3()
+    // 1. COMPUTE TARGET VELOCITY
+    const arcadeVelocity = new THREE.Vector3()
       .copy(character.velocity)
       .multiplyScalar(character.moveSpeed);
-    // Turn local into global
-    arcadeVelocity = Utils.appplyVectorMatrixXZ(
-      character.orientation,
-      arcadeVelocity
-    );
+    
+    let targetVelocity = Utils.appplyVectorMatrixXZ(character.orientation, arcadeVelocity);
 
-    let newVelocity = new THREE.Vector3();
-
-    // Additive velocity mode
-    if (character.arcadeVelocityIsAdditive) {
-      newVelocity.copy(simulatedVelocity);
-
-      let globalVelocityTarget = Utils.appplyVectorMatrixXZ(
-        character.orientation,
-        character.velocityTarget
-      );
-      let add = new THREE.Vector3()
-        .copy(arcadeVelocity)
-        .multiply(character.arcadeVelocityInfluence);
-
-      if (
-        Math.abs(simulatedVelocity.x) <
-          Math.abs(globalVelocityTarget.x * character.moveSpeed) ||
-        Utils.haveDifferentSigns(simulatedVelocity.x, arcadeVelocity.x)
-      ) {
-        newVelocity.x += add.x;
-      }
-      if (
-        Math.abs(simulatedVelocity.y) <
-          Math.abs(globalVelocityTarget.y * character.moveSpeed) ||
-        Utils.haveDifferentSigns(simulatedVelocity.y, arcadeVelocity.y)
-      ) {
-        newVelocity.y += add.y;
-      }
-      if (
-        Math.abs(simulatedVelocity.z) <
-          Math.abs(globalVelocityTarget.z * character.moveSpeed) ||
-        Utils.haveDifferentSigns(simulatedVelocity.z, arcadeVelocity.z)
-      ) {
-        newVelocity.z += add.z;
-      }
-    } else {
-      newVelocity = new THREE.Vector3(
-        THREE.MathUtils.lerp(
-          simulatedVelocity.x,
-          arcadeVelocity.x,
-          character.arcadeVelocityInfluence.x
-        ),
-        THREE.MathUtils.lerp(
-          simulatedVelocity.y,
-          arcadeVelocity.y,
-          character.arcadeVelocityInfluence.y
-        ),
-        THREE.MathUtils.lerp(
-          simulatedVelocity.z,
-          arcadeVelocity.z,
-          character.arcadeVelocityInfluence.z
-        )
-      );
-    }
-
-    // If we're hitting the ground, stick to ground
+    // 2. GROUNDED LOGIC
     if (character.rayHasHit && !(character.charState instanceof Flying)) {
-      // Flatten velocity
-      newVelocity.y = 0;
+      const normal = Utils.threeVector(character.rayResult.hitNormalWorld);
+      const up = new THREE.Vector3(0, 1, 0);
 
-      // Move on top of moving objects
-      if (character.rayResult.body.mass > 0) {
-        let pointVelocity = new CANNON.Vec3();
-        character.rayResult.body.getVelocityAtWorldPoint(
-          character.rayResult.hitPointWorld,
-          pointVelocity
-        );
-        newVelocity.add(Utils.threeVector(pointVelocity));
+      // Project target velocity onto the floor normal
+      const q = new THREE.Quaternion().setFromUnitVectors(up, normal);
+      targetVelocity.applyQuaternion(q);
+
+      // Handle slope speed reduction (very simple and effective)
+      const dot = normal.dot(up);
+      if (dot < 0.7) { // > 45 degrees
+          targetVelocity.multiplyScalar(THREE.MathUtils.clamp((dot - 0.3) / 0.4, 0, 1));
       }
 
-      // Measure the normal vector offset from direct "up" vector
-      // and transform it into a matrix
-      let up = new THREE.Vector3(0, 1, 0);
-      let normal = new THREE.Vector3(
-        character.rayResult.hitNormalWorld.x,
-        character.rayResult.hitNormalWorld.y,
-        character.rayResult.hitNormalWorld.z
-      );
-      let q = new THREE.Quaternion().setFromUnitVectors(up, normal);
-      let m = new THREE.Matrix4().makeRotationFromQuaternion(q);
+      // Smoothly set horizontal velocity
+      const influence = character.arcadeVelocityInfluence;
+      body.velocity.x = THREE.MathUtils.lerp(body.velocity.x, targetVelocity.x, influence.x);
+      body.velocity.z = THREE.MathUtils.lerp(body.velocity.z, targetVelocity.z, influence.z);
 
-      // Rotate the velocity vector
-      newVelocity.applyMatrix4(m);
+      // Grounding: PD-like velocity snap (extremely stable)
+      const targetHeight = character.suspensionTarget;
+      const currentHeight = character.rayResult.distance;
+      const heightError = targetHeight - currentHeight;
+      
+      // Calculate needed vertical velocity to reach target height in 0.1s
+      let verticalVelocity = heightError / 0.1;
+      
+      // If we are on a moving platform, add its velocity
+      if (character.rayResult.body.mass > 0) {
+          const pointVelocity = new CANNON.Vec3();
+          character.rayResult.body.getVelocityAtWorldPoint(character.rayResult.hitPointWorld, pointVelocity);
+          body.velocity.x += pointVelocity.x;
+          body.velocity.z += pointVelocity.z;
+          verticalVelocity += pointVelocity.y;
+      }
 
-      // Compensate for gravity
-      // newVelocity.y -= body.world.physicsManager.physicsWorld.gravity.y / body.character.world.physicsFrameRate;
-
-      // Apply velocity
-      body.velocity.x = newVelocity.x;
-      body.velocity.y = newVelocity.y;
-      body.velocity.z = newVelocity.z;
-      // Ground character
-      body.position.y =
-        character.rayResult.hitPointWorld.y +
-        character.rayCastLength +
-        newVelocity.y / character.world.physicsFrameRate;
+      body.velocity.y = verticalVelocity;
     } else {
-      // If we're in air
-      body.velocity.x = newVelocity.x;
-      body.velocity.y = newVelocity.y;
-      body.velocity.z = newVelocity.z;
+      // 3. AIR LOGIC
+      // Standard air control (minimal)
+      const airInfluence = 0.05;
+      body.velocity.x = THREE.MathUtils.lerp(body.velocity.x, targetVelocity.x, airInfluence);
+      body.velocity.z = THREE.MathUtils.lerp(body.velocity.z, targetVelocity.z, airInfluence);
 
-      // Save last in-air information
-      character.groundImpactData.velocity.x = body.velocity.x;
-      character.groundImpactData.velocity.y = body.velocity.y;
-      character.groundImpactData.velocity.z = body.velocity.z;
+      // Impact data for landings
+      character.groundImpactData.velocity.copy(Utils.threeVector(body.velocity));
     }
 
-    // Jumping
+    // 4. JUMP LOGIC
     if (character.wantsToJump) {
-      // If initJumpSpeed is set
-      if (character.initJumpSpeed > -1) {
-        // Flatten velocity
-        body.velocity.y = 0;
-        let speed = Math.max(
-          character.velocitySimulator.position.length() * 4,
-          character.initJumpSpeed
-        );
-        body.velocity = Utils.cannonVector(
-          character.orientation.clone().multiplyScalar(speed)
-        );
-      } else {
-        // Moving objects compensation
-        let add = new CANNON.Vec3();
-        character.rayResult.body.getVelocityAtWorldPoint(
-          character.rayResult.hitPointWorld,
-          add
-        );
-        body.velocity.vsub(add, body.velocity);
-      }
-
-      // Add positive vertical velocity
-      body.velocity.y += 4;
-      // Move above ground by 2x safe offset value
-      body.position.y += character.raySafeOffset * 2;
-      // Reset flag
+      body.velocity.y = 5;
+      body.position.y += 0.1; 
       character.wantsToJump = false;
     }
   }
@@ -1196,9 +1106,9 @@ export class Character extends THREE.Object3D implements IWorldEntity {
       world.entityManager.characters.push(this);
 
       // Register physics
+      this.characterCapsule.body.material = world.physicsManager.characterMaterial;
       world.physicsManager.physicsWorld.addBody(this.characterCapsule.body);
       this.characterCapsule.body.userData = this; // Set userData for collision detection
-
       // Explicitly set the physics body's position to match the visual object's position
       // The initial position should be managed by setPosition in spawnEnemies
       // this.characterCapsule.body.position.copy(Utils.cannonVector(this.position));

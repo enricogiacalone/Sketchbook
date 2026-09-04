@@ -6,11 +6,16 @@ import * as THREE from 'three';
 import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
 
-const Airplane: React.FC = () => {
+interface AirplaneProps {
+  position?: [number, number, number];
+  id?: string;
+}
+
+const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'airplane-1' }) => {
   const { scene } = useGLTF('airplane.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
   const input = useInput();
-  const { currentControllable, setCurrentControllable, updateEntity } = useStore();
+  const { currentControllable, controlledEntityId, setCurrentControllable, updateEntity, setPlayerInfo } = useStore();
   const [ready, setReady] = useState(false);
 
   const chassisArgs: [number, number, number] = [1.5, 1, 4];
@@ -19,7 +24,7 @@ const Airplane: React.FC = () => {
     allowSleep: false,
     args: chassisArgs,
     mass: 50,
-    position: [-10, 15, -10],
+    position: position,
     collisionFilterGroup: 1, // Default
     collisionFilterMask: -1, // Collide with everything
   }));
@@ -29,7 +34,7 @@ const Airplane: React.FC = () => {
     const unsubVel = chassisApi.velocity.subscribe((v) => (velocity.current = v));
     const unsubPos = chassisApi.position.subscribe((p) => {
         if (p) {
-            updateEntity('airplane-1', { 
+            updateEntity(id, { 
                 type: 'airplane', 
                 position: p as [number, number, number] 
             });
@@ -37,7 +42,7 @@ const Airplane: React.FC = () => {
         }
     });
     return () => { unsubVel(); unsubPos(); };
-  }, [chassisApi, updateEntity]);
+  }, [chassisApi, updateEntity, id]);
 
   const [enginePower, setEnginePower] = useState(0);
   const rotorRef = useRef<THREE.Object3D>();
@@ -50,8 +55,14 @@ const Airplane: React.FC = () => {
     }
   }, [scene]);
 
+  const prevControllable = useRef(currentControllable);
+
   useFrame((state, delta) => {
-    if (!ready || currentControllable !== 'airplane' || !chassisRef.current) {
+    const isAirplaneActive = currentControllable === 'airplane' && controlledEntityId === id;
+    const wasAirplaneActive = prevControllable.current === 'airplane' && controlledEntityId === id;
+    prevControllable.current = currentControllable;
+
+    if (!ready || !isAirplaneActive || !chassisRef.current) {
       if (enginePower > 0) setEnginePower(prev => Math.max(0, prev - delta * 0.12));
       return;
     }
@@ -72,8 +83,8 @@ const Airplane: React.FC = () => {
 
     // Thrust
     let thrustForce = 0;
-    if (input.shift) thrustForce = 15; 
-    else if (input.jump) thrustForce = -10; 
+    if (input.shift) thrustForce = 28; 
+    else if (input.jump) thrustForce = -15; 
     
     if (enginePower > 0.1) {
         chassisApi.applyImpulse(
@@ -89,23 +100,43 @@ const Airplane: React.FC = () => {
     if (input.left) chassisApi.applyTorque([forward.x * torqueFactor * 1.5, forward.y * torqueFactor * 1.5, forward.z * torqueFactor * 1.5]);
     if (input.right) chassisApi.applyTorque([-forward.x * torqueFactor * 1.5, -forward.y * torqueFactor * 1.5, -forward.z * torqueFactor * 1.5]);
 
+    // Yaw (Q/E)
+    const yawTorqueFactor = 1.0 * flightModeInfluence * enginePower;
+    if (input.yawLeft) chassisApi.applyTorque([up.x * yawTorqueFactor, up.y * yawTorqueFactor, up.z * yawTorqueFactor]);
+    if (input.yawRight) chassisApi.applyTorque([-up.x * yawTorqueFactor, -up.y * yawTorqueFactor, -up.z * yawTorqueFactor]);
+
     // Lift
-    const lift = Math.min(0.5, currentSpeed * 0.05) * enginePower;
-    if (lift > 0) {
-        chassisApi.applyImpulse([up.x * lift, up.y * lift, up.z * lift], [0, 0, 0]);
+    const liftForce = Math.min(1.8, currentSpeed * 0.08) * enginePower * 20 * 50 * delta; 
+    if (liftForce > 0) {
+        chassisApi.applyImpulse([up.x * liftForce, up.y * liftForce, up.z * liftForce], [0, 0, 0]);
     }
 
     // Drag
     const drag = currentSpeed * 0.01 * enginePower;
     chassisApi.applyImpulse([-velVec.x * drag, -velVec.y * drag, -velVec.z * drag], [0, 0, 0]);
 
-    if (input.consumeJustPressed('enter')) {
+    const planePos = new THREE.Vector3();
+    chassisRef.current.getWorldPosition(planePos);
+    const planeEuler = new THREE.Euler().setFromQuaternion(chassisRef.current.quaternion, 'YXZ');
+    
+    // Update player info so camera/minimap follow the plane
+    setPlayerInfo([planePos.x, planePos.y, planePos.z], planeEuler.y);
+
+    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
+      updateEntity(id, {
+        type: 'airplane',
+        position: [planePos.x, planePos.y, planePos.z],
+        rotation: planeEuler.y
+      });
+    }
+
+    if (wasAirplaneActive && input.consumeJustPressed('enter')) {
         setCurrentControllable('player');
     }
   });
 
   return (
-    <mesh ref={chassisRef}>
+    <mesh ref={chassisRef} name={id}>
       <boxGeometry args={chassisArgs} />
       <meshStandardMaterial visible={false} />
       <primitive object={clonedScene} position={[0, -0.5, 0]} />

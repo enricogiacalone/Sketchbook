@@ -124,6 +124,7 @@ export class VillageGenerator {
           mass: 0,
           material: this.physicsManager.trimeshMaterial,
         });
+        physicsBody.collisionFilterGroup = CollisionGroups.TrimeshColliders; // Correct group
         physicsBody.addShape(physicsBodyShape);
         physicsBody.position.set(x, baseHeight + houseHeight / 2, z);
         this.physicsManager.physicsWorld.addBody(physicsBody);
@@ -233,6 +234,7 @@ export class VillageGenerator {
       mass: 0,
       material: this.physicsManager.trimeshMaterial,
     });
+    wellPhysicsBody.collisionFilterGroup = CollisionGroups.TrimeshColliders; // Correct group
     wellPhysicsBody.addShape(wellPhysicsShape);
     wellPhysicsBody.position.set(wellX, wellY + totalWellHeight / 2, wellZ);
     this.physicsManager.physicsWorld.addBody(wellPhysicsBody);
@@ -309,6 +311,7 @@ export class VillageGenerator {
         mass: 0,
         material: this.physicsManager.trimeshMaterial,
       });
+      wallPhysicsBody.collisionFilterGroup = CollisionGroups.TrimeshColliders; // Correct group
       wallPhysicsBody.addShape(wallPhysicsShape);
       wallPhysicsBody.position.copy(
         new CANNON.Vec3(midX, wallBottomY + consistentWallHeight / 2, midZ)
@@ -372,6 +375,7 @@ export class VillageGenerator {
         mass: 0,
         material: this.physicsManager.trimeshMaterial,
       });
+      towerPhysicsBody.collisionFilterGroup = CollisionGroups.TrimeshColliders; // Correct group
       towerPhysicsBody.addShape(towerPhysicsShape);
       towerPhysicsBody.position.copy(
         new CANNON.Vec3(towerX, wallBottomY + towerHeight / 2, towerZ)

@@ -231,11 +231,11 @@ export class WorldBuilder {
 
     const groundBody = new CANNON.Body({
       mass: 0,
-
       material: this.world.physicsManager.trimeshMaterial,
     });
-
+    groundBody.collisionFilterGroup = CollisionGroups.TrimeshColliders; // Set correct collision group
     groundBody.addShape(trimeshShape);
+    groundBody.updateAABB();
 
     this.world.physicsManager.physicsWorld.addBody(groundBody);
 
@@ -396,7 +396,10 @@ export class WorldBuilder {
               phys.body.updateAABB();
 
               phys.body.shapes.forEach((shape) => {
-                shape.collisionFilterMask = ~CollisionGroups.TrimeshColliders;
+                // Collide with EVERYTHING except other trimesh colliders (to avoid performance issues with static-static)
+                shape.collisionFilterMask = ~CollisionGroups.TrimeshColliders | CollisionGroups.TrimeshColliders; 
+                // Actually, just let it use default mask which is all 1s
+                shape.collisionFilterMask = 0xFFFFFFFF; 
               });
 
               this.world.physicsManager.physicsWorld.addBody(phys.body);
@@ -404,6 +407,7 @@ export class WorldBuilder {
               let phys = new TrimeshCollider(child, {
                 material: this.world.physicsManager.trimeshMaterial,
               });
+              phys.body.collisionFilterGroup = CollisionGroups.TrimeshColliders; // Set group here too
               this.world.physicsManager.physicsWorld.addBody(phys.body);
             }
 

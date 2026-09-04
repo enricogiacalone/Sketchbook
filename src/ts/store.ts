@@ -14,6 +14,7 @@ interface GameState {
   maxHealth: number;
   armor: number;
   currentControllable: ControllableType;
+  controlledEntityId: string | null;
   isLoading: boolean;
   isCrosshairVisible: boolean;
   playerPos: [number, number, number];
@@ -23,7 +24,7 @@ interface GameState {
   setHealth: (health: number) => void;
   setMaxHealth: (maxHealth: number) => void;
   setArmor: (armor: number) => void;
-  setCurrentControllable: (type: ControllableType) => void;
+  setCurrentControllable: (type: ControllableType, id?: string | null) => void;
   setIsLoading: (loading: boolean) => void;
   setIsCrosshairVisible: (visible: boolean) => void;
   setPlayerInfo: (pos: [number, number, number], yaw: number) => void;
@@ -37,6 +38,7 @@ export const useStore = create<GameState>((set) => ({
   maxHealth: 100,
   armor: 0,
   currentControllable: 'player',
+  controlledEntityId: null,
   isLoading: false, // Set to false initially to show WelcomeScreen
   isCrosshairVisible: false,
   playerPos: [0, 0, 0],
@@ -46,7 +48,7 @@ export const useStore = create<GameState>((set) => ({
   setHealth: (health) => set({ health }),
   setMaxHealth: (maxHealth) => set({ maxHealth }),
   setArmor: (armor) => set({ armor }),
-  setCurrentControllable: (type) => set({ currentControllable: type }),
+  setCurrentControllable: (type, id = null) => set({ currentControllable: type, controlledEntityId: id }),
   setIsLoading: (loading) => set({ isLoading: loading }),
   setIsCrosshairVisible: (visible) => set({ isCrosshairVisible: visible }),
   setPlayerInfo: (pos, yaw) => set({ playerPos: pos, playerYaw: yaw }),

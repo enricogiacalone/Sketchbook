@@ -85,7 +85,7 @@ const Clouds: React.FC = () => {
     clouds.forEach((cloud) => {
       cloud.particles.forEach((p) => {
         dummy.position.copy(cloud.position).add(p.offset);
-        dummy.rotation.z = p.rotation;
+        dummy.quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), p.rotation);
         dummy.scale.set(p.scale, p.scale, 1);
         dummy.updateMatrix();
         meshRef.current!.setMatrixAt(instanceIdx++, dummy.matrix);
@@ -109,8 +109,12 @@ const Clouds: React.FC = () => {
 
       cloud.particles.forEach((p) => {
         dummy.position.copy(cloud.position).add(p.offset);
-        // Make particles face the camera slightly or just keep static rotation
-        dummy.rotation.z = p.rotation + state.clock.elapsedTime * 0.05; 
+        // Face the camera!
+        dummy.quaternion.copy(state.camera.quaternion);
+        // Apply individual particle rotation
+        const zRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), p.rotation + state.clock.elapsedTime * 0.05);
+        dummy.quaternion.multiply(zRotation);
+        
         dummy.scale.set(p.scale, p.scale, 1);
         dummy.updateMatrix();
         meshRef.current!.setMatrixAt(instanceIdx++, dummy.matrix);

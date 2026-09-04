@@ -6,36 +6,43 @@ import * as THREE from 'three';
 import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
 
-const Helicopter: React.FC = () => {
+interface HelicopterProps {
+  position?: [number, number, number];
+  id?: string;
+}
+
+const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 'heli-1' }) => {
   const { scene } = useGLTF('heli.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
   const input = useInput();
-  const { currentControllable, setCurrentControllable, updateEntity } = useStore();
+  const { currentControllable, controlledEntityId, setCurrentControllable, updateEntity, setPlayerInfo } = useStore();
   const [ready, setReady] = useState(false);
 
   const chassisArgs: [number, number, number] = [1.2, 1.5, 4];
   const [ref, api] = useBox<THREE.Mesh>(() => ({
     mass: 50,
-    position: [-15, 20, 15],
+    position: position,
     args: chassisArgs,
     collisionFilterGroup: 1, // Default
     collisionFilterMask: -1, // Collide with everything
   }));
 
   const velocity = useRef([0, 0, 0]);
+  const angularVelocity = useRef([0, 0, 0]);
   useEffect(() => {
     const unsubVel = api.velocity.subscribe((v) => (velocity.current = v));
+    const unsubAngVel = api.angularVelocity.subscribe((av) => (angularVelocity.current = av));
     const unsubPos = api.position.subscribe((p) => {
         if (p) {
-            updateEntity('heli-1', { 
+            updateEntity(id, { 
                 type: 'helicopter', 
                 position: p as [number, number, number] 
             });
             setReady(true);
         }
     });
-    return () => { unsubVel(); unsubPos(); };
-  }, [api, updateEntity]);
+    return () => { unsubVel(); unsubAngVel(); unsubPos(); };
+  }, [api, updateEntity, id]);
 
   const [enginePower, setEnginePower] = useState(0);
   const rotorsRef = useRef<THREE.Object3D[]>([]);
@@ -50,8 +57,14 @@ const Helicopter: React.FC = () => {
     }
   }, [scene]);
 
+  const prevControllable = useRef(currentControllable);
+
   useFrame((state, delta) => {
-    if (!ready || currentControllable !== 'helicopter' || !ref.current) {
+    const isHeliActive = currentControllable === 'helicopter' && controlledEntityId === id;
+    const wasHeliActive = prevControllable.current === 'helicopter' && controlledEntityId === id;
+    prevControllable.current = currentControllable;
+
+    if (!ready || !isHeliActive || !ref.current) {
       if (enginePower > 0) setEnginePower(prev => Math.max(0, prev - delta * 0.06));
       return;
     }
@@ -69,7 +82,7 @@ const Helicopter: React.FC = () => {
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
 
     // 1. Throttle (Ascend/Descend)
-    const throttleFactor = 7.5 * enginePower;
+    const throttleFactor = 15 * enginePower;
     if (input.shift) {
         api.applyImpulse([up.x * throttleFactor, up.y * throttleFactor, up.z * throttleFactor], [0, 0, 0]);
     }
@@ -78,7 +91,7 @@ const Helicopter: React.FC = () => {
     }
 
     // 2. Vertical Stabilization (Gravity compensation)
-    const gravity = 9.81;
+    const gravity = 20;
     let gravityCompensation = gravity * 50 * delta * 0.98;
     const dot = globalUp.dot(up);
     gravityCompensation *= Math.sqrt(THREE.MathUtils.clamp(dot, 0, 1));
@@ -90,15 +103,18 @@ const Helicopter: React.FC = () => {
     const damping = 1 - (0.005 * enginePower);
     api.velocity.set(velocity.current[0] * damping, velocity.current[1], velocity.current[2] * damping);
 
-    // 4. Rotation Stabilization
+    // 4. Rotation Stabilization & Yaw
     const rotStabQuat = new THREE.Quaternion().setFromUnitVectors(up, globalUp);
-    const rotStabEuler = new THREE.Euler().setFromQuaternion(new THREE.Quaternion(
-        rotStabQuat.x * 0.3, rotStabQuat.y * 0.3, rotStabQuat.z * 0.3, rotStabQuat.w * 0.3
-    ));
+    const rotStabEuler = new THREE.Euler().setFromQuaternion(rotStabQuat);
+    
+    let yawSpeed = 0;
+    if (input.yawLeft) yawSpeed = 1.8 * enginePower;
+    if (input.yawRight) yawSpeed = -1.8 * enginePower;
+
     api.angularVelocity.set(
-        velocity.current[0] * 0.97 + rotStabEuler.x * enginePower,
-        velocity.current[1] * 0.97 + rotStabEuler.y * enginePower,
-        velocity.current[2] * 0.97 + rotStabEuler.z * enginePower
+        angularVelocity.current[0] * 0.95 + rotStabEuler.x * enginePower * 2.0,
+        angularVelocity.current[1] * 0.95 + yawSpeed,
+        angularVelocity.current[2] * 0.95 + rotStabEuler.z * enginePower * 2.0
     );
 
     // 5. Controls (Torques)
@@ -111,13 +127,28 @@ const Helicopter: React.FC = () => {
     if (input.left) api.applyTorque([forward.x * torqueFactor, forward.y * torqueFactor, forward.z * torqueFactor]);
     if (input.right) api.applyTorque([-forward.x * torqueFactor, -forward.y * torqueFactor, -forward.z * torqueFactor]);
 
-    if (input.consumeJustPressed('enter')) {
+    const heliPos = new THREE.Vector3();
+    ref.current.getWorldPosition(heliPos);
+    const heliEuler = new THREE.Euler().setFromQuaternion(quat, 'YXZ');
+    
+    // Update player info so camera/minimap follow the helicopter
+    setPlayerInfo([heliPos.x, heliPos.y, heliPos.z], heliEuler.y);
+
+    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
+      updateEntity(id, {
+        type: 'helicopter',
+        position: [heliPos.x, heliPos.y, heliPos.z],
+        rotation: heliEuler.y
+      });
+    }
+
+    if (wasHeliActive && input.consumeJustPressed('enter')) {
         setCurrentControllable('player');
     }
   });
 
   return (
-    <mesh ref={ref}>
+    <mesh ref={ref} name={id}>
         <boxGeometry args={chassisArgs} />
         <meshStandardMaterial visible={false} />
         <primitive object={clonedScene} position={[0, -0.5, 0]} />

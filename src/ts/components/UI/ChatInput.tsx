@@ -51,6 +51,31 @@ const ChatInput: React.FC = () => {
     };
   }, []);
 
+  // Listen for Enter or T keys to open the chat
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (isExpanded) return;
+      
+      // If we are focused on an input or textarea, don't trigger the chat
+      if (
+        document.activeElement?.tagName === 'INPUT' ||
+        document.activeElement?.tagName === 'TEXTAREA'
+      ) {
+        return;
+      }
+
+      if (e.key === 'Enter' || e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        setIsExpanded(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [isExpanded]);
+
   return (
     <div 
       id="chat-input-container" 

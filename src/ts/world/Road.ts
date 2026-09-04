@@ -105,6 +105,7 @@ export class Road implements IWorldEntity {
         mass: 0,
         material: world.physicsManager.trimeshMaterial,
       });
+      roadBody.collisionFilterGroup = CollisionGroups.TrimeshColliders; // Set correct collision group
       roadBody.addShape(trimeshShape);
       roadBody.position.copy(Utils.cannonVector(positionOffset));
       this.roadPhysicsBodies.push(roadBody);

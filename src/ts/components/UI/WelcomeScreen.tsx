@@ -1,53 +1,82 @@
 import React, { useState } from 'react';
-import Swal from 'sweetalert2';
 
 interface WelcomeScreenProps {
   onJoin: (name: string, controlMethod: string) => void;
 }
 
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
-  React.useEffect(() => {
-    Swal.fire({
-      title: "Welcome to Sketchbook!",
-      text: "Feel free to explore the world and interact with available vehicles.",
-      html: `
-        <div style="margin-top: 20px;">
-          <label for="swal-input-name" style="display: block; margin-bottom: 5px; font-weight: bold;">Your Name</label>
-          <input id="swal-input-name" class="swal2-input" placeholder="Enter your name..." style="margin-top: 0; width: 80%;">
-        </div>
-        <div style="margin-top: 20px;">
-          <label style="display: block; margin-bottom: 10px; font-weight: bold;">Control Method</label>
-          <div style="display: flex; justify-content: space-around;">
-            <label style="cursor: pointer;">
-              <input type="radio" name="control-method" value="keyboard" checked style="margin-right: 5px;"> Keyboard
-            </label>
-            <label style="cursor: pointer;">
-              <input type="radio" name="control-method" value="gamepad" style="margin-right: 5px;"> Gamepad
-            </label>
-          </div>
-        </div>
-      `,
-      focusConfirm: false,
-      confirmButtonText: "Join",
-      allowOutsideClick: false,
-      allowEscapeKey: false,
-      preConfirm: () => {
-        const name = (document.getElementById("swal-input-name") as HTMLInputElement).value;
-        const controlMethod = (document.querySelector('input[name="control-method"]:checked') as HTMLInputElement).value;
-        if (!name) {
-          Swal.showValidationMessage("You need to write a name!");
-          return false;
-        }
-        return { name, controlMethod };
-      },
-    }).then((result) => {
-      if (result.isConfirmed) {
-        onJoin(result.value.name, result.value.controlMethod);
-      }
-    });
-  }, [onJoin]);
+  const [name, setName] = useState('');
+  const [controlMethod, setControlMethod] = useState('keyboard');
+  const [error, setError] = useState('');
 
-  return null;
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) {
+      setError('Please enter your name!');
+      return;
+    }
+    onJoin(name.trim(), controlMethod);
+  };
+
+  return (
+    <div className="welcome-overlay">
+      <div className="welcome-bg-glow" />
+      <div className="welcome-bg-glow-2" />
+      
+      <div className="welcome-card">
+        <h1 className="welcome-title">Sketchbook</h1>
+        <p className="welcome-subtitle">
+          Step into a physics-based 3D playground. Explore the city, spawn meteorites, and drive multiple vehicles!
+        </p>
+
+        <form onSubmit={handleSubmit}>
+          <div className="welcome-form-group">
+            <label className="welcome-label" htmlFor="name-input">
+              Your Username
+            </label>
+            <input
+              id="name-input"
+              className="welcome-input"
+              type="text"
+              placeholder="Enter your name..."
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                if (error) setError('');
+              }}
+              autoFocus
+              maxLength={15}
+            />
+            {error && <span className="welcome-error-msg">{error}</span>}
+          </div>
+
+          <div className="welcome-form-group">
+            <label className="welcome-label">Control Mode</label>
+            <div className="welcome-options">
+              <div
+                className={`welcome-option-card ${controlMethod === 'keyboard' ? 'active' : ''}`}
+                onClick={() => setControlMethod('keyboard')}
+              >
+                <span className="welcome-option-icon">⌨️</span>
+                <span className="welcome-option-title">Keyboard & Mouse</span>
+              </div>
+              <div
+                className={`welcome-option-card ${controlMethod === 'gamepad' ? 'active' : ''}`}
+                onClick={() => setControlMethod('gamepad')}
+              >
+                <span className="welcome-option-icon">🎮</span>
+                <span className="welcome-option-title">Gamepad</span>
+              </div>
+            </div>
+          </div>
+
+          <button className="welcome-button" type="submit">
+            Enter Playground 🚀
+          </button>
+        </form>
+      </div>
+    </div>
+  );
 };
 
 export default WelcomeScreen;

@@ -16,7 +16,7 @@ const Controls: React.FC = () => {
           { keys: ['W', 'S'], desc: 'Throttle / Brake' },
           { keys: ['A', 'D'], desc: 'Steering' },
           { keys: ['Space'], desc: 'Handbrake' },
-          { keys: ['Enter'], desc: 'Exit Vehicle' },
+          { keys: ['F'], desc: 'Exit Vehicle' },
         ];
       case 'airplane':
         return [
@@ -24,7 +24,7 @@ const Controls: React.FC = () => {
           { keys: ['Space'], desc: 'Decelerate' },
           { keys: ['W', 'S'], desc: 'Pitch' },
           { keys: ['A', 'D'], desc: 'Roll' },
-          { keys: ['Enter'], desc: 'Exit Vehicle' },
+          { keys: ['F'], desc: 'Exit Vehicle' },
         ];
       case 'helicopter':
         return [
@@ -32,14 +32,15 @@ const Controls: React.FC = () => {
           { keys: ['Space'], desc: 'Descend' },
           { keys: ['W', 'S'], desc: 'Pitch' },
           { keys: ['A', 'D'], desc: 'Roll' },
-          { keys: ['Enter'], desc: 'Exit Vehicle' },
+          { keys: ['Q', 'E'], desc: 'Yaw (Turn)' },
+          { keys: ['F'], desc: 'Exit Vehicle' },
         ];
       default:
         return [
           { keys: ['W', 'A', 'S', 'D'], desc: 'Movement' },
           { keys: ['Shift'], desc: 'Sprint' },
           { keys: ['Space'], desc: 'Jump' },
-          { keys: ['Enter'], desc: 'Enter Vehicle' },
+          { keys: ['F'], desc: 'Enter Vehicle' },
         ];
     }
   };

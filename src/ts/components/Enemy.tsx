@@ -171,30 +171,50 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
         <Html position={[0, 1.8, 0]} center distanceFactor={10}>
           <div
             style={{
-              color: "#ff4444",
-              background: "rgba(0,0,0,0.5)",
-              padding: "2px 8px",
-              borderRadius: "4px",
-              fontSize: "12px",
-              fontWeight: "bold",
-              whiteSpace: "nowrap",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "4px",
               pointerEvents: "none",
+              fontFamily: "Solway, serif"
             }}
           >
-            ENEMY
+            <div
+              style={{
+                color: "#ff4444",
+                background: "rgba(0,0,0,0.75)",
+                padding: "2px 8px",
+                borderRadius: "4px",
+                fontSize: "11px",
+                fontWeight: "bold",
+                letterSpacing: "1px",
+                whiteSpace: "nowrap",
+                border: "1px solid rgba(255, 68, 68, 0.3)"
+              }}
+            >
+              ENEMY
+            </div>
+            <div
+              style={{
+                width: "40px",
+                height: "5px",
+                backgroundColor: "rgba(255, 0, 0, 0.5)",
+                borderRadius: "3px",
+                overflow: "hidden",
+                border: "1px solid rgba(0,0,0,0.5)"
+              }}
+            >
+              <div
+                style={{
+                  width: `${health}%`,
+                  height: "100%",
+                  backgroundColor: "#00ff66",
+                  transition: "width 0.2s ease"
+                }}
+              />
+            </div>
           </div>
         </Html>
-
-        <group position={[0, 1.5, 0]}>
-          <mesh>
-            <planeGeometry args={[0.8, 0.1]} />
-            <meshBasicMaterial color="red" />
-          </mesh>
-          <mesh position={[0, 0, 0.01]} scale={[health / 100, 1, 1]}>
-            <planeGeometry args={[0.8, 0.1]} />
-            <meshBasicMaterial color="#00ff00" />
-          </mesh>
-        </group>
 
         <SpeechBubble message={message} position={[0, 1.2, 0]} />
 

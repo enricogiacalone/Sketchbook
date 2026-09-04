@@ -5,15 +5,15 @@ import { useHeightfield } from "@react-three/cannon";
 export const getTerrainHeight = (
   x: number,
   z: number,
-  maxHeight: number = 10
+  maxHeight: number = 0.5
 ): number => {
   return Math.sin(x / 30) * Math.cos(z / 20) * maxHeight;
 };
 
 const Terrain: React.FC = () => {
-  const size = 400;
-  const segments = 60; 
-  const maxHeight = 10;
+  const size = 600;
+  const segments = 40; 
+  const maxHeight = 0.5;
 
   // Visual Mesh Data - Centered at [0,0,0]
   const { vertices, visualIndices } = useMemo(() => {
@@ -82,7 +82,7 @@ const Terrain: React.FC = () => {
           itemSize={1}
         />
       </bufferGeometry>
-      <meshStandardMaterial color="#33691e" roughness={0.8} />
+      <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
     </mesh>
   );
 };

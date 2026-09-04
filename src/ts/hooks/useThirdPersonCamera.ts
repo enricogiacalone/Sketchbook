@@ -1,9 +1,11 @@
 import { useRef, useEffect } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { useStore } from '../store';
 
-export const useThirdPersonCamera = (target: THREE.Vector3, isControlling: boolean) => {
+export const useThirdPersonCamera = () => {
   const { camera, gl } = useThree();
+  const { currentControllable, controlledEntityId } = useStore();
   
   // State for camera orientation
   const theta = useRef(0); // Horizontal angle
@@ -12,12 +14,10 @@ export const useThirdPersonCamera = (target: THREE.Vector3, isControlling: boole
   const targetRadius = useRef(5);
   
   // Smoothing refs
-  const smoothTarget = useRef(new THREE.Vector3().copy(target));
+  const smoothTarget = useRef(new THREE.Vector3());
   const sensitivity = useRef(new THREE.Vector2(0.3, 0.3));
 
   useEffect(() => {
-    if (!isControlling) return;
-
     const handleMouseMove = (e: MouseEvent) => {
       if (document.pointerLockElement === gl.domElement) {
         theta.current -= e.movementX * sensitivity.current.x;
@@ -29,7 +29,7 @@ export const useThirdPersonCamera = (target: THREE.Vector3, isControlling: boole
     };
 
     const handleWheel = (e: WheelEvent) => {
-      targetRadius.current = THREE.MathUtils.clamp(targetRadius.current + e.deltaY * 0.005, 2, 12);
+      targetRadius.current = THREE.MathUtils.clamp(targetRadius.current + e.deltaY * 0.005, 2, 25);
     };
 
     const handleClick = () => {
@@ -47,13 +47,37 @@ export const useThirdPersonCamera = (target: THREE.Vector3, isControlling: boole
       gl.domElement.removeEventListener('wheel', handleWheel);
       gl.domElement.removeEventListener('click', handleClick);
     };
-  }, [gl, isControlling]);
+  }, [gl]);
 
   useFrame((state, delta) => {
-    if (!isControlling) return;
+    // Determine the target object name
+    const targetName = currentControllable === 'player' ? 'player' : controlledEntityId;
+    if (!targetName) return;
+
+    const targetObj = state.scene.getObjectByName(targetName);
+    if (!targetObj) return;
+
+    // Get the target position in world coordinates
+    const targetPos = new THREE.Vector3();
+    targetObj.getWorldPosition(targetPos);
+
+    // Adjust target offset based on entity type for better visibility
+    let heightOffset = 0.8;
+    let lookAtOffset = 1.0;
+    if (currentControllable === 'airplane') {
+      heightOffset = 1.5;
+      lookAtOffset = 0.5;
+    } else if (currentControllable === 'helicopter') {
+      heightOffset = 2.0;
+      lookAtOffset = 0.5;
+    } else if (currentControllable === 'car') {
+      heightOffset = 1.0;
+      lookAtOffset = 0.5;
+    }
 
     // 1. Smoothly follow the target position
-    smoothTarget.current.lerp(target, 0.1);
+    const lerpTarget = new THREE.Vector3(targetPos.x, targetPos.y + heightOffset, targetPos.z);
+    smoothTarget.current.lerp(lerpTarget, 0.1);
     
     // 2. Smoothly adjust the radius
     radius.current = THREE.MathUtils.lerp(radius.current, targetRadius.current, 0.1);
@@ -67,8 +91,8 @@ export const useThirdPersonCamera = (target: THREE.Vector3, isControlling: boole
     const z = smoothTarget.current.z + radius.current * Math.cos(thetaRad) * Math.cos(phiRad);
 
     // 4. Update camera
-    camera.position.set(x, y + 1.5, z); // Offset y for better head height view
-    camera.lookAt(smoothTarget.current.x, smoothTarget.current.y + 1, smoothTarget.current.z);
+    camera.position.set(x, y, z);
+    camera.lookAt(smoothTarget.current.x, smoothTarget.current.y - heightOffset + lookAtOffset, smoothTarget.current.z);
   });
 
   return { theta, phi, radius };

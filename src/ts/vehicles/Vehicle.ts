@@ -46,7 +46,7 @@ export abstract class Vehicle extends THREE.Object3D implements IWorldEntity {
 
     // Physics mat
     let mat = new CANNON.Material("Mat");
-    mat.friction = 0.01;
+    mat.friction = 0.3; // Increased from 0.01 to provide better traction and physical presence
 
     // Collision body
     this.collision = new CANNON.Body({ mass: 50 });

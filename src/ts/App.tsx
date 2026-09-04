@@ -15,6 +15,7 @@ import Minimap from "./components/UI/Minimap";
 import Crosshair from "./components/UI/Crosshair";
 import Loader from "./components/UI/Loader"; // Helper to track loading
 import Player from "./components/Player"; // Import Player directly to pass userName
+import ThirdPersonCamera from "./components/ThirdPersonCamera";
 import { useStore } from "./store";
 import * as THREE from "three";
 
@@ -52,13 +53,13 @@ const App: React.FC = () => {
             <pointLight position={[10, 10, 10]} castShadow />
 
             <Physics
-              gravity={[0, -9.81, 0]}
+              gravity={[0, -20, 0]}
               tolerance={0.0001}
               allowSleep={false}
               iterations={30}
               stepSize={1 / 120}
               defaultContactMaterial={{
-                friction: 0.1,
+                friction: 0.7,
                 restitution: 0,
                 contactEquationStiffness: 1e8,
                 contactEquationRelaxation: 3,
@@ -78,6 +79,7 @@ const App: React.FC = () => {
               <Player userName={userName} />
             </Physics>
 
+            <ThirdPersonCamera />
             <Loader />
           </Suspense>
         )}

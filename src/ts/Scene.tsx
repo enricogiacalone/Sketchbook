@@ -7,7 +7,7 @@ import Ocean from "./components/Environment/Ocean";
 import Trees from "./components/Environment/Trees";
 import Terrain from "./components/Environment/Terrain";
 import Road from "./components/Environment/Road";
-import Village from "./components/Environment/Village";
+import City from "./components/Environment/City";
 import Clouds from "./components/Environment/Clouds";
 import UFO from "./components/Environment/UFO";
 import MeteoriteSpawner from "./components/Environment/MeteoriteSpawner";
@@ -35,18 +35,19 @@ const Scene: React.FC = () => {
 
       {/* Carichiamo i modelli in blocchi separati per non bloccare la fisica */}
       <Suspense fallback={null}>
-        <Car />
+        <Car id="car-1" position={[10, 5, 0]} />
+        <Car id="car-2" position={[60, 5, 0]} />
+        <Car id="car-3" position={[0, 5, 60]} />
+        <Car id="car-4" position={[-60, 5, 60]} />
+        <Car id="car-5" position={[60, 5, 60]} />
+        <Car id="car-6" position={[-60, 5, -60]} />
+        
         <Airplane />
         <Helicopter />
       </Suspense>
 
       <Suspense fallback={null}>
-        <Village />
-      </Suspense>
-
-      <Suspense fallback={null}>
-        <Grass />
-        <Trees />
+        <City />
       </Suspense>
     </>
   );

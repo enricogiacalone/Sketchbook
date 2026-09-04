@@ -2,55 +2,77 @@
 
 #chat-input-container {
   position: fixed;
-  bottom: 20px;
-  right: 20px;
+  bottom: 24px;
+  right: 24px;
   z-index: 100001;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  transition: all 0.3s ease-in-out;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
 }
 
 #chat-input-container.collapsed {
-  width: 50px;
-  height: 50px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
-  background-color: rgba(0, 0, 0, 0.6);
+  background: rgba(18, 18, 29, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   cursor: pointer;
+  display: flex;
   justify-content: center;
   align-items: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+#chat-input-container.collapsed:hover {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.4);
+  transform: scale(1.05);
 }
 
 #chat-input-container.expanded {
-  width: 300px;
-  height: auto;
-  border-radius: 5px;
-  background-color: rgba(0, 0, 0, 0.8);
+  width: 280px;
+  border-radius: 14px;
+  background: rgba(18, 18, 29, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
 #chat-input {
   width: 100%;
-  padding: 8px;
-  border: 1px solid #ccc;
-  border-radius: 5px;
-  background-color: rgba(0, 0, 0, 0.7);
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(10, 10, 18, 0.6);
   color: white;
-  font-size: 16px;
-  box-sizing: border-box; /* Include padding and border in the element's total width and height */
+  font-size: 14px;
+  box-sizing: border-box;
+  outline: none;
+  transition: all 0.25s ease;
+}
+
+#chat-input:focus {
+  border-color: #6366f1;
+  background: rgba(10, 10, 18, 0.85);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.2);
 }
 
 #chat-input-container.collapsed #chat-input {
-  display: none; /* Hide input field when collapsed */
+  display: none;
 }
 
 #chat-input-container.expanded #chat-input {
-  display: block; /* Show input field when expanded */
+  display: block;
 }
 
-/* Optional: Add a small icon for the collapsed state */
 #chat-input-container.collapsed::before {
-  content: "💬"; /* Speech bubble emoji */
-  font-size: 24px;
-  color: white;
+  content: "💬";
+  font-size: 20px;
+  line-height: 1;
 }
