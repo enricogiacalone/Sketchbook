@@ -1,8 +1,18 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../../store';
+import { useShallow } from 'zustand/react/shallow';
 
 const Minimap: React.FC = () => {
-  const { playerPos, playerYaw, entities, health, maxHealth, armor } = useStore();
+  const { playerPos, playerYaw, entities, health, maxHealth, armor } = useStore(
+    useShallow((state) => ({
+      playerPos: state.playerPos,
+      playerYaw: state.playerYaw,
+      entities: state.entities,
+      health: state.health,
+      maxHealth: state.maxHealth,
+      armor: state.armor,
+    }))
+  );
 
   const mapSize = 200;
   const worldSize = 100; // Visible area size

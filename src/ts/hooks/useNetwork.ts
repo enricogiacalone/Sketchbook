@@ -102,13 +102,50 @@ export const useNetwork = (
     };
   }, [userName]);
 
+  // playerPosition/playerQuaternion are new array literals every single
+  // render (Player.tsx/Car.tsx/etc. build them fresh each frame), so this
+  // effect used to fire -- and emit over the socket -- every single frame,
+  // regardless of whether anything actually moved. The server only
+  // rebroadcasts every 50ms anyway (see server.js), so anything faster than
+  // that is pure waste; this throttles to that same cadence and skips the
+  // emit entirely when the position/rotation barely changed (e.g. a parked
+  // car, an idle player).
+  const lastEmitRef = useRef<{ time: number; pos: [number, number, number]; quat: number[] } | null>(null);
   useEffect(() => {
     if (socket && socket.connected) {
-      socket.emit('updatePlayer', {
-        position: { x: playerPosition[0], y: playerPosition[1], z: playerPosition[2] },
-        quaternion: playerQuaternion,
-        animation: playerAnimation,
-      });
+      const now = performance.now();
+      const last = lastEmitRef.current;
+
+      const dx = playerPosition[0] - (last?.pos[0] ?? Infinity);
+      const dy = playerPosition[1] - (last?.pos[1] ?? Infinity);
+      const dz = playerPosition[2] - (last?.pos[2] ?? Infinity);
+      const posDeltaSq = dx * dx + dy * dy + dz * dz;
+
+      let quatDeltaSq = 0;
+      if (last) {
+        for (let i = 0; i < playerQuaternion.length; i++) {
+          const d = playerQuaternion[i] - (last.quat[i] ?? 0);
+          quatDeltaSq += d * d;
+        }
+      } else {
+        quatDeltaSq = Infinity;
+      }
+
+      const EMIT_INTERVAL_MS = 50;
+      const POS_EPSILON_SQ = 0.0001; // 0.01 units
+      const QUAT_EPSILON_SQ = 0.000001;
+
+      const enoughTimePassed = !last || now - last.time >= EMIT_INTERVAL_MS;
+      const movedEnough = posDeltaSq > POS_EPSILON_SQ || quatDeltaSq > QUAT_EPSILON_SQ;
+
+      if (enoughTimePassed && movedEnough) {
+        socket.emit('updatePlayer', {
+          position: { x: playerPosition[0], y: playerPosition[1], z: playerPosition[2] },
+          quaternion: playerQuaternion,
+          animation: playerAnimation,
+        });
+        lastEmitRef.current = { time: now, pos: playerPosition, quat: playerQuaternion };
+      }
     }
   }, [socket, playerPosition, playerQuaternion, playerAnimation]);
 

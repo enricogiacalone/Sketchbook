@@ -2,10 +2,16 @@ import { useRef, useEffect } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useStore } from '../store';
+import { useShallow } from 'zustand/react/shallow';
 
 export const useThirdPersonCamera = () => {
   const { camera, gl } = useThree();
-  const { currentControllable, controlledEntityId } = useStore();
+  const { currentControllable, controlledEntityId } = useStore(
+    useShallow((state) => ({
+      currentControllable: state.currentControllable,
+      controlledEntityId: state.controlledEntityId,
+    }))
+  );
   
   // State for camera orientation
   const theta = useRef(0); // Horizontal angle

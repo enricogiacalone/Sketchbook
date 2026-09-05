@@ -32,6 +32,8 @@ const createCloudTexture = (opacity: number): THREE.CanvasTexture => {
   return texture;
 };
 
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+
 const Clouds: React.FC = () => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   
@@ -42,6 +44,9 @@ const Clouds: React.FC = () => {
   
   const texture = useMemo(() => createCloudTexture(0.8), []);
   const dummy = useMemo(() => new THREE.Object3D(), []);
+  // Scratch quaternion reused every frame/particle instead of allocating
+  // a fresh one per particle (40 clouds x 10 particles = 400/frame).
+  const scratchQuat = useMemo(() => new THREE.Quaternion(), []);
 
   // Generate initial cloud data
   const clouds = useMemo(() => {
@@ -99,27 +104,29 @@ const Clouds: React.FC = () => {
     if (!meshRef.current) return;
 
     let instanceIdx = 0;
-    clouds.forEach((cloud) => {
+    for (let ci = 0; ci < clouds.length; ci++) {
+      const cloud = clouds[ci];
       // Drifting
       cloud.position.x += cloud.driftSpeed * delta;
-      
+
       // Wrap around
       if (cloud.position.x > 500) cloud.position.x = -500;
       if (cloud.position.x < -500) cloud.position.x = 500;
 
-      cloud.particles.forEach((p) => {
+      for (let j = 0; j < cloud.particles.length; j++) {
+        const p = cloud.particles[j];
         dummy.position.copy(cloud.position).add(p.offset);
         // Face the camera!
         dummy.quaternion.copy(state.camera.quaternion);
-        // Apply individual particle rotation
-        const zRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), p.rotation + state.clock.elapsedTime * 0.05);
-        dummy.quaternion.multiply(zRotation);
-        
+        // Apply individual particle rotation (scratch quaternion, no per-particle alloc)
+        scratchQuat.setFromAxisAngle(Z_AXIS, p.rotation + state.clock.elapsedTime * 0.05);
+        dummy.quaternion.multiply(scratchQuat);
+
         dummy.scale.set(p.scale, p.scale, 1);
         dummy.updateMatrix();
         meshRef.current!.setMatrixAt(instanceIdx++, dummy.matrix);
-      });
-    });
+      }
+    }
     meshRef.current.instanceMatrix.needsUpdate = true;
   });
 

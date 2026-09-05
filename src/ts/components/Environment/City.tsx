@@ -68,6 +68,10 @@ const City: React.FC = () => {
         // Skip blocks too far from center
         if (Math.abs(i) > 3 || Math.abs(j) > 3) continue;
 
+        // The central block (i=0, j=0, blockX/blockZ = 30/30) is the park
+        // instead -- see Park.tsx, rendered from Scene.tsx.
+        if (i === 0 && j === 0) continue;
+
         // Add 2-4 buildings per block
         const count = 2 + Math.floor(Math.random() * 3);
         for (let k = 0; k < count; k++) {

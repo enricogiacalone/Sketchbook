@@ -5,11 +5,22 @@ import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
+import { useShallow } from 'zustand/react/shallow';
 
 interface HelicopterProps {
   position?: [number, number, number];
   id?: string;
 }
+
+const _heliUp = new THREE.Vector3();
+const _heliGlobalUp = new THREE.Vector3(0, 1, 0);
+const _heliRight = new THREE.Vector3();
+const _heliForward = new THREE.Vector3();
+const _heliRotStabQuat = new THREE.Quaternion();
+const _heliRotStabEuler = new THREE.Euler();
+const _heliVertStab = new THREE.Vector3();
+const _heliPos = new THREE.Vector3();
+const _heliEuler = new THREE.Euler();
 
 const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 'heli-1' }) => {
   const { scene } = useGLTF('heli.glb');
@@ -17,7 +28,15 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
   const input = useInput();
   // Vehicle entry/exit (including the exit key) is orchestrated centrally
   // by Player.tsx (see vehicleTransition there).
-  const { currentControllable, controlledEntityId, isVehicleTransitioning, updateEntity, setPlayerInfo } = useStore();
+  const { currentControllable, controlledEntityId, isVehicleTransitioning, updateEntity, setPlayerInfo } = useStore(
+    useShallow((state) => ({
+      currentControllable: state.currentControllable,
+      controlledEntityId: state.controlledEntityId,
+      isVehicleTransitioning: state.isVehicleTransitioning,
+      updateEntity: state.updateEntity,
+      setPlayerInfo: state.setPlayerInfo,
+    }))
+  );
   const [ready, setReady] = useState(false);
 
   const chassisArgs: [number, number, number] = [1.2, 1.5, 4];
@@ -46,7 +65,7 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     return () => { unsubVel(); unsubAngVel(); unsubPos(); };
   }, [api, updateEntity, id]);
 
-  const [enginePower, setEnginePower] = useState(0);
+  const enginePower = useRef(0);
   const rotorsRef = useRef<THREE.Object3D[]>([]);
 
   useEffect(() => {
@@ -63,21 +82,24 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     const isHeliActive = currentControllable === 'helicopter' && controlledEntityId === id && !isVehicleTransitioning;
 
     if (!ready || !isHeliActive || !ref.current) {
-      if (enginePower > 0) setEnginePower(prev => Math.max(0, prev - delta * 0.06));
+      if (enginePower.current > 0) enginePower.current = Math.max(0, enginePower.current - delta * 0.06);
       return;
     }
 
-    if (enginePower < 1) setEnginePower(prev => Math.min(1, prev + delta * 0.2));
+    if (enginePower.current < 1) enginePower.current = Math.min(1, enginePower.current + delta * 0.2);
 
-    rotorsRef.current.forEach(rotor => {
-        rotor.rotateX(enginePower * delta * 30);
-    });
+    for (let i = 0; i < rotorsRef.current.length; i++) {
+      rotorsRef.current[i].rotateX(enginePower.current * delta * 30);
+    }
 
     const quat = ref.current.quaternion;
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
-    const globalUp = new THREE.Vector3(0, 1, 0);
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
-    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
+    _heliUp.set(0, 1, 0).applyQuaternion(quat);
+    const up = _heliUp;
+    const globalUp = _heliGlobalUp;
+    _heliRight.set(1, 0, 0).applyQuaternion(quat);
+    const right = _heliRight;
+    _heliForward.set(0, 0, 1).applyQuaternion(quat);
+    const forward = _heliForward;
 
     // Throttle and the pitch/roll torques below are fixed impulses applied
     // once per RENDERED frame with no time scaling -- so, like the car and
@@ -92,7 +114,7 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     const dt60 = Math.min(delta * 60, 3);
 
     // 1. Throttle (Ascend/Descend)
-    const throttleFactor = 15 * enginePower * dt60;
+    const throttleFactor = 15 * enginePower.current * dt60;
     if (input.shift) {
         api.applyImpulse([up.x * throttleFactor, up.y * throttleFactor, up.z * throttleFactor], [0, 0, 0]);
     }
@@ -106,29 +128,29 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     const dot = globalUp.dot(up);
     gravityCompensation *= Math.sqrt(THREE.MathUtils.clamp(dot, 0, 1));
     
-    const vertStab = up.clone().multiplyScalar(gravityCompensation * enginePower);
-    api.applyImpulse([vertStab.x, vertStab.y, vertStab.z], [0, 0, 0]);
+    _heliVertStab.copy(up).multiplyScalar(gravityCompensation * enginePower.current);
+    api.applyImpulse([_heliVertStab.x, _heliVertStab.y, _heliVertStab.z], [0, 0, 0]);
 
     // 3. Positional Damping
-    const damping = 1 - (0.005 * enginePower);
+    const damping = 1 - (0.005 * enginePower.current);
     api.velocity.set(velocity.current[0] * damping, velocity.current[1], velocity.current[2] * damping);
 
     // 4. Rotation Stabilization & Yaw
-    const rotStabQuat = new THREE.Quaternion().setFromUnitVectors(up, globalUp);
-    const rotStabEuler = new THREE.Euler().setFromQuaternion(rotStabQuat);
-    
+    _heliRotStabQuat.setFromUnitVectors(up, globalUp);
+    _heliRotStabEuler.setFromQuaternion(_heliRotStabQuat);
+
     let yawSpeed = 0;
-    if (input.yawLeft) yawSpeed = 1.8 * enginePower;
-    if (input.yawRight) yawSpeed = -1.8 * enginePower;
+    if (input.yawLeft) yawSpeed = 1.8 * enginePower.current;
+    if (input.yawRight) yawSpeed = -1.8 * enginePower.current;
 
     api.angularVelocity.set(
-        angularVelocity.current[0] * 0.95 + rotStabEuler.x * enginePower * 2.0,
+        angularVelocity.current[0] * 0.95 + _heliRotStabEuler.x * enginePower.current * 2.0,
         angularVelocity.current[1] * 0.95 + yawSpeed,
-        angularVelocity.current[2] * 0.95 + rotStabEuler.z * enginePower * 2.0
+        angularVelocity.current[2] * 0.95 + _heliRotStabEuler.z * enginePower.current * 2.0
     );
 
     // 5. Controls (Torques)
-    const torqueFactor = 3.5 * enginePower * dt60;
+    const torqueFactor = 3.5 * enginePower.current * dt60;
     // Pitch (W/S)
     if (input.forward) api.applyTorque([right.x * torqueFactor, right.y * torqueFactor, right.z * torqueFactor]);
     if (input.backward) api.applyTorque([-right.x * torqueFactor, -right.y * torqueFactor, -right.z * torqueFactor]);
@@ -137,10 +159,11 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     if (input.left) api.applyTorque([forward.x * torqueFactor, forward.y * torqueFactor, forward.z * torqueFactor]);
     if (input.right) api.applyTorque([-forward.x * torqueFactor, -forward.y * torqueFactor, -forward.z * torqueFactor]);
 
-    const heliPos = new THREE.Vector3();
-    ref.current.getWorldPosition(heliPos);
-    const heliEuler = new THREE.Euler().setFromQuaternion(quat, 'YXZ');
-    
+    ref.current.getWorldPosition(_heliPos);
+    const heliPos = _heliPos;
+    _heliEuler.setFromQuaternion(quat, 'YXZ');
+    const heliEuler = _heliEuler;
+
     // Update player info so camera/minimap follow the helicopter
     setPlayerInfo([heliPos.x, heliPos.y, heliPos.z], heliEuler.y);
 

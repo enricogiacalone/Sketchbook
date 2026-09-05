@@ -5,15 +5,31 @@ import * as THREE from 'three';
 import Explosion from './Explosion';
 
 const Meteorite: React.FC<{ id: number, initialPosition: [number, number, number], initialVelocity: [number, number, number], onExplode: (id: number, pos: [number, number, number]) => void }> = ({ id, initialPosition, initialVelocity, onExplode }) => {
+  const position = useRef(initialPosition);
   const [ref, api] = useSphere<THREE.Mesh>(() => ({
     mass: 5,
     position: initialPosition,
     velocity: initialVelocity,
     args: [0.3],
     onCollide: (e) => {
-        onExplode(id, initialPosition); 
+        onExplode(id, position.current);
     }
   }));
+
+  useEffect(() => api.position.subscribe((p) => (position.current = p as [number, number, number])), [api.position]);
+
+  // Safety net: if a meteorite never registers a collision (missed the
+  // terrain heightfield's resolution, bounced off the play area, etc.) it
+  // would otherwise fall forever, staying in MeteoriteSpawner's state and
+  // in the physics world for good -- one every 5s, forever, is a slow leak
+  // that makes the scene (and the periodic spawn stutter) measurably worse
+  // the longer a session runs. Force it gone well past when it should have
+  // landed.
+  const age = useRef(0);
+  useFrame((_state, delta) => {
+    age.current += delta;
+    if (age.current > 10) onExplode(id, position.current);
+  });
 
   return (
     <mesh ref={ref} castShadow>

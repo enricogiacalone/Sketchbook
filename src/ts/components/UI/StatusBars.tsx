@@ -1,8 +1,9 @@
 import React from 'react';
 import { useStore } from '../../store';
+import { useShallow } from 'zustand/react/shallow';
 
 const StatusBars: React.FC = () => {
-  const { health, armor } = useStore();
+  const { health, armor } = useStore(useShallow((state) => ({ health: state.health, armor: state.armor })));
 
   return (
     <div style={{ 

@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { useStore } from '../../store';
 
 const Loader: React.FC = () => {
-  const { setIsLoading } = useStore();
+  const setIsLoading = useStore((state) => state.setIsLoading);
 
   useEffect(() => {
     // When this component mounts inside Suspense, it means the content is ready

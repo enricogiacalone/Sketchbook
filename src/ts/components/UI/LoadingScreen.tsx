@@ -2,7 +2,7 @@ import React from 'react';
 import { useStore } from '../../store';
 
 const LoadingScreen: React.FC = () => {
-  const { isLoading } = useStore();
+  const isLoading = useStore((state) => state.isLoading);
 
   if (!isLoading) return null;
 

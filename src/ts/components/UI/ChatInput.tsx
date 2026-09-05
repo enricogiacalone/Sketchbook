@@ -5,7 +5,7 @@ const ChatInput: React.FC = () => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [message, setMessage] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  const { setPlayerMessage } = useStore();
+  const setPlayerMessage = useStore((state) => state.setPlayerMessage);
 
   const handleToggle = () => {
     setIsExpanded(!isExpanded);

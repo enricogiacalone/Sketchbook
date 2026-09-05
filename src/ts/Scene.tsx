@@ -8,6 +8,7 @@ import Trees from "./components/Environment/Trees";
 import Terrain from "./components/Environment/Terrain";
 import Road from "./components/Environment/Road";
 import City from "./components/Environment/City";
+import Park from "./components/Environment/Park";
 import Clouds from "./components/Environment/Clouds";
 import UFO from "./components/Environment/UFO";
 import MeteoriteSpawner from "./components/Environment/MeteoriteSpawner";
@@ -22,6 +23,14 @@ useGLTF.preload("airplane.glb");
 useGLTF.preload("heli.glb");
 useGLTF.preload("boxman.glb");
 
+// DEBUG: temporarily stripped cars/vehicles/enemies out of the scene to
+// isolate the periodic stutter -- it turned out to be MeteoriteSpawner's
+// Explosion effect (huge per-frame allocation burst + needless per-frame
+// React state, see Explosion.tsx), unrelated to any of these. Back to false
+// now that the real cause is fixed; flip true again only if the stutter
+// reappears and needs re-isolating.
+const DEBUG_DISABLE_CARS_AND_ENEMIES = false;
+
 const Scene: React.FC = () => {
   return (
     <>
@@ -31,23 +40,32 @@ const Scene: React.FC = () => {
       <Ocean />
       <UFO initialPosition={[0, 150, 0]} />
       <MeteoriteSpawner />
-      <EnemySpawner />
+      {!DEBUG_DISABLE_CARS_AND_ENEMIES && <EnemySpawner />}
 
       {/* Carichiamo i modelli in blocchi separati per non bloccare la fisica */}
       <Suspense fallback={null}>
-        <Car id="car-1" position={[10, 5, 0]} />
-        <Car id="car-2" position={[60, 5, 0]} />
-        <Car id="car-3" position={[0, 5, 60]} />
-        <Car id="car-4" position={[-60, 5, 60]} />
-        <Car id="car-5" position={[60, 5, 60]} />
-        <Car id="car-6" position={[-60, 5, -60]} />
-        
-        <Airplane />
-        <Helicopter />
+        {!DEBUG_DISABLE_CARS_AND_ENEMIES && (
+          <>
+            <Car id="car-1" position={[10, 5, 0]} />
+            <Car id="car-2" position={[60, 5, 0]} />
+            <Car id="car-3" position={[0, 5, 60]} />
+            <Car id="car-4" position={[-60, 5, 60]} />
+            <Car id="car-5" position={[60, 5, 60]} />
+            <Car id="car-6" position={[-60, 5, -60]} />
+          </>
+        )}
+
+        {!DEBUG_DISABLE_CARS_AND_ENEMIES && (
+          <>
+            <Airplane />
+            <Helicopter />
+          </>
+        )}
       </Suspense>
 
       <Suspense fallback={null}>
         <City />
+        <Park />
       </Suspense>
     </>
   );

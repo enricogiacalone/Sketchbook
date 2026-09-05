@@ -4,7 +4,10 @@ import * as THREE from 'three';
 
 const Laser: React.FC<{ start: THREE.Vector3, end: THREE.Vector3, onFinish: () => void }> = ({ start, end, onFinish }) => {
   const meshRef = useRef<THREE.Mesh>(null);
-  const [age, setAge] = useState(0);
+  // Was React state updated every frame (setAge), forcing a re-render for
+  // the whole 0.5s lifetime of every laser -- a plain ref is all this needs
+  // since nothing else reads `age` reactively.
+  const age = useRef(0);
   const [isFinished, setIsFinished] = useState(false);
   const lifeTime = 0.5;
 
@@ -27,17 +30,15 @@ const Laser: React.FC<{ start: THREE.Vector3, end: THREE.Vector3, onFinish: () =
   useFrame((state, delta) => {
     if (isFinished) return;
 
-    setAge(prev => {
-        const next = prev + delta;
-        if (next >= lifeTime) {
-            setIsFinished(true);
-            return lifeTime;
-        }
-        if (meshRef.current) {
-            (meshRef.current.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - next / lifeTime);
-        }
-        return next;
-    });
+    const next = age.current + delta;
+    age.current = next;
+    if (next >= lifeTime) {
+      setIsFinished(true);
+      return;
+    }
+    if (meshRef.current) {
+      (meshRef.current.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - next / lifeTime);
+    }
   });
 
   return (
@@ -51,6 +52,8 @@ const Laser: React.FC<{ start: THREE.Vector3, end: THREE.Vector3, onFinish: () =
     </mesh>
   );
 };
+
+const _ufoDirection = new THREE.Vector3();
 
 const UFO: React.FC<{ initialPosition: [number, number, number] }> = ({ initialPosition }) => {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -78,8 +81,8 @@ const UFO: React.FC<{ initialPosition: [number, number, number] }> = ({ initialP
       ));
     }
 
-    const direction = new THREE.Vector3().subVectors(target, currentPos).normalize();
-    currentPos.add(direction.multiplyScalar(speed * delta));
+    _ufoDirection.subVectors(target, currentPos).normalize();
+    currentPos.add(_ufoDirection.multiplyScalar(speed * delta));
     meshRef.current.rotation.y += delta * 2;
 
     laserTimer.current += delta;

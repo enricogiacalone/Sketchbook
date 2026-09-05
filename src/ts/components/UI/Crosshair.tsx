@@ -2,7 +2,7 @@ import React from 'react';
 import { useStore } from '../../store';
 
 const Crosshair: React.FC = () => {
-  const { isCrosshairVisible } = useStore();
+  const isCrosshairVisible = useStore((state) => state.isCrosshairVisible);
 
   if (!isCrosshairVisible) return null;
 

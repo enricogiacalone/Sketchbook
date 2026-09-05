@@ -5,6 +5,7 @@ import { useGLTF, useAnimations, Html } from "@react-three/drei";
 import { SkeletonUtils } from "three-stdlib";
 import * as THREE from "three";
 import { useStore } from "../store";
+import { useShallow } from "zustand/react/shallow";
 import SpeechBubble from "./UI/SpeechBubble";
 import { useSpringVector } from "../hooks/useSpringVector";
 import Explosion from "./Environment/Explosion";
@@ -21,7 +22,13 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
   const { scene, animations } = useGLTF("boxman.glb");
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { actions } = useAnimations(animations, clonedScene);
-  const { playerPos, updateEntity, removeEntity } = useStore();
+  const { playerPos, updateEntity, removeEntity } = useStore(
+    useShallow((state) => ({
+      playerPos: state.playerPos,
+      updateEntity: state.updateEntity,
+      removeEntity: state.removeEntity,
+    }))
+  );
 
   const [health, setHealth] = useState(100);
   const [isExploded, setIsExploded] = useState(false);

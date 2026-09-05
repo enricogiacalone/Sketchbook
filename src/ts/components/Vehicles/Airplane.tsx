@@ -5,11 +5,19 @@ import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
+import { useShallow } from 'zustand/react/shallow';
 
 interface AirplaneProps {
   position?: [number, number, number];
   id?: string;
 }
+
+const _planeForward = new THREE.Vector3();
+const _planeUp = new THREE.Vector3();
+const _planeRight = new THREE.Vector3();
+const _planeVelVec = new THREE.Vector3();
+const _planePos = new THREE.Vector3();
+const _planeEuler = new THREE.Euler();
 
 const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'airplane-1' }) => {
   const { scene } = useGLTF('airplane.glb');
@@ -17,7 +25,15 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
   const input = useInput();
   // Vehicle entry/exit (including the exit key) is orchestrated centrally
   // by Player.tsx (see vehicleTransition there).
-  const { currentControllable, controlledEntityId, isVehicleTransitioning, updateEntity, setPlayerInfo } = useStore();
+  const { currentControllable, controlledEntityId, isVehicleTransitioning, updateEntity, setPlayerInfo } = useStore(
+    useShallow((state) => ({
+      currentControllable: state.currentControllable,
+      controlledEntityId: state.controlledEntityId,
+      isVehicleTransitioning: state.isVehicleTransitioning,
+      updateEntity: state.updateEntity,
+      setPlayerInfo: state.setPlayerInfo,
+    }))
+  );
   const [ready, setReady] = useState(false);
 
   const chassisArgs: [number, number, number] = [1.5, 1, 4];
@@ -46,7 +62,7 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
     return () => { unsubVel(); unsubPos(); };
   }, [chassisApi, updateEntity, id]);
 
-  const [enginePower, setEnginePower] = useState(0);
+  const enginePower = useRef(0);
   const rotorRef = useRef<THREE.Object3D | undefined>(undefined);
 
   useEffect(() => {
@@ -61,21 +77,25 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
     const isAirplaneActive = currentControllable === 'airplane' && controlledEntityId === id && !isVehicleTransitioning;
 
     if (!ready || !isAirplaneActive || !chassisRef.current) {
-      if (enginePower > 0) setEnginePower(prev => Math.max(0, prev - delta * 0.12));
+      if (enginePower.current > 0) enginePower.current = Math.max(0, enginePower.current - delta * 0.12);
       return;
     }
 
-    if (enginePower < 1) setEnginePower(prev => Math.min(1, prev + delta * 0.4));
+    if (enginePower.current < 1) enginePower.current = Math.min(1, enginePower.current + delta * 0.4);
 
     if (rotorRef.current) {
-        rotorRef.current.rotateX(enginePower * delta * 60);
+        rotorRef.current.rotateX(enginePower.current * delta * 60);
     }
 
-    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(chassisRef.current.quaternion);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(chassisRef.current.quaternion);
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(chassisRef.current.quaternion);
+    _planeForward.set(0, 0, 1).applyQuaternion(chassisRef.current.quaternion);
+    const forward = _planeForward;
+    _planeUp.set(0, 1, 0).applyQuaternion(chassisRef.current.quaternion);
+    const up = _planeUp;
+    _planeRight.set(1, 0, 0).applyQuaternion(chassisRef.current.quaternion);
+    const right = _planeRight;
 
-    const velVec = new THREE.Vector3(...velocity.current);
+    _planeVelVec.set(velocity.current[0], velocity.current[1], velocity.current[2]);
+    const velVec = _planeVelVec;
     const currentSpeed = velVec.dot(forward);
     const flightModeInfluence = THREE.MathUtils.clamp(currentSpeed / 10, 0, 1);
 
@@ -97,39 +117,40 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
     if (input.shift) thrustForce = 28; 
     else if (input.jump) thrustForce = -15; 
     
-    if (enginePower > 0.1) {
+    if (enginePower.current > 0.1) {
         chassisApi.applyImpulse(
-            [forward.x * thrustForce * enginePower * dt60, forward.y * thrustForce * enginePower * dt60, forward.z * thrustForce * enginePower * dt60],
+            [forward.x * thrustForce * enginePower.current * dt60, forward.y * thrustForce * enginePower.current * dt60, forward.z * thrustForce * enginePower.current * dt60],
             [0, 0, 0]
         );
     }
 
     // Torques
-    const torqueFactor = 2 * flightModeInfluence * enginePower * dt60;
+    const torqueFactor = 2 * flightModeInfluence * enginePower.current * dt60;
     if (input.forward) chassisApi.applyTorque([right.x * torqueFactor, right.y * torqueFactor, right.z * torqueFactor]);
     if (input.backward) chassisApi.applyTorque([-right.x * torqueFactor, -right.y * torqueFactor, -right.z * torqueFactor]);
     if (input.left) chassisApi.applyTorque([forward.x * torqueFactor * 1.5, forward.y * torqueFactor * 1.5, forward.z * torqueFactor * 1.5]);
     if (input.right) chassisApi.applyTorque([-forward.x * torqueFactor * 1.5, -forward.y * torqueFactor * 1.5, -forward.z * torqueFactor * 1.5]);
 
     // Yaw (Q/E)
-    const yawTorqueFactor = 1.0 * flightModeInfluence * enginePower * dt60;
+    const yawTorqueFactor = 1.0 * flightModeInfluence * enginePower.current * dt60;
     if (input.yawLeft) chassisApi.applyTorque([up.x * yawTorqueFactor, up.y * yawTorqueFactor, up.z * yawTorqueFactor]);
     if (input.yawRight) chassisApi.applyTorque([-up.x * yawTorqueFactor, -up.y * yawTorqueFactor, -up.z * yawTorqueFactor]);
 
     // Lift
-    const liftForce = Math.min(1.8, currentSpeed * 0.08) * enginePower * 20 * 50 * delta; 
+    const liftForce = Math.min(1.8, currentSpeed * 0.08) * enginePower.current * 20 * 50 * delta; 
     if (liftForce > 0) {
         chassisApi.applyImpulse([up.x * liftForce, up.y * liftForce, up.z * liftForce], [0, 0, 0]);
     }
 
     // Drag
-    const drag = currentSpeed * 0.01 * enginePower * dt60;
+    const drag = currentSpeed * 0.01 * enginePower.current * dt60;
     chassisApi.applyImpulse([-velVec.x * drag, -velVec.y * drag, -velVec.z * drag], [0, 0, 0]);
 
-    const planePos = new THREE.Vector3();
-    chassisRef.current.getWorldPosition(planePos);
-    const planeEuler = new THREE.Euler().setFromQuaternion(chassisRef.current.quaternion, 'YXZ');
-    
+    chassisRef.current.getWorldPosition(_planePos);
+    const planePos = _planePos;
+    _planeEuler.setFromQuaternion(chassisRef.current.quaternion, 'YXZ');
+    const planeEuler = _planeEuler;
+
     // Update player info so camera/minimap follow the plane
     setPlayerInfo([planePos.x, planePos.y, planePos.z], planeEuler.y);
 

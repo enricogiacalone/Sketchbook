@@ -7,7 +7,7 @@ interface ControlRow {
 }
 
 const Controls: React.FC = () => {
-  const { currentControllable } = useStore();
+  const currentControllable = useStore((state) => state.currentControllable);
 
   const getControls = (): ControlRow[] => {
     switch (currentControllable) {

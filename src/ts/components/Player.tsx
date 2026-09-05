@@ -7,6 +7,7 @@ import { SkeletonUtils } from "three-stdlib";
 import { useInput } from "../hooks/useInput";
 import { useNetwork } from "../hooks/useNetwork";
 import { useStore } from "../store";
+import { useShallow } from "zustand/react/shallow";
 import { getTerrainHeight } from "./Environment/Terrain";
 import { getRoadOffset } from "./Environment/Road";
 import { CollisionGroups } from "../enums/CollisionGroups";
@@ -44,6 +45,9 @@ const sideOf = (fromPos: THREE.Vector3, fromQuat: THREE.Quaternion, toPos: THREE
   return right.dot(view) > 0 ? "left" : "right";
 };
 
+const _networkYAxis = new THREE.Vector3(0, 1, 0);
+const _networkQuat = new THREE.Quaternion();
+
 type VehicleType = "car" | "airplane" | "helicopter";
 
 interface VehicleTransition {
@@ -76,7 +80,19 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     playerMessage,
     entities,
     setIsLoading,
-  } = useStore();
+  } = useStore(
+    useShallow((state) => ({
+      currentControllable: state.currentControllable,
+      controlledEntityId: state.controlledEntityId,
+      setCurrentControllable: state.setCurrentControllable,
+      isVehicleTransitioning: state.isVehicleTransitioning,
+      setIsVehicleTransitioning: state.setIsVehicleTransitioning,
+      setPlayerInfo: state.setPlayerInfo,
+      playerMessage: state.playerMessage,
+      entities: state.entities,
+      setIsLoading: state.setIsLoading,
+    }))
+  );
 
   useEffect(() => {
     if (scene) setIsLoading(false);
@@ -540,8 +556,8 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
 
     if (state.clock.getElapsedTime() % 0.05 < 0.02) {
         setPosState([position.current[0], position.current[1], position.current[2]]);
-        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), modelRotation.current);
-        setQuatState([q.x, q.y, q.z, q.w]);
+        _networkQuat.setFromAxisAngle(_networkYAxis, modelRotation.current);
+        setQuatState([_networkQuat.x, _networkQuat.y, _networkQuat.z, _networkQuat.w]);
     }
   });
 

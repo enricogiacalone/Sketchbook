@@ -17,12 +17,15 @@ import Loader from "./components/UI/Loader"; // Helper to track loading
 import Player from "./components/Player"; // Import Player directly to pass userName
 import ThirdPersonCamera from "./components/ThirdPersonCamera";
 import { useStore } from "./store";
+import { useShallow } from "zustand/react/shallow";
 import * as THREE from "three";
 
 const App: React.FC = () => {
   const [isJoined, setIsJoined] = useState(false);
   const [userName, setUserName] = useState("");
-  const { isLoading, setIsLoading } = useStore();
+  const { isLoading, setIsLoading } = useStore(
+    useShallow((state) => ({ isLoading: state.isLoading, setIsLoading: state.setIsLoading }))
+  );
 
   const handleJoin = (name: string, controlMethod: string) => {
     setUserName(name);
@@ -43,6 +46,10 @@ const App: React.FC = () => {
       <Canvas
         shadows={{ type: THREE.PCFShadowMap }}
         camera={{ position: [5, 5, 5], fov: 50 }}
+        // Cap the device pixel ratio -- with no dpr set, R3F defaults to
+        // window.devicePixelRatio (2+ on Retina Macs), which is 4x the
+        // fragment-shader work of dpr=1 on every single frame.
+        dpr={[1, 2]}
       >
         {isJoined && (
           <Suspense fallback={null}>
@@ -55,9 +62,27 @@ const App: React.FC = () => {
             <Physics
               gravity={[0, -20, 0]}
               tolerance={0.0001}
-              allowSleep={false}
-              iterations={30}
+              // Dynamic bodies (idle enemies, parked cars, spent bullets)
+              // can now go to sleep instead of being solved every step even
+              // at rest. Characters/vehicles set velocity directly every
+              // frame, which still reads as "at rest" once that velocity is
+              // ~0, so they sleep and wake normally with input.
+              allowSleep={true}
+              // Was 30 (3x cannon-es's own default of 10) -- brought down
+              // to still be extra-stable versus the default without paying
+              // 3x the per-step solver cost on every dynamic body.
+              iterations={15}
               stepSize={1 / 120}
+              // Was left at the library default (10). If a frame stalls for
+              // any reason, the physics step "catches up" by running extra
+              // sub-steps in the very next tick -- with the default of 10,
+              // that could mean up to 10 full solver passes crammed into a
+              // single JS tick, turning a small stall into a much bigger,
+              // very visible one. Capping this bounds how bad that
+              // amplification can get; physics just falls slightly behind
+              // real time for a few frames instead of front-loading all the
+              // catch-up work into one.
+              maxSubSteps={4}
               defaultContactMaterial={{
                 friction: 0.7,
                 restitution: 0,
