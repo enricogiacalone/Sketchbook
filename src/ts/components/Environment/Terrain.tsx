@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import * as THREE from "three";
 import { useHeightfield } from "@react-three/cannon";
+import { CollisionGroups } from "../../enums/CollisionGroups";
 
 export const getTerrainHeight = (
   x: number,
@@ -62,8 +63,13 @@ const Terrain: React.FC = () => {
     rotation: [-Math.PI / 2, 0, 0], // Rotate to lay on XZ plane
     type: 'Static',
     material: 'ground',
-    collisionFilterGroup: 4, 
-    collisionFilterMask: -1,
+    collisionFilterGroup: CollisionGroups.TrimeshColliders,
+    // Exclude other TrimeshColliders (the road sections): every road strip
+    // and this heightfield are all static, mass-0 bodies, so colliding them
+    // with each other can only ever be a costly no-op -- there's no dynamic
+    // response to produce. Matches the original's own (never fully applied)
+    // intent to skip trimesh-vs-trimesh collisions for performance.
+    collisionFilterMask: ~CollisionGroups.TrimeshColliders,
   }));
 
   return (

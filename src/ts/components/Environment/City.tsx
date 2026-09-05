@@ -2,6 +2,26 @@ import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { useBox } from '@react-three/cannon';
 import { getTerrainHeight } from './Terrain';
+import { getRoadOffset } from './Road';
+import { CollisionGroups } from '../../enums/CollisionGroups';
+
+// Mirrors the original's TerrainGrid, which marks Road cells so buildings
+// (and everything else the VillageGenerator/Trees place) are generated
+// around them instead of on top of them. We don't have a full occupancy
+// grid here, so we do the equivalent check directly against the road
+// layout: a building whose footprint comes within ROAD_WIDTH/2 of any
+// road strip is considered blocked.
+const footprintOverlapsRoad = (x: number, z: number, width: number, depth: number): boolean => {
+  const halfW = width / 2;
+  const halfD = depth / 2;
+  const samplePoints: [number, number][] = [
+    [x, z],
+    [x - halfW, z - halfD], [x + halfW, z - halfD],
+    [x - halfW, z + halfD], [x + halfW, z + halfD],
+    [x, z - halfD], [x, z + halfD], [x - halfW, z], [x + halfW, z],
+  ];
+  return samplePoints.some(([px, pz]) => getRoadOffset(px, pz) > 0);
+};
 
 const Building: React.FC<{ x: number, z: number, width: number, depth: number, height: number, color: string }> = ({ x, z, width, depth, height, color }) => {
   const y = getTerrainHeight(x, z);
@@ -10,6 +30,11 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
     type: 'Static',
     args: [width, height, depth],
     position: [x, y + height / 2, z],
+    // Same group the original's BoxCollider used for GLTF-authored physics
+    // props (see WorldBuilder._processSceneChild): Default, colliding with
+    // everything -- characters and vehicles both need to be blocked by it.
+    collisionFilterGroup: CollisionGroups.Default,
+    collisionFilterMask: -1,
   }));
 
   return (
@@ -46,14 +71,25 @@ const City: React.FC = () => {
         // Add 2-4 buildings per block
         const count = 2 + Math.floor(Math.random() * 3);
         for (let k = 0; k < count; k++) {
-            const offsetX = (Math.random() - 0.5) * 30;
-            const offsetZ = (Math.random() - 0.5) * 30;
             const w = 10 + Math.random() * 15;
             const d = 10 + Math.random() * 15;
             const h = 20 + Math.random() * 80;
             const color = buildingColors[Math.floor(Math.random() * buildingColors.length)];
-            
-            arr.push({ x: blockX + offsetX, z: blockZ + offsetZ, w, d, h, color });
+
+            // Retry a handful of times to find a spot that doesn't straddle
+            // a road; a block that just can't fit one (edge blocks with a
+            // wide/offset building) simply gets fewer buildings, same as
+            // the original skipping already-occupied TerrainGrid cells.
+            for (let attempt = 0; attempt < 8; attempt++) {
+                const offsetX = (Math.random() - 0.5) * 30;
+                const offsetZ = (Math.random() - 0.5) * 30;
+                const x = blockX + offsetX;
+                const z = blockZ + offsetZ;
+                if (!footprintOverlapsRoad(x, z, w, d)) {
+                    arr.push({ x, z, w, d, h, color });
+                    break;
+                }
+            }
         }
       }
     }

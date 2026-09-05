@@ -8,6 +8,9 @@ import { useStore } from "../store";
 import SpeechBubble from "./UI/SpeechBubble";
 import { useSpringVector } from "../hooks/useSpringVector";
 import Explosion from "./Environment/Explosion";
+import { getTerrainHeight } from "./Environment/Terrain";
+import { getRoadOffset } from "./Environment/Road";
+import { CollisionGroups } from "../enums/CollisionGroups";
 
 interface EnemyProps {
   id: string;
@@ -28,25 +31,35 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
   const radius = 0.3;
   const height = 1;
   const moveSpeed = 3.5;
+  // The compound body's own origin is the middle of the three stacked
+  // spheres; its actual bottom -- where it should rest on the ground -- is
+  // height/2 + radius below that. Used both for the ground-snap target
+  // below and to pull the rendered model down to match (see the JSX).
+  const bodyBottomOffset = height / 2 + radius;
+  const GROUND_SNAP_FORCE = 14;
+  const MAX_SNAP_SPEED = 10;
 
   const [ref, api] = useCompoundBody<THREE.Group>(() => ({
     mass: 1,
     position: initialPosition,
     fixedRotation: true,
     material: "slippery",
-    collisionFilterGroup: 2,
-    collisionFilterMask: 1 | 2 | 4,
+    collisionFilterGroup: CollisionGroups.Characters,
+    // Excludes TrimeshColliders (terrain + roads), same reasoning as the
+    // player's sphere in Player.tsx: physically colliding with the ground
+    // fights the manual ground-snap below every step (double authority over
+    // Y), which is what made the player "walk badly" before that fix -- the
+    // enemies never got the same treatment and had the same problem, plus
+    // it let them take damage from touching the ground at all (see the
+    // onCollide condition below, which used to key off this exact group).
+    collisionFilterMask: ~CollisionGroups.TrimeshColliders,
     shapes: [
       { type: "Sphere", args: [radius], position: [0, 0, 0] },
       { type: "Sphere", args: [radius], position: [0, height / 2, 0] },
       { type: "Sphere", args: [radius], position: [0, -height / 2, 0] },
     ],
     onCollide: (e) => {
-      if (
-        (e.body.collisionFilterGroup === 4 ||
-          e.body.userData?.type === "bullet") &&
-        health > 0
-      ) {
+      if (e.body.userData?.type === "bullet" && health > 0) {
         setHealth((prev) => {
           const next = Math.max(0, prev - 25); // Increased damage
           if (next <= 0) {
@@ -115,7 +128,22 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
       Math.cos(modelRotation.current)
     ).multiplyScalar(arcadeVelMagnitude);
 
-    api.velocity.set(worldVel.x, velocity.current[1], worldVel.z);
+    // Ground snap, mirroring Player.tsx: the compound body no longer
+    // physically collides with the terrain/road (see collisionFilterMask
+    // above), so this is the only thing placing it vertically. Enemies
+    // never jump, so unlike the player this can run unconditionally.
+    const groundY =
+      getTerrainHeight(position.current[0], position.current[2]) +
+      getRoadOffset(position.current[0], position.current[2]);
+    const targetY = groundY + bodyBottomOffset;
+    const heightError = targetY - position.current[1];
+    const yVel = THREE.MathUtils.clamp(
+      heightError * GROUND_SNAP_FORCE,
+      -MAX_SNAP_SPEED,
+      MAX_SNAP_SPEED
+    );
+
+    api.velocity.set(worldVel.x, yVel, worldVel.z);
 
     if (Math.random() < 0.002 && !message) {
       const phrase = phrases[Math.floor(Math.random() * phrases.length)];
@@ -218,7 +246,11 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
 
         <SpeechBubble message={message} position={[0, 1.2, 0]} />
 
-        <group position={[0, 0, 0]}>
+        {/* Pulls the model's feet down to the compound body's actual
+            bottom (see bodyBottomOffset above) -- without this the model
+            was drawn at the body's origin, floating height/2+radius above
+            where it's really standing. */}
+        <group position={[0, -bodyBottomOffset, 0]}>
           <primitive object={clonedScene} />
         </group>
       </group>

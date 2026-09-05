@@ -14,12 +14,69 @@ import NetworkPlayer from "./NetworkPlayer";
 import SpeechBubble from "./UI/SpeechBubble";
 import Bullet from "./Bullet";
 
+// -- Vehicle seat/entrance lookup -------------------------------------------
+// Every vehicle glb (car/airplane/heli) ships the same authored empties the
+// original (non-React) Sketchbook used for its VehicleSeat/entry points --
+// "seat_1", "entrance_1", etc. -- as real named nodes. We only support one
+// (driver) seat per vehicle here, so we always use the "_1" pair; falling
+// back to the vehicle's own root transform keeps this from silently
+// breaking if a model is ever missing them.
+interface VehicleParts {
+  root: THREE.Object3D;
+  seat: THREE.Object3D;
+  entrance: THREE.Object3D;
+}
+
+const getVehicleParts = (scene: THREE.Object3D, vehicleId: string): VehicleParts | null => {
+  const root = scene.getObjectByName(vehicleId);
+  if (!root) return null;
+  const seat = root.getObjectByName("seat_1") ?? root;
+  const entrance = root.getObjectByName("entrance_1") ?? seat;
+  return { root, seat, entrance };
+};
+
+// Mirrors the original's FunctionLibrary.detectRelativeSide(): which side of
+// `fromPos`/`fromQuat` the point `toPos` is on, using its local right axis.
+// Used to pick the left/right sit-down, stand-up and door animations.
+const sideOf = (fromPos: THREE.Vector3, fromQuat: THREE.Quaternion, toPos: THREE.Vector3): "left" | "right" => {
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(fromQuat);
+  const view = toPos.clone().sub(fromPos).normalize();
+  return right.dot(view) > 0 ? "left" : "right";
+};
+
+type VehicleType = "car" | "airplane" | "helicopter";
+
+interface VehicleTransition {
+  mode: "entering" | "exiting";
+  vehicleId: string;
+  vehicleType: VehicleType;
+  t: number;
+  duration: number;
+  startPos: THREE.Vector3;
+  startQuat: THREE.Quaternion;
+  anim: string;
+  // Only set for "exiting": the estimated velocity to hand back to the
+  // player's body on completion, same idea as the original copying the
+  // vehicle's chassis velocity onto the character when it detaches.
+  exitVelocity: THREE.Vector3;
+}
+
 const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const input = useInput();
   const { scene, animations } = useGLTF("boxman.glb");
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { actions } = useAnimations(animations, clonedScene);
-  const { currentControllable, setCurrentControllable, setPlayerInfo, playerMessage, entities, setIsLoading } = useStore();
+  const {
+    currentControllable,
+    controlledEntityId,
+    setCurrentControllable,
+    isVehicleTransitioning,
+    setIsVehicleTransitioning,
+    setPlayerInfo,
+    playerMessage,
+    entities,
+    setIsLoading,
+  } = useStore();
 
   useEffect(() => {
     if (scene) setIsLoading(false);
@@ -64,6 +121,16 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   // one-frame correction rebound the character upward almost as hard as an
   // actual jump -- i.e. what looked like "another jump" right on landing.
   const MAX_SNAP_SPEED = 6;
+
+  // Vehicle entry/exit. VEHICLE_SEARCH_RADIUS mirrors the original's
+  // ClosestObjectFinder(this.position, 10) for picking the nearest vehicle;
+  // VEHICLE_ENTRANCE_RANGE additionally requires being close to its actual
+  // door (the original instead auto-walks the character to the door, which
+  // this port doesn't do, so we ask the player to walk up themselves).
+  const VEHICLE_SEARCH_RADIUS = 10;
+  const VEHICLE_ENTRANCE_RANGE = 3.5;
+  const VEHICLE_ENTER_DURATION = 0.45;
+  const VEHICLE_EXIT_DURATION = 0.4;
 
   const [ref, api] = useSphere<THREE.Group>(() => ({
     mass: 1,
@@ -116,6 +183,23 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const landingAnim = useRef<string | null>(null);
   const landingAnimTimer = useRef(0);
 
+  // -- Vehicle entry/exit. vehicleTransition drives the walk-to-seat /
+  // stand-up-and-leave lerp (see the original's EnteringVehicle/
+  // ExitingVehicle character states); transitionMode is the same
+  // information mirrored into React state purely so the player mesh's
+  // `visible` prop (below) re-renders at the right moments -- refs alone
+  // don't trigger a render, and we want the character to stay visible
+  // through the "exiting" animation instead of popping in only at the end.
+  const vehicleTransition = useRef<VehicleTransition | null>(null);
+  const [transitionMode, setTransitionMode] = useState<"entering" | "exiting" | null>(null);
+  // While parked in a vehicle (not transitioning), tracks the seat's world
+  // position frame to frame so we can estimate the vehicle's velocity and
+  // hand it to the player's body on exit -- same idea as the original
+  // copying vehicle.chassisBody.velocity onto the character when it
+  // detaches, so hopping out of a moving car keeps your momentum.
+  const lastSeatPos = useRef<THREE.Vector3 | null>(null);
+  const seatVelocityEstimate = useRef(new THREE.Vector3());
+
 
   const playAnim = (name: string) => {
     if (currentAnimRef.current === name) return;
@@ -136,29 +220,167 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     setBullets(prev => prev.filter(b => b.id !== id));
   }, []);
 
-  const prevControllable = useRef(currentControllable);
-
   useFrame((state, delta) => {
-    const isPlayerActive = currentControllable === "player";
-    const wasPlayerActive = prevControllable.current === "player";
-    prevControllable.current = currentControllable;
+    if (!ref.current || !clonedScene) return;
 
-    if (!ref.current || !clonedScene || !isPlayerActive) {
-      api.velocity.set(0, velocity.current[1], 0);
+    const isPlayerActive = currentControllable === "player";
+
+    // -- Vehicle entering/exiting transition. Runs regardless of who
+    // nominally "has control": during "entering" that's still the player
+    // (control only hands over to the vehicle once the character has sat
+    // down); during "exiting" it's still the vehicle (control only hands
+    // back once the character has stood up and stepped out).
+    const transition = vehicleTransition.current;
+    if (transition) {
+      transition.t += delta;
+      const factor = THREE.MathUtils.clamp(transition.t / transition.duration, 0, 1);
+      const eased = -(Math.cos(Math.PI * factor) - 1) / 2; // easeInOutSine, same as the original
+
+      const parts = getVehicleParts(state.scene, transition.vehicleId);
+      const targetPos = new THREE.Vector3();
+      const targetQuat = new THREE.Quaternion();
+      if (parts) {
+        const targetObj = transition.mode === "entering" ? parts.seat : parts.entrance;
+        targetObj.getWorldPosition(targetPos);
+        targetObj.getWorldQuaternion(targetQuat);
+      }
+
+      const lerpPos = new THREE.Vector3().lerpVectors(transition.startPos, targetPos, eased);
+      api.position.set(lerpPos.x, lerpPos.y, lerpPos.z);
+      api.velocity.set(0, 0, 0);
+
+      const lerpQuat = new THREE.Quaternion().slerpQuaternions(transition.startQuat, targetQuat, eased);
+      modelRotation.current = new THREE.Euler().setFromQuaternion(lerpQuat, "YXZ").y;
+
+      playAnim(transition.anim);
+      setPlayerInfo([lerpPos.x, lerpPos.y, lerpPos.z], modelRotation.current);
+
+      if (factor >= 1) {
+        if (transition.mode === "entering") {
+          setCurrentControllable(transition.vehicleType, transition.vehicleId);
+        } else {
+          api.velocity.set(transition.exitVelocity.x, transition.exitVelocity.y, transition.exitVelocity.z);
+          setCurrentControllable("player");
+          // Force the next real ground check to treat this as a fresh
+          // landing (see the airPhase machine below) instead of leaving
+          // the character stuck in "falling" forever, or skipping the
+          // landing-recovery pose it would otherwise be entitled to.
+          wasGrounded.current = false;
+          airPhase.current = "falling";
+          airPhaseTimer.current = 0;
+        }
+        vehicleTransition.current = null;
+        setIsVehicleTransitioning(false);
+        setTransitionMode(null);
+      }
       return;
     }
 
-    // Vehicle Entry Logic - Only if we were already the player
-    if (wasPlayerActive && input.consumeJustPressed('enter')) {
-        const pPos = new THREE.Vector3(position.current[0], 0, position.current[2]);
-        entities.forEach((e) => {
-          if (['car', 'airplane', 'helicopter'].includes(e.type)) {
-            // Check 2D distance for easier entry
-            if (pPos.distanceTo(new THREE.Vector3(e.position[0], 0, e.position[2])) < 8) {
-              setCurrentControllable(e.type as any, e.id);
-            }
+    if (!isPlayerActive) {
+      // Parked inside a vehicle: follow the seat every frame so the
+      // invisible body doesn't get left behind wherever it was boarded --
+      // and, since it no longer collides with the ground (see
+      // collisionFilterMask above), doesn't just fall forever either. This
+      // is a pragmatic stand-in for the original literally attaching the
+      // character to the vehicle's transform while seated.
+      if (controlledEntityId) {
+        const parts = getVehicleParts(state.scene, controlledEntityId);
+        if (parts) {
+          const seatPos = new THREE.Vector3();
+          parts.seat.getWorldPosition(seatPos);
+          api.position.set(seatPos.x, seatPos.y, seatPos.z);
+
+          if (lastSeatPos.current && delta > 0) {
+            seatVelocityEstimate.current
+              .copy(seatPos)
+              .sub(lastSeatPos.current)
+              .divideScalar(delta);
           }
-        });
+          lastSeatPos.current = seatPos;
+        }
+      }
+      api.velocity.set(0, 0, 0);
+
+      if (input.consumeJustPressed("enter") && controlledEntityId) {
+        const parts = getVehicleParts(state.scene, controlledEntityId);
+        if (parts) {
+          const startPos = new THREE.Vector3();
+          parts.seat.getWorldPosition(startPos);
+          const startQuat = new THREE.Quaternion();
+          parts.seat.getWorldQuaternion(startQuat);
+          const entrancePos = new THREE.Vector3();
+          parts.entrance.getWorldPosition(entrancePos);
+          const side = sideOf(startPos, startQuat, entrancePos);
+
+          vehicleTransition.current = {
+            mode: "exiting",
+            vehicleId: controlledEntityId,
+            vehicleType: currentControllable as VehicleType,
+            t: 0,
+            duration: VEHICLE_EXIT_DURATION,
+            startPos,
+            startQuat,
+            anim: side === "left" ? "stand_up_left" : "stand_up_right",
+            exitVelocity: seatVelocityEstimate.current.clone(),
+          };
+          setIsVehicleTransitioning(true, controlledEntityId);
+          setTransitionMode("exiting");
+        }
+      }
+      return;
+    }
+
+    lastSeatPos.current = null;
+
+    // Vehicle entry: find the nearest vehicle within reach of its door.
+    // Two-stage search mirrors the original's findVehicleToEnter() --
+    // nearest vehicle overall, then nearest entry point on it -- except the
+    // original then auto-walks the character to the door; this port
+    // requires the player to already be standing next to it.
+    if (input.consumeJustPressed("enter")) {
+      const playerPos = new THREE.Vector3(position.current[0], position.current[1], position.current[2]);
+      let closestId: string | null = null;
+      let closestType: VehicleType | null = null;
+      let closestDist = VEHICLE_SEARCH_RADIUS;
+      entities.forEach((e) => {
+        if (e.type !== "car" && e.type !== "airplane" && e.type !== "helicopter") return;
+        const d = playerPos.distanceTo(new THREE.Vector3(...e.position));
+        if (d < closestDist) {
+          closestDist = d;
+          closestId = e.id;
+          closestType = e.type as VehicleType;
+        }
+      });
+
+      if (closestId && closestType) {
+        const parts = getVehicleParts(state.scene, closestId);
+        if (parts) {
+          const entrancePos = new THREE.Vector3();
+          parts.entrance.getWorldPosition(entrancePos);
+          if (playerPos.distanceTo(entrancePos) < VEHICLE_ENTRANCE_RANGE) {
+            const entranceQuat = new THREE.Quaternion();
+            parts.entrance.getWorldQuaternion(entranceQuat);
+            const seatPos = new THREE.Vector3();
+            parts.seat.getWorldPosition(seatPos);
+            const side = sideOf(entrancePos, entranceQuat, seatPos);
+
+            vehicleTransition.current = {
+              mode: "entering",
+              vehicleId: closestId,
+              vehicleType: closestType,
+              t: 0,
+              duration: VEHICLE_ENTER_DURATION,
+              startPos: playerPos.clone(),
+              startQuat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), modelRotation.current),
+              anim: side === "left" ? "sit_down_left" : "sit_down_right",
+              exitVelocity: new THREE.Vector3(),
+            };
+            setIsVehicleTransitioning(true, closestId);
+            setTransitionMode("entering");
+            return;
+          }
+        }
+      }
     }
 
     // 1. Camera-Relative Input. Computed before the ground analysis below
@@ -325,7 +547,11 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
 
   return (
     <>
-      <group ref={ref} name="player" visible={currentControllable === "player"}>
+      <group
+        ref={ref}
+        name="player"
+        visible={currentControllable === "player" || transitionMode === "exiting"}
+      >
         <group rotation={[0, modelRotation.current, 0]}>
           <primitive object={clonedScene} position={[0, -RADIUS, 0]} />
         </group>

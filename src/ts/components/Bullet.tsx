@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { useSphere } from '@react-three/cannon';
 import * as THREE from 'three';
+import { CollisionGroups } from '../enums/CollisionGroups';
 
 interface BulletProps {
   id: string;
@@ -19,9 +20,14 @@ const Bullet: React.FC<BulletProps> = ({ id, position, velocity, onKill }) => {
         // Bullets should disappear on any collision
         onKill(id);
     },
-    // Bullet collision group
-    collisionFilterGroup: 4, // Group 4 for bullets
-    collisionFilterMask: 1 | 2, // Collide with ground (1) and characters/enemies (2)
+    // Group 4 was TrimeshColliders (terrain/road), not Bullet -- that
+    // mislabeling coincidentally reused the value the terrain/road physics
+    // bodies also use, which is how enemies ended up taking bullet damage
+    // just from touching the ground (see Enemy.tsx's onCollide, now fixed
+    // to key off userData instead of this group number).
+    collisionFilterGroup: CollisionGroups.Bullet,
+    collisionFilterMask: CollisionGroups.Default | CollisionGroups.Characters,
+
     userData: { type: 'bullet' }
   }));
 

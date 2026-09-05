@@ -15,7 +15,9 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
   const { scene } = useGLTF('heli.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
   const input = useInput();
-  const { currentControllable, controlledEntityId, setCurrentControllable, updateEntity, setPlayerInfo } = useStore();
+  // Vehicle entry/exit (including the exit key) is orchestrated centrally
+  // by Player.tsx (see vehicleTransition there).
+  const { currentControllable, controlledEntityId, isVehicleTransitioning, updateEntity, setPlayerInfo } = useStore();
   const [ready, setReady] = useState(false);
 
   const chassisArgs: [number, number, number] = [1.2, 1.5, 4];
@@ -57,12 +59,8 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     }
   }, [scene]);
 
-  const prevControllable = useRef(currentControllable);
-
   useFrame((state, delta) => {
-    const isHeliActive = currentControllable === 'helicopter' && controlledEntityId === id;
-    const wasHeliActive = prevControllable.current === 'helicopter' && controlledEntityId === id;
-    prevControllable.current = currentControllable;
+    const isHeliActive = currentControllable === 'helicopter' && controlledEntityId === id && !isVehicleTransitioning;
 
     if (!ready || !isHeliActive || !ref.current) {
       if (enginePower > 0) setEnginePower(prev => Math.max(0, prev - delta * 0.06));
@@ -81,8 +79,20 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
 
+    // Throttle and the pitch/roll torques below are fixed impulses applied
+    // once per RENDERED frame with no time scaling -- so, like the car and
+    // airplane, their actual per-second effect depended entirely on the
+    // display's refresh rate. dt60 renormalizes to the tuning's implicit
+    // 60fps baseline (dt60 == 1 at exactly 60fps). The gravity-compensation
+    // impulse below already does its own delta scaling and is left alone.
+    // Clamped so a dropped/backgrounded frame (a big one-off `delta`)
+    // can't fling the helicopter with a single huge impulse -- caps the
+    // renormalization at 3x the 60fps baseline instead of following an
+    // arbitrarily large delta.
+    const dt60 = Math.min(delta * 60, 3);
+
     // 1. Throttle (Ascend/Descend)
-    const throttleFactor = 15 * enginePower;
+    const throttleFactor = 15 * enginePower * dt60;
     if (input.shift) {
         api.applyImpulse([up.x * throttleFactor, up.y * throttleFactor, up.z * throttleFactor], [0, 0, 0]);
     }
@@ -118,7 +128,7 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     );
 
     // 5. Controls (Torques)
-    const torqueFactor = 3.5 * enginePower;
+    const torqueFactor = 3.5 * enginePower * dt60;
     // Pitch (W/S)
     if (input.forward) api.applyTorque([right.x * torqueFactor, right.y * torqueFactor, right.z * torqueFactor]);
     if (input.backward) api.applyTorque([-right.x * torqueFactor, -right.y * torqueFactor, -right.z * torqueFactor]);
@@ -141,17 +151,16 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
         rotation: heliEuler.y
       });
     }
-
-    if (wasHeliActive && input.consumeJustPressed('enter')) {
-        setCurrentControllable('player');
-    }
   });
 
   return (
     <mesh ref={ref} name={id}>
         <boxGeometry args={chassisArgs} />
         <meshStandardMaterial visible={false} />
-        <primitive object={clonedScene} position={[0, -0.5, 0]} />
+        {/* Chassis box half-height is 0.75; the glb's lowest point sits
+            0.673 below the model's own origin, so -0.08 aligns it with
+            the box's bottom face. */}
+        <primitive object={clonedScene} position={[0, -0.08, 0]} />
     </mesh>
   );
 };

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { useTrimesh } from '@react-three/cannon';
 import { getTerrainHeight } from './Terrain';
+import { CollisionGroups } from '../../enums/CollisionGroups';
 
 // Shared road-grid layout, also consumed by Player.tsx (getRoadOffset) so the
 // character's manual ground-snapping agrees with the actual road geometry
@@ -75,8 +76,12 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
     type: 'Static',
     args: [vertices, physicsIndices],
     mass: 0,
-    collisionFilterGroup: 4, 
-    collisionFilterMask: -1, 
+    material: 'ground',
+    collisionFilterGroup: CollisionGroups.TrimeshColliders,
+    // Exclude other TrimeshColliders (the terrain heightfield and the other
+    // road strips): all static, mass-0 bodies colliding with each other for
+    // no dynamic effect, just wasted broadphase/narrowphase work every step.
+    collisionFilterMask: ~CollisionGroups.TrimeshColliders,
   }));
 
   return (
