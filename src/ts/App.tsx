@@ -1,6 +1,6 @@
 import React, { Suspense, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Physics, Debug } from "@react-three/cannon";
+import { Physics } from "@react-three/rapier";
 import { Environment } from "@react-three/drei";
 import Scene from "./Scene";
 import Sky from "./components/Environment/Sky";
@@ -67,44 +67,29 @@ const App: React.FC = () => {
             <ambientLight intensity={0.5} />
             <pointLight position={[10, 10, 10]} castShadow />
 
+            {/*
+              Migrated from @react-three/cannon to @react-three/rapier.
+              Rapier's default (and what we use here) steps physics
+              synchronously on the main thread inside a useFrame callback
+              ("follow" updateLoop) -- no Web Worker, no postMessage
+              serialization boundary. That boundary is what made cannon's
+              RaycastVehicle (engine force, suspension, wheel transforms)
+              a no-op in this app: verified live that the worker-side
+              vehicle registers and steps every frame, but its effects
+              never reliably reached the chassis body. See Car.tsx for the
+              real vehicle controller this migration unlocks.
+
+              Friction/restitution used to be set globally via
+              defaultContactMaterial/contactMaterials (cannon). Rapier sets
+              these per RigidBody/Collider instead -- see each body's own
+              friction/restitution props (e.g. Player.tsx's capsule).
+            */}
             <Physics
               gravity={[0, -20, 0]}
-              tolerance={0.0001}
-              // Dynamic bodies (idle enemies, parked cars, spent bullets)
-              // can now go to sleep instead of being solved every step even
-              // at rest. Characters/vehicles set velocity directly every
-              // frame, which still reads as "at rest" once that velocity is
-              // ~0, so they sleep and wake normally with input.
-              allowSleep={true}
-              // Was 30 (3x cannon-es's own default of 10) -- brought down
-              // to still be extra-stable versus the default without paying
-              // 3x the per-step solver cost on every dynamic body.
-              iterations={15}
-              stepSize={1 / 120}
-              // Was left at the library default (10). If a frame stalls for
-              // any reason, the physics step "catches up" by running extra
-              // sub-steps in the very next tick -- with the default of 10,
-              // that could mean up to 10 full solver passes crammed into a
-              // single JS tick, turning a small stall into a much bigger,
-              // very visible one. Capping this bounds how bad that
-              // amplification can get; physics just falls slightly behind
-              // real time for a few frames instead of front-loading all the
-              // catch-up work into one.
-              maxSubSteps={4}
-              defaultContactMaterial={{
-                friction: 0.7,
-                restitution: 0,
-                contactEquationStiffness: 1e8,
-                contactEquationRelaxation: 3,
-              }}
-              contactMaterials={[
-                {
-                  friction: 0, // Zero friction for the player on ground to avoid sticking to slopes
-                  restitution: 0,
-                  materialA: "slippery",
-                  materialB: "ground",
-                }
-              ]}
+              // Matches cannon's old `iterations` (solver iterations/step).
+              numSolverIterations={15}
+              // Matches cannon's old `stepSize` (fixed physics tick rate).
+              timeStep={1 / 120}
             >
               {/* Scene contains the world environment */}
               <Scene />

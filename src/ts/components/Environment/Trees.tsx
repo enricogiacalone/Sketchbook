@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
-import { useCylinder } from '@react-three/cannon';
+import { RigidBody, CylinderCollider } from '@react-three/rapier';
 import { Tree } from "@dgreenheck/ez-tree";
 import { getTerrainHeight } from './Terrain';
 
@@ -59,15 +59,28 @@ const TreeInstances: React.FC = () => {
   
     const allInstances = useMemo(() => instancesByTemplate.flat(), [instancesByTemplate]);
     
-    useCylinder(() => allInstances.map((inst) => ({
-      mass: 0,
-      position: [inst.position[0], inst.position[1] + inst.trunkHeight / 2, inst.position[2]],
-      args: [0.5 * inst.scale[0], 0.5 * inst.scale[0], inst.trunkHeight, 8],
-      type: 'Static'
-    })));
-  
+    // Migrated from cannon's useCylinder(() => allInstances.map(...))
+    // batch-body mode (no per-instance refs, purely for collision) -- there's
+    // no direct Rapier equivalent for "one hook call, N static bodies with no
+    // shared shape", so this is just N individual fixed RigidBodies. At ~30
+    // trees this is plenty cheap; the actual tree VISUALS stay handled by
+    // TemplateGroup's instancedMesh below, unrelated to these invisible
+    // trunk colliders. Rapier's CylinderCollider args are [halfHeight,
+    // radius] (vs cannon's [radiusTop, radiusBottom, height, segments]),
+    // and both engines default a cylinder's long axis to local Y, so no
+    // extra rotation is needed here either.
     return (
       <group>
+        {allInstances.map((inst, i) => (
+          <RigidBody
+            key={i}
+            type="fixed"
+            colliders={false}
+            position={[inst.position[0], inst.position[1] + inst.trunkHeight / 2, inst.position[2]]}
+          >
+            <CylinderCollider args={[inst.trunkHeight / 2, 0.5 * inst.scale[0]]} />
+          </RigidBody>
+        ))}
         {treeTemplates.map((template, tIdx) => (
           <TemplateGroup 
             key={tIdx} 

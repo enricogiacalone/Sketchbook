@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { useSphere } from "@react-three/cannon";
+import { RigidBody, BallCollider, RapierRigidBody } from "@react-three/rapier";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
@@ -10,7 +10,7 @@ import { useStore } from "../store";
 import { useShallow } from "zustand/react/shallow";
 import { getTerrainHeight } from "./Environment/Terrain";
 import { getRoadOffset } from "./Environment/Road";
-import { CollisionGroups } from "../enums/CollisionGroups";
+import { CollisionGroups, groupsExcluding } from "../enums/CollisionGroups";
 import NetworkPlayer from "./NetworkPlayer";
 import SpeechBubble from "./UI/SpeechBubble";
 import Bullet from "./Bullet";
@@ -112,9 +112,13 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const RUN_SPEED = 8;
   const SPRINT_SPEED = RUN_SPEED * 1.8;
   const JUMP_FORCE = 8.5;
-  // How long (seconds) isGrounded is forced false right after a jump, to
-  // outlast the ~1-frame latency of the @react-three/cannon worker (see
-  // jumpLockout below for why this exists).
+  // How long (seconds) isGrounded is forced false right after a jump. Kept
+  // from the cannon-worker era as a small, harmless safety margin -- with
+  // Rapier stepping synchronously on the main thread (see rigidBodyRef
+  // below) there's no longer a worker-latency frame to outlast, but a short
+  // lockout still protects against the ground-snap branch reasserting
+  // itself the instant setLinvel's upward jump velocity is applied, before
+  // the body has visibly left the ground.
   const JUMP_LOCKOUT_TIME = 0.15;
   const RADIUS = 0.5; // Slightly larger for smoother stepping
 
@@ -124,11 +128,10 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const FALLBACK_LANDING_ANIM_DURATION = 0.3;
 
   // Vertical ground-snapping gains. These are the sole authority over the
-  // character's Y position while grounded (see collisionFilterMask below),
-  // so they can stay gentle: there is no physics contact response fighting
+  // character's Y position while grounded (see collisionGroups below), so
+  // they can stay gentle: there is no physics contact response fighting
   // them anymore. MAX_SNAP_SPEED clamps a single frame's correction so a
-  // large one-off height error (e.g. right after landing) can't overshoot
-  // and ring across the ~1-frame latency of the @react-three/cannon worker.
+  // large one-off height error (e.g. right after landing) can't overshoot.
   const GROUND_SNAP_FORCE_IDLE = 12;
   const GROUND_SNAP_FORCE_MOVING = 16;
   // Kept well below JUMP_FORCE: a fast landing can momentarily read a
@@ -148,54 +151,53 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const VEHICLE_ENTER_DURATION = 0.45;
   const VEHICLE_EXIT_DURATION = 0.4;
 
-  const [ref, api] = useSphere<THREE.Group>(() => ({
-    mass: 1,
-    position: [0, 15, 0],
-    args: [RADIUS],
-    fixedRotation: true,
-    linearDamping: 0,
-    // Without this, the Physics world's default allowSleep (App.tsx) puts
-    // the character to sleep after ~1s at rest -- and a sleeping cannon-es
-    // body is skipped during integration entirely, so every api.velocity.set
-    // call below (which mutates the body's velocity Vec3 directly, not
-    // through a wake-triggering setter -- confirmed in
-    // @pmndrs/cannon-worker-api's body.velocity.set(...)) silently has zero
-    // effect until something else wakes it back up. That's what made
-    // movement stop working after standing still for a moment: the
-    // character was asleep and no longer listening to WASD at all. Matches
-    // the Car chassis, which needed the same override for the same reason
-    // (see Car.tsx).
-    allowSleep: false,
-    material: "slippery",
-    collisionFilterGroup: CollisionGroups.Characters,
-    // Everything except TrimeshColliders (terrain + roads): the character's
-    // vertical position on the ground is driven entirely by the analytic
-    // getTerrainHeight/getRoadOffset functions below, not by physics contact.
-    // Letting the sphere also collide with the (much coarser) terrain
-    // heightfield/road trimesh made the contact solver fight the manual
-    // ground-snap every frame -- two independent, disagreeing corrections
-    // to the same Y coordinate -- which is what caused the jitter/bouncing
-    // on the ground after the React port. Collision with characters,
-    // vehicles and buildings (all other groups) is unaffected.
-    collisionFilterMask: ~CollisionGroups.TrimeshColliders,
-  }));
+  // Migrated from @react-three/cannon's useSphere to @react-three/rapier's
+  // <RigidBody>/<BallCollider> (see App.tsx for why). lockRotations mirrors
+  // cannon's fixedRotation: true (keeps the capsule from tipping over);
+  // canSleep={false} mirrors allowSleep: false -- with cannon a sleeping
+  // body silently dropped every velocity write, which is exactly what made
+  // movement stop working after standing still (see git history); Rapier's
+  // setLinvel/setTranslation both take an explicit wakeUp argument (passed
+  // true everywhere below) so this would no longer strictly be needed, but
+  // it's kept for parity/safety at zero cost. friction/restitution 0 on the
+  // collider matches the original's "slippery" cannon Material (see
+  // PhysicsManager.ts's characterTrimeshContactMaterial). collisionGroups
+  // excludes TrimeshColliders (terrain + roads) for the same reason as
+  // before: the character's vertical position on the ground is driven
+  // entirely by the analytic getTerrainHeight/getRoadOffset functions
+  // below, not by physics contact -- letting the sphere also collide with
+  // the (much coarser) terrain heightfield/road trimesh made the contact
+  // solver fight the manual ground-snap every frame. Collision with
+  // characters, vehicles and buildings (all other groups) is unaffected.
+  const rigidBodyRef = useRef<RapierRigidBody>(null);
 
+  // Rapier steps synchronously on the main thread inside useFrame (see
+  // App.tsx's <Physics updateLoop="follow">, the default) -- no Web Worker,
+  // no postMessage boundary -- so translation()/linvel() are read directly
+  // off the rigid body at the top of useFrame below instead of through the
+  // ~1-frame-lagged subscription cannon-worker-api needed. position/velocity
+  // stay as plain refs purely so the rest of this file (written against
+  // that older shape) doesn't need to change.
   const velocity = useRef([0, 0, 0]);
-  useEffect(() => api.velocity.subscribe((v) => (velocity.current = v)), [api.velocity]);
-
   const position = useRef([0, 0, 0]);
-  useEffect(() => api.position.subscribe((p) => (position.current = p)), [api.position]);
 
   // TEMP DEBUG (Claude): teleport + live status for testing ground snapping
   // without relying on slow/unreliable simulated key input.
   useEffect(() => {
     if (import.meta.env.DEV) {
       (window as any).__teleportPlayer = (x: number, z: number) => {
-        api.position.set(x, 20, z);
-        api.velocity.set(0, 0, 0);
+        rigidBodyRef.current?.setTranslation({ x, y: 20, z }, true);
+        rigidBodyRef.current?.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      };
+      // TEMP DEBUG (Claude): same idea but keeps the given Y instead of
+      // always dropping from height -- for quickly repositioning right next
+      // to a moving car's live entrance point without waiting out a fall.
+      (window as any).__setPlayerPos = (x: number, y: number, z: number) => {
+        rigidBodyRef.current?.setTranslation({ x, y, z }, true);
+        rigidBodyRef.current?.setLinvel({ x: 0, y: 0, z: 0 }, true);
       };
     }
-  }, [api]);
+  }, []);
 
   const modelRotation = useRef(0);
   const isGrounded = useRef(true);
@@ -260,7 +262,19 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   }, []);
 
   useFrame((state, delta) => {
-    if (!ref.current || !clonedScene) return;
+    const body = rigidBodyRef.current;
+    if (!body || !clonedScene) return;
+
+    // Synchronous Rapier read (see rigidBodyRef comment above) -- refreshes
+    // the position/velocity refs every frame before anything below uses them.
+    const t = body.translation();
+    const v = body.linvel();
+    position.current[0] = t.x;
+    position.current[1] = t.y;
+    position.current[2] = t.z;
+    velocity.current[0] = v.x;
+    velocity.current[1] = v.y;
+    velocity.current[2] = v.z;
 
     const isPlayerActive = currentControllable === "player";
 
@@ -285,8 +299,8 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       }
 
       const lerpPos = new THREE.Vector3().lerpVectors(transition.startPos, targetPos, eased);
-      api.position.set(lerpPos.x, lerpPos.y, lerpPos.z);
-      api.velocity.set(0, 0, 0);
+      body.setTranslation({ x: lerpPos.x, y: lerpPos.y, z: lerpPos.z }, true);
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
 
       const lerpQuat = new THREE.Quaternion().slerpQuaternions(transition.startQuat, targetQuat, eased);
       modelRotation.current = new THREE.Euler().setFromQuaternion(lerpQuat, "YXZ").y;
@@ -298,7 +312,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
         if (transition.mode === "entering") {
           setCurrentControllable(transition.vehicleType, transition.vehicleId);
         } else {
-          api.velocity.set(transition.exitVelocity.x, transition.exitVelocity.y, transition.exitVelocity.z);
+          body.setLinvel({ x: transition.exitVelocity.x, y: transition.exitVelocity.y, z: transition.exitVelocity.z }, true);
           setCurrentControllable("player");
           // Force the next real ground check to treat this as a fresh
           // landing (see the airPhase machine below) instead of leaving
@@ -319,7 +333,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       // Parked inside a vehicle: follow the seat every frame so the
       // invisible body doesn't get left behind wherever it was boarded --
       // and, since it no longer collides with the ground (see
-      // collisionFilterMask above), doesn't just fall forever either. This
+      // collisionGroups above), doesn't just fall forever either. This
       // is a pragmatic stand-in for the original literally attaching the
       // character to the vehicle's transform while seated.
       if (controlledEntityId) {
@@ -327,7 +341,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
         if (parts) {
           const seatPos = new THREE.Vector3();
           parts.seat.getWorldPosition(seatPos);
-          api.position.set(seatPos.x, seatPos.y, seatPos.z);
+          body.setTranslation({ x: seatPos.x, y: seatPos.y, z: seatPos.z }, true);
 
           if (lastSeatPos.current && delta > 0) {
             seatVelocityEstimate.current
@@ -338,7 +352,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
           lastSeatPos.current = seatPos;
         }
       }
-      api.velocity.set(0, 0, 0);
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
 
       if (input.consumeJustPressed("enter") && controlledEntityId) {
         const parts = getVehicleParts(state.scene, controlledEntityId);
@@ -468,13 +482,9 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     const distToGround = position.current[1] - (groundY + RADIUS);
     // TEMP DEBUG (Claude)
     (window as any).__groundDebug = { pos: position.current.slice(), terrainY, roadOff, groundY, distToGround, isGrounded: isGrounded.current };
-    // jumpLockout keeps this false for a short window after a jump: position
-    // and velocity here come from an async worker subscription (see the
-    // api.velocity / api.position subscriptions above) that lags by roughly
-    // a frame, so right after commanding the jump this can still read as
-    // "grounded" for a frame or two and fall straight back into the step-3
-    // ground-snap branch, which would zero the jump out before it ever left
-    // the ground.
+    (window as any).__inputDebug = { forward: input.forward, backward: input.backward, left: input.left, right: input.right, shift: input.shift, isPlayerActive };
+    // jumpLockout keeps this false for a short window after a jump (see
+    // JUMP_LOCKOUT_TIME above).
     isGrounded.current = jumpLockout.current <= 0 && distToGround < 0.3 && velocity.current[1] < 2.0;
     wasGrounded.current = isGrounded.current;
 
@@ -508,7 +518,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
 
     // 3. Ground movement: slope-projected horizontal velocity + vertical snap.
     // The sphere no longer receives contact response from the ground (see
-    // collisionFilterMask above), so this snap is the only thing placing the
+    // collisionGroups above), so this snap is the only thing placing the
     // character vertically while grounded -- nothing else contests it.
     let yVel = velocity.current[1];
 
@@ -537,7 +547,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     }
 
     // Apply Physics
-    api.velocity.set(finalVel.x, yVel, finalVel.z);
+    body.setLinvel({ x: finalVel.x, y: yVel, z: finalVel.z }, true);
 
     // 4. Combat logic
     if (input.primary && state.clock.elapsedTime * 1000 - lastFireTime.current > 200) {
@@ -575,6 +585,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     } else if (hSpeed > 0.5) {
         nextAnim = hSpeed > RUN_SPEED * 1.3 ? "sprint" : "run";
     }
+    (window as any).__animDebug = { nextAnim, currentAnim: currentAnimRef.current, airPhase: airPhase.current, landingAnim: landingAnim.current, landingAnimTimer: landingAnimTimer.current, hSpeed, isGrounded: isGrounded.current };
     playAnim(nextAnim);
 
     // 6. Network & Store
@@ -589,16 +600,39 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
 
   return (
     <>
-      <group
-        ref={ref}
+      <RigidBody
+        ref={rigidBodyRef}
         name="player"
-        visible={currentControllable === "player" || transitionMode === "exiting"}
+        type="dynamic"
+        colliders={false}
+        position={[0, 15, 0]}
+        linearDamping={0}
+        canSleep={false}
+        lockRotations
       >
-        <group rotation={[0, modelRotation.current, 0]}>
-          <primitive object={clonedScene} position={[0, -RADIUS, 0]} />
+        <BallCollider
+          args={[RADIUS]}
+          mass={1}
+          friction={0}
+          restitution={0}
+          // Matches the original's "slippery" cannon Material (see
+          // PhysicsManager.ts's characterTrimeshContactMaterial) and
+          // excludes TrimeshColliders for the reason explained above the
+          // rigidBodyRef declaration.
+          collisionGroups={groupsExcluding(CollisionGroups.Characters, CollisionGroups.TrimeshColliders)}
+        />
+        {/* visible lives here, not on <RigidBody>, because RigidBodyProps'
+            TS type has no index signature for arbitrary Object3D props --
+            and this is actually more correct anyway: hiding the mesh this
+            way (same as the old cannon <group visible={...}> did) never
+            touched the physics collider's simulation, only the render. */}
+        <group visible={currentControllable === "player" || transitionMode === "exiting"}>
+          <group rotation={[0, modelRotation.current, 0]}>
+            <primitive object={clonedScene} position={[0, -RADIUS, 0]} />
+          </group>
+          <SpeechBubble message={playerMessage} position={[0, 1.2, 0]} />
         </group>
-        <SpeechBubble message={playerMessage} position={[0, 1.2, 0]} />
-      </group>
+      </RigidBody>
       {Array.from(remotePlayers.values()).map((p) => (
         <NetworkPlayer key={p.id} data={p} />
       ))}

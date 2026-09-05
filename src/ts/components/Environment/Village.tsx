@@ -1,24 +1,23 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
-import { useBox, useCylinder } from '@react-three/cannon';
+import { RigidBody, CuboidCollider, CylinderCollider } from '@react-three/rapier';
 import { getTerrainHeight } from './Terrain';
 
 const House: React.FC<{ x: number, z: number, width: number, depth: number, height: number }> = ({ x, z, width, depth, height }) => {
   const y = getTerrainHeight(x, z);
   const roofHeight = 3;
 
-  const [bodyRef] = useBox<THREE.Mesh>(() => ({
-    type: 'Static',
-    args: [width, height, depth],
-    position: [x, y + height / 2, z],
-  }));
-
   return (
     <group>
-      <mesh ref={bodyRef} castShadow receiveShadow>
-        <boxGeometry args={[width, height, depth]} />
-        <meshStandardMaterial color="#8b4513" />
-      </mesh>
+      {/* Migrated from cannon's useBox({type:'Static', args:[full dims]})
+          -- Rapier's CuboidCollider args are half-extents. */}
+      <RigidBody type="fixed" colliders={false} position={[x, y + height / 2, z]}>
+        <CuboidCollider args={[width / 2, height / 2, depth / 2]} />
+        <mesh castShadow receiveShadow>
+          <boxGeometry args={[width, height, depth]} />
+          <meshStandardMaterial color="#8b4513" />
+        </mesh>
+      </RigidBody>
       <mesh position={[x, y + height + roofHeight / 2, z]} rotation={[0, Math.PI / 4, 0]} castShadow>
         <coneGeometry args={[Math.max(width, depth) / 1.2, roofHeight, 4]} />
         <meshStandardMaterial color="#a00000" />
@@ -32,18 +31,18 @@ const Well: React.FC<{ x: number, z: number }> = ({ x, z }) => {
   const radius = 1.5;
   const height = 2;
 
-  const [ref] = useCylinder<THREE.Mesh>(() => ({
-    type: 'Static',
-    args: [radius, radius, height, 16],
-    position: [x, y + height / 2, z],
-  }));
-
   return (
     <group>
-      <mesh ref={ref} castShadow receiveShadow>
-        <cylinderGeometry args={[radius, radius, height, 16]} />
-        <meshStandardMaterial color="#6e6e6e" />
-      </mesh>
+      {/* Migrated from cannon's useCylinder({type:'Static',
+          args:[radiusTop,radiusBottom,height,segments]}) -- Rapier's
+          CylinderCollider args are [halfHeight, radius]. */}
+      <RigidBody type="fixed" colliders={false} position={[x, y + height / 2, z]}>
+        <CylinderCollider args={[height / 2, radius]} />
+        <mesh castShadow receiveShadow>
+          <cylinderGeometry args={[radius, radius, height, 16]} />
+          <meshStandardMaterial color="#6e6e6e" />
+        </mesh>
+      </RigidBody>
       {/* Supports and roof */}
       <mesh position={[x - radius, y + height + 1.5, z]} castShadow>
         <boxGeometry args={[0.2, 3, 0.2]} />

@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { useCompoundBody } from "@react-three/cannon";
+import { RigidBody, BallCollider, RapierRigidBody, CollisionEnterHandler } from "@react-three/rapier";
 import { useGLTF, useAnimations, Html } from "@react-three/drei";
 import { SkeletonUtils } from "three-stdlib";
 import * as THREE from "three";
@@ -11,7 +11,7 @@ import { useSpringVector } from "../hooks/useSpringVector";
 import Explosion from "./Environment/Explosion";
 import { getTerrainHeight } from "./Environment/Terrain";
 import { getRoadOffset } from "./Environment/Road";
-import { CollisionGroups } from "../enums/CollisionGroups";
+import { CollisionGroups, groupsExcluding } from "../enums/CollisionGroups";
 
 interface EnemyProps {
   id: string;
@@ -46,53 +46,31 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
   const GROUND_SNAP_FORCE = 14;
   const MAX_SNAP_SPEED = 10;
 
-  const [ref, api] = useCompoundBody<THREE.Group>(() => ({
-    mass: 1,
-    position: initialPosition,
-    fixedRotation: true,
-    material: "slippery",
-    collisionFilterGroup: CollisionGroups.Characters,
-    // Excludes TrimeshColliders (terrain + roads), same reasoning as the
-    // player's sphere in Player.tsx: physically colliding with the ground
-    // fights the manual ground-snap below every step (double authority over
-    // Y), which is what made the player "walk badly" before that fix -- the
-    // enemies never got the same treatment and had the same problem, plus
-    // it let them take damage from touching the ground at all (see the
-    // onCollide condition below, which used to key off this exact group).
-    collisionFilterMask: ~CollisionGroups.TrimeshColliders,
-    shapes: [
-      { type: "Sphere", args: [radius], position: [0, 0, 0] },
-      { type: "Sphere", args: [radius], position: [0, height / 2, 0] },
-      { type: "Sphere", args: [radius], position: [0, -height / 2, 0] },
-    ],
-    onCollide: (e) => {
-      if (e.body.userData?.type === "bullet" && health > 0) {
-        setHealth((prev) => {
-          const next = Math.max(0, prev - 25); // Increased damage
-          if (next <= 0) {
-            setIsExploded(true);
-          } else {
-            setMessage("OUCH!");
-            setTimeout(() => setMessage(""), 1000);
-          }
-          return next;
-        });
-      }
-    },
-  }));
+  const ref = useRef<RapierRigidBody>(null);
+
+  // Migrated from cannon's e.body.userData?.type === "bullet" (cannon lets
+  // you stash arbitrary data straight on the Body). Rapier's own userData
+  // prop is passed down to the THREE.Object3D instead (see CollisionGroups
+  // usage elsewhere for the groups side of this) -- so the bullet's
+  // userData is read off payload.other.rigidBodyObject here. Shared across
+  // all three sphere colliders below since a bullet can hit any of them.
+  const handleBulletHit: CollisionEnterHandler = (payload) => {
+    if (payload.other.rigidBodyObject?.userData?.type === "bullet" && health > 0) {
+      setHealth((prev) => {
+        const next = Math.max(0, prev - 25); // Increased damage
+        if (next <= 0) {
+          setIsExploded(true);
+        } else {
+          setMessage("OUCH!");
+          setTimeout(() => setMessage(""), 1000);
+        }
+        return next;
+      });
+    }
+  };
 
   const velocity = useRef([0, 0, 0]);
-  useEffect(
-    () => api.velocity.subscribe((v) => (velocity.current = v)),
-    [api.velocity]
-  );
-
-  const position = useRef([0, 0, 0]);
-  useEffect(
-    () => api.position.subscribe((p) => (position.current = p)),
-    [api.position]
-  );
-
+  const position = useRef([...initialPosition]);
   const modelRotation = useRef(0);
   const velocitySim = useSpringVector(60, 0.7);
 
@@ -105,9 +83,21 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
   ];
 
   useFrame((state, delta) => {
-    if (!ref.current || health <= 0) return;
+    const body = ref.current;
+    if (!body || health <= 0) return;
 
-    const enemyPos = new THREE.Vector3(...position.current);
+    // Synchronous Rapier reads (no more worker-subscription lag -- see
+    // Player.tsx's rigidBodyRef comment for the general explanation).
+    const t = body.translation();
+    const lv = body.linvel();
+    position.current[0] = t.x;
+    position.current[1] = t.y;
+    position.current[2] = t.z;
+    velocity.current[0] = lv.x;
+    velocity.current[1] = lv.y;
+    velocity.current[2] = lv.z;
+
+    const enemyPos = new THREE.Vector3(...(position.current as [number, number, number]));
     const targetPos = new THREE.Vector3(...playerPos);
     const distance = enemyPos.distanceTo(targetPos);
 
@@ -136,8 +126,8 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
     ).multiplyScalar(arcadeVelMagnitude);
 
     // Ground snap, mirroring Player.tsx: the compound body no longer
-    // physically collides with the terrain/road (see collisionFilterMask
-    // above), so this is the only thing placing it vertically. Enemies
+    // physically collides with the terrain/road (see collisionGroups
+    // below), so this is the only thing placing it vertically. Enemies
     // never jump, so unlike the player this can run unconditionally.
     const groundY =
       getTerrainHeight(position.current[0], position.current[2]) +
@@ -150,7 +140,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
       MAX_SNAP_SPEED
     );
 
-    api.velocity.set(worldVel.x, yVel, worldVel.z);
+    body.setLinvel({ x: worldVel.x, y: yVel, z: worldVel.z }, true);
 
     if (Math.random() < 0.002 && !message) {
       const phrase = phrases[Math.floor(Math.random() * phrases.length)];
@@ -201,7 +191,47 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
   }
 
   return (
-    <group ref={ref}>
+    <RigidBody
+      ref={ref}
+      type="dynamic"
+      colliders={false}
+      position={initialPosition}
+      lockRotations
+      // Proactively applied here even though the original never set this
+      // explicitly for Enemy: Player.tsx's chassis needed allowSleep:false/
+      // canSleep={false} because a sleeping body silently ignores every
+      // velocity write, which is exactly the every-frame
+      // body.setLinvel(...) pattern this component also uses for its
+      // ground-snap + movement below -- so it's exposed to the identical
+      // "stops responding after ~1s idle" failure mode Player.tsx already
+      // diagnosed and fixed, whether or not it was ever separately reported
+      // for enemies specifically.
+      canSleep={false}
+    >
+      <BallCollider
+        args={[radius]}
+        position={[0, 0, 0]}
+        friction={0}
+        restitution={0}
+        collisionGroups={groupsExcluding(CollisionGroups.Characters, CollisionGroups.TrimeshColliders)}
+        onCollisionEnter={handleBulletHit}
+      />
+      <BallCollider
+        args={[radius]}
+        position={[0, height / 2, 0]}
+        friction={0}
+        restitution={0}
+        collisionGroups={groupsExcluding(CollisionGroups.Characters, CollisionGroups.TrimeshColliders)}
+        onCollisionEnter={handleBulletHit}
+      />
+      <BallCollider
+        args={[radius]}
+        position={[0, -height / 2, 0]}
+        friction={0}
+        restitution={0}
+        collisionGroups={groupsExcluding(CollisionGroups.Characters, CollisionGroups.TrimeshColliders)}
+        onCollisionEnter={handleBulletHit}
+      />
       <group rotation={[0, modelRotation.current, 0]}>
         <Html position={[0, 1.8, 0]} center distanceFactor={10}>
           <div
@@ -261,7 +291,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
           <primitive object={clonedScene} />
         </group>
       </group>
-    </group>
+    </RigidBody>
   );
 };
 

@@ -33,6 +33,34 @@ export const useThirdPersonCamera = () => {
 
   const prevControllable = useRef<string | null>(null);
 
+  // TEMP DEBUG (Claude): pointer lock never actually engages in the
+  // automated browser pane used to test this (verified: document.
+  // pointerLockElement stays null even after a trusted-looking click), so
+  // there's no way to steer the camera by mouse while testing live --
+  // theta/phi just sit at whatever they were left at. Exposing direct
+  // setters here lets a test script aim the camera at/away from a point
+  // before walking, to see a proper forward-facing view while moving
+  // instead of whatever fixed angle the camera happened to start at.
+  // Dev-only, no-op in production builds.
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      (window as any).__camera = {
+        get theta() { return theta.current; },
+        get phi() { return phi.current; },
+        setTheta: (deg: number) => { theta.current = deg; },
+        setPhi: (deg: number) => { phi.current = THREE.MathUtils.clamp(deg, -85, 85); },
+        // Point the camera so "forward" (W) walks from (fromX,fromZ)
+        // toward (toX,toZ).
+        lookTowards: (fromX: number, fromZ: number, toX: number, toZ: number) => {
+          const dx = toX - fromX;
+          const dz = toZ - fromZ;
+          const len = Math.hypot(dx, dz) || 1;
+          theta.current = (Math.atan2(-dx / len, -dz / len) * 180) / Math.PI;
+        },
+      };
+    }
+  }, []);
+
   // Caches the resolved target Object3D so the frame loop doesn't run a
   // full recursive scene.getObjectByName() traversal every single frame --
   // only re-looked-up when the target name changes or gets detached.

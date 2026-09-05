@@ -1,8 +1,8 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { useTrimesh, useCylinder } from '@react-three/cannon';
+import { RigidBody, TrimeshCollider, CylinderCollider } from '@react-three/rapier';
 import { getTerrainHeight } from './Terrain';
-import { CollisionGroups } from '../../enums/CollisionGroups';
+import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 
 // Shared road-grid layout, also consumed by Player.tsx (getRoadOffset) so the
 // character's manual ground-snapping agrees with the actual road geometry
@@ -26,21 +26,10 @@ const ROAD_OFFSETS: number[] = (() => {
 // at (x, z) -- road, sidewalk, or 0 if the point isn't over either. Mirrors
 // the road/sidewalk grid built by <Road />, so this must stay in sync with
 // it: Player.tsx's character controller never gets a real physics contact
-// response from these trimeshes (see Player.tsx's collisionFilterMask), it
+// response from these trimeshes (see Player.tsx's collisionGroups), it
 // snaps its own Y purely from this function, so any patch of ground this
 // misses is a patch the character will sink into or hover above instead of
 // standing on properly.
-//
-// This used to only know about the road surface itself, not the sidewalk
-// that runs alongside it (added later, in RoadSection's `sidewalkVertices`
-// above -- SIDEWALK_WIDTH/SIDEWALK_HEIGHT, offset roadWidth/2..+SIDEWALK_WIDTH
-// from the same centerlines, same math as the trimesh generation there).
-// Standing on a sidewalk this function doesn't know about, the character
-// snapped down to bare-terrain height while the visible mesh sat
-// SIDEWALK_HEIGHT above that -- feet clipped into the curb, and the
-// ground-snap force fighting a target height that jumps by ROAD_Y_OFFSET +
-// SIDEWALK_HEIGHT right at the curb edge, which reads as exactly the
-// floaty/low-gravity, can't-get-traction feeling reported.
 export const getRoadOffset = (x: number, z: number): number => {
   const half = ROAD_WIDTH / 2;
   const sidewalkOuter = half + SIDEWALK_WIDTH;
@@ -76,7 +65,7 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
   const segmentsAcross = 10;
   const yOffset = ROAD_Y_OFFSET;
 
-  const { vertices, physicsIndices, visualIndices } = useMemo(() => {
+  const { vertices, indices } = useMemo(() => {
     const geometry = new THREE.PlaneGeometry(
         axis === 'x' ? size : roadWidth,
         axis === 'z' ? size : roadWidth,
@@ -98,22 +87,9 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
 
     return {
         vertices: pos.array as Float32Array,
-        physicsIndices: new Int32Array(rawIndices),
-        visualIndices: new Uint32Array(rawIndices)
+        indices: new Uint32Array(rawIndices),
     };
   }, [axis, size]);
-
-  const [ref] = useTrimesh<THREE.Mesh>(() => ({
-    type: 'Static',
-    args: [vertices, physicsIndices],
-    mass: 0,
-    material: 'ground',
-    collisionFilterGroup: CollisionGroups.TrimeshColliders,
-    // Exclude other TrimeshColliders (the terrain heightfield and the other
-    // road strips): all static, mass-0 bodies colliding with each other for
-    // no dynamic effect, just wasted broadphase/narrowphase work every step.
-    collisionFilterMask: ~CollisionGroups.TrimeshColliders,
-  }));
 
   // Dashed lane markings
   const dashCount = Math.floor(size / 6);
@@ -183,72 +159,60 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
     };
   }, [axis, size]);
 
-  const [swRef] = useTrimesh<THREE.Mesh>(() => ({
-    type: 'Static',
-    args: [sidewalkVertices, new Int32Array(sidewalkIndices)],
-    mass: 0,
-    material: 'ground',
-    // THE REAL BUG (found by re-reading this against the asphalt trimesh
-    // above): this body was tagged CollisionGroups.Default with no
-    // collisionFilterMask override (defaults to -1, collide with
-    // everything). The player's collisionFilterMask (Player.tsx) only
-    // excludes CollisionGroups.TrimeshColliders -- Default is NOT excluded
-    // -- so the player was physically colliding with this trimesh for
-    // real, on top of the manual analytic ground-snap that's supposed to
-    // be the ONLY thing placing the character vertically (see the long
-    // comment on Player.tsx's collisionFilterMask). Two independent
-    // systems fighting over the same Y coordinate every frame is exactly
-    // what read as "moon gravity" / "sticks to the sidewalk" -- and only
-    // on the sidewalk, never the road, because the asphalt trimesh above
-    // was correctly tagged TrimeshColliders + excluded from the start.
-    // (An earlier attempt fixed the *material* here instead, assuming
-    // real contact was intended and just missing friction tuning -- wrong
-    // diagnosis: there should be no real contact here at all.)
-    collisionFilterGroup: CollisionGroups.TrimeshColliders,
-    collisionFilterMask: ~CollisionGroups.TrimeshColliders,
-  }));
+  // Both trimeshes are static/fixed, tagged TrimeshColliders and excluded
+  // from colliding with each other (asphalt vs sidewalk vs terrain
+  // heightfield) -- all mass-0 bodies, so any contact between them would be
+  // a costly no-op with no dynamic response to produce.
+  const roadGroups = useMemo(
+    () => groupsExcluding(CollisionGroups.TrimeshColliders, CollisionGroups.TrimeshColliders),
+    []
+  );
 
   return (
     <group>
       {/* Asphalt */}
-      <mesh ref={ref} receiveShadow>
+      <RigidBody type="fixed" colliders={false} friction={0.8} restitution={0}>
+        <TrimeshCollider args={[vertices, indices]} collisionGroups={roadGroups} />
+        <mesh receiveShadow>
+            <bufferGeometry>
+                <bufferAttribute
+                    attach="attributes-position"
+                    count={vertices.length / 3}
+                    array={vertices}
+                    itemSize={3}
+                />
+                <bufferAttribute
+                    attach="index"
+                    count={indices.length}
+                    array={indices}
+                    itemSize={1}
+                />
+            </bufferGeometry>
+            <meshStandardMaterial color="#222" roughness={0.8} />
+        </mesh>
+      </RigidBody>
+
+      {/* Sidewalks */}
+      <RigidBody type="fixed" colliders={false} friction={0.8} restitution={0}>
+        <TrimeshCollider args={[sidewalkVertices, sidewalkIndices]} collisionGroups={roadGroups} />
+        <mesh receiveShadow>
           <bufferGeometry>
               <bufferAttribute
                   attach="attributes-position"
-                  count={vertices.length / 3}
-                  array={vertices}
+                  count={sidewalkVertices.length / 3}
+                  array={sidewalkVertices}
                   itemSize={3}
               />
-              {visualIndices && (
-                  <bufferAttribute
-                      attach="index"
-                      count={visualIndices.length}
-                      array={visualIndices}
-                      itemSize={1}
-                  />
-              )}
+              <bufferAttribute
+                  attach="index"
+                  count={sidewalkIndices.length}
+                  array={sidewalkIndices}
+                  itemSize={1}
+              />
           </bufferGeometry>
-          <meshStandardMaterial color="#222" roughness={0.8} />
-      </mesh>
-
-      {/* Sidewalks */}
-      <mesh ref={swRef} receiveShadow>
-        <bufferGeometry>
-            <bufferAttribute
-                attach="attributes-position"
-                count={sidewalkVertices.length / 3}
-                array={sidewalkVertices}
-                itemSize={3}
-            />
-            <bufferAttribute
-                attach="index"
-                count={sidewalkIndices.length}
-                array={sidewalkIndices}
-                itemSize={1}
-            />
-        </bufferGeometry>
-        <meshStandardMaterial color="#777" roughness={0.9} />
-      </mesh>
+          <meshStandardMaterial color="#777" roughness={0.9} />
+        </mesh>
+      </RigidBody>
 
       {/* Dashes */}
       <instancedMesh
@@ -331,32 +295,27 @@ const StreetLight: React.FC<{ x: number, z: number }> = ({ x, z }) => {
     const poleHeight = 6;
     const poleRadius = 0.15;
 
-    const [poleRef] = useCylinder<THREE.Mesh>(() => ({
-        type: 'Static',
-        args: [poleRadius, poleRadius, poleHeight, 8],
-        position: [x, y + poleHeight / 2, z],
-        collisionFilterGroup: CollisionGroups.Default,
-        // Exclude Characters: found live that falling/spawning directly above
-        // a lamp (its footprint is thin but real -- radius 0.15, 6 units
-        // tall) let the player's sphere land on TOP of the pole/bulb via a
-        // real physics contact. The character's ground-snap (Player.tsx) only
-        // knows about the analytic terrain/road height, not other physics
-        // bodies, so isGrounded never became true up there and the character
-        // was left floating in the "falling" pose indefinitely (reproduced at
-        // world (5,5), one of the lamp positions -- see StreetLight below --
-        // where it settled at y~6.58 and never moved again). Lamp posts are
-        // thin decoration, not a surface anyone is meant to stand on, so the
-        // simplest fix is to just not let characters rest on them; vehicles/
-        // bullets/etc. still collide normally.
-        collisionFilterMask: ~CollisionGroups.Characters,
-    }));
-
     return (
         <group>
-            <mesh ref={poleRef} castShadow receiveShadow>
-                <cylinderGeometry args={[poleRadius, poleRadius, poleHeight, 8]} />
-                <meshStandardMaterial color="#333" />
-            </mesh>
+            <RigidBody type="fixed" colliders={false} position={[x, y + poleHeight / 2, z]}>
+                <CylinderCollider
+                    args={[poleHeight / 2, poleRadius]}
+                    // Exclude Characters: found live (on the old cannon setup)
+                    // that falling/spawning directly above a lamp let the
+                    // player's sphere land on TOP of the pole/bulb via a real
+                    // physics contact, and the character's ground-snap
+                    // (Player.tsx) only knows about the analytic
+                    // terrain/road height, not other physics bodies, so it
+                    // never became grounded up there. Lamp posts are thin
+                    // decoration, not a surface anyone is meant to stand on;
+                    // vehicles/bullets/etc. still collide normally.
+                    collisionGroups={groupsExcluding(CollisionGroups.Default, CollisionGroups.Characters)}
+                />
+                <mesh castShadow receiveShadow>
+                    <cylinderGeometry args={[poleRadius, poleRadius, poleHeight, 8]} />
+                    <meshStandardMaterial color="#333" />
+                </mesh>
+            </RigidBody>
             <mesh position={[x, y + poleHeight, z]}>
                 <sphereGeometry args={[0.4, 8, 8]} />
                 {/* High emissiveIntensity gives the bulb its glow -- this
@@ -410,4 +369,3 @@ const Road: React.FC = () => {
 };
 
 export default Road;
-

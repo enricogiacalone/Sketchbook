@@ -1,10 +1,10 @@
 import React, { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { useCylinder, useBox } from "@react-three/cannon";
+import { RigidBody, CylinderCollider, CuboidCollider } from "@react-three/rapier";
 import { Tree } from "@dgreenheck/ez-tree";
 import { getTerrainHeight } from "./Terrain";
-import { CollisionGroups } from "../../enums/CollisionGroups";
+import { CollisionGroups, groupsExcluding } from "../../enums/CollisionGroups";
 
 const BLOCK_MIN = 0;
 const BLOCK_MAX = 60;
@@ -45,20 +45,29 @@ const _dummy = new THREE.Object3D();
 const Fountain: React.FC = () => {
   const y = getTerrainHeight(CENTER_X, CENTER_Z);
 
-  const [baseRef] = useCylinder<THREE.Mesh>(() => ({
-    type: "Static",
-    args: [FOUNTAIN_RADIUS, FOUNTAIN_RADIUS, 1, 16],
-    position: [CENTER_X, y + 0.5, CENTER_Z],
-    collisionFilterGroup: CollisionGroups.Default,
-  }));
-
   return (
     <group position={[CENTER_X, y, CENTER_Z]}>
-      {/* Base */}
-      <mesh ref={baseRef} castShadow receiveShadow>
-        <cylinderGeometry args={[FOUNTAIN_RADIUS, FOUNTAIN_RADIUS, 1, 16]} />
-        <meshStandardMaterial color="#888" roughness={0.4} />
-      </mesh>
+      {/* Base -- migrated from cannon's useCylinder. IMPORTANT: cannon's
+          body position is always literal WORLD coordinates (physics bodies
+          there are entirely decoupled from the three.js scene graph, and
+          the ref'd mesh's transform gets overwritten with that same
+          absolute value via a matrixAutoUpdate=false trick that bypasses
+          normal parent-child composition) -- that's why the old config used
+          the absolute [CENTER_X, y+0.5, CENTER_Z] even though this mesh is
+          nested inside a group already offset by [CENTER_X, y, CENTER_Z].
+          Rapier's RigidBody instead reads the real ambient scene-graph
+          transform (it calls object.updateWorldMatrix and factors in
+          object.parent.matrixWorld), so it needs the LOCAL position here --
+          [0, 0.5, 0], matching the Middle/Top Tier siblings' own
+          position={[0, 1.2/2, 0]}-style local coords below -- or it would
+          double-apply this group's offset. */}
+      <RigidBody type="fixed" colliders={false} position={[0, 0.5, 0]} collisionGroups={groupsExcluding(CollisionGroups.Default)}>
+        <CylinderCollider args={[0.5, FOUNTAIN_RADIUS]} />
+        <mesh castShadow receiveShadow>
+          <cylinderGeometry args={[FOUNTAIN_RADIUS, FOUNTAIN_RADIUS, 1, 16]} />
+          <meshStandardMaterial color="#888" roughness={0.4} />
+        </mesh>
+      </RigidBody>
       {/* Middle Tier */}
       <mesh position={[0, 1.2, 0]} castShadow>
         <cylinderGeometry
@@ -152,19 +161,25 @@ const Bench: React.FC<{ x: number; z: number; rotationY: number }> = ({
   rotationY,
 }) => {
   const y = getTerrainHeight(x, z);
-  const [ref] = useBox<THREE.Mesh>(() => ({
-    type: "Static",
-    args: [2.5, 1, 1],
-    position: [x, y + 0.5, z],
-    rotation: [0, rotationY, 0],
-  }));
 
   return (
     <group position={[x, y, z]} rotation={[0, rotationY, 0]}>
-      <mesh ref={ref} castShadow receiveShadow>
-        <boxGeometry args={[2.5, 0.2, 0.8]} />
-        <meshStandardMaterial color="#5d4037" />
-      </mesh>
+      {/* Migrated from cannon's useBox -- same local-vs-world-position
+          reasoning as Fountain's Base above: this group already carries
+          [x,y,z]/rotationY, so the RigidBody only needs [0, 0.5, 0] with no
+          extra rotation (cannon's old config specified rotationY again
+          itself only because it needed the true world orientation
+          directly, being scene-graph-agnostic). The collision box (half-
+          extents [1.25, 0.5, 0.5]) is intentionally bigger than the visible
+          seat mesh below -- it's a simplified hull for the whole bench,
+          backrest and legs included. */}
+      <RigidBody type="fixed" colliders={false} position={[0, 0.5, 0]}>
+        <CuboidCollider args={[1.25, 0.5, 0.5]} />
+        <mesh castShadow receiveShadow>
+          <boxGeometry args={[2.5, 0.2, 0.8]} />
+          <meshStandardMaterial color="#5d4037" />
+        </mesh>
+      </RigidBody>
       <mesh
         position={[0, 0.6, -0.35]}
         rotation={[Math.PI / 2, 0, 0]}
@@ -308,30 +323,37 @@ const ParkTree: React.FC<{
   const trunkHeight = template.trunkHeight * scale;
   const trunkRadius = 0.4 * scale;
 
-  useCylinder(() => ({
-    type: "Static",
-    args: [trunkRadius, trunkRadius, trunkHeight, 8],
-    position: [x, y + trunkHeight / 2, z],
-    collisionFilterGroup: CollisionGroups.Default,
-    collisionFilterMask: -1,
-  }));
-
+  // Collision-only, no visual mesh attached (the real tree geometry is
+  // rendered separately below, unrelated to this invisible trunk collider)
+  // -- this RigidBody is a SIBLING of the visual group, not nested inside
+  // it, so [x, y+trunkHeight/2, z] is already correct as-is (no ancestor
+  // transform to account for, unlike Fountain/Bench above).
   return (
-    <group
-      position={[x, y, z]}
-      rotation={[0, rotationY, 0]}
-      scale={[scale, scale, scale]}
-    >
-      {template.parts.map((part, i) => (
-        <mesh
-          key={i}
-          geometry={part.geometry}
-          material={part.material}
-          castShadow
-          receiveShadow
-        />
-      ))}
-    </group>
+    <>
+      <RigidBody
+        type="fixed"
+        colliders={false}
+        position={[x, y + trunkHeight / 2, z]}
+        collisionGroups={groupsExcluding(CollisionGroups.Default)}
+      >
+        <CylinderCollider args={[trunkHeight / 2, trunkRadius]} />
+      </RigidBody>
+      <group
+        position={[x, y, z]}
+        rotation={[0, rotationY, 0]}
+        scale={[scale, scale, scale]}
+      >
+        {template.parts.map((part, i) => (
+          <mesh
+            key={i}
+            geometry={part.geometry}
+            material={part.material}
+            castShadow
+            receiveShadow
+          />
+        ))}
+      </group>
+    </>
   );
 };
 
@@ -342,20 +364,23 @@ const StreetLamp: React.FC<{ x: number; z: number }> = ({ x, z }) => {
   const poleHeight = 4.5;
   const poleRadius = 0.12;
 
-  const [poleRef] = useCylinder<THREE.Mesh>(() => ({
-    type: "Static",
-    args: [poleRadius, poleRadius, poleHeight, 8],
-    position: [x, y + poleHeight / 2, z],
-    collisionFilterGroup: CollisionGroups.Default,
-    collisionFilterMask: -1,
-  }));
-
   return (
     <group>
-      <mesh ref={poleRef} castShadow receiveShadow>
-        <cylinderGeometry args={[poleRadius, poleRadius, poleHeight, 8]} />
-        <meshStandardMaterial color="#222222" roughness={0.6} metalness={0.6} />
-      </mesh>
+      {/* This wrapping <group> carries no position offset, so (unlike
+          Fountain/Bench above) world coords and local coords coincide here
+          -- no local-vs-world adjustment needed. */}
+      <RigidBody
+        type="fixed"
+        colliders={false}
+        position={[x, y + poleHeight / 2, z]}
+        collisionGroups={groupsExcluding(CollisionGroups.Default)}
+      >
+        <CylinderCollider args={[poleHeight / 2, poleRadius]} />
+        <mesh castShadow receiveShadow>
+          <cylinderGeometry args={[poleRadius, poleRadius, poleHeight, 8]} />
+          <meshStandardMaterial color="#222222" roughness={0.6} metalness={0.6} />
+        </mesh>
+      </RigidBody>
       <mesh position={[x, y + poleHeight + 0.15, z]}>
         <sphereGeometry args={[0.28, 10, 10]} />
         {/* Emissive glow reads as "lit" on its own -- no real pointLight

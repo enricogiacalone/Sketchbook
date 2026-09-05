@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import * as THREE from "three";
-import { useHeightfield } from "@react-three/cannon";
-import { CollisionGroups } from "../../enums/CollisionGroups";
+import { RigidBody, HeightfieldCollider } from "@react-three/rapier";
+import { CollisionGroups, groupsExcluding } from "../../enums/CollisionGroups";
 
 export const getTerrainHeight = (
   x: number,
@@ -13,7 +13,7 @@ export const getTerrainHeight = (
 
 const Terrain: React.FC = () => {
   const size = 600;
-  const segments = 40; 
+  const segments = 40;
   const maxHeight = 0.5;
 
   // Visual Mesh Data - Centered at [0,0,0]
@@ -35,61 +35,63 @@ const Terrain: React.FC = () => {
     };
   }, [size, segments, maxHeight]);
 
-  // Physics Heightfield Data
-  // Cannon Heightfield expects a 2D array [x][z]
+  // Physics Heightfield Data.
+  //
+  // Rapier's Heightfield shape is column-major, `heights[col * (nrows+1) +
+  // row]`, and -- unlike cannon's heightfield, which lives in the local XY
+  // plane and needs a -90deg X rotation to lay flat -- Rapier's already
+  // uses the local X/Z plane with height along local Y, and is CENTERED on
+  // the body's origin (cannon's was corner-anchored, hence the old
+  // `position: [-size/2, 0, size/2]` offset). So this body sits at world
+  // origin with identity rotation, matching the centered visual mesh above
+  // directly. Row = local X, column = local Z (verified live against
+  // getTerrainHeight with a raycast test while migrating off cannon).
   const heights = useMemo(() => {
-    const matrix: number[][] = [];
+    const nrows = segments;
+    const ncols = segments;
+    const flat = new Array<number>((nrows + 1) * (ncols + 1));
     const step = size / segments;
-    
-    for (let i = 0; i <= segments; i++) {
-      matrix[i] = [];
-      const worldX = -size / 2 + i * step;
-      for (let j = 0; j <= segments; j++) {
-        const worldZ = -size / 2 + j * step;
-        // In Cannon, the second dimension of the heightfield 
-        // maps to its local Y, which will be our world -Z after rotation.
-        // We calculate height based on the world coordinates.
-        matrix[i][j] = getTerrainHeight(worldX, worldZ, maxHeight);
+
+    for (let row = 0; row <= nrows; row++) {
+      const worldX = -size / 2 + row * step;
+      for (let col = 0; col <= ncols; col++) {
+        const worldZ = -size / 2 + col * step;
+        flat[col * (nrows + 1) + row] = getTerrainHeight(worldX, worldZ, maxHeight);
       }
     }
-    return matrix;
+    return flat;
   }, [size, segments, maxHeight]);
 
-  // We create the physics body but DON'T attach the ref to the visual mesh
-  // to keep the coordinate systems independent and clean.
-  useHeightfield(() => ({
-    args: [heights, { elementSize: size / segments }],
-    position: [-size / 2, 0, size / 2], // Offset to align with centered visual mesh
-    rotation: [-Math.PI / 2, 0, 0], // Rotate to lay on XZ plane
-    type: 'Static',
-    material: 'ground',
-    collisionFilterGroup: CollisionGroups.TrimeshColliders,
-    // Exclude other TrimeshColliders (the road sections): every road strip
-    // and this heightfield are all static, mass-0 bodies, so colliding them
-    // with each other can only ever be a costly no-op -- there's no dynamic
-    // response to produce. Matches the original's own (never fully applied)
-    // intent to skip trimesh-vs-trimesh collisions for performance.
-    collisionFilterMask: ~CollisionGroups.TrimeshColliders,
-  }));
-
   return (
-    <mesh receiveShadow position={[0, 0, 0]}>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          count={vertices.length / 3}
-          array={vertices}
-          itemSize={3}
+    <>
+      <RigidBody type="fixed" colliders={false} position={[0, 0, 0]} friction={0.7} restitution={0}>
+        <HeightfieldCollider
+          args={[segments, segments, heights, { x: size, y: 1, z: size }]}
+          // Exclude other TrimeshColliders (the road sections): every road
+          // strip and this heightfield are all static, fixed bodies, so
+          // colliding them with each other can only ever be a costly no-op
+          // -- there's no dynamic response to produce.
+          collisionGroups={groupsExcluding(CollisionGroups.TrimeshColliders, CollisionGroups.TrimeshColliders)}
         />
-        <bufferAttribute
-          attach="index"
-          count={visualIndices.length}
-          array={visualIndices}
-          itemSize={1}
-        />
-      </bufferGeometry>
-      <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
-    </mesh>
+      </RigidBody>
+      <mesh receiveShadow position={[0, 0, 0]}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            count={vertices.length / 3}
+            array={vertices}
+            itemSize={3}
+          />
+          <bufferAttribute
+            attach="index"
+            count={visualIndices.length}
+            array={visualIndices}
+            itemSize={1}
+          />
+        </bufferGeometry>
+        <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
+      </mesh>
+    </>
   );
 };
 

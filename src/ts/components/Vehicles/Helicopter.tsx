@@ -1,11 +1,12 @@
-import React, { useRef, useState, useEffect, useMemo } from 'react';
+import React, { useRef, useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useBox } from '@react-three/cannon';
+import { RigidBody, CuboidCollider, RapierRigidBody } from '@react-three/rapier';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
+import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 
 interface HelicopterProps {
   position?: [number, number, number];
@@ -21,6 +22,7 @@ const _heliRotStabEuler = new THREE.Euler();
 const _heliVertStab = new THREE.Vector3();
 const _heliPos = new THREE.Vector3();
 const _heliEuler = new THREE.Euler();
+const _heliQuat = new THREE.Quaternion();
 
 const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 'heli-1' }) => {
   const { scene } = useGLTF('heli.glb');
@@ -37,33 +39,24 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
       setPlayerInfo: state.setPlayerInfo,
     }))
   );
-  const [ready, setReady] = useState(false);
 
-  const chassisArgs: [number, number, number] = [1.2, 1.5, 4];
-  const [ref, api] = useBox<THREE.Mesh>(() => ({
-    mass: 50,
-    position: position,
-    args: chassisArgs,
-    collisionFilterGroup: 1, // Default
-    collisionFilterMask: -1, // Collide with everything
-  }));
+  // Migrated from @react-three/cannon's useBox to @react-three/rapier's
+  // <RigidBody>/<CuboidCollider> -- see Airplane.tsx for the general
+  // reasoning (half-extents conversion, collisionGroups). Old full-size box
+  // [1.2, 1.5, 4] -> half-extents [0.6, 0.75, 2].
+  const chassisHalfExtents: [number, number, number] = [0.6, 0.75, 2];
+  const ref = useRef<RapierRigidBody>(null);
+
+  useEffect(() => {
+    // Populate the store immediately -- see Airplane.tsx/Car.tsx for why.
+    if (!ref.current) return;
+    const t = ref.current.translation();
+    updateEntity(id, { type: 'helicopter', position: [t.x, t.y, t.z] });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const velocity = useRef([0, 0, 0]);
   const angularVelocity = useRef([0, 0, 0]);
-  useEffect(() => {
-    const unsubVel = api.velocity.subscribe((v) => (velocity.current = v));
-    const unsubAngVel = api.angularVelocity.subscribe((av) => (angularVelocity.current = av));
-    const unsubPos = api.position.subscribe((p) => {
-        if (p) {
-            updateEntity(id, { 
-                type: 'helicopter', 
-                position: p as [number, number, number] 
-            });
-            setReady(true);
-        }
-    });
-    return () => { unsubVel(); unsubAngVel(); unsubPos(); };
-  }, [api, updateEntity, id]);
 
   const enginePower = useRef(0);
   const rotorsRef = useRef<THREE.Object3D[]>([]);
@@ -79,9 +72,23 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
   }, [scene]);
 
   useFrame((state, delta) => {
+    const body = ref.current;
     const isHeliActive = currentControllable === 'helicopter' && controlledEntityId === id && !isVehicleTransitioning;
 
-    if (!ready || !isHeliActive || !ref.current) {
+    if (!body) return;
+
+    // Synchronous Rapier reads (no more worker-subscription lag -- see
+    // Player.tsx's rigidBodyRef comment for the general explanation).
+    const lv = body.linvel();
+    velocity.current[0] = lv.x;
+    velocity.current[1] = lv.y;
+    velocity.current[2] = lv.z;
+    const av = body.angvel();
+    angularVelocity.current[0] = av.x;
+    angularVelocity.current[1] = av.y;
+    angularVelocity.current[2] = av.z;
+
+    if (!isHeliActive) {
       if (enginePower.current > 0) enginePower.current = Math.max(0, enginePower.current - delta * 0.06);
       return;
     }
@@ -92,7 +99,9 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
       rotorsRef.current[i].rotateX(enginePower.current * delta * 30);
     }
 
-    const quat = ref.current.quaternion;
+    const rot = body.rotation();
+    _heliQuat.set(rot.x, rot.y, rot.z, rot.w);
+    const quat = _heliQuat;
     _heliUp.set(0, 1, 0).applyQuaternion(quat);
     const up = _heliUp;
     const globalUp = _heliGlobalUp;
@@ -116,10 +125,10 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     // 1. Throttle (Ascend/Descend)
     const throttleFactor = 15 * enginePower.current * dt60;
     if (input.shift) {
-        api.applyImpulse([up.x * throttleFactor, up.y * throttleFactor, up.z * throttleFactor], [0, 0, 0]);
+        body.applyImpulse({ x: up.x * throttleFactor, y: up.y * throttleFactor, z: up.z * throttleFactor }, true);
     }
     if (input.jump) {
-        api.applyImpulse([-up.x * throttleFactor, -up.y * throttleFactor, -up.z * throttleFactor], [0, 0, 0]);
+        body.applyImpulse({ x: -up.x * throttleFactor, y: -up.y * throttleFactor, z: -up.z * throttleFactor }, true);
     }
 
     // 2. Vertical Stabilization (Gravity compensation)
@@ -129,11 +138,11 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     gravityCompensation *= Math.sqrt(THREE.MathUtils.clamp(dot, 0, 1));
     
     _heliVertStab.copy(up).multiplyScalar(gravityCompensation * enginePower.current);
-    api.applyImpulse([_heliVertStab.x, _heliVertStab.y, _heliVertStab.z], [0, 0, 0]);
+    body.applyImpulse({ x: _heliVertStab.x, y: _heliVertStab.y, z: _heliVertStab.z }, true);
 
     // 3. Positional Damping
     const damping = 1 - (0.005 * enginePower.current);
-    api.velocity.set(velocity.current[0] * damping, velocity.current[1], velocity.current[2] * damping);
+    body.setLinvel({ x: velocity.current[0] * damping, y: velocity.current[1], z: velocity.current[2] * damping }, true);
 
     // 4. Rotation Stabilization & Yaw
     _heliRotStabQuat.setFromUnitVectors(up, globalUp);
@@ -143,23 +152,24 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     if (input.yawLeft) yawSpeed = 1.8 * enginePower.current;
     if (input.yawRight) yawSpeed = -1.8 * enginePower.current;
 
-    api.angularVelocity.set(
-        angularVelocity.current[0] * 0.95 + _heliRotStabEuler.x * enginePower.current * 2.0,
-        angularVelocity.current[1] * 0.95 + yawSpeed,
-        angularVelocity.current[2] * 0.95 + _heliRotStabEuler.z * enginePower.current * 2.0
-    );
+    body.setAngvel({
+        x: angularVelocity.current[0] * 0.95 + _heliRotStabEuler.x * enginePower.current * 2.0,
+        y: angularVelocity.current[1] * 0.95 + yawSpeed,
+        z: angularVelocity.current[2] * 0.95 + _heliRotStabEuler.z * enginePower.current * 2.0
+    }, true);
 
     // 5. Controls (Torques)
     const torqueFactor = 3.5 * enginePower.current * dt60;
     // Pitch (W/S)
-    if (input.forward) api.applyTorque([right.x * torqueFactor, right.y * torqueFactor, right.z * torqueFactor]);
-    if (input.backward) api.applyTorque([-right.x * torqueFactor, -right.y * torqueFactor, -right.z * torqueFactor]);
+    if (input.forward) body.applyTorqueImpulse({ x: right.x * torqueFactor, y: right.y * torqueFactor, z: right.z * torqueFactor }, true);
+    if (input.backward) body.applyTorqueImpulse({ x: -right.x * torqueFactor, y: -right.y * torqueFactor, z: -right.z * torqueFactor }, true);
 
     // Roll (A/D)
-    if (input.left) api.applyTorque([forward.x * torqueFactor, forward.y * torqueFactor, forward.z * torqueFactor]);
-    if (input.right) api.applyTorque([-forward.x * torqueFactor, -forward.y * torqueFactor, -forward.z * torqueFactor]);
+    if (input.left) body.applyTorqueImpulse({ x: forward.x * torqueFactor, y: forward.y * torqueFactor, z: forward.z * torqueFactor }, true);
+    if (input.right) body.applyTorqueImpulse({ x: -forward.x * torqueFactor, y: -forward.y * torqueFactor, z: -forward.z * torqueFactor }, true);
 
-    ref.current.getWorldPosition(_heliPos);
+    const t = body.translation();
+    _heliPos.set(t.x, t.y, t.z);
     const heliPos = _heliPos;
     _heliEuler.setFromQuaternion(quat, 'YXZ');
     const heliEuler = _heliEuler;
@@ -177,14 +187,20 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
   });
 
   return (
-    <mesh ref={ref} name={id}>
-        <boxGeometry args={chassisArgs} />
-        <meshStandardMaterial visible={false} />
-        {/* Chassis box half-height is 0.75; the glb's lowest point sits
-            0.673 below the model's own origin, so -0.08 aligns it with
-            the box's bottom face. */}
-        <primitive object={clonedScene} position={[0, -0.08, 0]} />
-    </mesh>
+    <RigidBody
+      ref={ref}
+      name={id}
+      type="dynamic"
+      colliders={false}
+      position={position}
+      collisionGroups={groupsExcluding(CollisionGroups.Default)}
+    >
+      <CuboidCollider args={chassisHalfExtents} mass={50} />
+      {/* Chassis box half-height is 0.75; the glb's lowest point sits
+          0.673 below the model's own origin, so -0.08 aligns it with
+          the box's bottom face. */}
+      <primitive object={clonedScene} position={[0, -0.08, 0]} />
+    </RigidBody>
   );
 };
 

@@ -1,22 +1,12 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useSphere } from '@react-three/cannon';
+import { RigidBody, BallCollider, RapierRigidBody } from '@react-three/rapier';
 import * as THREE from 'three';
 import Explosion from './Explosion';
 
 const Meteorite: React.FC<{ id: number, initialPosition: [number, number, number], initialVelocity: [number, number, number], onExplode: (id: number, pos: [number, number, number]) => void }> = ({ id, initialPosition, initialVelocity, onExplode }) => {
   const position = useRef(initialPosition);
-  const [ref, api] = useSphere<THREE.Mesh>(() => ({
-    mass: 5,
-    position: initialPosition,
-    velocity: initialVelocity,
-    args: [0.3],
-    onCollide: (e) => {
-        onExplode(id, position.current);
-    }
-  }));
-
-  useEffect(() => api.position.subscribe((p) => (position.current = p as [number, number, number])), [api.position]);
+  const ref = useRef<RapierRigidBody>(null);
 
   // Safety net: if a meteorite never registers a collision (missed the
   // terrain heightfield's resolution, bounced off the play area, etc.) it
@@ -27,15 +17,33 @@ const Meteorite: React.FC<{ id: number, initialPosition: [number, number, number
   // landed.
   const age = useRef(0);
   useFrame((_state, delta) => {
+    const body = ref.current;
+    if (body) {
+      const t = body.translation();
+      position.current = [t.x, t.y, t.z];
+    }
     age.current += delta;
     if (age.current > 10) onExplode(id, position.current);
   });
 
   return (
-    <mesh ref={ref} castShadow>
-      <sphereGeometry args={[0.3, 8, 8]} />
-      <meshStandardMaterial color="#ccc" />
-    </mesh>
+    <RigidBody
+      ref={ref}
+      type="dynamic"
+      colliders={false}
+      position={initialPosition}
+      linearVelocity={initialVelocity}
+    >
+      <BallCollider
+        args={[0.3]}
+        mass={5}
+        onCollisionEnter={() => onExplode(id, position.current)}
+      />
+      <mesh castShadow>
+        <sphereGeometry args={[0.3, 8, 8]} />
+        <meshStandardMaterial color="#ccc" />
+      </mesh>
+    </RigidBody>
   );
 };
 

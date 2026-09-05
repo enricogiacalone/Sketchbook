@@ -1,9 +1,9 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
-import { useBox } from '@react-three/cannon';
+import { RigidBody, CuboidCollider } from '@react-three/rapier';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
-import { CollisionGroups } from '../../enums/CollisionGroups';
+import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 
 const footprintOverlapsRoad = (x: number, z: number, width: number, depth: number): boolean => {
   const halfW = width / 2;
@@ -21,30 +21,33 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
   const y = getTerrainHeight(x, z);
   const hasGreenRoof = height > 40 && Math.random() > 0.5;
 
-  const [ref] = useBox<THREE.Mesh>(() => ({
-    type: 'Static',
-    args: [width, height, depth],
-    position: [x, y + height / 2, z],
-    collisionFilterGroup: CollisionGroups.Default,
-    collisionFilterMask: -1,
-  }));
-
   return (
     <group>
-      {/* Main Structure */}
-      <mesh ref={ref} castShadow receiveShadow>
-        <boxGeometry args={[width, height, depth]} />
-        {/* "glass" buildings keep their blue tint and shininess but are no
-            longer alpha-blended -- transparent materials force three.js to
-            sort and render them back-to-front with depth-write off, which
-            gets expensive fast with this many overlapping buildings. Opaque
-            (with high metalness/low roughness) still reads as glass. */}
-        <meshStandardMaterial 
-            color={style === 'glass' ? '#88ccff' : style === 'brick' ? '#a52a2a' : color} 
-            roughness={style === 'glass' ? 0.1 : 0.7} 
-            metalness={style === 'glass' ? 0.9 : 0.2}
-        />
-      </mesh>
+      {/* Main Structure -- migrated from cannon's useBox({type:'Static',
+          args:[width,height,depth] (full dims)}) to a fixed RigidBody with
+          an explicit CuboidCollider (Rapier args are half-extents). No ref
+          needed: nothing ever reads a building's transform back out. */}
+      <RigidBody
+        type="fixed"
+        colliders={false}
+        position={[x, y + height / 2, z]}
+        collisionGroups={groupsExcluding(CollisionGroups.Default)}
+      >
+        <CuboidCollider args={[width / 2, height / 2, depth / 2]} />
+        <mesh castShadow receiveShadow>
+          <boxGeometry args={[width, height, depth]} />
+          {/* "glass" buildings keep their blue tint and shininess but are no
+              longer alpha-blended -- transparent materials force three.js to
+              sort and render them back-to-front with depth-write off, which
+              gets expensive fast with this many overlapping buildings. Opaque
+              (with high metalness/low roughness) still reads as glass. */}
+          <meshStandardMaterial 
+              color={style === 'glass' ? '#88ccff' : style === 'brick' ? '#a52a2a' : color} 
+              roughness={style === 'glass' ? 0.1 : 0.7} 
+              metalness={style === 'glass' ? 0.9 : 0.2}
+          />
+        </mesh>
+      </RigidBody>
       
       {/* Windows / Emissive Detail */}
       <mesh position={[x, y + height / 2, z]} scale={[1.005, 0.95, 1.005]}>

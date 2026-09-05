@@ -1,6 +1,5 @@
 import React, { Suspense } from "react";
 import { useGLTF } from "@react-three/drei";
-import { usePlane } from "@react-three/cannon";
 import * as THREE from "three";
 import Grass from "./components/Environment/Grass";
 import Ocean from "./components/Environment/Ocean";
