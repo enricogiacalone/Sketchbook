@@ -50,6 +50,14 @@ const App: React.FC = () => {
         // window.devicePixelRatio (2+ on Retina Macs), which is 4x the
         // fragment-shader work of dpr=1 on every single frame.
         dpr={[1, 2]}
+        // TEMP DEBUG (Claude): expose the r3f root state (gl/scene/camera)
+        // for live console profiling while chasing the perf complaints.
+        // Dev-only, no-op in production builds.
+        onCreated={(state) => {
+          if (import.meta.env.DEV) {
+            (window as any).__r3fState = state;
+          }
+        }}
       >
         {isJoined && (
           <Suspense fallback={null}>

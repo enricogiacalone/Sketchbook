@@ -154,6 +154,18 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     args: [RADIUS],
     fixedRotation: true,
     linearDamping: 0,
+    // Without this, the Physics world's default allowSleep (App.tsx) puts
+    // the character to sleep after ~1s at rest -- and a sleeping cannon-es
+    // body is skipped during integration entirely, so every api.velocity.set
+    // call below (which mutates the body's velocity Vec3 directly, not
+    // through a wake-triggering setter -- confirmed in
+    // @pmndrs/cannon-worker-api's body.velocity.set(...)) silently has zero
+    // effect until something else wakes it back up. That's what made
+    // movement stop working after standing still for a moment: the
+    // character was asleep and no longer listening to WASD at all. Matches
+    // the Car chassis, which needed the same override for the same reason
+    // (see Car.tsx).
+    allowSleep: false,
     material: "slippery",
     collisionFilterGroup: CollisionGroups.Characters,
     // Everything except TrimeshColliders (terrain + roads): the character's
@@ -173,6 +185,17 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
 
   const position = useRef([0, 0, 0]);
   useEffect(() => api.position.subscribe((p) => (position.current = p)), [api.position]);
+
+  // TEMP DEBUG (Claude): teleport + live status for testing ground snapping
+  // without relying on slow/unreliable simulated key input.
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      (window as any).__teleportPlayer = (x: number, z: number) => {
+        api.position.set(x, 20, z);
+        api.velocity.set(0, 0, 0);
+      };
+    }
+  }, [api]);
 
   const modelRotation = useRef(0);
   const isGrounded = useRef(true);
@@ -440,8 +463,11 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     // groundY includes the road surface offset, so walking over a road tile
     // doesn't leave the character sunk into the (slightly lower) bare terrain.
     const terrainY = getTerrainHeight(position.current[0], position.current[2]);
-    const groundY = terrainY + getRoadOffset(position.current[0], position.current[2]);
+    const roadOff = getRoadOffset(position.current[0], position.current[2]);
+    const groundY = terrainY + roadOff;
     const distToGround = position.current[1] - (groundY + RADIUS);
+    // TEMP DEBUG (Claude)
+    (window as any).__groundDebug = { pos: position.current.slice(), terrainY, roadOff, groundY, distToGround, isGrounded: isGrounded.current };
     // jumpLockout keeps this false for a short window after a jump: position
     // and velocity here come from an async worker subscription (see the
     // api.velocity / api.position subscriptions above) that lags by roughly

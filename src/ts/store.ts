@@ -81,3 +81,9 @@ export const useStore = create<GameState>((set) => ({
     return { entities: newEntities };
   }),
 }));
+
+// TEMP DEBUG (Claude): expose store for live console inspection while
+// diagnosing the vehicle-visibility bug. Safe no-op in production builds.
+if (import.meta.env.DEV) {
+  (window as any).__gameStore = useStore;
+}

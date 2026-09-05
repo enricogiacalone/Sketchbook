@@ -123,6 +123,15 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
       if (child.userData?.data === 'wheel' || child.name.toLowerCase().includes('wheel')) {
         child.visible = false;
       }
+      // car.glb also bakes in a set of "collision" helper meshes (2 boxes +
+      // 12 spheres wrapping the fenders/bumpers) used only for authoring in
+      // Blender -- these were never meant to be visible in-game, but nothing
+      // was hiding them, so they rendered as real geometry (visible as
+      // spheres/boxes floating on the car). Purely visual -- the physics
+      // hull below (CHASSIS_SHAPES) is unrelated to this hide.
+      if (child.userData?.data === 'collision') {
+        child.visible = false;
+      }
       if (child.userData?.data === 'wheel') {
         defs.push({
           position: [child.position.x, child.position.y, child.position.z],
@@ -188,17 +197,25 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
   // Chassis -- a compound body built from the car's own collision geometry
   // (see CHASSIS_SHAPES above) instead of a single guessed box, so the real
   // wheel raycasts (added below via useRaycastVehicle) line up with a hull
-  // that actually matches the model. Excludes TrimeshColliders (road/terrain)
-  // from the collision mask, matching the original's per-shape
-  // `collisionFilterMask = ~CollisionGroups.TrimeshColliders`: the wheels'
-  // own raycasts are what supports the car (and a raycast -- world.rayTest --
-  // hits everything regardless of collision group, verified against
-  // cannon-es's source, so this exclusion can't stop them from finding the
-  // ground). Without it, every one of these (6 cars, 2 boxes each) also ran
-  // a full narrow-phase collision test against the road/terrain trimesh
-  // every physics step on top of the raycasts already doing that job --
-  // pure redundant cost, and the reason things got slow after this was
-  // briefly turned on as a (unnecessary, in hindsight) safety net.
+  // that actually matches the model.
+  //
+  // IMPORTANT: this used to also carry `collisionFilterMask:
+  // ~CollisionGroups.TrimeshColliders` to exclude the terrain/road trimesh
+  // from the chassis's own narrow-phase collision, on the theory that the
+  // wheel raycasts below were the only thing that should hold the car up
+  // (cheaper: skips a full box-vs-trimesh test every step on top of the
+  // raycasts already doing that job). Verified live in the browser
+  // (window.__gameStore) that with that exclusion in place, every car's Y
+  // position free-falls forever from its spawn height straight through
+  // the ground -- the raycast-based suspension isn't actually holding
+  // them up (root cause not yet fully isolated: likely something in how
+  // @react-three/cannon's useRaycastVehicle wires up the worker-side
+  // vehicle, since the raycast itself checks out fine against cannon-es's
+  // own source). Until that's root-caused, the chassis collides with
+  // terrain/road normally (default mask, -1) so the car has *some* way to
+  // rest on the ground -- confirmed live that this actually stops the
+  // fall. Only 6 cars, so the extra narrow-phase cost is not a real
+  // concern.
   const [chassisRef, chassisApi] = useCompoundBody<THREE.Group>(() => ({
     allowSleep: false,
     mass: 50, // matches the original's `new CANNON.Body({ mass: 50 })`
@@ -207,7 +224,6 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
     angularDamping: 0.01,
     material: { friction: 0.3 }, // matches the original's Mat.friction = 0.3
     collisionFilterGroup: CollisionGroups.Default,
-    collisionFilterMask: ~CollisionGroups.TrimeshColliders,
     shapes: CHASSIS_SHAPES,
   }), undefined, []);
 

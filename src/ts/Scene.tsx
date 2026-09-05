@@ -30,6 +30,10 @@ useGLTF.preload("boxman.glb");
 // now that the real cause is fixed; flip true again only if the stutter
 // reappears and needs re-isolating.
 const DEBUG_DISABLE_CARS_AND_ENEMIES = false;
+// Enemies off for now (asked separately from the cars/vehicles toggle
+// above) while testing movement/ground feel without them getting in the
+// way. Flip back to true to bring them back.
+const DEBUG_DISABLE_ENEMIES = true;
 
 const Scene: React.FC = () => {
   return (
@@ -40,7 +44,7 @@ const Scene: React.FC = () => {
       <Ocean />
       <UFO initialPosition={[0, 150, 0]} />
       <MeteoriteSpawner />
-      {!DEBUG_DISABLE_CARS_AND_ENEMIES && <EnemySpawner />}
+      {!DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
 
       {/* Carichiamo i modelli in blocchi separati per non bloccare la fisica */}
       <Suspense fallback={null}>

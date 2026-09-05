@@ -4,38 +4,57 @@ import * as THREE from 'three';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 
+// Ports the original's CameraOperator.ts "normal" (non-free-fly) orbit mode:
+// spherical coordinates in degrees around a target, phi clamped to [-85, 85],
+// radius eased toward a target radius, and NO lag on the target position
+// itself -- the original hard-sets `target` from the followed entity every
+// frame, there's no smoothing on it (only `radius` is lerped, same as here).
+const PLAYER_RADIUS = 1.6;
+const VEHICLE_RADIUS = 3;
+const MIN_RADIUS = 1;
+const MAX_RADIUS = 20;
+const VEHICLE_TARGET_Y_OFFSET = 0.5;
+
 export const useThirdPersonCamera = () => {
-  const { camera, gl } = useThree();
+  const { camera, gl, scene } = useThree();
   const { currentControllable, controlledEntityId } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
     }))
   );
-  
-  // State for camera orientation
-  const theta = useRef(0); // Horizontal angle
-  const phi = useRef(15);   // Vertical angle
-  const radius = useRef(5); // Current distance
-  const targetRadius = useRef(5);
-  
-  // Smoothing refs
-  const smoothTarget = useRef(new THREE.Vector3());
-  const sensitivity = useRef(new THREE.Vector2(0.3, 0.3));
+
+  const theta = useRef(0);
+  const phi = useRef(0);
+  const radius = useRef(PLAYER_RADIUS);
+  const targetRadius = useRef(PLAYER_RADIUS);
+  const target = useRef(new THREE.Vector3());
+  const sensitivity = useRef(new THREE.Vector2(0.3, 0.24));
+
+  const prevControllable = useRef<string | null>(null);
+
+  // Caches the resolved target Object3D so the frame loop doesn't run a
+  // full recursive scene.getObjectByName() traversal every single frame --
+  // only re-looked-up when the target name changes or gets detached.
+  const cachedTargetName = useRef<string | null>(null);
+  const cachedTargetObj = useRef<THREE.Object3D | null>(null);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (document.pointerLockElement === gl.domElement) {
-        theta.current -= e.movementX * sensitivity.current.x;
-        phi.current += e.movementY * sensitivity.current.y;
-        
-        // Clamp vertical rotation to prevent flipping
-        phi.current = THREE.MathUtils.clamp(phi.current, -10, 80);
+        theta.current -= e.movementX * (sensitivity.current.x / 2);
+        theta.current %= 360;
+        phi.current += e.movementY * (sensitivity.current.y / 2);
+        phi.current = THREE.MathUtils.clamp(phi.current, -85, 85);
       }
     };
 
     const handleWheel = (e: WheelEvent) => {
-      targetRadius.current = THREE.MathUtils.clamp(targetRadius.current + e.deltaY * 0.005, 2, 25);
+      targetRadius.current = THREE.MathUtils.clamp(
+        targetRadius.current + e.deltaY * 0.005,
+        MIN_RADIUS,
+        MAX_RADIUS
+      );
     };
 
     const handleClick = () => {
@@ -55,50 +74,46 @@ export const useThirdPersonCamera = () => {
     };
   }, [gl]);
 
-  useFrame((state, delta) => {
-    // Determine the target object name
+  useFrame(() => {
     const targetName = currentControllable === 'player' ? 'player' : controlledEntityId;
     if (!targetName) return;
 
-    const targetObj = state.scene.getObjectByName(targetName);
+    if (
+      cachedTargetName.current !== targetName ||
+      !cachedTargetObj.current ||
+      !cachedTargetObj.current.parent
+    ) {
+      cachedTargetObj.current = scene.getObjectByName(targetName) ?? null;
+      cachedTargetName.current = targetName;
+    }
+    const targetObj = cachedTargetObj.current;
     if (!targetObj) return;
 
-    // Get the target position in world coordinates
-    const targetPos = new THREE.Vector3();
-    targetObj.getWorldPosition(targetPos);
-
-    // Adjust target offset based on entity type for better visibility
-    let heightOffset = 0.8;
-    let lookAtOffset = 1.0;
-    if (currentControllable === 'airplane') {
-      heightOffset = 1.5;
-      lookAtOffset = 0.5;
-    } else if (currentControllable === 'helicopter') {
-      heightOffset = 2.0;
-      lookAtOffset = 0.5;
-    } else if (currentControllable === 'car') {
-      heightOffset = 1.0;
-      lookAtOffset = 0.5;
+    // Snap the radius instantly when switching what's controlled (getting
+    // in/out of a vehicle), same as the original's setRadius(value, true).
+    if (prevControllable.current !== currentControllable) {
+      const snapped = currentControllable === 'player' ? PLAYER_RADIUS : VEHICLE_RADIUS;
+      targetRadius.current = snapped;
+      radius.current = snapped;
+      prevControllable.current = currentControllable;
     }
 
-    // 1. Smoothly follow the target position
-    const lerpTarget = new THREE.Vector3(targetPos.x, targetPos.y + heightOffset, targetPos.z);
-    smoothTarget.current.lerp(lerpTarget, 0.1);
-    
-    // 2. Smoothly adjust the radius
+    targetObj.getWorldPosition(target.current);
+    if (currentControllable !== 'player') {
+      target.current.y += VEHICLE_TARGET_Y_OFFSET;
+    }
+
     radius.current = THREE.MathUtils.lerp(radius.current, targetRadius.current, 0.1);
 
-    // 3. Calculate position on a sphere around the target
-    const thetaRad = THREE.MathUtils.degToRad(theta.current);
-    const phiRad = THREE.MathUtils.degToRad(phi.current);
+    const thetaRad = (theta.current * Math.PI) / 180;
+    const phiRad = (phi.current * Math.PI) / 180;
 
-    const x = smoothTarget.current.x + radius.current * Math.sin(thetaRad) * Math.cos(phiRad);
-    const y = smoothTarget.current.y + radius.current * Math.sin(phiRad);
-    const z = smoothTarget.current.z + radius.current * Math.cos(thetaRad) * Math.cos(phiRad);
-
-    // 4. Update camera
-    camera.position.set(x, y, z);
-    camera.lookAt(smoothTarget.current.x, smoothTarget.current.y - heightOffset + lookAtOffset, smoothTarget.current.z);
+    camera.position.set(
+      target.current.x + radius.current * Math.sin(thetaRad) * Math.cos(phiRad),
+      target.current.y + radius.current * Math.sin(phiRad),
+      target.current.z + radius.current * Math.cos(thetaRad) * Math.cos(phiRad)
+    );
+    camera.lookAt(target.current);
   });
 
   return { theta, phi, radius };

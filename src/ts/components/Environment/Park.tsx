@@ -1,37 +1,34 @@
-import React, { useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
-import { useCylinder } from '@react-three/cannon';
-import { Tree } from '@dgreenheck/ez-tree';
-import { getTerrainHeight } from './Terrain';
-import { CollisionGroups } from '../../enums/CollisionGroups';
+import React, { useMemo, useRef } from "react";
+import { useFrame } from "@react-three/fiber";
+import * as THREE from "three";
+import { useCylinder, useBox } from "@react-three/cannon";
+import { Tree } from "@dgreenheck/ez-tree";
+import { getTerrainHeight } from "./Terrain";
+import { CollisionGroups } from "../../enums/CollisionGroups";
 
-// The park replaces the central city block (i=0, j=0 in City.tsx's grid,
-// blockX/blockZ = 30/30) instead of buildings -- see the matching
-// `if (i === 0 && j === 0) continue;` in City.tsx's generation loop. The
-// block spans world x/z in [0, 60]; roads run along its four edges (x/z = 0
-// and 60), so everything here stays a few units inside that to avoid
-// overlapping the road strips.
 const BLOCK_MIN = 0;
 const BLOCK_MAX = 60;
 const MARGIN = 9;
-const AREA_MIN = BLOCK_MIN + MARGIN; // 9
-const AREA_MAX = BLOCK_MAX - MARGIN; // 51
+const AREA_MIN = BLOCK_MIN + MARGIN;
+const AREA_MAX = BLOCK_MAX - MARGIN;
 const CENTER_X = 30;
 const CENTER_Z = 30;
-const OPEN_LAWN_RADIUS = 9; // keep a clear circle at the very center
+const FOUNTAIN_RADIUS = 4;
+const PATH_WIDTH = 3;
 
-// A couple of vehicles spawn close to this block (see Scene.tsx: car-1 at
-// [10,5,0], car-3 at [0,5,60]) -- keep trees/lamps clear of those spots so
-// nothing ends up spawned inside a static collider.
 const KEEP_CLEAR: Array<[number, number, number]> = [
   [10, 0, 10],
   [0, 60, 10],
 ];
 
-const isFreeSpot = (x: number, z: number, placed: Array<[number, number]>, minSpacing: number): boolean => {
+const isFreeSpot = (
+  x: number,
+  z: number,
+  placed: Array<[number, number]>,
+  minSpacing: number
+): boolean => {
   const dCenter = Math.hypot(x - CENTER_X, z - CENTER_Z);
-  if (dCenter < OPEN_LAWN_RADIUS) return false;
+  if (dCenter < FOUNTAIN_RADIUS + 4) return false; // Keep clear of fountain and inner path
   for (const [sx, sz, r] of KEEP_CLEAR) {
     if (Math.hypot(x - sx, z - sz) < r) return false;
   }
@@ -42,6 +39,152 @@ const isFreeSpot = (x: number, z: number, placed: Array<[number, number]>, minSp
 };
 
 const _dummy = new THREE.Object3D();
+
+// --- Fountain -------------------------------------------------------------
+
+const Fountain: React.FC = () => {
+  const y = getTerrainHeight(CENTER_X, CENTER_Z);
+
+  const [baseRef] = useCylinder<THREE.Mesh>(() => ({
+    type: "Static",
+    args: [FOUNTAIN_RADIUS, FOUNTAIN_RADIUS, 1, 16],
+    position: [CENTER_X, y + 0.5, CENTER_Z],
+    collisionFilterGroup: CollisionGroups.Default,
+  }));
+
+  return (
+    <group position={[CENTER_X, y, CENTER_Z]}>
+      {/* Base */}
+      <mesh ref={baseRef} castShadow receiveShadow>
+        <cylinderGeometry args={[FOUNTAIN_RADIUS, FOUNTAIN_RADIUS, 1, 16]} />
+        <meshStandardMaterial color="#888" roughness={0.4} />
+      </mesh>
+      {/* Middle Tier */}
+      <mesh position={[0, 1.2, 0]} castShadow>
+        <cylinderGeometry
+          args={[FOUNTAIN_RADIUS * 0.6, FOUNTAIN_RADIUS * 0.6, 0.5, 12]}
+        />
+        <meshStandardMaterial color="#777" />
+      </mesh>
+      {/* Top Tier */}
+      <mesh position={[0, 2, 0]} castShadow>
+        <cylinderGeometry
+          args={[FOUNTAIN_RADIUS * 0.3, FOUNTAIN_RADIUS * 0.3, 0.4, 8]}
+        />
+        <meshStandardMaterial color="#666" />
+      </mesh>
+      {/* Water Surface */}
+      <mesh position={[0, 0.6, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[FOUNTAIN_RADIUS * 0.9, 16]} />
+        <meshStandardMaterial
+          color="#44aaff"
+          emissive="#2288ff"
+          emissiveIntensity={0.5}
+          transparent
+          opacity={0.7}
+        />
+      </mesh>
+    </group>
+  );
+};
+
+// --- Paths ----------------------------------------------------------------
+
+const Paths: React.FC = () => {
+  const yCenter = getTerrainHeight(CENTER_X, CENTER_Z) + 0.05;
+  return (
+    <group>
+      {/* Circular path around fountain */}
+      <mesh
+        position={[CENTER_X, yCenter, CENTER_Z]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
+      >
+        <ringGeometry
+          args={[FOUNTAIN_RADIUS + 0.5, FOUNTAIN_RADIUS + PATH_WIDTH, 32]}
+        />
+        <meshStandardMaterial color="#a18c7c" roughness={1} />
+      </mesh>
+      {/* Radial paths to edges */}
+      {[-1, 1].map((s) => (
+        <React.Fragment key={s}>
+          {/* X axis paths */}
+          <mesh
+            position={[
+              CENTER_X + (s * (AREA_MAX - CENTER_X)) / 2 + s * 2,
+              yCenter,
+              CENTER_Z,
+            ]}
+            rotation={[-Math.PI / 2, 0, 0]}
+            receiveShadow
+          >
+            <planeGeometry
+              args={[AREA_MAX - CENTER_X - FOUNTAIN_RADIUS - 1, PATH_WIDTH]}
+            />
+            <meshStandardMaterial color="#a18c7c" roughness={1} />
+          </mesh>
+          {/* Z axis paths */}
+          <mesh
+            position={[
+              CENTER_X,
+              yCenter,
+              CENTER_Z + (s * (AREA_MAX - CENTER_Z)) / 2 + s * 2,
+            ]}
+            rotation={[-Math.PI / 2, 0, 0]}
+            receiveShadow
+          >
+            <planeGeometry
+              args={[PATH_WIDTH, AREA_MAX - CENTER_Z - FOUNTAIN_RADIUS - 1]}
+            />
+            <meshStandardMaterial color="#a18c7c" roughness={1} />
+          </mesh>
+        </React.Fragment>
+      ))}
+    </group>
+  );
+};
+
+// --- Benches --------------------------------------------------------------
+
+const Bench: React.FC<{ x: number; z: number; rotationY: number }> = ({
+  x,
+  z,
+  rotationY,
+}) => {
+  const y = getTerrainHeight(x, z);
+  const [ref] = useBox<THREE.Mesh>(() => ({
+    type: "Static",
+    args: [2.5, 1, 1],
+    position: [x, y + 0.5, z],
+    rotation: [0, rotationY, 0],
+  }));
+
+  return (
+    <group position={[x, y, z]} rotation={[0, rotationY, 0]}>
+      <mesh ref={ref} castShadow receiveShadow>
+        <boxGeometry args={[2.5, 0.2, 0.8]} />
+        <meshStandardMaterial color="#5d4037" />
+      </mesh>
+      <mesh
+        position={[0, 0.6, -0.35]}
+        rotation={[Math.PI / 2, 0, 0]}
+        castShadow
+      >
+        <boxGeometry args={[2.5, 0.8, 0.2]} />
+        <meshStandardMaterial color="#5d4037" />
+      </mesh>
+      {/* Legs */}
+      <mesh position={[-1.1, 0.2, 0]} castShadow>
+        <boxGeometry args={[0.2, 0.4, 0.8]} />
+        <meshStandardMaterial color="#333" />
+      </mesh>
+      <mesh position={[1.1, 0.2, 0]} castShadow>
+        <boxGeometry args={[0.2, 0.4, 0.8]} />
+        <meshStandardMaterial color="#333" />
+      </mesh>
+    </group>
+  );
+};
 
 // --- Grass -------------------------------------------------------------
 
@@ -84,9 +227,15 @@ const ParkGrass: React.FC = () => {
           const x = AREA_MIN + Math.random() * (AREA_MAX - AREA_MIN);
           const z = AREA_MIN + Math.random() * (AREA_MAX - AREA_MIN);
           const y = getTerrainHeight(x, z);
-          _dummy.position.set(x, y, z);
-          _dummy.rotation.set(0, Math.random() * Math.PI, 0);
-          _dummy.scale.setScalar(0.5 + Math.random() * 0.5);
+          // Don't spawn grass on fountain or paths (rough check)
+          const dCenter = Math.hypot(x - CENTER_X, z - CENTER_Z);
+          if (dCenter < FOUNTAIN_RADIUS + PATH_WIDTH) {
+            _dummy.scale.setScalar(0);
+          } else {
+            _dummy.position.set(x, y, z);
+            _dummy.rotation.set(0, Math.random() * Math.PI, 0);
+            _dummy.scale.setScalar(0.5 + Math.random() * 0.5);
+          }
           _dummy.updateMatrix();
           self.setMatrixAt(i, _dummy.matrix);
         }
@@ -105,11 +254,6 @@ const ParkGrass: React.FC = () => {
 };
 
 // --- Trees ---------------------------------------------------------------
-// Real tree meshes generated with @dgreenheck/ez-tree (same library the
-// orphaned Trees.tsx uses), not the simple procedural cones this started
-// with. A handful of template variations are generated once and their
-// geometry/material parts are reused (shared, not cloned) across every
-// instance placed in the park -- cheap on both draw calls and memory.
 
 interface TreeTemplatePart {
   geometry: THREE.BufferGeometry;
@@ -142,13 +286,10 @@ const useParkTreeTemplates = (): TreeTemplate[] => {
         });
 
         if (parts.length > 0) {
-          // ez-tree's default trunk (branch level 0) length is 20 units --
-          // matches the raw geometry so the collider tracks the visible trunk
-          // once TREE_SCALE below shrinks it down to park size.
           templates.push({ parts, trunkHeight: 20 });
         }
       } catch (e) {
-        console.warn('Park: failed to generate ez-tree template:', e);
+        console.warn("Park: failed to generate ez-tree template:", e);
       }
     }
 
@@ -156,24 +297,19 @@ const useParkTreeTemplates = (): TreeTemplate[] => {
   }, []);
 };
 
-const ParkTree: React.FC<{ x: number; z: number; rotationY: number; scale: number; template: TreeTemplate }> = ({
-  x,
-  z,
-  rotationY,
-  scale,
-  template,
-}) => {
+const ParkTree: React.FC<{
+  x: number;
+  z: number;
+  rotationY: number;
+  scale: number;
+  template: TreeTemplate;
+}> = ({ x, z, rotationY, scale, template }) => {
   const y = getTerrainHeight(x, z);
   const trunkHeight = template.trunkHeight * scale;
   const trunkRadius = 0.4 * scale;
 
-  // Physics-only static trunk collider, deliberately NOT bound to the
-  // visual meshes below (same decoupling the orphaned Trees.tsx uses) --
-  // one hook call per tree instead of Trees.tsx's single array-based call
-  // across all instances, which is what trips up its TS types (and, more
-  // importantly, keeps each tree's body creation independent and simple).
   useCylinder(() => ({
-    type: 'Static',
+    type: "Static",
     args: [trunkRadius, trunkRadius, trunkHeight, 8],
     position: [x, y + trunkHeight / 2, z],
     collisionFilterGroup: CollisionGroups.Default,
@@ -181,9 +317,19 @@ const ParkTree: React.FC<{ x: number; z: number; rotationY: number; scale: numbe
   }));
 
   return (
-    <group position={[x, y, z]} rotation={[0, rotationY, 0]} scale={[scale, scale, scale]}>
+    <group
+      position={[x, y, z]}
+      rotation={[0, rotationY, 0]}
+      scale={[scale, scale, scale]}
+    >
       {template.parts.map((part, i) => (
-        <mesh key={i} geometry={part.geometry} material={part.material} castShadow receiveShadow />
+        <mesh
+          key={i}
+          geometry={part.geometry}
+          material={part.material}
+          castShadow
+          receiveShadow
+        />
       ))}
     </group>
   );
@@ -197,7 +343,7 @@ const StreetLamp: React.FC<{ x: number; z: number }> = ({ x, z }) => {
   const poleRadius = 0.12;
 
   const [poleRef] = useCylinder<THREE.Mesh>(() => ({
-    type: 'Static',
+    type: "Static",
     args: [poleRadius, poleRadius, poleHeight, 8],
     position: [x, y + poleHeight / 2, z],
     collisionFilterGroup: CollisionGroups.Default,
@@ -212,19 +358,16 @@ const StreetLamp: React.FC<{ x: number; z: number }> = ({ x, z }) => {
       </mesh>
       <mesh position={[x, y + poleHeight + 0.15, z]}>
         <sphereGeometry args={[0.28, 10, 10]} />
-        <meshStandardMaterial color="#ffe9b0" emissive="#ffcf70" emissiveIntensity={1.4} />
+        {/* Emissive glow reads as "lit" on its own -- no real pointLight
+            needed (see the matching note in Road.tsx's StreetLight: every
+            real light in the scene gets evaluated in the shader for every
+            lit fragment on every mesh, so lamps add up fast). */}
+        <meshStandardMaterial
+          color="#ffe9b0"
+          emissive="#ffcf70"
+          emissiveIntensity={1.4}
+        />
       </mesh>
-      {/* No shadow casting: 8 of these is fine for the glow, but 8 shadow-casting
-          lights would add real per-frame render cost -- the whole point of this
-          feature request came alongside a stutter-hunting session. */}
-      <pointLight
-        position={[x, y + poleHeight + 0.15, z]}
-        color="#ffcf70"
-        intensity={1.2}
-        distance={14}
-        decay={2}
-        castShadow={false}
-      />
     </group>
   );
 };
@@ -232,49 +375,76 @@ const StreetLamp: React.FC<{ x: number; z: number }> = ({ x, z }) => {
 // --- Park --------------------------------------------------------------
 
 const LAMP_POSITIONS: Array<[number, number]> = [
-  [14, 14], [46, 14], [14, 46], [46, 46],
-  [30, 14], [30, 46], [14, 30], [46, 30],
+  [14, 14],
+  [46, 14],
+  [14, 46],
+  [46, 46],
+  [30, 14],
+  [30, 46],
+  [14, 30],
+  [46, 30],
 ];
 
-// ez-tree generates full real-world-scale trees (trunk alone defaults to
-// 20 units long, 1.5 radius -- taller than most buildings). This brings a
-// generated tree down to an appropriate park-sized tree (roughly 6-10
-// units tall including the crown), the per-instance factor below just adds
-// natural variation on top.
 const TREE_SCALE = 0.22;
 
 const Park: React.FC = () => {
   const treeTemplates = useParkTreeTemplates();
 
-  const trees = useMemo(() => {
+  const { trees, flowers } = useMemo(() => {
     const placed: Array<[number, number]> = [...LAMP_POSITIONS];
-    const result: Array<{ x: number; z: number; rotationY: number; scale: number; templateIndex: number }> = [];
-    if (treeTemplates.length === 0) return result;
+    const treeResult: Array<{
+      x: number;
+      z: number;
+      rotationY: number;
+      scale: number;
+      templateIndex: number;
+    }> = [];
+    const flowerResult: Array<{ x: number; z: number; color: string }> = [];
+    const flowerColors = ["#ff4444", "#ffff44", "#ff44ff", "#ffffff"];
 
-    const treeCount = 16;
-    for (let i = 0; i < treeCount; i++) {
-      for (let attempt = 0; attempt < 6; attempt++) {
-        const x = AREA_MIN + Math.random() * (AREA_MAX - AREA_MIN);
-        const z = AREA_MIN + Math.random() * (AREA_MAX - AREA_MIN);
-        if (isFreeSpot(x, z, placed, 4)) {
-          placed.push([x, z]);
-          result.push({
-            x,
-            z,
-            rotationY: Math.random() * Math.PI * 2,
-            scale: TREE_SCALE * (0.8 + Math.random() * 0.5),
-            templateIndex: Math.floor(Math.random() * treeTemplates.length),
-          });
-          break;
+    if (treeTemplates.length > 0) {
+      const treeCount = 16;
+      for (let i = 0; i < treeCount; i++) {
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const x = AREA_MIN + Math.random() * (AREA_MAX - AREA_MIN);
+          const z = AREA_MIN + Math.random() * (AREA_MAX - AREA_MIN);
+          if (isFreeSpot(x, z, placed, 4)) {
+            placed.push([x, z]);
+            treeResult.push({
+              x,
+              z,
+              rotationY: Math.random() * Math.PI * 2,
+              scale: TREE_SCALE * (0.8 + Math.random() * 0.5),
+              templateIndex: Math.floor(Math.random() * treeTemplates.length),
+            });
+            break;
+          }
         }
       }
     }
-    return result;
+
+    const flowerCount = 60;
+    for (let i = 0; i < flowerCount; i++) {
+      const x = AREA_MIN + Math.random() * (AREA_MAX - AREA_MIN);
+      const z = AREA_MIN + Math.random() * (AREA_MAX - AREA_MIN);
+      const dCenter = Math.hypot(x - CENTER_X, z - CENTER_Z);
+      if (dCenter > FOUNTAIN_RADIUS + PATH_WIDTH + 1) {
+        flowerResult.push({
+          x,
+          z,
+          color: flowerColors[Math.floor(Math.random() * flowerColors.length)],
+        });
+      }
+    }
+
+    return { trees: treeResult, flowers: flowerResult };
   }, [treeTemplates]);
 
   return (
     <group>
       <ParkGrass />
+      <Fountain />
+      <Paths />
       {trees.map((t, i) => (
         <ParkTree
           key={i}
@@ -285,8 +455,34 @@ const Park: React.FC = () => {
           template={treeTemplates[t.templateIndex]}
         />
       ))}
-      {LAMP_POSITIONS.map(([x, z], i) => (
+      {/* Disabled along with Road.tsx's StreetLight while testing ground
+          movement (see that file for why). */}
+      {false && LAMP_POSITIONS.map(([x, z], i) => (
         <StreetLamp key={i} x={x} z={z} />
+      ))}
+      {flowers.map((f, i) => (
+        <mesh
+          key={`flower-${i}`}
+          position={[f.x, getTerrainHeight(f.x, f.z) + 0.2, f.z]}
+        >
+          <sphereGeometry args={[0.15, 6, 6]} />
+          <meshStandardMaterial color={f.color} />
+        </mesh>
+      ))}
+      {/* Benches along the circular path */}
+      {[0, Math.PI / 2, Math.PI, Math.PI * 1.5].map((angle, i) => (
+        <Bench
+          key={`bench-${i}`}
+          x={
+            CENTER_X +
+            Math.cos(angle + 0.4) * (FOUNTAIN_RADIUS + PATH_WIDTH + 1.5)
+          }
+          z={
+            CENTER_Z +
+            Math.sin(angle + 0.4) * (FOUNTAIN_RADIUS + PATH_WIDTH + 1.5)
+          }
+          rotationY={-angle - 0.4 + Math.PI / 2}
+        />
       ))}
     </group>
   );
