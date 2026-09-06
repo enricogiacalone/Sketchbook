@@ -1,4 +1,5 @@
 import React, { useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { RigidBody, TrimeshCollider, CylinderCollider } from '@react-three/rapier';
 import { getTerrainHeight } from './Terrain';
@@ -415,6 +416,65 @@ const StreetLight: React.FC<{ x: number, z: number }> = ({ x, z }) => {
     );
 };
 
+// Shared, mutated-in-place materials -- every TrafficLight instance across
+// the whole grid renders using these exact same two THREE.Material OBJECTS
+// (passed via the `material` prop below, not a fresh <meshStandardMaterial>
+// per instance), so ONE useFrame here toggling .emissiveIntensity lights up
+// every signal in the city simultaneously, independent of how many
+// intersections there are -- same reasoning as the emissive-only streetlamp
+// bulbs above, just applied to keeping the update cost flat instead of the
+// light-source cost.
+const _trafficRedMat = new THREE.MeshStandardMaterial({ color: '#330000', emissive: '#ff0000', emissiveIntensity: 0 });
+const _trafficGreenMat = new THREE.MeshStandardMaterial({ color: '#003300', emissive: '#00ff00', emissiveIntensity: 0 });
+const TRAFFIC_CYCLE_SECONDS = 4;
+
+// Mounted exactly once (in Road() below) regardless of how many
+// intersections exist -- see the shared-material comment above.
+const TrafficLightCycle: React.FC = () => {
+  useFrame((state) => {
+    const isRed = Math.floor(state.clock.elapsedTime / TRAFFIC_CYCLE_SECONDS) % 2 === 0;
+    _trafficRedMat.emissiveIntensity = isRed ? 2.5 : 0;
+    _trafficGreenMat.emissiveIntensity = isRed ? 0 : 2.5;
+  });
+  return null;
+};
+
+// Purely decorative -- nothing in this app actually obeys traffic signals
+// (no NPC traffic yet), so every light in the city cycles in lockstep on
+// the same shared timer above rather than each intersection running its
+// own independent (and correctly out-of-phase) cycle.
+const TrafficLight: React.FC<{ x: number, z: number }> = ({ x, z }) => {
+  const y = getTerrainHeight(x, z);
+  const poleHeight = 4.5;
+
+  return (
+    <group>
+      <RigidBody
+        type="fixed"
+        colliders={false}
+        position={[x, y + poleHeight / 2, z]}
+        collisionGroups={groupsExcluding(CollisionGroups.Default, CollisionGroups.Characters)}
+      >
+        <CylinderCollider args={[poleHeight / 2, 0.1]} />
+        <mesh castShadow receiveShadow>
+          <cylinderGeometry args={[0.1, 0.1, poleHeight, 8]} />
+          <meshStandardMaterial color="#333" metalness={0.4} roughness={0.6} />
+        </mesh>
+      </RigidBody>
+      <mesh position={[x, y + poleHeight + 0.35, z]} castShadow>
+        <boxGeometry args={[0.35, 0.9, 0.35]} />
+        <meshStandardMaterial color="#111" />
+      </mesh>
+      <mesh position={[x, y + poleHeight + 0.6, z + 0.19]} material={_trafficRedMat}>
+        <sphereGeometry args={[0.12, 8, 8]} />
+      </mesh>
+      <mesh position={[x, y + poleHeight + 0.1, z + 0.19]} material={_trafficGreenMat}>
+        <sphereGeometry args={[0.12, 8, 8]} />
+      </mesh>
+    </group>
+  );
+};
+
 const Road: React.FC = () => {
   const offsets = ROAD_OFFSETS;
 
@@ -431,16 +491,20 @@ const Road: React.FC = () => {
         </React.Fragment>
       ))}
       {/* Intersections Details */}
+      <TrafficLightCycle />
       {offsets.map((ox) => 
         offsets.map((oz) => (
             <React.Fragment key={`inter-${ox}-${oz}`}>
                 <Crosswalk x={ox} z={oz} />
-                {/* Streetlights disabled for now -- asked to take them out
-                    of the picture while testing sidewalk movement (they
-                    were a red herring for the "moon gravity"/friction bug,
-                    see the sidewalk trimesh fix above for the real cause). */}
-                {false && <StreetLight x={ox - ROAD_WIDTH/2 - 1} z={oz - ROAD_WIDTH/2 - 1} />}
-                {false && <StreetLight x={ox + ROAD_WIDTH/2 + 1} z={oz + ROAD_WIDTH/2 + 1} />}
+                {/* Re-enabled -- the "moon gravity"/friction bug these were
+                    disabled to rule out during testing was actually the
+                    sidewalk trimesh (see getRoadOffset/extrudeGrid above),
+                    fixed since. Emissive-only bulb, no real light source. */}
+                <StreetLight x={ox - ROAD_WIDTH/2 - 1} z={oz - ROAD_WIDTH/2 - 1} />
+                <StreetLight x={ox + ROAD_WIDTH/2 + 1} z={oz + ROAD_WIDTH/2 + 1} />
+                {/* Other two corners: traffic signals. */}
+                <TrafficLight x={ox - ROAD_WIDTH/2 - 1} z={oz + ROAD_WIDTH/2 + 1} />
+                <TrafficLight x={ox + ROAD_WIDTH/2 + 1} z={oz - ROAD_WIDTH/2 - 1} />
             </React.Fragment>
         ))
       )}

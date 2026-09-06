@@ -8,6 +8,7 @@ import Terrain from "./components/Environment/Terrain";
 import Road from "./components/Environment/Road";
 import City from "./components/Environment/City";
 import Park from "./components/Environment/Park";
+import CityDetails from "./components/Environment/CityDetails";
 import Clouds from "./components/Environment/Clouds";
 import UFO from "./components/Environment/UFO";
 import MeteoriteSpawner from "./components/Environment/MeteoriteSpawner";
@@ -83,6 +84,7 @@ const Scene: React.FC = () => {
       <Suspense fallback={null}>
         <City />
         <Park />
+        <CityDetails />
       </Suspense>
     </>
   );

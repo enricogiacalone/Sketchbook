@@ -480,9 +480,9 @@ const Park: React.FC = () => {
           template={treeTemplates[t.templateIndex]}
         />
       ))}
-      {/* Disabled along with Road.tsx's StreetLight while testing ground
-          movement (see that file for why). */}
-      {false && LAMP_POSITIONS.map(([x, z], i) => (
+      {/* Re-enabled along with Road.tsx's StreetLight -- see that file for
+          why these were off (an unrelated bug, since fixed). */}
+      {LAMP_POSITIONS.map(([x, z], i) => (
         <StreetLamp key={i} x={x} z={z} />
       ))}
       {flowers.map((f, i) => (
