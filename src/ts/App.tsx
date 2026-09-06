@@ -1,4 +1,4 @@
-import React, { Suspense, useState } from "react";
+import React, { Suspense, useState, useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import { Environment } from "@react-three/drei";
@@ -13,6 +13,7 @@ import LoadingScreen from "./components/UI/LoadingScreen";
 import ChatInput from "./components/UI/ChatInput";
 import Minimap from "./components/UI/Minimap";
 import Crosshair from "./components/UI/Crosshair";
+import GamepadDebug from "./components/UI/GamepadDebug";
 import Loader from "./components/UI/Loader"; // Helper to track loading
 import Player from "./components/Player"; // Import Player directly to pass userName
 import ThirdPersonCamera from "./components/ThirdPersonCamera";
@@ -23,8 +24,13 @@ import * as THREE from "three";
 const App: React.FC = () => {
   const [isJoined, setIsJoined] = useState(false);
   const [userName, setUserName] = useState("");
-  const { isLoading, setIsLoading } = useStore(
-    useShallow((state) => ({ isLoading: state.isLoading, setIsLoading: state.setIsLoading }))
+  const { isLoading, setIsLoading, isPaused, setPaused } = useStore(
+    useShallow((state) => ({
+      isLoading: state.isLoading,
+      setIsLoading: state.setIsLoading,
+      isPaused: state.isPaused,
+      setPaused: state.setPaused,
+    }))
   );
 
   const handleJoin = (name: string, controlMethod: string) => {
@@ -33,6 +39,24 @@ const App: React.FC = () => {
     setIsLoading(true); // Start showing loader while Suspense does its thing
     console.log(`Joined as ${name} with ${controlMethod}`);
   };
+
+  // Auto-pause when the tab is backgrounded. This isn't just a nicety: a
+  // hidden tab gets requestAnimationFrame throttled by the browser (down to
+  // a handful of frames a minute in the worst case, confirmed while
+  // debugging this app's own automated test tooling), so whatever real
+  // wall-clock time passed while away shows up as one huge catch-up
+  // delta/physics burst the moment the tab comes back -- cars and the
+  // player can end up flung across the map. Pausing on hidden and requiring
+  // an explicit Start/Escape to resume (rather than auto-resuming on
+  // visible) avoids that burst entirely and matches how most games handle
+  // losing focus.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) setPaused(true);
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [setPaused]);
 
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#111" }}>
@@ -90,6 +114,11 @@ const App: React.FC = () => {
               numSolverIterations={15}
               // Matches cannon's old `stepSize` (fixed physics tick rate).
               timeStep={1 / 120}
+              // Stops the physics world from stepping at all -- see
+              // isPaused's comment in store.ts for why Player.tsx/Car.tsx/
+              // Airplane.tsx/Helicopter.tsx also each need their own
+              // explicit pause check on top of this.
+              paused={isPaused}
             >
               {/* Scene contains the world environment */}
               <Scene />
@@ -135,6 +164,33 @@ const App: React.FC = () => {
           <ChatInput />
           <Minimap />
           <Crosshair />
+          <GamepadDebug />
+          {isPaused && (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.5)",
+                color: "white",
+                textAlign: "center",
+              }}
+            >
+              <div>
+                <h1 className="sb-font" style={{ fontSize: 48, margin: 0 }}>
+                  Pausa
+                </h1>
+                <div style={{ fontSize: 16, opacity: 0.85 }}>
+                  Premi Start (o Esc) per riprendere
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -6,7 +6,7 @@ const STICK_DEADZONE = 0.25;
 const ACTION_NAMES = [
   'forward', 'backward', 'left', 'right', 'jump', 'shift',
   'yawLeft', 'yawRight', 'enter', 'enter_passenger', 'seat_switch',
-  'camera', 'fly', 'respawn', 'primary', 'secondary',
+  'camera', 'fly', 'respawn', 'primary', 'secondary', 'pause',
 ] as const;
 type Action = (typeof ACTION_NAMES)[number];
 
@@ -27,6 +27,7 @@ const emptyActionMap = (): Record<Action, boolean> => ({
   respawn: false,
   primary: false,
   secondary: false,
+  pause: false,
 });
 
 export const useInput = () => {
@@ -76,6 +77,7 @@ export const useInput = () => {
     KeyB: 'fly',
     KeyQ: 'yawLeft',
     KeyR: 'respawn',
+    Escape: 'pause',
   };
 
   useEffect(() => {
@@ -111,16 +113,41 @@ export const useInput = () => {
         }
     };
 
+    // Browsers only fire these two events (no per-button/per-axis events
+    // exist), but that's still useful for figuring out how a given pad
+    // actually looks to the browser -- notably, non-Xbox-style pads like a
+    // PS3 DualShock 3 are very often reported with mapping: "" (not
+    // "standard"), which means the button/axis INDICES the poller below
+    // assumes (Xbox-style: 0=A/Cross, 1=B/Circle, 2=X/Square, 3=Y/Triangle,
+    // axes 0/1=left stick...) may not line up with the physical pad at all.
+    // Logging this once on connect is the fastest way to tell "wrong
+    // mapping" apart from "browser doesn't see the pad" apart from "pad
+    // seen but with garbage/drifting axes".
+    const handleGamepadConnected = (e: GamepadEvent) => {
+      const p = e.gamepad;
+      console.log(
+        `[Gamepad] connected: "${p.id}" mapping="${p.mapping || '(none)'}" ` +
+        `buttons=${p.buttons.length} axes=${p.axes.length}`
+      );
+    };
+    const handleGamepadDisconnected = (e: GamepadEvent) => {
+      console.log(`[Gamepad] disconnected: "${e.gamepad.id}"`);
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('gamepadconnected', handleGamepadConnected);
+    window.addEventListener('gamepaddisconnected', handleGamepadDisconnected);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousedown', handleMouseDown);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('gamepadconnected', handleGamepadConnected);
+      window.removeEventListener('gamepaddisconnected', handleGamepadDisconnected);
     };
   }, []);
 
@@ -140,6 +167,23 @@ export const useInput = () => {
     }
 
     const g = gamepadActions.current;
+
+    // Live snapshot for the on-screen calibration readout (GamepadDebug.tsx)
+    // -- see the connect-log comment above for why this matters: without
+    // seeing the raw indices, there's no way to tell a wrong mapping from a
+    // pad the browser isn't reading at all.
+    if (import.meta.env.DEV) {
+      (window as any).__gamepadDebug = pad
+        ? {
+            id: pad.id,
+            mapping: pad.mapping || '(none)',
+            axes: Array.from(pad.axes).map((a) => Math.round(a * 100) / 100),
+            buttons: pad.buttons
+              .map((b, i) => (b.pressed || b.value > 0.15 ? i : -1))
+              .filter((i) => i !== -1),
+          }
+        : null;
+    }
 
     if (!pad) {
       // No pad connected (or it just disconnected) -- make sure nothing
@@ -168,9 +212,20 @@ export const useInput = () => {
     g.shift = !!pad.buttons[5]?.pressed || !!pad.buttons[6]?.pressed; // RB or LT: run
     g.primary = !!pad.buttons[7]?.pressed; // RT: fire
     g.secondary = !!pad.buttons[1]?.pressed; // B / Circle
-    g.enter = !!pad.buttons[2]?.pressed; // X / Square: enter/exit vehicle
-    g.enter_passenger = !!pad.buttons[3]?.pressed; // Y / Triangle
-    g.respawn = !!pad.buttons[9]?.pressed; // Start
+    // X/Square AND Y/Triangle both enter/exit a vehicle -- Triangle used to
+    // drive the separate (and entirely unused -- nothing ever read
+    // input.enter_passenger) 'enter_passenger' action; folded into 'enter'
+    // per request so Triangle actually does something.
+    g.enter = !!pad.buttons[2]?.pressed || !!pad.buttons[3]?.pressed; // Square or Triangle
+    // Back/Select: cycle the camera's 4 zoom presets (see ZOOM_LEVELS in
+    // useThirdPersonCamera.ts). Reuses the 'camera' action, which already
+    // existed with a keyboard binding (KeyC) but, like enter_passenger
+    // above, had nothing reading it anywhere.
+    g.camera = !!pad.buttons[8]?.pressed;
+    // Start: pause/resume (see isPaused in store.ts). This used to drive
+    // 'respawn', which -- same story again -- nothing ever read; KeyR still
+    // fires it from the keyboard side in case that's wired up later.
+    g.pause = !!pad.buttons[9]?.pressed;
 
     applyMerged();
   });

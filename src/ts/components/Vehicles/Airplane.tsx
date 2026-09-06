@@ -27,13 +27,14 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
   const input = useInput();
   // Vehicle entry/exit (including the exit key) is orchestrated centrally
   // by Player.tsx (see vehicleTransition there).
-  const { currentControllable, controlledEntityId, isVehicleTransitioning, updateEntity, setPlayerInfo } = useStore(
+  const { currentControllable, controlledEntityId, isVehicleTransitioning, updateEntity, setPlayerInfo, isPaused } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
       isVehicleTransitioning: state.isVehicleTransitioning,
       updateEntity: state.updateEntity,
       setPlayerInfo: state.setPlayerInfo,
+      isPaused: state.isPaused,
     }))
   );
 
@@ -76,6 +77,11 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
     const isAirplaneActive = currentControllable === 'airplane' && controlledEntityId === id && !isVehicleTransitioning;
 
     if (!body) return;
+    // Unlike Car.tsx, all of this vehicle's control logic (engine power,
+    // forces, rotation) lives in this plain useFrame rather than
+    // useBeforePhysicsStep, so <Physics paused> alone doesn't stop it --
+    // needs its own explicit check, same as Player.tsx/Car.tsx.
+    if (isPaused) return;
 
     // Synchronous Rapier read (no more worker-subscription lag -- see
     // Player.tsx's rigidBodyRef comment for the general explanation).

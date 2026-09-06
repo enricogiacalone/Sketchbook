@@ -3,6 +3,7 @@ import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
+import { useInput } from './useInput';
 
 // Ports the original's CameraOperator.ts "normal" (non-free-fly) orbit mode:
 // spherical coordinates in degrees around a target, phi clamped to [-85, 85],
@@ -15,14 +16,43 @@ const MIN_RADIUS = 1;
 const MAX_RADIUS = 20;
 const VEHICLE_TARGET_Y_OFFSET = 0.5;
 
+// Right-stick camera look. useInput.ts's poller only ever reads the LEFT
+// stick (axes[0]/[1], for movement) -- despite a comment further down in
+// this file claiming the right stick was "handled separately" here, nothing
+// here ever actually read axes[2]/[3] either. Net effect: a gamepad could
+// move the character but never turn the camera at all. STICK_DEADZONE
+// matches useInput.ts's movement deadzone; the two *_SPEED constants are
+// in degrees/second since, unlike the mouse's per-event movementX/Y deltas,
+// a held stick has to be scaled by frame time to stay frame-rate independent.
+const CAMERA_STICK_DEADZONE = 0.2;
+const CAMERA_STICK_YAW_SPEED = 140;
+const CAMERA_STICK_PITCH_SPEED = 110;
+
+// 4 selectable third-person zoom presets, cycled with Select/Back on the
+// gamepad (or C on the keyboard -- both drive the same 'camera' action,
+// which previously existed but had nothing reading it). Mouse wheel still
+// free-zooms continuously on top of whichever preset is active; cycling
+// again just jumps targetRadius to the next fixed value.
+const ZOOM_LEVELS = [1.6, 4, 8, 14];
+
 export const useThirdPersonCamera = () => {
   const { camera, gl, scene } = useThree();
-  const { currentControllable, controlledEntityId } = useStore(
+  const { currentControllable, controlledEntityId, togglePause } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
+      togglePause: state.togglePause,
     }))
   );
+  // This hook is mounted exactly once (via the always-present
+  // <ThirdPersonCamera /> in App.tsx), unlike Player/Car/Airplane/Helicopter
+  // which each get their own useInput() instance -- that makes it the one
+  // safe place to consume a global, one-shot action like pause or zoom-cycle:
+  // checking consumeJustPressed('pause') from, say, Player AND Car at once
+  // (while driving, both are mounted) would double-fire it from the same
+  // physical press, since each useInput() call tracks justPressed
+  // independently.
+  const input = useInput();
 
   const theta = useRef(0);
   const phi = useRef(0);
@@ -30,6 +60,7 @@ export const useThirdPersonCamera = () => {
   const targetRadius = useRef(PLAYER_RADIUS);
   const target = useRef(new THREE.Vector3());
   const sensitivity = useRef(new THREE.Vector2(0.3, 0.24));
+  const zoomIndex = useRef(0);
 
   const prevControllable = useRef<string | null>(null);
 
@@ -102,7 +133,42 @@ export const useThirdPersonCamera = () => {
     };
   }, [gl]);
 
-  useFrame(() => {
+  useFrame((_state, delta) => {
+    // Pause toggle (Start / Escape) and zoom-preset cycle (Select / C) --
+    // both global, one-shot actions, handled here for the reason in the
+    // comment above `input = useInput()`.
+    if (input.consumeJustPressed('pause')) {
+      togglePause();
+    }
+    if (input.consumeJustPressed('camera')) {
+      zoomIndex.current = (zoomIndex.current + 1) % ZOOM_LEVELS.length;
+      targetRadius.current = ZOOM_LEVELS[zoomIndex.current];
+    }
+
+    // Right-stick look (see CAMERA_STICK_* comment above) -- runs
+    // regardless of what's currently controlled, same as mouse-look, so you
+    // can still look around a vehicle you're riding in.
+    const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : [];
+    let pad: Gamepad | null = null;
+    for (let i = 0; i < pads.length; i++) {
+      if (pads[i]) { pad = pads[i] as Gamepad; break; }
+    }
+    if (pad) {
+      const rx = pad.axes[2] ?? 0;
+      const ry = pad.axes[3] ?? 0;
+      if (Math.abs(rx) > CAMERA_STICK_DEADZONE) {
+        theta.current -= rx * CAMERA_STICK_YAW_SPEED * delta;
+        theta.current %= 360;
+      }
+      if (Math.abs(ry) > CAMERA_STICK_DEADZONE) {
+        phi.current = THREE.MathUtils.clamp(
+          phi.current + ry * CAMERA_STICK_PITCH_SPEED * delta,
+          -85,
+          85
+        );
+      }
+    }
+
     const targetName = currentControllable === 'player' ? 'player' : controlledEntityId;
     if (!targetName) return;
 

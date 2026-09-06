@@ -7,6 +7,8 @@ import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
+import { getTerrainHeight } from '../Environment/Terrain';
+import { getRoadOffset } from '../Environment/Road';
 
 interface CarProps {
   position?: [number, number, number];
@@ -95,6 +97,18 @@ const GEARS_MAX_SPEEDS: Record<string, number> = { R: -4, '0': 0, '1': 5, '2': 9
 const BRAKE_FORCE = 500000;
 const MAX_STEER_VAL = 0.8;
 
+// -- Flip recovery tuning. A car counts as "flipped" once its own local up
+// axis has tilted more than ~60 degrees from world up (dot product below
+// 0.5) -- on its side or roof, not just leaned into a hard turn -- and
+// "stationary" once both its linear and angular speed drop under a small
+// threshold (still settling from the crash doesn't count). Only once BOTH
+// hold for FLIP_RESPAWN_DELAY seconds straight does it get set back
+// upright -- see the useBeforePhysicsStep flip-recovery block below.
+const FLIP_UP_DOT_THRESHOLD = 0.5;
+const FLIP_STATIONARY_LINVEL_SQ = 0.15 * 0.15;
+const FLIP_STATIONARY_ANGVEL_SQ = 0.15 * 0.15;
+const FLIP_RESPAWN_DELAY = 2;
+
 // Wheel layout read from car.glb's node "extras" (steering/drive flags baked
 // into the model, surfaced by three's GLTFLoader as userData) -- the exact
 // same data the original's readVehicleData()/Wheel.ts read off these nodes.
@@ -137,6 +151,9 @@ const _carEuler = new THREE.Euler();
 const _chassisQuat = new THREE.Quaternion();
 const _steerQuat = new THREE.Quaternion();
 const _spinQuat = new THREE.Quaternion();
+const _chassisUp = new THREE.Vector3();
+const _uprightQuat = new THREE.Quaternion();
+const _uprightEuler = new THREE.Euler();
 
 const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
   const { scene } = useGLTF('car.glb');
@@ -183,50 +200,43 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
   }, [clonedScene]);
 
   const input = useInput();
-  const { currentControllable, controlledEntityId, isVehicleTransitioning, transitioningEntityId, updateEntity, setPlayerInfo } = useStore(
+  const { currentControllable, controlledEntityId, isVehicleTransitioning, transitioningEntityId, transitioningDoorName, updateEntity, setPlayerInfo, isPaused } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
       isVehicleTransitioning: state.isVehicleTransitioning,
       transitioningEntityId: state.transitioningEntityId,
+      transitioningDoorName: state.transitioningDoorName,
       updateEntity: state.updateEntity,
       setPlayerInfo: state.setPlayerInfo,
+      isPaused: state.isPaused,
     }))
   );
 
-  // -- Door, mirroring the original's VehicleDoor: swings open for the
-  // whole entering/exiting transition and closes the rest of the time
-  // (parked or driving). Found and oriented once from the glb below.
-  const doorRef = useRef<THREE.Object3D | undefined>(undefined);
-  const doorSign = useRef(1);
-  const doorOpenFactor = useRef(0);
+  // -- Doors, mirroring the original's VehicleDoor: whichever door the
+  // player is actually walking through swings open for the whole
+  // entering/exiting transition and closes the rest of the time (parked or
+  // driving). All 4 doors on the glb are tracked (not just the one nearest
+  // the driver's entrance) so getting in via a closer door -- e.g. a rear
+  // one -- opens THAT door instead of always animating the front one
+  // regardless of which side was actually used (see git history / chat:
+  // "deve poter salire anche dietro se la portiera e' piu' vicina"; the
+  // matching Player.tsx-side change is getVehicleEntrances). Which one is
+  // "active" for the current transition comes from the store's
+  // transitioningDoorName, set by whichever entrance Player.tsx picked.
+  const doorsRef = useRef<Record<string, { node: THREE.Object3D; sign: number }>>({});
+  const doorOpenFactors = useRef<Record<string, number>>({});
   const DOOR_ROTATION_SPEED = 5; // rad/sec, matches the original's VehicleDoor.rotationSpeed
   const DOOR_MAX_ANGLE = 1; // radians (~57deg), matches the original's targetRotation of 1
 
   useEffect(() => {
-    const entrance = clonedScene.getObjectByName('entrance_1');
-    if (!entrance) return;
-    const entrancePos = new THREE.Vector3();
-    entrance.getWorldPosition(entrancePos);
-
-    let nearestDoor: THREE.Object3D | null = null;
-    let nearestDist = Infinity;
+    const doors: Record<string, { node: THREE.Object3D; sign: number }> = {};
     clonedScene.traverse((child) => {
       if (child.name.toLowerCase().startsWith('door')) {
-        const p = new THREE.Vector3();
-        child.getWorldPosition(p);
-        const d = p.distanceTo(entrancePos);
-        if (d < nearestDist) {
-          nearestDist = d;
-          nearestDoor = child;
-        }
+        doors[child.name] = { node: child, sign: -Math.sign(child.position.x) || 1 };
       }
     });
-
-    if (nearestDoor) {
-      doorRef.current = nearestDoor;
-      doorSign.current = -Math.sign((nearestDoor as THREE.Object3D).position.x) || 1;
-    }
+    doorsRef.current = doors;
   }, [clonedScene]);
 
   // Chassis -- migrated from @react-three/cannon's useCompoundBody to
@@ -333,6 +343,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
   // instance fields.
   const gear = useRef(1);
   const shiftTimer = useRef(0);
+  const flipTimer = useRef(0);
 
   // -- Physics-step driving logic: engine force / brake / steering per
   // wheel, then controller.updateVehicle() to actually integrate them into
@@ -347,11 +358,55 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
   // (whenever physics needs to catch up); that's fine here since everything
   // below re-reads the CURRENT chassis state fresh each call.
   useBeforePhysicsStep((world) => {
+    // Belt-and-suspenders: <Physics paused> (App.tsx) should already stop
+    // this from firing at all, but this doesn't cost anything to check and
+    // means driving/flip-recovery definitely can't sneak a force in while
+    // paused even if that assumption ever turns out wrong.
+    if (isPaused) return;
+
     const controller = vehicleController.current;
     const chassis = chassisRef.current;
     if (!controller || !chassis) return;
 
     const dt = world.timestep;
+
+    // -- Flip recovery: runs unconditionally (driven or parked), since a
+    // parked car can just as easily get knocked over by another car or the
+    // player. See the constants above for what counts as "flipped" and
+    // "stationary" (see git history / chat: "se l'auto si ribalta di lato
+    // o sottosopra ed e' ferma, respawnalla dritta dopo 2 secondi").
+    {
+      const flipRot = chassis.rotation();
+      _chassisQuat.set(flipRot.x, flipRot.y, flipRot.z, flipRot.w);
+      _chassisUp.set(0, 1, 0).applyQuaternion(_chassisQuat);
+      const flipLinvel = chassis.linvel();
+      const flipAngvel = chassis.angvel();
+      const linSpeedSq = flipLinvel.x * flipLinvel.x + flipLinvel.y * flipLinvel.y + flipLinvel.z * flipLinvel.z;
+      const angSpeedSq = flipAngvel.x * flipAngvel.x + flipAngvel.y * flipAngvel.y + flipAngvel.z * flipAngvel.z;
+      const isFlipped = _chassisUp.y < FLIP_UP_DOT_THRESHOLD;
+      const isStationary = linSpeedSq < FLIP_STATIONARY_LINVEL_SQ && angSpeedSq < FLIP_STATIONARY_ANGVEL_SQ;
+
+      if (isFlipped && isStationary) {
+        flipTimer.current += dt;
+        if (flipTimer.current >= FLIP_RESPAWN_DELAY) {
+          const flipPos = chassis.translation();
+          const groundY = getTerrainHeight(flipPos.x, flipPos.z) + getRoadOffset(flipPos.x, flipPos.z);
+          // Keep the car's current heading (yaw) -- only roll/pitch get
+          // zeroed -- so this reads as "set back on its wheels facing the
+          // same way", not a random teleport.
+          const yaw = _uprightEuler.setFromQuaternion(_chassisQuat, 'YXZ').y;
+          _uprightQuat.setFromEuler(_uprightEuler.set(0, yaw, 0));
+          chassis.setTranslation({ x: flipPos.x, y: groundY + 1.2, z: flipPos.z }, true);
+          chassis.setRotation({ x: _uprightQuat.x, y: _uprightQuat.y, z: _uprightQuat.z, w: _uprightQuat.w }, true);
+          chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
+          chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
+          flipTimer.current = 0;
+        }
+      } else {
+        flipTimer.current = 0;
+      }
+    }
+
     const isCarActive = currentControllable === 'car' && controlledEntityId === id && !isVehicleTransitioning;
 
     if (!isCarActive) {
@@ -487,6 +542,10 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
 
   useFrame((state, delta) => {
     if (!chassisRef.current) return;
+    // Freezes door-swing animation and the debug/entity-sync writes below
+    // while paused -- this plain useFrame isn't stopped by <Physics
+    // paused>, only the useBeforePhysicsStep block above is.
+    if (isPaused) return;
 
     if (import.meta.env.DEV) {
       const t0 = chassisRef.current.translation();
@@ -500,18 +559,44 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
       };
     }
 
+    if (import.meta.env.DEV && !(window as any).__seatDebug?.[id]) {
+      (window as any).__seatDebug = (window as any).__seatDebug || {};
+      const dump: any = {};
+      for (let i = 1; i <= 4; i++) {
+        const seat = clonedScene.getObjectByName(`seat_${i}`);
+        const entrance = clonedScene.getObjectByName(`entrance_${i}`);
+        const door = clonedScene.getObjectByName(`door_${i}`);
+        const wp = new THREE.Vector3();
+        dump[`seat_${i}`] = seat ? (seat.getWorldPosition(wp), [wp.x, wp.y, wp.z]) : null;
+        dump[`entrance_${i}`] = entrance ? (entrance.getWorldPosition(wp), [wp.x, wp.y, wp.z]) : null;
+        dump[`door_${i}`] = door ? (door.getWorldPosition(wp), [wp.x, wp.y, wp.z]) : null;
+        dump[`seat_${i}_userData`] = seat ? seat.userData : null;
+      }
+      (window as any).__seatDebug[id] = dump;
+    }
+
     // Door animation runs whenever THIS car is the one being entered or
     // exited, regardless of whether driving control has actually handed
     // over yet -- controlledEntityId only updates once the transition
     // finishes, so during "entering" it still points at whatever was
     // controlled before (see transitioningEntityId in store.ts).
-    if (doorRef.current) {
-      const doorShouldBeOpen = isVehicleTransitioning && transitioningEntityId === id;
-      const target = doorShouldBeOpen ? 1 : 0;
+    {
+      // Only the door named by transitioningDoorName opens; every other
+      // door on this car animates back toward closed, same as before this
+      // was multi-door (see the doorsRef comment above).
+      const activeDoorName = isVehicleTransitioning && transitioningEntityId === id
+        ? (transitioningDoorName ?? 'door_1')
+        : null;
       const step = DOOR_ROTATION_SPEED * delta;
-      const diff = target - doorOpenFactor.current;
-      doorOpenFactor.current = Math.abs(diff) <= step ? target : doorOpenFactor.current + Math.sign(diff) * step;
-      doorRef.current.rotation.y = doorSign.current * doorOpenFactor.current * DOOR_MAX_ANGLE;
+      for (const doorName in doorsRef.current) {
+        const door = doorsRef.current[doorName];
+        const target = doorName === activeDoorName ? 1 : 0;
+        const current = doorOpenFactors.current[doorName] ?? 0;
+        const diff = target - current;
+        const next = Math.abs(diff) <= step ? target : current + Math.sign(diff) * step;
+        doorOpenFactors.current[doorName] = next;
+        door.node.rotation.y = door.sign * next * DOOR_MAX_ANGLE;
+      }
     }
 
     const t = chassisRef.current.translation();

@@ -27,6 +27,23 @@ interface GameState {
   // whose door should swing open, not once the character has already sat
   // down.
   transitioningEntityId: string | null;
+  // Which of the vehicle's doors (by glb node name, e.g. "door_3") is the
+  // one actually being walked through for the current transition -- set
+  // alongside transitioningEntityId so a car with more than one usable
+  // entrance (see Player.tsx's getVehicleEntrances) knows WHICH of its
+  // doors to swing open, instead of always animating the driver's.
+  transitioningDoorName: string | null;
+  // True while the game is paused (Start/Escape, or automatically when the
+  // browser tab is backgrounded -- see App.tsx's visibilitychange listener).
+  // Drives <Physics paused> in App.tsx plus explicit early-returns in
+  // Player.tsx/Car.tsx/Airplane.tsx/Helicopter.tsx's per-frame logic, since
+  // Physics pausing only stops the physics WORLD stepping (so
+  // useBeforePhysicsStep callbacks don't fire) -- it doesn't stop plain
+  // useFrame callbacks elsewhere, and direct RigidBody setters like
+  // setTranslation/setLinvel take effect immediately regardless of whether
+  // the world is stepping, so anything still calling those every frame
+  // would keep moving things even while "paused".
+  isPaused: boolean;
   isLoading: boolean;
   isCrosshairVisible: boolean;
   playerPos: [number, number, number];
@@ -37,7 +54,9 @@ interface GameState {
   setMaxHealth: (maxHealth: number) => void;
   setArmor: (armor: number) => void;
   setCurrentControllable: (type: ControllableType, id?: string | null) => void;
-  setIsVehicleTransitioning: (transitioning: boolean, entityId?: string | null) => void;
+  setIsVehicleTransitioning: (transitioning: boolean, entityId?: string | null, doorName?: string | null) => void;
+  togglePause: () => void;
+  setPaused: (paused: boolean) => void;
   setIsLoading: (loading: boolean) => void;
   setIsCrosshairVisible: (visible: boolean) => void;
   setPlayerInfo: (pos: [number, number, number], yaw: number) => void;
@@ -54,6 +73,8 @@ export const useStore = create<GameState>((set) => ({
   controlledEntityId: null,
   isVehicleTransitioning: false,
   transitioningEntityId: null,
+  transitioningDoorName: null,
+  isPaused: false,
   isLoading: false, // Set to false initially to show WelcomeScreen
   isCrosshairVisible: false,
   playerPos: [0, 0, 0],
@@ -64,7 +85,15 @@ export const useStore = create<GameState>((set) => ({
   setMaxHealth: (maxHealth) => set({ maxHealth }),
   setArmor: (armor) => set({ armor }),
   setCurrentControllable: (type, id = null) => set({ currentControllable: type, controlledEntityId: id }),
-  setIsVehicleTransitioning: (transitioning, entityId = null) => set({ isVehicleTransitioning: transitioning, transitioningEntityId: transitioning ? entityId : null }),
+  setIsVehicleTransitioning: (transitioning, entityId = null, doorName = null) => set({
+    isVehicleTransitioning: transitioning,
+    transitioningEntityId: transitioning ? entityId : null,
+    transitioningDoorName: transitioning ? doorName : null,
+  }),
+  togglePause: () => set((state) => ({ isPaused: !state.isPaused })),
+  // Separate from togglePause: the tab-hidden auto-pause always wants to
+  // force pause ON, never flip an already-paused game back to running.
+  setPaused: (paused) => set({ isPaused: paused }),
   setIsLoading: (loading) => set({ isLoading: loading }),
   setIsCrosshairVisible: (visible) => set({ isCrosshairVisible: visible }),
   setPlayerInfo: (pos, yaw) => set({ playerPos: pos, playerYaw: yaw }),

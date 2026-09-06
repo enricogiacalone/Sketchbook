@@ -36,6 +36,56 @@ const getVehicleParts = (scene: THREE.Object3D, vehicleId: string): VehicleParts
   return { root, seat, entrance };
 };
 
+// car.glb (and, per the same authoring convention, airplane/heli) actually
+// ships 4 seat/entrance/door triples, one per physical door -- not just the
+// driver's. getVehicleParts above only ever looks at the "_1" (driver)
+// pair, which meant getting in always required walking all the way around
+// to that one specific door, even when a different one (e.g. a rear door)
+// was physically closer (see git history / chat: "deve poter salire anche
+// dietro se la portiera e' piu' vicina"). This enumerates every entrance
+// point a vehicle actually has, each carrying its associated door's name
+// (read off its seat's "door_object" extra, the same field the original
+// Sketchbook's VehicleSeat/VehicleDoor pairing used) -- the entry-search
+// below then picks whichever entrance is nearest to the player, not always
+// entrance_1. Only seat_1 ever grants actual control (this stays a
+// single-driver game), so the sit-down animation still ends there; only the
+// entrance/side/door used to climb in varies by which one you approached.
+interface VehicleEntrance {
+  entranceName: string;
+  doorName: string | null;
+  entrance: THREE.Object3D;
+}
+
+// The legacy vanilla source (src/ts/characters/Character.ts's
+// findVehicleToEnter(), still in the repo though unused by this React app)
+// only lets you walk in through the driver's own seat or a passenger seat
+// directly connected to it (seat_1/seat_2 on car.glb) when your intent is
+// to drive -- a rear seat not connected to the driver's is never a valid
+// "I want to drive" entry there, since sitting in it would just leave you
+// stuck as a passenger (its whole multi-seat/switch-seat system, see
+// Sitting.ts/SwitchingSeats.ts, has no equivalent here). Confirmed with
+// the user that for THIS single-driver-only port, where no seat but the
+// driver's does anything, that restriction only gets in the way -- every
+// door should just be able to walk you in and start driving, back seats
+// included (see git history / chat: "devo poter entrare anche dietro").
+// So, deliberately diverging from the legacy behavior here: every
+// seat_N/entrance_N pair the glb actually has counts as a valid entrance.
+const getVehicleEntrances = (root: THREE.Object3D): VehicleEntrance[] => {
+  const points: VehicleEntrance[] = [];
+  for (let i = 1; i <= 4; i++) {
+    const seat = root.getObjectByName(`seat_${i}`);
+    const entrance = root.getObjectByName(`entrance_${i}`);
+    if (!seat || !entrance) continue;
+    const doorName = (seat.userData?.door_object as string | undefined) ?? null;
+    points.push({ entranceName: `entrance_${i}`, doorName, entrance });
+  }
+  if (points.length === 0) {
+    const fallback = root.getObjectByName("entrance_1") ?? root;
+    points.push({ entranceName: "entrance_1", doorName: "door_1", entrance: fallback });
+  }
+  return points;
+};
+
 // Mirrors the original's FunctionLibrary.detectRelativeSide(): which side of
 // `fromPos`/`fromQuat` the point `toPos` is on, using its local right axis.
 // Used to pick the left/right sit-down, stand-up and door animations.
@@ -70,6 +120,31 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const { scene, animations } = useGLTF("boxman.glb");
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { actions } = useAnimations(animations, clonedScene);
+
+  // One-shot transition/action clips need LoopOnce + clampWhenFinished --
+  // three.js's AnimationAction defaults to LoopRepeat, which nothing here
+  // ever overrode. For clips whose OWN duration is what gates switching
+  // away from them (jump/landing, via clipDuration() + a timer below) that
+  // mostly went unnoticed since the switch usually happens before the clip
+  // would even loop back around. sit_down/stand_up are different: nothing
+  // ever calls playAnim() again for as long as you're parked/driving (the
+  // seated pose is just supposed to be held), so with no clamp the sit-down
+  // motion itself just kept restarting from frame 0 in an endless loop the
+  // whole time you were in the car (see git history / chat: "sembra che
+  // vada in loop nel sedersit"). Clamping holds the last frame -- the
+  // seated/landed pose -- instead of jumping back to frame 0.
+  useEffect(() => {
+    const oneShotClips = [
+      "sit_down_left", "sit_down_right", "stand_up_left", "stand_up_right",
+      "jump_idle", "jump_running", "drop_idle", "drop_running", "drop_running_roll",
+    ];
+    oneShotClips.forEach((name) => {
+      const action = actions[name];
+      if (!action) return;
+      action.setLoop(THREE.LoopOnce, 1);
+      action.clampWhenFinished = true;
+    });
+  }, [actions]);
   const {
     currentControllable,
     controlledEntityId,
@@ -80,6 +155,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     playerMessage,
     entities,
     setIsLoading,
+    isPaused,
   } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
@@ -88,6 +164,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       isVehicleTransitioning: state.isVehicleTransitioning,
       setIsVehicleTransitioning: state.setIsVehicleTransitioning,
       setPlayerInfo: state.setPlayerInfo,
+      isPaused: state.isPaused,
       playerMessage: state.playerMessage,
       entities: state.entities,
       setIsLoading: state.setIsLoading,
@@ -265,6 +342,13 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     const body = rigidBodyRef.current;
     if (!body || !clonedScene) return;
 
+    if (import.meta.env.DEV) {
+      (window as any).__playerBody = body;
+      (window as any).__playerScene = state.scene;
+      (window as any).__playerFrameCount = ((window as any).__playerFrameCount || 0) + 1;
+      (window as any).__playerInput = { ...input, delta };
+    }
+
     // Synchronous Rapier read (see rigidBodyRef comment above) -- refreshes
     // the position/velocity refs every frame before anything below uses them.
     const t = body.translation();
@@ -275,6 +359,14 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     velocity.current[0] = v.x;
     velocity.current[1] = v.y;
     velocity.current[2] = v.z;
+
+    // Paused: freeze here. Physics's own `paused` prop (App.tsx) already
+    // stops the world stepping, but RigidBody setters like setTranslation/
+    // setLinvel used below (e.g. the vehicle entry/exit lerp, and the
+    // "parked in a vehicle" seat-follow) apply immediately regardless of
+    // whether the world is stepping -- so without this, pausing mid-lerp or
+    // mid-drive would still let the body keep moving every frame.
+    if (isPaused) return;
 
     const isPlayerActive = currentControllable === "player";
 
@@ -377,7 +469,11 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
             anim: side === "left" ? "stand_up_left" : "stand_up_right",
             exitVelocity: seatVelocityEstimate.current.clone(),
           };
-          setIsVehicleTransitioning(true, controlledEntityId);
+          // Exiting always goes back out through the driver's own door
+          // (seat_1/door_1) -- you got in through whichever door was
+          // closest, but you're driving from the front seat, so getting
+          // out the front makes sense regardless of how you got in.
+          setIsVehicleTransitioning(true, controlledEntityId, "door_1");
           setTransitionMode("exiting");
         }
       }
@@ -409,11 +505,29 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       if (closestId && closestType) {
         const parts = getVehicleParts(state.scene, closestId);
         if (parts) {
-          const entrancePos = new THREE.Vector3();
-          parts.entrance.getWorldPosition(entrancePos);
-          if (playerPos.distanceTo(entrancePos) < VEHICLE_ENTRANCE_RANGE) {
+          // Check every door this vehicle has, not just the driver's --
+          // whichever one is actually nearest (and within range) is the
+          // one used to get in. The final SEAT is still always seat_1 (see
+          // getVehicleEntrances' own comment for why); only the entrance
+          // point/side/door vary.
+          const entrances = getVehicleEntrances(parts.root);
+          let bestEntrance: VehicleEntrance | null = null;
+          let bestEntranceDist = VEHICLE_ENTRANCE_RANGE;
+          const candidatePos = new THREE.Vector3();
+          for (const candidate of entrances) {
+            candidate.entrance.getWorldPosition(candidatePos);
+            const d = playerPos.distanceTo(candidatePos);
+            if (d < bestEntranceDist) {
+              bestEntranceDist = d;
+              bestEntrance = candidate;
+            }
+          }
+
+          if (bestEntrance) {
+            const entrancePos = new THREE.Vector3();
+            bestEntrance.entrance.getWorldPosition(entrancePos);
             const entranceQuat = new THREE.Quaternion();
-            parts.entrance.getWorldQuaternion(entranceQuat);
+            bestEntrance.entrance.getWorldQuaternion(entranceQuat);
             const seatPos = new THREE.Vector3();
             parts.seat.getWorldPosition(seatPos);
             const side = sideOf(entrancePos, entranceQuat, seatPos);
@@ -434,7 +548,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
             // whole time this body is associated with a vehicle, re-enabled
             // only once fully exited below.
             body.setEnabled(false);
-            setIsVehicleTransitioning(true, closestId);
+            setIsVehicleTransitioning(true, closestId, bestEntrance.doorName);
             setTransitionMode("entering");
             return;
           }
@@ -449,7 +563,12 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     state.camera.getWorldDirection(forward);
     forward.y = 0;
     forward.normalize();
-    const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), forward).normalize();
+    // cross(forward, up) -- NOT cross(up, forward), which points the wrong
+    // way and was making A/D (and gamepad left stick strafe) move the
+    // character opposite to what the camera shows (confirmed: with forward
+    // = (0,0,-1)/up = (0,1,0), cross(up,forward) = (-1,0,0) but the actual
+    // camera-right direction there is (+1,0,0) = cross(forward,up)).
+    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
 
     const moveDir = new THREE.Vector3(0, 0, 0);
     if (input.forward) moveDir.add(forward);
@@ -627,12 +746,24 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
           // rigidBodyRef declaration.
           collisionGroups={groupsExcluding(CollisionGroups.Characters, CollisionGroups.TrimeshColliders)}
         />
-        {/* visible lives here, not on <RigidBody>, because RigidBodyProps'
-            TS type has no index signature for arbitrary Object3D props --
-            and this is actually more correct anyway: hiding the mesh this
-            way (same as the old cannon <group visible={...}> did) never
-            touched the physics collider's simulation, only the render. */}
-        <group visible={currentControllable === "player" || transitionMode === "exiting"}>
+        {/* Always visible now (Claude) -- this used to hide the character
+            the instant control handed over to a vehicle (`visible={
+            currentControllable === "player" || transitionMode === "exiting"}`,
+            inherited unchanged from the old cannon version's own
+            <group visible={...}>). That made the character disappear
+            entirely the whole time you were actually driving/flying, not
+            just during the brief hidden-nowhere-yet instant right after
+            control handed over -- unlike the original (non-React)
+            Sketchbook, where the character stays visible sitting in the
+            seat the whole time (see git history / chat: "il personaggio...
+            si sedeva correttamente in auto ora non si vede proprio"). The
+            body itself is still correctly seat-tracked and physics-
+            disabled while driving (see the vehicle-entry effects above),
+            so nothing but the render was ever the problem here. Left as a
+            plain <group> (not folded back onto <RigidBody>) because
+            RigidBodyProps' TS type has no index signature for arbitrary
+            Object3D props like `visible`. */}
+        <group>
           <group rotation={[0, modelRotation.current, 0]}>
             <primitive object={clonedScene} position={[0, -RADIUS, 0]} />
           </group>
