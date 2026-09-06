@@ -233,16 +233,25 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
   // @react-three/rapier's <RigidBody>/<CuboidCollider>. Built from the car's
   // own collision geometry (CHASSIS_SHAPES) instead of a single guessed box,
   // so it still collides correctly sideways with buildings, curbs, other
-  // cars, etc. Excludes TrimeshColliders (terrain + road) -- unlike
-  // Player.tsx, this ISN'T standing in for a broken suspension anymore: with
-  // Rapier's real DynamicRayCastVehicleController (below), the wheel
-  // raycasts are what should be holding the chassis up off the terrain/road
-  // trimesh. This exclusion just avoids the chassis's own (much coarser)
-  // collision hull additionally resting on the ground mesh alongside the
-  // wheel raycasts -- two independent vertical supports fighting each other,
-  // the same reasoning as Player.tsx's sphere. If real suspension turns out
-  // not to hold the chassis up on its own once this is live-tested, this is
-  // the first place to revisit.
+  // cars, etc.
+  //
+  // DOES collide with TrimeshColliders (terrain + road), unlike Player.tsx's
+  // sphere -- originally this excluded them on the theory that the wheel
+  // raycasts (below) are what should hold the chassis up, and letting the
+  // chassis's own coarser hull rest on the ground too would just be two
+  // vertical supports fighting each other. Live-testing proved that wrong in
+  // a worse way: the vehicle controller's wheel raycasts fire in chassis-
+  // LOCAL "down", so the moment a car rolls/flips (a hard turn, a crash),
+  // those raycasts point sideways or up instead of at the ground -- with
+  // TrimeshColliders excluded, NOTHING was left to catch the chassis, so a
+  // flipped car just fell through the terrain forever (see git history /
+  // chat: "appena si ribalta cade all'infinito"). Colliding normally with
+  // the ground gives the chassis a hard backstop for exactly that case (a
+  // flipped/crashed car now rests on its roof/side instead of falling
+  // through), at the cost of the chassis's coarse hull also lightly
+  // resting on the ground alongside the suspension while upright -- in
+  // practice not noticeable since the suspension keeps normal ride height
+  // well clear of it.
   const chassisRef = useRef<RapierRigidBody>(null);
 
   // Real vehicle controller (see useEffect below) -- replaces BOTH
@@ -407,7 +416,13 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
     } else if (input.backward) {
       const powerFactor = (GEARS_MAX_SPEEDS['R'] - speed) / Math.abs(GEARS_MAX_SPEEDS['R']);
       const force = (ENGINE_FORCE / gear.current) * Math.abs(powerFactor);
-      for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, force);
+      // Sign flipped (Claude) -- see the "forward" branch below, same fix,
+      // opposite direction: this was applying its force with the wrong
+      // sign relative to Rapier's DynamicRayCastVehicleController
+      // convention, so accelerator and reverse were swapped end to end
+      // (see git history / chat: "l'acceleratore e la retromarcia sn
+      // invertite").
+      for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, -force);
     } else {
       const top = GEARS_MAX_SPEEDS[String(gear.current)];
       const bottom = GEARS_MAX_SPEEDS[String(gear.current - 1)];
@@ -423,7 +438,17 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
         for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, 0);
       } else if (input.forward) {
         const force = (ENGINE_FORCE / gear.current) * powerFactor;
-        for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, -force);
+        // Sign flipped (Claude) -- was `-force`. Rapier's vehicle
+        // controller's positive wheel engine force turned out to drive
+        // this chassis in its local -Z (the same direction `_forward`/
+        // `speed` above call "backward"), the opposite of what this code
+        // assumed when it was ported from the cannon-es version. Flipping
+        // just these two signs (this branch and the `input.backward`
+        // branch above) realigns accelerator/reverse with W/S without
+        // touching the speed/gear logic, which was already measuring
+        // "forward" consistently via the `_forward` vector -- only the
+        // force applied to actually go there was inverted.
+        for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, force);
       } else {
         for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, 0);
       }
@@ -462,6 +487,18 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
 
   useFrame((state, delta) => {
     if (!chassisRef.current) return;
+
+    if (import.meta.env.DEV) {
+      const t0 = chassisRef.current.translation();
+      const controller0 = vehicleController.current;
+      (window as any).__carsPosDebug = (window as any).__carsPosDebug || {};
+      (window as any).__carsPosDebug[id] = {
+        pos: [t0.x, t0.y, t0.z],
+        hasController: !!controller0,
+        wheelDefsCount: wheelDefs.filter((d) => !!d?.node).length,
+        wheelsInContact: controller0 ? [0,1,2,3].map((i) => controller0.wheelIsInContact(i)) : null,
+      };
+    }
 
     // Door animation runs whenever THIS car is the one being entered or
     // exited, regardless of whether driving control has actually handed
@@ -549,7 +586,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
       linearDamping={0.01}
       angularDamping={0.01}
       canSleep={false}
-      collisionGroups={groupsExcluding(CollisionGroups.Default, CollisionGroups.TrimeshColliders)}
+      collisionGroups={groupsExcluding(CollisionGroups.Default)}
     >
       {CHASSIS_SHAPES.map((shape, i) => (
         <CuboidCollider

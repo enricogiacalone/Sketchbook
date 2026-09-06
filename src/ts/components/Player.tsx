@@ -312,6 +312,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
         if (transition.mode === "entering") {
           setCurrentControllable(transition.vehicleType, transition.vehicleId);
         } else {
+          body.setEnabled(true);
           body.setLinvel({ x: transition.exitVelocity.x, y: transition.exitVelocity.y, z: transition.exitVelocity.z }, true);
           setCurrentControllable("player");
           // Force the next real ground check to treat this as a fresh
@@ -428,6 +429,11 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
               anim: side === "left" ? "sit_down_left" : "sit_down_right",
               exitVelocity: new THREE.Vector3(),
             };
+            // See the big comment above this function's vehicle-entry section --
+            // stop colliding with anything (the target car included) for the
+            // whole time this body is associated with a vehicle, re-enabled
+            // only once fully exited below.
+            body.setEnabled(false);
             setIsVehicleTransitioning(true, closestId);
             setTransitionMode("entering");
             return;

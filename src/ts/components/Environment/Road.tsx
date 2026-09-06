@@ -12,7 +12,27 @@ export const ROAD_GRID_SPACING = 60;
 export const ROAD_WIDTH = 8;
 export const ROAD_Y_OFFSET = 0.15;
 export const SIDEWALK_WIDTH = 1.5;
-export const SIDEWALK_HEIGHT = 0.15;
+// Lowered from 0.15 (Claude): the vehicle controller's wheel raycasts
+// don't simulate real curb-climbing -- combined with the chassis now
+// physically colliding with the ground (see the car-flip fix above), a
+// full 0.15 step right at the road edge acted like a solid wall the car
+// would slam into instead of bumping over, any time a wheel drifted even
+// slightly off the road (see git history / chat: "ci sbatto con l'auto").
+// A much shallower lip still reads visually as a curb without stopping
+// the car dead.
+export const SIDEWALK_HEIGHT = 0.04;
+// How far down (world units) the road/sidewalk slabs extrude below their
+// own top surface. Both used to be single infinitely-thin planes sitting
+// ON TOP of the terrain -- fine from directly above, but at a grazing
+// angle (walking/driving right up to a curb, or looking along the road
+// edge) you could see straight under the paper-thin mesh into the gap
+// between it and the terrain surface below, since nothing filled that gap
+// in (see git history / chat: "non sono piani senza spessore"). 1.0 is
+// comfortably more than the +0.15/+0.30 the road/sidewalk sit above the
+// terrain, so the slab's underside always dips below the actual ground
+// surface (even accounting for the terrain's own gentle slope across the
+// road's width) no matter where you look from.
+export const ROAD_THICKNESS = 1.0;
 
 const ROAD_OFFSETS: number[] = (() => {
   const arr: number[] = [];
@@ -54,6 +74,73 @@ export const getRoadOffset = (x: number, z: number): number => {
   return 0;
 };
 
+// Extrudes a flat top-surface grid down by `thickness` and closes the
+// perimeter with side walls, turning what would otherwise be an
+// infinitely-thin plane into a solid slab (see ROAD_THICKNESS above for
+// why). `topPositions` must be a row-major grid of `rows` rows by `cols`
+// columns -- vertex (r, c) at index r*cols+c -- which is exactly how
+// THREE.PlaneGeometry lays its own position attribute out, so every
+// caller here can just hand this the top-surface positions it already
+// built (after sampling terrain height into Y) with that grid's own
+// rows/cols.
+function extrudeGrid(
+  topPositions: Float32Array,
+  rows: number,
+  cols: number,
+  thickness: number
+): { positions: Float32Array; indices: Uint32Array } {
+  const n = rows * cols;
+  const positions = new Float32Array(n * 2 * 3);
+  positions.set(topPositions, 0);
+  for (let i = 0; i < n; i++) {
+    positions[n * 3 + i * 3 + 0] = topPositions[i * 3 + 0];
+    positions[n * 3 + i * 3 + 1] = topPositions[i * 3 + 1] - thickness;
+    positions[n * 3 + i * 3 + 2] = topPositions[i * 3 + 2];
+  }
+
+  const indices: number[] = [];
+
+  // Top face.
+  for (let r = 0; r < rows - 1; r++) {
+    for (let c = 0; c < cols - 1; c++) {
+      const a = r * cols + c;
+      const b = r * cols + c + 1;
+      const cc = (r + 1) * cols + c;
+      const d = (r + 1) * cols + c + 1;
+      indices.push(a, b, d, a, d, cc);
+    }
+  }
+  // Bottom face -- same winding as the top, offset into the bottom vertex
+  // block. The material is double-sided (see callers below) so the exact
+  // winding only affects shading, never visibility, and this is mostly
+  // buried in the terrain anyway.
+  for (let r = 0; r < rows - 1; r++) {
+    for (let c = 0; c < cols - 1; c++) {
+      const a = r * cols + c + n;
+      const b = r * cols + c + 1 + n;
+      const cc = (r + 1) * cols + c + n;
+      const d = (r + 1) * cols + c + 1 + n;
+      indices.push(a, b, d, a, d, cc);
+    }
+  }
+  // Side skirts around the full perimeter (both long edges + both ends)
+  // connecting each top edge vertex straight down to its bottom
+  // counterpart.
+  const addWall = (topIndexAt: (i: number) => number, count: number) => {
+    for (let i = 0; i < count - 1; i++) {
+      const a = topIndexAt(i);
+      const b = topIndexAt(i + 1);
+      indices.push(a, b, b + n, a, b + n, a + n);
+    }
+  };
+  addWall((r) => r * cols, rows); // c = 0 edge
+  addWall((r) => r * cols + (cols - 1), rows); // c = cols-1 edge
+  addWall((c) => c, cols); // r = 0 edge
+  addWall((c) => (rows - 1) * cols + c, cols); // r = rows-1 edge
+
+  return { positions, indices: new Uint32Array(indices) };
+}
+
 interface RoadSectionProps {
   axis: 'x' | 'z';
   size: number;
@@ -81,13 +168,18 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
         const z = pos.getZ(i);
         pos.setY(i, getTerrainHeight(x, z) + yOffset);
     }
-    geometry.computeVertexNormals();
 
-    const rawIndices = geometry.index?.array || new Uint32Array();
+    // rows/cols of the grid PlaneGeometry just built above -- see
+    // extrudeGrid's own comment for why this (row-major, r*cols+c) layout
+    // matters. widthSegments/heightSegments swap with `axis` the same way
+    // the PlaneGeometry dimensions above do.
+    const cols = (axis === 'x' ? segmentsAlong : segmentsAcross) + 1;
+    const rows = (axis === 'x' ? segmentsAcross : segmentsAlong) + 1;
+    const slab = extrudeGrid(pos.array as Float32Array, rows, cols, ROAD_THICKNESS);
 
     return {
-        vertices: pos.array as Float32Array,
-        indices: new Uint32Array(rawIndices),
+        vertices: slab.positions,
+        indices: slab.indices,
     };
   }, [axis, size]);
 
@@ -96,66 +188,51 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
   const dashMeshRef = useRef<THREE.InstancedMesh>(null);
   const dummy = useMemo(() => new THREE.Object3D(), []);
 
-  // Sidewalks
+  // Sidewalks -- two strips, one on each side, each extruded into its own
+  // solid slab (see extrudeGrid/ROAD_THICKNESS above) and then merged.
   const { sidewalkVertices, sidewalkIndices } = useMemo(() => {
-    // We'll create two strips, one on each side. For simplicity, we just use a plane
-    // and elevate it more than the road.
     const swWidth = SIDEWALK_WIDTH;
     const swY = yOffset + SIDEWALK_HEIGHT;
-    
-    // Left sidewalk
-    const geoLeft = new THREE.PlaneGeometry(
-        axis === 'x' ? size : swWidth,
-        axis === 'z' ? size : swWidth,
-        axis === 'x' ? segmentsAlong : 2,
-        axis === 'z' ? segmentsAlong : 2
-    );
-    geoLeft.rotateX(-Math.PI / 2);
-    const posL = geoLeft.attributes.position;
-    const offsetL = (roadWidth / 2 + swWidth / 2);
-    for (let i = 0; i < posL.count; i++) {
-        const x = posL.getX(i) + (axis === 'z' ? -offsetL : 0);
-        const z = posL.getZ(i) + (axis === 'x' ? -offsetL : 0);
-        posL.setX(i, x);
-        posL.setZ(i, z);
-        posL.setY(i, getTerrainHeight(x, z) + swY);
-    }
+    const swCols = (axis === 'x' ? segmentsAlong : 2) + 1;
+    const swRows = (axis === 'x' ? 2 : segmentsAlong) + 1;
 
-    // Right sidewalk
-    const geoRight = new THREE.PlaneGeometry(
-        axis === 'x' ? size : swWidth,
-        axis === 'z' ? size : swWidth,
-        axis === 'x' ? segmentsAlong : 2,
-        axis === 'z' ? segmentsAlong : 2
-    );
-    geoRight.rotateX(-Math.PI / 2);
-    const posR = geoRight.attributes.position;
-    const offsetR = (roadWidth / 2 + swWidth / 2);
-    for (let i = 0; i < posR.count; i++) {
-        const x = posR.getX(i) + (axis === 'z' ? offsetR : 0);
-        const z = posR.getZ(i) + (axis === 'x' ? offsetR : 0);
-        posR.setX(i, x);
-        posR.setZ(i, z);
-        posR.setY(i, getTerrainHeight(x, z) + swY);
-    }
+    const buildStrip = (side: 1 | -1) => {
+      const geo = new THREE.PlaneGeometry(
+          axis === 'x' ? size : swWidth,
+          axis === 'z' ? size : swWidth,
+          axis === 'x' ? segmentsAlong : 2,
+          axis === 'z' ? segmentsAlong : 2
+      );
+      geo.rotateX(-Math.PI / 2);
+      const p = geo.attributes.position;
+      const offset = (roadWidth / 2 + swWidth / 2) * side;
+      for (let i = 0; i < p.count; i++) {
+          const x = p.getX(i) + (axis === 'z' ? offset : 0);
+          const z = p.getZ(i) + (axis === 'x' ? offset : 0);
+          p.setX(i, x);
+          p.setZ(i, z);
+          p.setY(i, getTerrainHeight(x, z) + swY);
+      }
+      return extrudeGrid(p.array as Float32Array, swRows, swCols, ROAD_THICKNESS);
+    };
 
-    const merged = new THREE.BufferGeometry();
-    const combinedPos = new Float32Array(posL.array.length + posR.array.length);
-    combinedPos.set(posL.array);
-    combinedPos.set(posR.array, posL.array.length);
-    merged.setAttribute('position', new THREE.BufferAttribute(combinedPos, 3));
-    
-    const indicesL = geoLeft.index?.array || new Uint32Array();
-    const indicesR = (geoRight.index?.array || new Uint32Array()).map(idx => idx + posL.count);
-    const combinedIndices = new Uint32Array(indicesL.length + indicesR.length);
-    combinedIndices.set(indicesL);
-    combinedIndices.set(indicesR, indicesL.length);
-    merged.setIndex(new THREE.BufferAttribute(combinedIndices, 1));
-    merged.computeVertexNormals();
+    // side=-1 matches the original "left" strip's `-offsetL`, side=1 the
+    // original "right" strip's `+offsetR`.
+    const left = buildStrip(-1);
+    const right = buildStrip(1);
+    const leftVertexCount = left.positions.length / 3;
+
+    const combinedPos = new Float32Array(left.positions.length + right.positions.length);
+    combinedPos.set(left.positions);
+    combinedPos.set(right.positions, left.positions.length);
+
+    const combinedIndices = new Uint32Array(left.indices.length + right.indices.length);
+    combinedIndices.set(left.indices);
+    combinedIndices.set(right.indices.map((idx) => idx + leftVertexCount), left.indices.length);
 
     return {
-        sidewalkVertices: merged.attributes.position.array as Float32Array,
-        sidewalkIndices: merged.index?.array as Uint32Array
+        sidewalkVertices: combinedPos,
+        sidewalkIndices: combinedIndices,
     };
   }, [axis, size]);
 
@@ -174,7 +251,7 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
       <RigidBody type="fixed" colliders={false} friction={0.8} restitution={0}>
         <TrimeshCollider args={[vertices, indices]} collisionGroups={roadGroups} />
         <mesh receiveShadow>
-            <bufferGeometry>
+            <bufferGeometry onUpdate={(self) => self.computeVertexNormals()}>
                 <bufferAttribute
                     attach="attributes-position"
                     count={vertices.length / 3}
@@ -188,7 +265,10 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
                     itemSize={1}
                 />
             </bufferGeometry>
-            <meshStandardMaterial color="#222" roughness={0.8} />
+            {/* DoubleSide -- now a solid slab (see extrudeGrid), not a single
+                thin plane, so the bottom face and side skirts need to render
+                too regardless of the exact winding extrudeGrid gave them. */}
+            <meshStandardMaterial color="#222" roughness={0.8} side={THREE.DoubleSide} />
         </mesh>
       </RigidBody>
 
@@ -196,7 +276,7 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
       <RigidBody type="fixed" colliders={false} friction={0.8} restitution={0}>
         <TrimeshCollider args={[sidewalkVertices, sidewalkIndices]} collisionGroups={roadGroups} />
         <mesh receiveShadow>
-          <bufferGeometry>
+          <bufferGeometry onUpdate={(self) => self.computeVertexNormals()}>
               <bufferAttribute
                   attach="attributes-position"
                   count={sidewalkVertices.length / 3}
@@ -210,7 +290,7 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
                   itemSize={1}
               />
           </bufferGeometry>
-          <meshStandardMaterial color="#777" roughness={0.9} />
+          <meshStandardMaterial color="#777" roughness={0.9} side={THREE.DoubleSide} />
         </mesh>
       </RigidBody>
 

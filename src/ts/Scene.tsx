@@ -49,12 +49,26 @@ const Scene: React.FC = () => {
       <Suspense fallback={null}>
         {!DEBUG_DISABLE_CARS_AND_ENEMIES && (
           <>
-            <Car id="car-1" position={[10, 5, 0]} />
-            <Car id="car-2" position={[60, 5, 0]} />
-            <Car id="car-3" position={[0, 5, 60]} />
-            <Car id="car-4" position={[-60, 5, 60]} />
-            <Car id="car-5" position={[60, 5, 60]} />
-            <Car id="car-6" position={[-60, 5, -60]} />
+            {/* Spawn Y lowered from 5 -> 1.2 (Claude): with the old cannon-worker
+                setup this height didn't matter -- the car's position was
+                snapped analytically every frame, it never actually free-fell.
+                Now that Car.tsx uses a real Rapier DynamicRayCastVehicleController,
+                a ~4.5-unit fall builds up enough speed (~9m/s) that the wheel
+                suspension (rest length 0.35, travel 1) can't always catch it
+                within one raycast before the chassis tunnels straight through
+                the terrain heightfield -- reproduced live: 5 of 6 cars fell
+                through and kept falling forever, 1 happened to land. Spawning
+                just above the terrain's max height variation (+/-0.5) plus
+                road offset (~0.15) means the suspension only ever has to
+                absorb a small drop, matching how a real raycast vehicle
+                controller is meant to be used (see git history / chat, "cade
+                oltre il terrain e sparisce"). */}
+            <Car id="car-1" position={[10, 1.2, 0]} />
+            <Car id="car-2" position={[60, 1.2, 0]} />
+            <Car id="car-3" position={[0, 1.2, 60]} />
+            <Car id="car-4" position={[-60, 1.2, 60]} />
+            <Car id="car-5" position={[60, 1.2, 60]} />
+            <Car id="car-6" position={[-60, 1.2, -60]} />
           </>
         )}
 
