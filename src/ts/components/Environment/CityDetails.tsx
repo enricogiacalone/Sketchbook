@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import * as THREE from 'three';
 import { RigidBody, CuboidCollider, CylinderCollider } from '@react-three/rapier';
 import { useGLTF } from '@react-three/drei';
@@ -6,6 +6,8 @@ import { getTerrainHeight } from './Terrain';
 import { getRoadOffset, ROAD_WIDTH, SIDEWALK_WIDTH } from './Road';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import Pedestrian from './Pedestrian';
+import Enemy from '../Enemy';
+import VideoBillboardScreen from './VideoBillboardScreen';
 
 // Street-level detail pass -- benches/trash cans/hydrants/signs along the
 // sidewalks, plus a few statically-parked cars tucked against the curb.
@@ -174,6 +176,20 @@ const BILLBOARD_SCHEMES = [
   { bg: '#fdd835', accent: '#212121' },
 ];
 
+// Local mp4 files under public/videos/ -- same-origin, so they get real
+// positional audio (Web Audio PannerNode, via VideoBillboardScreen.tsx)
+// and play automatically with no click, neither of which a cross-origin
+// YouTube embed could ever fully offer (see the comment at the top of
+// VideoBillboardScreen.tsx for the full story). Drop your own files at
+// these exact paths -- any that's missing just shows as a blank/black
+// screen until it's added, everything else keeps working.
+const BILLBOARD_VIDEO_SRCS = [
+  '/videos/billboard-1.mp4',
+  '/videos/billboard-2.mp4',
+  '/videos/billboard-3.mp4',
+  '/videos/billboard-4.mp4',
+];
+
 // Freestanding ad panel on two poles, tall enough to read from down the
 // street/while driving. Purely decorative -- schemeIndex just picks a
 // color pair, there's no actual ad content/text (a canvas-texture label
@@ -189,6 +205,18 @@ const Billboard: React.FC<{ x: number; z: number; rotationY: number; schemeIndex
   const panelWidth = 6;
   const panelHeight = 3;
   const poleHeight = 9;
+
+  const videoSrc = BILLBOARD_VIDEO_SRCS[schemeIndex % BILLBOARD_VIDEO_SRCS.length];
+  // The video screen's real-world footprint -- inset a bit from the full
+  // panel so a border of the panel's own color still shows as a bezel.
+  const screenWidth = panelWidth * 0.88;
+  const screenHeight = panelHeight * 0.78;
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    (window as any).__videoBillboards = (window as any).__videoBillboards || [];
+    (window as any).__videoBillboards.push({ videoSrc, worldX: x, worldZ: z });
+  }, []);
 
   return (
     <group position={[x, y, z]} rotation={[0, rotationY, 0]}>
@@ -207,19 +235,26 @@ const Billboard: React.FC<{ x: number; z: number; rotationY: number; schemeIndex
           </mesh>
         </RigidBody>
       ))}
+      {/* Bezel -- the panel itself, now just a colored frame behind/around
+          the actual video screen instead of being the "ad" itself. */}
       <mesh position={[0, poleHeight + panelHeight / 2, 0]} castShadow>
         <boxGeometry args={[panelWidth, panelHeight, 0.2]} />
-        <meshStandardMaterial color={scheme.bg} emissive={scheme.bg} emissiveIntensity={0.6} roughness={0.5} />
+        <meshStandardMaterial color={scheme.bg} emissive={scheme.bg} emissiveIntensity={0.3} roughness={0.5} />
       </mesh>
-      {/* Accent stripe, both faces so it reads from either direction */}
-      <mesh position={[0, poleHeight + panelHeight / 2, 0.11]}>
-        <planeGeometry args={[panelWidth * 0.8, panelHeight * 0.25]} />
-        <meshStandardMaterial color={scheme.accent} emissive={scheme.accent} emissiveIntensity={0.8} />
-      </mesh>
+      {/* Back face keeps the old accent stripe -- a real second synced
+          video player per billboard (for true both-sides readability)
+          isn't worth doubling the YouTube API instances/network load for
+          what's mostly seen from the road side anyway. */}
       <mesh position={[0, poleHeight + panelHeight / 2, -0.11]} rotation={[0, Math.PI, 0]}>
         <planeGeometry args={[panelWidth * 0.8, panelHeight * 0.25]} />
         <meshStandardMaterial color={scheme.accent} emissive={scheme.accent} emissiveIntensity={0.8} />
       </mesh>
+      <VideoBillboardScreen
+        src={videoSrc}
+        localPosition={[0, poleHeight + panelHeight / 2, 0.11]}
+        width={screenWidth}
+        height={screenHeight}
+      />
     </group>
   );
 };
@@ -229,6 +264,17 @@ const Billboard: React.FC<{ x: number; z: number; rotationY: number; schemeIndex
 const SIGN_COLORS = ['#1565c0', '#2e7d32', '#f9a825', '#ef6c00'];
 
 const CityDetails: React.FC = () => {
+  // Pedestrians that got hit and turned hostile -- each one spawns a real
+  // Enemy.tsx (chase AI, health, bullet hits, the works) at the spot it
+  // was standing. Kept as local state here rather than in the global store
+  // since nothing outside this tree needs to know about it.
+  const [pedestrianEnemies, setPedestrianEnemies] = useState<
+    Array<{ id: string; position: [number, number, number] }>
+  >([]);
+  const handlePedestrianHit = useCallback((id: string, position: [number, number, number]) => {
+    setPedestrianEnemies((prev) => (prev.some((e) => e.id === id) ? prev : [...prev, { id, position }]));
+  }, []);
+
   const { furniture, parkedCars, pedestrians, billboards } = useMemo(() => {
     const furnitureArr: Array<{ kind: 'bench' | 'trash' | 'hydrant' | 'sign'; x: number; z: number; rotationY: number; color?: string }> = [];
     const carsArr: Array<{ x: number; z: number; rotationY: number }> = [];
@@ -323,7 +369,20 @@ const CityDetails: React.FC = () => {
         <ParkedCar key={`car-${i}`} x={c.x} z={c.z} rotationY={c.rotationY} />
       ))}
       {pedestrians.map((p, i) => (
-        <Pedestrian key={`ped-${i}`} x1={p.x1} z1={p.z1} x2={p.x2} z2={p.z2} speed={p.speed} phase={p.phase} />
+        <Pedestrian
+          key={`ped-${i}`}
+          id={`enemy-ped-${i}`}
+          x1={p.x1}
+          z1={p.z1}
+          x2={p.x2}
+          z2={p.z2}
+          speed={p.speed}
+          phase={p.phase}
+          onBecomeEnemy={handlePedestrianHit}
+        />
+      ))}
+      {pedestrianEnemies.map((e) => (
+        <Enemy key={e.id} id={e.id} initialPosition={e.position} />
       ))}
       {billboards.map((b, i) => (
         <Billboard key={`bb-${i}`} x={b.x} z={b.z} rotationY={b.rotationY} schemeIndex={b.schemeIndex} />

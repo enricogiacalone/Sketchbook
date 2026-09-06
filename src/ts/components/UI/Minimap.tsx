@@ -58,7 +58,13 @@ const Minimap: React.FC = () => {
               style={{ 
                 left: mapX, 
                 top: mapY,
-                transform: `translate(-50%, -50%) rotate(${(entity.rotation - playerYaw) * (180 / Math.PI)}deg)`
+                // Just the entity's own absolute heading -- #minimap-container's
+                // own rotate(-playerYaw) (below) already reorients everything
+                // inside it, this icon included, to keep "the way you're
+                // facing" pointing up. Subtracting playerYaw again here on
+                // top of that was double-counting it, so vehicle icons spun
+                // twice as fast (and the wrong way) as you turned.
+                transform: `translate(-50%, -50%) rotate(${entity.rotation * (180 / Math.PI)}deg)`
               }} 
             />
           );
@@ -73,14 +79,21 @@ const Minimap: React.FC = () => {
   const armorRotation = 225 + 180 * (armor / 100);
 
   return (
-    <div style={{ position: 'absolute', bottom: 20, right: 20, width: mapSize, height: mapSize, pointerEvents: 'auto' }}>
+    // Bottom-left, GTA5-style (also frees up the bottom-right corner, which
+    // ChatInput already occupies).
+    <div style={{ position: 'absolute', bottom: 20, left: 20, width: mapSize, height: mapSize, pointerEvents: 'auto' }}>
       <div id="minimap-container" style={{ transform: `rotate(${-playerYaw}rad)` }}>
         <div id="minimap-north" style={{ transform: `translateX(-50%) rotate(${playerYaw}rad)` }}>N</div>
         {enemyDots}
         {vehicleIcons}
       </div>
 
-      <div id="minimap-player" style={{ left: mapSize / 2, top: mapSize / 2, transform: `translate(-50%, -50%) rotate(${playerYaw}rad)` }} />
+      {/* GTA-style radar: the world rotates underneath (minimap-container's
+          rotate(-playerYaw) above), so the player's own arrow always points
+          straight up and never rotates itself -- it used to spin with
+          playerYaw on top of that, which fought the map rotation instead of
+          matching it. */}
+      <div id="minimap-player" style={{ left: mapSize / 2, top: mapSize / 2, transform: 'translate(-50%, -50%)' }} />
 
       <div id="health-bar-container">
         <div id="health-bar" className="bar-arc">

@@ -1,7 +1,7 @@
 #minimap-container {
   position: absolute;
   bottom: 20px;
-  right: 20px;
+  left: 20px;
   width: 200px;
   height: 200px;
   background-color: rgba(0, 0, 0, 0.5);
@@ -14,7 +14,7 @@
 #armor-bar-container {
   position: absolute;
   bottom: 20px;
-  right: 20px;
+  left: 20px;
   width: 200px;
   height: 200px;
   pointer-events: none;

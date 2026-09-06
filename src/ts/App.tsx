@@ -38,6 +38,16 @@ const App: React.FC = () => {
     setIsJoined(true);
     setIsLoading(true); // Start showing loader while Suspense does its thing
     console.log(`Joined as ${name} with ${controlMethod}`);
+    // Unlocks the shared Web Audio context (used by every billboard's
+    // THREE.PositionalAudio, and its underlying <video> elements) from
+    // inside this real, same-origin click -- browsers only need this ONE
+    // gesture per page for same-origin audio/video autoplay-with-sound,
+    // unlike a cross-origin embed which needs a gesture on that exact
+    // element every time. See VideoBillboardScreen.tsx.
+    // three's own .d.ts mistypes getContext()'s return as the wrapper
+    // class instead of the native AudioContext (its own JSDoc says
+    // Window.AudioContext) -- cast to reach the real .resume().
+    (THREE.AudioContext.getContext() as unknown as globalThis.AudioContext).resume().catch(() => {});
   };
 
   // Auto-pause when the tab is backgrounded. This isn't just a nicety: a
@@ -50,7 +60,12 @@ const App: React.FC = () => {
   // an explicit Start/Escape to resume (rather than auto-resuming on
   // visible) avoids that burst entirely and matches how most games handle
   // losing focus.
+  //
+  // Skipped in dev builds: switching tabs/windows while developing (devtools,
+  // another app, this session's own browser automation) shouldn't pause the
+  // game every time -- only a production build behaves like a real game here.
   useEffect(() => {
+    if (import.meta.env.DEV) return;
     const handleVisibilityChange = () => {
       if (document.hidden) setPaused(true);
     };

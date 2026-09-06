@@ -1,18 +1,28 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF, useAnimations } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
+import { useStore } from '../../store';
+import { useShallow } from 'zustand/react/shallow';
 
 interface PedestrianProps {
+  id: string;
   x1: number;
   z1: number;
   x2: number;
   z2: number;
   speed?: number;
   phase?: number;
+  // Called once, the moment the player (on foot or in any vehicle) gets
+  // close enough to this pedestrian to count as a hit -- CityDetails.tsx
+  // uses it to spawn a real Enemy.tsx in this pedestrian's place. Passed
+  // down rather than reaching into the store directly so this component
+  // stays a dumb "walk back and forth, report a hit" thing and doesn't
+  // need to know how the resulting enemy is actually managed/rendered.
+  onBecomeEnemy: (id: string, position: [number, number, number]) => void;
 }
 
 // Background crowd filler -- same boxman.glb as the player, walking back
@@ -27,7 +37,7 @@ interface PedestrianProps {
 // at a slow linear speed reads a little brisk up close, but at the
 // distances these are actually seen from around the city it's a fine
 // stand-in, and matches the run cycle Player.tsx itself already uses.
-const Pedestrian: React.FC<PedestrianProps> = ({ x1, z1, x2, z2, speed = 1.2, phase = 0 }) => {
+const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2, phase = 0, onBecomeEnemy }) => {
   const { scene, animations } = useGLTF('boxman.glb');
   // Plain scene.clone() (Object3D.clone) does NOT re-bind skinned-mesh
   // skeletons -- every clone's SkinnedMesh would keep pointing at the
@@ -50,6 +60,15 @@ const Pedestrian: React.FC<PedestrianProps> = ({ x1, z1, x2, z2, speed = 1.2, ph
   const currentAnim = useRef<string | null>(null);
   const pauseTimer = useRef(0);
   const scratchPos = useRef(new THREE.Vector3());
+  const [isEnemy, setIsEnemy] = useState(false);
+  const { playerPos, currentControllable } = useStore(
+    useShallow((state) => ({ playerPos: state.playerPos, currentControllable: state.currentControllable }))
+  );
+  // Getting run over on foot is a lot more precise than getting clipped by
+  // a 2m-wide car -- give vehicles a much more forgiving hit radius so
+  // driving anywhere near one reliably counts, instead of needing to line
+  // up the car's exact footprint against a stationary point target.
+  const HIT_RADIUS = currentControllable === 'player' ? 1.1 : 2.2;
 
   const playAnim = (name: string) => {
     if (currentAnim.current === name || !actions[name]) return;
@@ -88,7 +107,22 @@ const Pedestrian: React.FC<PedestrianProps> = ({ x1, z1, x2, z2, speed = 1.2, ph
     if (Math.hypot(dx, dz) > 0.01) {
       groupRef.current.rotation.y = Math.atan2(dx, dz);
     }
+
+    // Hit check, last -- uses this frame's just-computed position/ground Y
+    // so the spawned Enemy picks up exactly where this pedestrian was
+    // standing, not last frame's stale spot.
+    const hitDx = playerPos[0] - pos.x;
+    const hitDz = playerPos[2] - pos.z;
+    if (hitDx * hitDx + hitDz * hitDz < HIT_RADIUS * HIT_RADIUS) {
+      setIsEnemy(true);
+      onBecomeEnemy(id, [pos.x, y, pos.z]);
+    }
   });
+
+  // The pedestrian itself disappears the instant it "becomes" the enemy --
+  // Enemy.tsx (spawned by the onBecomeEnemy callback above) takes over
+  // rendering/physics/AI at this same spot from here on.
+  if (isEnemy) return null;
 
   return (
     <group ref={groupRef}>
