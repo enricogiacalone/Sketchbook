@@ -3,27 +3,21 @@ import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useStore } from '../../store';
 
-// Real, always-on, genuinely positional video+audio for a billboard --
-// this is what a cross-origin YouTube iframe can never fully deliver (see
-// the git history on YouTubeBillboardScreen.tsx for the long, thoroughly
-// tested list of reasons: no panning control in the YouTube API at all,
-// and YouTube's own player refuses to honor a scripted unmute without a
-// direct click on it, confirmed even with Chrome's autoplay restrictions
-// fully disabled). A LOCAL mp4 file has none of those restrictions,
-// because it's the same origin as the page itself:
+// Real, always-on, genuinely positional video+audio for a billboard -- see
+// the git history on YouTubeBillboardScreen.tsx for why a cross-origin
+// YouTube iframe can never fully deliver this (no panning in the API at
+// all, and YouTube's own player refuses a scripted unmute without a click
+// directly on it). A LOCAL mp4 file has none of those restrictions:
 //   - Its audio is routed through THREE.PositionalAudio via
-//     `setMediaElementSource`, which is a genuine Web Audio PannerNode --
-//     real stereo panning as you walk around the screen, not just a
-//     volume fade.
+//     `setMediaElementSource`, a genuine Web Audio PannerNode -- real
+//     stereo panning as you walk around the screen, not just a fade.
 //   - Same-origin autoplay-with-sound only needs the ONE standard
 //     browser-wide gesture unlock (the "Enter Playground" click already
-//     provides that -- see App.tsx's handleJoin), not a click on this
-//     exact element.
+//     provides that -- see App.tsx's handleJoin).
 //   - Play/pause syncs trivially with the game's pause state.
 //
-// The video's own frames are drawn straight into the 3D scene via a
-// THREE.VideoTexture on a plane -- no drei <Html>/iframe/CSS-transform
-// layer at all, so none of that sizing math applies here either.
+// The video's own frames go straight into the 3D scene via a
+// THREE.VideoTexture on a plane -- no drei <Html>/iframe layer at all.
 
 let sharedListener: THREE.AudioListener | null = null;
 function getSharedListener(camera: THREE.Camera): THREE.AudioListener {
@@ -35,9 +29,6 @@ function getSharedListener(camera: THREE.Camera): THREE.AudioListener {
 interface VideoBillboardScreenProps {
   // Path under /public, e.g. "/videos/billboard-1.mp4".
   src: string;
-  // Local position/size within the parent <group> -- same convention the
-  // old YouTubeScreen used for localPosition, just a plane's width/height
-  // now instead of a pxWidth/pxHeight + drei Html scale.
   localPosition: [number, number, number];
   width: number;
   height: number;
@@ -49,16 +40,28 @@ const VideoBillboardScreen: React.FC<VideoBillboardScreenProps> = ({ src, localP
   const textureRef = useRef<THREE.VideoTexture | null>(null);
   const soundRef = useRef<THREE.PositionalAudio | null>(null);
 
+  // Lazy, ref-backed initializers -- created exactly ONCE per component
+  // instance, immune to React 18 StrictMode's dev-only double-invoke of
+  // effects (mount -> cleanup -> mount again). This runs during render,
+  // not inside an effect, so the second render after a double-invoke sees
+  // `ref.current` already set and skips creating a new object.
+  //
+  // Getting this wrong (creating the video/texture inside a useEffect
+  // instead) is exactly what caused "the video shows but is frozen on the
+  // first frame": StrictMode mounts the creating effect, tears it down,
+  // then mounts it again -- ending up with the on-screen texture still
+  // reading from the FIRST (now-paused, discarded) video element while a
+  // second, live one plays invisibly underneath it, never advancing what
+  // you actually see.
   if (!videoRef.current) {
     const video = document.createElement('video');
     video.src = src;
     video.loop = true;
     video.playsInline = true;
     video.preload = 'auto';
-    // NOT muted -- its actual audio is what we want, routed through the
-    // Web Audio graph below rather than straight to the speakers, which
-    // is what setMediaElementSource does to a media element by design
-    // (it takes over the element's audio output).
+    // NOT muted -- its real audio is what we want, routed through the Web
+    // Audio graph below (setMediaElementSource takes over the element's
+    // audio output by design, so this is safe even though it's unmuted).
     video.muted = false;
     videoRef.current = video;
 
@@ -81,27 +84,20 @@ const VideoBillboardScreen: React.FC<VideoBillboardScreenProps> = ({ src, localP
   useEffect(() => {
     const video = videoRef.current!;
     const sound = soundRef.current!;
-    // createMediaElementSource can only ever be called ONCE for a given
-    // <video> element, for the lifetime of that element -- calling it
-    // again throws InvalidStateError, even to "reconnect" the exact same
-    // pair, and there's no way to undo the binding. React 18 StrictMode's
-    // dev-mode double-invoke (mount -> cleanup -> mount again) runs this
-    // effect twice against the SAME video/sound instances (they're
-    // created once, lazily, in the refs above -- StrictMode replays the
-    // effect, not the component's initial render), which without this
-    // guard threw on the second mount and crashed the whole <Canvas>
-    // (confirmed live). Skipping the call when already bound makes both
-    // the StrictMode replay and a real single mount safe.
+    // createMediaElementSource can only ever be called ONCE per element --
+    // the boundRef guard keeps StrictMode's double-invoke from calling it
+    // twice on the same (persisted) video, which throws InvalidStateError.
     if (!boundRef.current) {
       sound.setMediaElementSource(video);
       boundRef.current = true;
     }
-    if (!useStore.getState().isPaused) {
+
+    const tryPlay = () => {
+      if (useStore.getState().isPaused) return;
       video.play().catch(() => {
-        // Autoplay-with-sound got refused (e.g. this mounted before the
-        // player ever interacted with the page at all) -- fall back to
-        // the standard one-time-unlock pattern: try again on the next
-        // real gesture anywhere on the page.
+        // Autoplay-with-sound got refused (e.g. mounted before the player
+        // ever interacted with the page) -- retry on the next real
+        // gesture anywhere on the page.
         const retry = () => {
           video.play().catch(() => {});
           window.removeEventListener('pointerdown', retry);
@@ -110,16 +106,11 @@ const VideoBillboardScreen: React.FC<VideoBillboardScreenProps> = ({ src, localP
         window.addEventListener('pointerdown', retry, { once: true });
         window.addEventListener('keydown', retry, { once: true });
       });
-    }
+    };
+    tryPlay();
+
     return () => {
       video.pause();
-      // Deliberately NOT clearing video.src or trying to unbind the
-      // MediaElementSource here -- see the comment above; on a StrictMode
-      // replay that would break the second mount, and on a real unmount
-      // the whole video/sound pair just gets garbage-collected once the
-      // refs are dropped. sound.disconnect() is fine to call any number
-      // of times, unlike setMediaElementSource -- it just detaches this
-      // node from the audio graph, it doesn't touch the one-time binding.
       sound.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

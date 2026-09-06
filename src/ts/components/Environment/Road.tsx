@@ -255,12 +255,14 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
             <bufferGeometry onUpdate={(self) => self.computeVertexNormals()}>
                 <bufferAttribute
                     attach="attributes-position"
+                    args={[vertices, 3]}
                     count={vertices.length / 3}
                     array={vertices}
                     itemSize={3}
                 />
                 <bufferAttribute
                     attach="index"
+                    args={[indices, 1]}
                     count={indices.length}
                     array={indices}
                     itemSize={1}
@@ -280,12 +282,14 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
           <bufferGeometry onUpdate={(self) => self.computeVertexNormals()}>
               <bufferAttribute
                   attach="attributes-position"
+                  args={[sidewalkVertices, 3]}
                   count={sidewalkVertices.length / 3}
                   array={sidewalkVertices}
                   itemSize={3}
               />
               <bufferAttribute
                   attach="index"
+                  args={[sidewalkIndices, 1]}
                   count={sidewalkIndices.length}
                   array={sidewalkIndices}
                   itemSize={1}

@@ -93,12 +93,14 @@ const Terrain: React.FC = () => {
         <bufferGeometry>
           <bufferAttribute
             attach="attributes-position"
+            args={[vertices, 3]}
             count={vertices.length / 3}
             array={vertices}
             itemSize={3}
           />
           <bufferAttribute
             attach="index"
+            args={[visualIndices, 1]}
             count={visualIndices.length}
             array={visualIndices}
             itemSize={1}

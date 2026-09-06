@@ -52,20 +52,25 @@ const App: React.FC = () => {
 
   // Auto-pause when the tab is backgrounded. This isn't just a nicety: a
   // hidden tab gets requestAnimationFrame throttled by the browser (down to
-  // a handful of frames a minute in the worst case, confirmed while
-  // debugging this app's own automated test tooling), so whatever real
+  // a handful of frames a minute in the worst case), so whatever real
   // wall-clock time passed while away shows up as one huge catch-up
-  // delta/physics burst the moment the tab comes back -- cars and the
-  // player can end up flung across the map. Pausing on hidden and requiring
-  // an explicit Start/Escape to resume (rather than auto-resuming on
-  // visible) avoids that burst entirely and matches how most games handle
-  // losing focus.
+  // delta/physics burst the moment the tab comes back -- confirmed live as
+  // the player appearing to "pop up out of the floor" right after
+  // switching back to the tab (Rapier's fixed-timestep accumulator clamps
+  // any single frame to 0.5s and then runs dozens of physics substeps back
+  // to back to catch up, which is enough for the falling/landing sequence
+  // to visibly glitch through the floor collider before it settles).
+  // Pausing on hidden and requiring an explicit Start/Escape to resume
+  // (rather than auto-resuming on visible) avoids that burst entirely and
+  // matches how most games handle losing focus.
   //
-  // Skipped in dev builds: switching tabs/windows while developing (devtools,
-  // another app, this session's own browser automation) shouldn't pause the
-  // game every time -- only a production build behaves like a real game here.
+  // Previously skipped in dev builds so switching to devtools/another app
+  // while developing wouldn't pause the game every time -- but that's
+  // exactly the gap that let real tab-switch testing hit this bug, so it
+  // now applies in dev too. Our own browser-automation testing can resume
+  // manually via `useStore.getState().setPaused(false)` if a background
+  // tab switch pauses it mid-test.
   useEffect(() => {
-    if (import.meta.env.DEV) return;
     const handleVisibilityChange = () => {
       if (document.hidden) setPaused(true);
     };

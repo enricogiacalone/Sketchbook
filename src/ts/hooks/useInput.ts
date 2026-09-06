@@ -62,7 +62,7 @@ export const useInput = () => {
     });
   };
 
-  const keys = {
+  const keys: Record<string, Action> = {
     KeyW: 'forward',
     KeyS: 'backward',
     KeyA: 'left',

@@ -25,7 +25,7 @@ export const useNetwork = (
   const [socket, setSocket] = useState<Socket | null>(null);
   const [remotePlayers, setRemotePlayers] = useState<Map<string, NetworkPlayerData>>(new Map());
   const [myId, setMyId] = useState<string | null>(null);
-  const messageTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const messageTimeouts = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     // Use the current origin for the socket connection

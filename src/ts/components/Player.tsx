@@ -388,6 +388,14 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
         const targetObj = transition.mode === "entering" ? parts.seat : parts.entrance;
         targetObj.getWorldPosition(targetPos);
         targetObj.getWorldQuaternion(targetQuat);
+        // The RigidBody's origin is the BallCollider's center, but the
+        // model is drawn RADIUS below it (see the <primitive> below --
+        // same convention as standing on the ground at groundY + RADIUS).
+        // seat_1/entrance_1 are authored at the surface the character's
+        // base should rest on, so without this the body (and therefore
+        // the visible model) ends up RADIUS too low, clipping into the
+        // vehicle's floor/seat mesh.
+        targetPos.y += RADIUS;
       }
 
       const lerpPos = new THREE.Vector3().lerpVectors(transition.startPos, targetPos, eased);
@@ -434,6 +442,10 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
         if (parts) {
           const seatPos = new THREE.Vector3();
           parts.seat.getWorldPosition(seatPos);
+          // Same RADIUS correction as the transition lerp above -- without
+          // it the seated body (and visible model) sinks into the vehicle
+          // for the whole ride, not just during the sit-down animation.
+          seatPos.y += RADIUS;
           body.setTranslation({ x: seatPos.x, y: seatPos.y, z: seatPos.z }, true);
 
           if (lastSeatPos.current && delta > 0) {
@@ -452,6 +464,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
         if (parts) {
           const startPos = new THREE.Vector3();
           parts.seat.getWorldPosition(startPos);
+          startPos.y += RADIUS; // matches the seat-follow correction above
           const startQuat = new THREE.Quaternion();
           parts.seat.getWorldQuaternion(startQuat);
           const entrancePos = new THREE.Vector3();
