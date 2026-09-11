@@ -1,5 +1,19 @@
 {
   "include": ["src/ts/**/*"],
+  "exclude": [
+    "node_modules",
+    "src/ts/sketchbook.ts",
+    "src/ts/core/**/*",
+    "src/ts/characters/**/*",
+    "src/ts/debug/**/*",
+    "src/ts/game/**/*",
+    "src/ts/interfaces/**/*",
+    "src/ts/network/**/*",
+    "src/ts/physics/**/*",
+    "src/ts/ui/**/*",
+    "src/ts/vehicles/**/*",
+    "src/ts/world/**/*"
+  ],
   "compilerOptions": {
     "module": "es2020",
     "target": "es6",
@@ -12,7 +26,8 @@
     "baseUrl": ".",
     "types": ["three"],
     "typeRoots": ["./node_modules/@types", "./src/ts/types"],
-    "lib": ["es2017", "dom", "dom.iterable"],
+    "lib": ["es2019", "dom", "dom.iterable"],
+    "skipLibCheck": true,
     "paths": {
       "~/*": ["./src/ts/*"],
       "$lib/*": ["./src/lib/*"],

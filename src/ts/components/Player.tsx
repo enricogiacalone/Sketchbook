@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from "react";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useFrame, useThree, createPortal } from "@react-three/fiber";
 import { RigidBody, BallCollider, RapierRigidBody } from "@react-three/rapier";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import * as THREE from "three";
@@ -18,10 +18,14 @@ import Bullet from "./Bullet";
 // -- Vehicle seat/entrance lookup -------------------------------------------
 // Every vehicle glb (car/airplane/heli) ships the same authored empties the
 // original (non-React) Sketchbook used for its VehicleSeat/entry points --
-// "seat_1", "entrance_1", etc. -- as real named nodes. We only support one
-// (driver) seat per vehicle here, so we always use the "_1" pair; falling
-// back to the vehicle's own root transform keeps this from silently
-// breaking if a model is ever missing them.
+// "seat_1", "entrance_1", etc. -- as real named nodes. This always resolves
+// the driver's own "_1" pair specifically (used for e.g. the default enter
+// door-search below and the vehicle-velocity estimate, which is fine off
+// any point on a rigid body); OTHER seats (passenger seat_2/3/4, their own
+// entry/exit points, doors, connected_seats for X-switching) are looked up
+// separately, by name, via getSeatInfo() further down -- falling back to
+// the vehicle's own root transform here keeps this from silently breaking
+// if a model is ever missing seat_1/entrance_1 specifically.
 interface VehicleParts {
   root: THREE.Object3D;
   seat: THREE.Object3D;
@@ -36,56 +40,6 @@ const getVehicleParts = (scene: THREE.Object3D, vehicleId: string): VehicleParts
   return { root, seat, entrance };
 };
 
-// car.glb (and, per the same authoring convention, airplane/heli) actually
-// ships 4 seat/entrance/door triples, one per physical door -- not just the
-// driver's. getVehicleParts above only ever looks at the "_1" (driver)
-// pair, which meant getting in always required walking all the way around
-// to that one specific door, even when a different one (e.g. a rear door)
-// was physically closer (see git history / chat: "deve poter salire anche
-// dietro se la portiera e' piu' vicina"). This enumerates every entrance
-// point a vehicle actually has, each carrying its associated door's name
-// (read off its seat's "door_object" extra, the same field the original
-// Sketchbook's VehicleSeat/VehicleDoor pairing used) -- the entry-search
-// below then picks whichever entrance is nearest to the player, not always
-// entrance_1. Only seat_1 ever grants actual control (this stays a
-// single-driver game), so the sit-down animation still ends there; only the
-// entrance/side/door used to climb in varies by which one you approached.
-interface VehicleEntrance {
-  entranceName: string;
-  doorName: string | null;
-  entrance: THREE.Object3D;
-}
-
-// The legacy vanilla source (src/ts/characters/Character.ts's
-// findVehicleToEnter(), still in the repo though unused by this React app)
-// only lets you walk in through the driver's own seat or a passenger seat
-// directly connected to it (seat_1/seat_2 on car.glb) when your intent is
-// to drive -- a rear seat not connected to the driver's is never a valid
-// "I want to drive" entry there, since sitting in it would just leave you
-// stuck as a passenger (its whole multi-seat/switch-seat system, see
-// Sitting.ts/SwitchingSeats.ts, has no equivalent here). Confirmed with
-// the user that for THIS single-driver-only port, where no seat but the
-// driver's does anything, that restriction only gets in the way -- every
-// door should just be able to walk you in and start driving, back seats
-// included (see git history / chat: "devo poter entrare anche dietro").
-// So, deliberately diverging from the legacy behavior here: every
-// seat_N/entrance_N pair the glb actually has counts as a valid entrance.
-const getVehicleEntrances = (root: THREE.Object3D): VehicleEntrance[] => {
-  const points: VehicleEntrance[] = [];
-  for (let i = 1; i <= 4; i++) {
-    const seat = root.getObjectByName(`seat_${i}`);
-    const entrance = root.getObjectByName(`entrance_${i}`);
-    if (!seat || !entrance) continue;
-    const doorName = (seat.userData?.door_object as string | undefined) ?? null;
-    points.push({ entranceName: `entrance_${i}`, doorName, entrance });
-  }
-  if (points.length === 0) {
-    const fallback = root.getObjectByName("entrance_1") ?? root;
-    points.push({ entranceName: "entrance_1", doorName: "door_1", entrance: fallback });
-  }
-  return points;
-};
-
 // Mirrors the original's FunctionLibrary.detectRelativeSide(): which side of
 // `fromPos`/`fromQuat` the point `toPos` is on, using its local right axis.
 // Used to pick the left/right sit-down, stand-up and door animations.
@@ -95,15 +49,139 @@ const sideOf = (fromPos: THREE.Vector3, fromQuat: THREE.Quaternion, toPos: THREE
   return right.dot(view) > 0 ? "left" : "right";
 };
 
+// -- Seat metadata straight off the glb's own authored data (see
+// VehicleSeat.ts in the legacy source this ports from): userData.seat_type
+// ("driver"/"passenger"), .door_object (this seat's own door, if it has
+// one), .connected_seats (the seat X-switches to -- see the seat_switch
+// handling in Player) and .entry_points (the point this seat's occupant
+// walks out through when exiting, which may differ from the entrance they
+// walked IN through). Confirmed straight from car.glb/heli.glb's own node
+// extras -- airplane.glb only has a single driver seat, no passengers/
+// connected_seats/door, matching its own distinct entry/exit handling
+// elsewhere in this file.
+type OccupantSeatKind = "driver" | "passenger";
+
+interface VehicleSeatInfo {
+  name: string;
+  node: THREE.Object3D;
+  kind: OccupantSeatKind;
+  doorName: string | null;
+  connectedSeatName: string | null;
+  entryPointName: string | null;
+}
+
+const getSeatInfo = (root: THREE.Object3D, seatName: string): VehicleSeatInfo | null => {
+  const node = root.getObjectByName(seatName);
+  if (!node) return null;
+  const ud = (node.userData ?? {}) as Record<string, string | undefined>;
+  const kind: OccupantSeatKind = ud.seat_type === "driver" ? "driver" : "passenger";
+  const doorName = ud.door_object ?? null;
+  const connectedSeatName = ud.connected_seats ? (ud.connected_seats.split(/[;,]/)[0]?.trim() || null) : null;
+  const entryPointName = ud.entry_points ? (ud.entry_points.split(/[;,]/)[0]?.trim() || null) : null;
+  return { name: seatName, node, kind, doorName, connectedSeatName, entryPointName };
+};
+
+// Faithful port of the legacy Character.ts's findVehicleToEnter(wantsToDrive)
+// -- given ONE already-chosen vehicle (the closest one overall, picked by
+// the caller) and the player's intent, finds the best SEAT for it, then the
+// nearest of THAT seat's own entry points (a seat can have more than one,
+// e.g. the airplane's "entrance_1;entrance_2"):
+//  - wantsToDrive: only driver seats, OR a passenger seat whose
+//    connected_seats points at a driver seat -- e.g. car.glb's seat_2 (a
+//    passenger seat you can X-switch to the driver's seat_1 from), but NOT
+//    seat_3/seat_4 (only connected to each other). Walking in from the
+//    passenger side while wanting to drive is still valid, faithfully --
+//    see autoSwitchToDriverOnArrival below, which then auto-slides you
+//    into the driver's seat the instant you've sat down, exactly like
+//    Sitting.ts's own continuous wantsToDrive check.
+//  - !wantsToDrive: any passenger seat, no connection requirement.
+// Deliberately reverted from an earlier, simpler "every door makes you
+// drive" divergence -- confirmed with the user that the original's real
+// per-seat logic (rear doors NOT reachable for driving-intent unless
+// connected to the driver's seat) is what's wanted here, not the shortcut.
+const findSeatAndEntry = (
+  root: THREE.Object3D,
+  playerPos: THREE.Vector3,
+  wantsToDrive: boolean
+): { seat: VehicleSeatInfo; entry: THREE.Object3D } | null => {
+  // Legacy picks the best SEAT first (by seat position) and only then its
+  // own nearest entry point -- fine there, since the character then
+  // auto-walks the whole way to it. This port has no auto-walk (the player
+  // must already be standing next to the door), so picking by seat
+  // proximity first can pick the WRONG entry point whenever two qualifying
+  // seats sit close together but their doors are on opposite sides (e.g.
+  // heli.glb's side-by-side seat_1/seat_2 cockpit) -- the player ends up
+  // standing right next to a perfectly valid door that this rejects anyway,
+  // because the "closer" seat's own (far away) door is what actually got
+  // checked (see git history / chat: "non riesco ad entrare
+  // nell'elicottero"). So instead: gather every entry point of every
+  // QUALIFYING seat (same qualification rule as legacy) and pick whichever
+  // single entry point is nearest to the player -- still only lets
+  // wantsToDrive land in the driver's seat or one connected to it, just
+  // decided by which door you're actually standing at, not by seat
+  // geometry the player never sees.
+  let bestSeat: VehicleSeatInfo | null = null;
+  let bestEntry: THREE.Object3D | null = null;
+  let bestEntryDist = Infinity;
+
+  for (let i = 1; i <= 4; i++) {
+    const seat = getSeatInfo(root, `seat_${i}`);
+    if (!seat) continue;
+
+    let qualifies: boolean;
+    if (wantsToDrive) {
+      if (seat.kind === "driver") {
+        qualifies = true;
+      } else {
+        const connected = seat.connectedSeatName ? getSeatInfo(root, seat.connectedSeatName) : null;
+        qualifies = connected?.kind === "driver";
+      }
+    } else {
+      qualifies = seat.kind === "passenger";
+    }
+    if (!qualifies) continue;
+
+    // All of this seat's own entry point names -- getSeatInfo only keeps
+    // the first (the common single-entry case), so re-read the raw list
+    // here (a seat can have more than one, e.g. the airplane's
+    // "entrance_1;entrance_2").
+    const ud = (seat.node.userData ?? {}) as Record<string, string | undefined>;
+    const entryNames = ud.entry_points ? ud.entry_points.split(/[;,]/).map((n) => n.trim()).filter(Boolean) : [];
+    for (const name of entryNames) {
+      const node = root.getObjectByName(name);
+      if (!node) continue;
+      const p = new THREE.Vector3();
+      node.getWorldPosition(p);
+      const d = playerPos.distanceTo(p);
+      if (d < bestEntryDist) {
+        bestEntryDist = d;
+        bestEntry = node;
+        bestSeat = seat;
+      }
+    }
+  }
+  if (!bestSeat || !bestEntry) return null;
+  return { seat: bestSeat, entry: bestEntry };
+};
+
 const _networkYAxis = new THREE.Vector3(0, 1, 0);
 const _networkQuat = new THREE.Quaternion();
 
 type VehicleType = "car" | "airplane" | "helicopter";
 
 interface VehicleTransition {
-  mode: "entering" | "exiting";
+  mode: "entering" | "exiting" | "switching";
   vehicleId: string;
   vehicleType: VehicleType;
+  // Name of the glb node the body lerps TO: a seat_N for "entering"/
+  // "switching", an entrance_N for "exiting" (see the per-frame block
+  // below, which resolves this against the vehicle's own root each frame
+  // rather than caching a possibly-stale Object3D reference).
+  targetNodeName: string;
+  // Driver vs passenger of targetNodeName, read once at setup time (see
+  // getSeatInfo) so the completion branch doesn't need to re-look it up,
+  // and so it can pick "driving" vs "sitting" as the held pose.
+  seatKind: OccupantSeatKind;
   t: number;
   duration: number;
   startPos: THREE.Vector3;
@@ -113,10 +191,29 @@ interface VehicleTransition {
   // player's body on completion, same idea as the original copying the
   // vehicle's chassis velocity onto the character when it detaches.
   exitVelocity: THREE.Vector3;
+  // Only set for "exiting": the seat being vacated and its own door (if
+  // any) -- used on completion to decide whether to play the
+  // close-door-from-outside animation (see closingDoorOutside below),
+  // mirroring the legacy ExitingVehicle.ts handing off to
+  // CloseVehicleDoorOutside.
+  originSeatName?: string;
+  exitDoorName?: string | null;
+  // Only set for "entering": true when this entry landed in a passenger
+  // seat while wantsToDrive was true (see findSeatAndEntry) -- on arrival,
+  // instead of settling into "sitting", immediately queues a "switching"
+  // transition into the connected driver seat, mirroring Sitting.ts's own
+  // continuous wantsToDrive check auto-triggering SwitchingSeats.
+  autoSwitchToDriverOnArrival?: boolean;
 }
 
 const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const input = useInput();
+  // Named worldScene, not scene -- useGLTF below already claims `scene`
+  // for the boxman model's own root object; this is the whole R3F canvas
+  // graph, needed at render time (not just inside useFrame, where the
+  // callback's own `state.scene` argument already covers it) to find the
+  // vehicle's seat node for the seated-passenger portal further down.
+  const { scene: worldScene } = useThree();
   const { scene, animations } = useGLTF("boxman.glb");
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { actions } = useAnimations(animations, clonedScene);
@@ -136,6 +233,10 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   useEffect(() => {
     const oneShotClips = [
       "sit_down_left", "sit_down_right", "stand_up_left", "stand_up_right",
+      "enter_airplane_left", "enter_airplane_right",
+      "sitting_shift_left", "sitting_shift_right",
+      "close_door_sitting_left", "close_door_sitting_right",
+      "close_door_standing_left", "close_door_standing_right",
       "jump_idle", "jump_running", "drop_idle", "drop_running", "drop_running_roll",
     ];
     oneShotClips.forEach((name) => {
@@ -148,9 +249,12 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const {
     currentControllable,
     controlledEntityId,
+    controlledSeatName,
     setCurrentControllable,
     isVehicleTransitioning,
     setIsVehicleTransitioning,
+    openVehicleDoors,
+    setDoorOpen,
     setPlayerInfo,
     playerMessage,
     entities,
@@ -160,9 +264,15 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
+      // Which seat (by glb node name) this player currently occupies --
+      // null while on foot. Used for seat-switching and the
+      // door-close-from-inside logic in the parked block below.
+      controlledSeatName: state.controlledSeatName,
       setCurrentControllable: state.setCurrentControllable,
       isVehicleTransitioning: state.isVehicleTransitioning,
       setIsVehicleTransitioning: state.setIsVehicleTransitioning,
+      openVehicleDoors: state.openVehicleDoors,
+      setDoorOpen: state.setDoorOpen,
       setPlayerInfo: state.setPlayerInfo,
       isPaused: state.isPaused,
       playerMessage: state.playerMessage,
@@ -309,7 +419,16 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   // don't trigger a render, and we want the character to stay visible
   // through the "exiting" animation instead of popping in only at the end.
   const vehicleTransition = useRef<VehicleTransition | null>(null);
-  const [transitionMode, setTransitionMode] = useState<"entering" | "exiting" | null>(null);
+  const [transitionMode, setTransitionMode] = useState<"entering" | "exiting" | "switching" | null>(null);
+  // Legacy CloseVehicleDoorInside port: plays while seated/driving, once
+  // this seat's own door is open and nobody's pressing a direction (see the
+  // parked block below). Purely cosmetic -- doesn't move the body, just
+  // switches the held animation for its duration.
+  const doorCloseTransition = useRef<{ vehicleId: string; doorName: string; anim: string; t: number; duration: number } | null>(null);
+  // Legacy CloseVehicleDoorOutside port: set up at the tail of an
+  // "exiting" transition's completion (see the transition block below),
+  // plays once back on foot, freezing movement for its duration.
+  const closingDoorOutside = useRef<{ vehicleId: string; doorName: string; anim: string; t: number; duration: number } | null>(null);
   // While parked in a vehicle (not transitioning), tracks the seat's world
   // position frame to frame so we can estimate the vehicle's velocity and
   // hand it to the player's body on exit -- same idea as the original
@@ -347,6 +466,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       (window as any).__playerScene = state.scene;
       (window as any).__playerFrameCount = ((window as any).__playerFrameCount || 0) + 1;
       (window as any).__playerInput = { ...input, delta };
+      (window as any).__playerModelRotation = modelRotation.current;
     }
 
     // Synchronous Rapier read (see rigidBodyRef comment above) -- refreshes
@@ -385,7 +505,12 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       const targetPos = new THREE.Vector3();
       const targetQuat = new THREE.Quaternion();
       if (parts) {
-        const targetObj = transition.mode === "entering" ? parts.seat : parts.entrance;
+        // "entering"/"switching" lerp to a seat_N; "exiting" lerps to an
+        // entrance_N -- both authored at the surface the character's base
+        // should rest on (see the RADIUS comment below), so a single named
+        // lookup against the vehicle's own root covers all three modes.
+        const targetObj = parts.root.getObjectByName(transition.targetNodeName)
+          ?? (transition.mode === "exiting" ? parts.entrance : parts.seat);
         targetObj.getWorldPosition(targetPos);
         targetObj.getWorldQuaternion(targetQuat);
         // The RigidBody's origin is the BallCollider's center, but the
@@ -409,8 +534,66 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       setPlayerInfo([lerpPos.x, lerpPos.y, lerpPos.z], modelRotation.current);
 
       if (factor >= 1) {
-        if (transition.mode === "entering") {
-          setCurrentControllable(transition.vehicleType, transition.vehicleId);
+        if (
+          transition.mode === "entering" &&
+          transition.autoSwitchToDriverOnArrival &&
+          transition.seatKind === "passenger"
+        ) {
+          // Landed in a passenger seat while wantsToDrive was true --
+          // immediately auto-slide into the connected driver's seat
+          // instead of settling into "sitting" at all, mirroring
+          // Sitting.ts's own continuous wantsToDrive check triggering
+          // SwitchingSeats the instant you've sat down. Queues a new
+          // "switching" transition and returns early, skipping the normal
+          // cleanup below (a transition is already in flight).
+          const partsNow = getVehicleParts(state.scene, transition.vehicleId);
+          const fromSeat = partsNow ? getSeatInfo(partsNow.root, transition.targetNodeName) : null;
+          const toSeat = partsNow && fromSeat?.connectedSeatName ? getSeatInfo(partsNow.root, fromSeat.connectedSeatName) : null;
+          if (partsNow && fromSeat && toSeat) {
+            const fromPos = new THREE.Vector3();
+            fromSeat.node.getWorldPosition(fromPos);
+            fromPos.y += RADIUS;
+            const fromQuat = new THREE.Quaternion();
+            fromSeat.node.getWorldQuaternion(fromQuat);
+            const toPos = new THREE.Vector3();
+            toSeat.node.getWorldPosition(toPos);
+            const side = sideOf(fromPos, fromQuat, toPos);
+            const switchAnim = side === "left" ? "sitting_shift_left" : "sitting_shift_right";
+
+            vehicleTransition.current = {
+              mode: "switching",
+              vehicleId: transition.vehicleId,
+              vehicleType: transition.vehicleType,
+              targetNodeName: toSeat.name,
+              seatKind: toSeat.kind,
+              t: 0,
+              duration: clipDuration(switchAnim, 0.5),
+              startPos: fromPos,
+              startQuat: fromQuat,
+              anim: switchAnim,
+              exitVelocity: new THREE.Vector3(),
+            };
+            setIsVehicleTransitioning(true, transition.vehicleId, null);
+            setTransitionMode("switching");
+            return;
+          }
+          // No connected driver seat found (shouldn't happen given
+          // findSeatAndEntry already required one to set this flag) --
+          // fall through and just settle into the passenger seat normally.
+          setCurrentControllable(transition.vehicleType, transition.vehicleId, transition.seatKind, transition.targetNodeName);
+          playAnim("sitting");
+        } else if (transition.mode === "entering" || transition.mode === "switching") {
+          setCurrentControllable(transition.vehicleType, transition.vehicleId, transition.seatKind, transition.targetNodeName);
+          // Legacy's Driving.ts/Sitting.ts: playAnimation("driving"/
+          // "sitting", 0.1) the instant control actually switches (or a
+          // seat-switch lands) -- missing this meant the character just
+          // stayed frozen on the last frame of sit_down_left/right
+          // (clamped, see the oneShotClips comment) for the whole ride
+          // instead of holding a proper seated pose. The driver gets the
+          // hands-on-wheel "driving" pose (same clip for every vehicle
+          // type, matching the legacy Driving state); any other seat just
+          // holds "sitting".
+          playAnim(transition.seatKind === "driver" ? "driving" : "sitting");
         } else {
           body.setEnabled(true);
           body.setLinvel({ x: transition.exitVelocity.x, y: transition.exitVelocity.y, z: transition.exitVelocity.z }, true);
@@ -422,6 +605,35 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
           wasGrounded.current = false;
           airPhase.current = "falling";
           airPhaseTimer.current = 0;
+
+          // Legacy's ExitingVehicle.ts: only close the door from outside
+          // (CloseVehicleDoorOutside) if nobody's already holding a
+          // direction key -- if you're in a hurry and walking off, the
+          // door is just left open until someone closes it later (matches
+          // the original faithfully, quirky as that sounds).
+          const stillNoDirection = !input.forward && !input.backward && !input.left && !input.right;
+          const partsNow = transition.exitDoorName ? getVehicleParts(state.scene, transition.vehicleId) : null;
+          const originSeatNode = partsNow && transition.originSeatName ? partsNow.root.getObjectByName(transition.originSeatName) : null;
+          const originDoorNode = partsNow && transition.exitDoorName ? partsNow.root.getObjectByName(transition.exitDoorName) : null;
+          if (stillNoDirection && transition.exitDoorName && originSeatNode && originDoorNode) {
+            const seatPos = new THREE.Vector3();
+            originSeatNode.getWorldPosition(seatPos);
+            const seatQuat = new THREE.Quaternion();
+            originSeatNode.getWorldQuaternion(seatQuat);
+            const doorPos = new THREE.Vector3();
+            originDoorNode.getWorldPosition(doorPos);
+            const side = sideOf(seatPos, seatQuat, doorPos);
+            // Legacy inverts left/right for the OUTSIDE close animation
+            // relative to the seat's own side (see CloseVehicleDoorOutside.ts).
+            const closeAnim = side === "left" ? "close_door_standing_right" : "close_door_standing_left";
+            closingDoorOutside.current = {
+              vehicleId: transition.vehicleId,
+              doorName: transition.exitDoorName,
+              anim: closeAnim,
+              t: 0,
+              duration: clipDuration(closeAnim, 0.5),
+            };
+          }
         }
         vehicleTransition.current = null;
         setIsVehicleTransitioning(false);
@@ -430,65 +642,175 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       return;
     }
 
-    if (!isPlayerActive) {
-      // Parked inside a vehicle: follow the seat every frame so the
-      // invisible body doesn't get left behind wherever it was boarded --
-      // and, since it no longer collides with the ground (see
-      // collisionGroups above), doesn't just fall forever either. This
-      // is a pragmatic stand-in for the original literally attaching the
-      // character to the vehicle's transform while seated.
-      if (controlledEntityId) {
-        const parts = getVehicleParts(state.scene, controlledEntityId);
-        if (parts) {
-          const seatPos = new THREE.Vector3();
-          parts.seat.getWorldPosition(seatPos);
-          // Same RADIUS correction as the transition lerp above -- without
-          // it the seated body (and visible model) sinks into the vehicle
-          // for the whole ride, not just during the sit-down animation.
-          seatPos.y += RADIUS;
-          body.setTranslation({ x: seatPos.x, y: seatPos.y, z: seatPos.z }, true);
+    // Post-exit "closing the door from outside" hold, mirroring the legacy
+    // CloseVehicleDoorOutside character state -- set up at the tail of the
+    // "exiting" completion branch just above. Runs entirely on foot
+    // (isPlayerActive is already true here), frozen in place for the
+    // clip's duration (no WASD, no gravity drift), then clears the door's
+    // held-open flag and falls through to normal control next frame.
+    if (closingDoorOutside.current) {
+      const cd = closingDoorOutside.current;
+      cd.t += delta;
+      playAnim(cd.anim);
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      setPlayerInfo([position.current[0], position.current[1], position.current[2]], modelRotation.current);
+      if (cd.t >= cd.duration) {
+        setDoorOpen(cd.vehicleId, cd.doorName, false);
+        closingDoorOutside.current = null;
+      }
+      return;
+    }
 
-          if (lastSeatPos.current && delta > 0) {
-            seatVelocityEstimate.current
-              .copy(seatPos)
-              .sub(lastSeatPos.current)
-              .divideScalar(delta);
-          }
-          lastSeatPos.current = seatPos;
+    if (!isPlayerActive) {
+      // Parked inside a vehicle. The visible model's position AND rotation
+      // are no longer copied by hand here -- see the createPortal block in
+      // the render below, which re-parents clonedScene onto the vehicle's
+      // own seat node for real (matching the original's
+      // `vehicle.attach(this)` in the old Character.ts), so normal
+      // matrixWorld propagation carries both for free every frame. This
+      // block still runs every frame for: estimating the seat's velocity
+      // (so jumping out of a moving vehicle keeps its momentum), zeroing
+      // the disabled RigidBody's own velocity so it doesn't wake up
+      // mid-drive with stale momentum from before boarding, seat-switching
+      // (X), the door-close-from-inside character animation (mirroring
+      // Driving.ts/Sitting.ts), and leaving the seat (F).
+      const parts = controlledEntityId ? getVehicleParts(state.scene, controlledEntityId) : null;
+      const mySeat = parts && controlledSeatName ? getSeatInfo(parts.root, controlledSeatName) : null;
+
+      if (parts) {
+        const seatPos = new THREE.Vector3();
+        parts.seat.getWorldPosition(seatPos);
+
+        if (lastSeatPos.current && delta > 0) {
+          seatVelocityEstimate.current
+            .copy(seatPos)
+            .sub(lastSeatPos.current)
+            .divideScalar(delta);
         }
+        lastSeatPos.current = seatPos;
       }
       body.setLinvel({ x: 0, y: 0, z: 0 }, true);
 
-      if (input.consumeJustPressed("enter") && controlledEntityId) {
-        const parts = getVehicleParts(state.scene, controlledEntityId);
-        if (parts) {
-          const startPos = new THREE.Vector3();
-          parts.seat.getWorldPosition(startPos);
-          startPos.y += RADIUS; // matches the seat-follow correction above
-          const startQuat = new THREE.Quaternion();
-          parts.seat.getWorldQuaternion(startQuat);
-          const entrancePos = new THREE.Vector3();
-          parts.entrance.getWorldPosition(entrancePos);
-          const side = sideOf(startPos, startQuat, entrancePos);
+      // Seat switching (X / seat_switch): lerp to whichever seat this
+      // one's userData.connected_seats names, playing sitting_shift_left/
+      // right -- a direct port of SwitchingSeats.ts. Reuses the same
+      // vehicleTransition machinery as entering/exiting (mode "switching"),
+      // seeding the disabled body's own position to the FROM seat first,
+      // same as every other transition.
+      if (input.consumeJustPressed("seat_switch") && parts && mySeat?.connectedSeatName && !doorCloseTransition.current) {
+        const toSeat = getSeatInfo(parts.root, mySeat.connectedSeatName);
+        if (toSeat) {
+          const fromPos = new THREE.Vector3();
+          mySeat.node.getWorldPosition(fromPos);
+          fromPos.y += RADIUS;
+          const fromQuat = new THREE.Quaternion();
+          mySeat.node.getWorldQuaternion(fromQuat);
+          const toPos = new THREE.Vector3();
+          toSeat.node.getWorldPosition(toPos);
+          const side = sideOf(fromPos, fromQuat, toPos);
+          const switchAnim = side === "left" ? "sitting_shift_left" : "sitting_shift_right";
 
           vehicleTransition.current = {
-            mode: "exiting",
-            vehicleId: controlledEntityId,
+            mode: "switching",
+            vehicleId: controlledEntityId!,
             vehicleType: currentControllable as VehicleType,
+            targetNodeName: toSeat.name,
+            seatKind: toSeat.kind,
             t: 0,
-            duration: VEHICLE_EXIT_DURATION,
-            startPos,
-            startQuat,
-            anim: side === "left" ? "stand_up_left" : "stand_up_right",
-            exitVelocity: seatVelocityEstimate.current.clone(),
+            duration: clipDuration(switchAnim, 0.5),
+            startPos: fromPos,
+            startQuat: fromQuat,
+            anim: switchAnim,
+            exitVelocity: new THREE.Vector3(),
           };
-          // Exiting always goes back out through the driver's own door
-          // (seat_1/door_1) -- you got in through whichever door was
-          // closest, but you're driving from the front seat, so getting
-          // out the front makes sense regardless of how you got in.
-          setIsVehicleTransitioning(true, controlledEntityId, "door_1");
-          setTransitionMode("exiting");
+          setIsVehicleTransitioning(true, controlledEntityId, null);
+          setTransitionMode("switching");
+          return;
         }
+      }
+
+      // Close-door-from-inside (mirrors Driving.ts/Sitting.ts's per-frame
+      // `door.rotation > 0 && noDirectionPressed() -> CloseVehicleDoorInside`):
+      // once this seat's own door is open and nobody's pressing a
+      // direction, play the seated close-door clip once, then clear the
+      // door's held-open flag in the store.
+      const noDirection = !input.forward && !input.backward && !input.left && !input.right;
+      if (
+        !doorCloseTransition.current &&
+        mySeat?.doorName &&
+        controlledEntityId &&
+        !!openVehicleDoors[`${controlledEntityId}:${mySeat.doorName}`] &&
+        noDirection
+      ) {
+        const doorNode = parts?.root.getObjectByName(mySeat.doorName) ?? null;
+        const seatPos2 = new THREE.Vector3();
+        mySeat.node.getWorldPosition(seatPos2);
+        const seatQuat2 = new THREE.Quaternion();
+        mySeat.node.getWorldQuaternion(seatQuat2);
+        const doorPos = new THREE.Vector3();
+        (doorNode ?? mySeat.node).getWorldPosition(doorPos);
+        const side = sideOf(seatPos2, seatQuat2, doorPos);
+        const closeAnim = side === "left" ? "close_door_sitting_left" : "close_door_sitting_right";
+        doorCloseTransition.current = {
+          vehicleId: controlledEntityId,
+          doorName: mySeat.doorName,
+          anim: closeAnim,
+          t: 0,
+          duration: clipDuration(closeAnim, 0.5),
+        };
+      }
+
+      if (doorCloseTransition.current) {
+        const dc = doorCloseTransition.current;
+        dc.t += delta;
+        playAnim(dc.anim);
+        if (dc.t >= dc.duration) {
+          setDoorOpen(dc.vehicleId, dc.doorName, false);
+          doorCloseTransition.current = null;
+        }
+      } else if (mySeat) {
+        // Held pose once not mid-close-door -- also what reasserts
+        // "driving"/"sitting" the frame right after a close-door animation
+        // finishes (playAnim no-ops if already the current clip, so this
+        // is a cheap no-op most frames).
+        playAnim(mySeat.kind === "driver" ? "driving" : "sitting");
+      }
+
+      if (input.consumeJustPressed("enter") && controlledEntityId && parts) {
+        // Leave through THIS seat's own entry point (legacy's
+        // ExitingVehicle.ts: `this.exitPoint = seat.entryPoints[0]`) --
+        // faithful now that passenger seats are real occupiable seats, not
+        // just always the driver's own front door.
+        const seatForExit = mySeat ?? getSeatInfo(parts.root, "seat_1");
+        const entryNode = seatForExit?.entryPointName ? parts.root.getObjectByName(seatForExit.entryPointName) : null;
+        const exitPointNode = entryNode ?? parts.entrance;
+
+        const startPos = new THREE.Vector3();
+        (seatForExit?.node ?? parts.seat).getWorldPosition(startPos);
+        startPos.y += RADIUS; // matches the seat-follow correction above
+        const startQuat = new THREE.Quaternion();
+        (seatForExit?.node ?? parts.seat).getWorldQuaternion(startQuat);
+        const entrancePos = new THREE.Vector3();
+        exitPointNode.getWorldPosition(entrancePos);
+        const side = sideOf(startPos, startQuat, entrancePos);
+
+        vehicleTransition.current = {
+          mode: "exiting",
+          vehicleId: controlledEntityId,
+          vehicleType: currentControllable as VehicleType,
+          targetNodeName: exitPointNode.name,
+          seatKind: seatForExit?.kind ?? "driver",
+          t: 0,
+          duration: VEHICLE_EXIT_DURATION,
+          startPos,
+          startQuat,
+          anim: side === "left" ? "stand_up_left" : "stand_up_right",
+          exitVelocity: seatVelocityEstimate.current.clone(),
+          originSeatName: seatForExit?.name ?? "seat_1",
+          exitDoorName: seatForExit?.doorName ?? null,
+        };
+        setIsVehicleTransitioning(true, controlledEntityId, seatForExit?.doorName ?? null);
+        setTransitionMode("exiting");
       }
       return;
     }
@@ -497,10 +819,19 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
 
     // Vehicle entry: find the nearest vehicle within reach of its door.
     // Two-stage search mirrors the original's findVehicleToEnter() --
-    // nearest vehicle overall, then nearest entry point on it -- except the
-    // original then auto-walks the character to the door; this port
-    // requires the player to already be standing next to it.
-    if (input.consumeJustPressed("enter")) {
+    // nearest vehicle overall, then (via findSeatAndEntry) the best SEAT
+    // for the given intent and the nearest of ITS OWN entry points --
+    // except the original then auto-walks the character all the way to
+    // the door; this port requires the player to already be standing
+    // within VEHICLE_ENTRANCE_RANGE of it. 'enter' (F, wantsToDrive) only
+    // ever lands you in the driver's seat or a seat connected to it (e.g.
+    // car.glb's front passenger seat_2, NOT the unconnected rear
+    // seat_3/seat_4) -- faithfully reverted from an earlier "every door
+    // makes you drive" shortcut. 'enter_passenger' (G) is the
+    // wantsToDrive=false path: any passenger seat, no connection required.
+    const wantsToDrive = input.consumeJustPressed("enter");
+    const wantsPassengerSeat = !wantsToDrive && input.consumeJustPressed("enter_passenger");
+    if (wantsToDrive || wantsPassengerSeat) {
       const playerPos = new THREE.Vector3(position.current[0], position.current[1], position.current[2]);
       let closestId: string | null = null;
       let closestType: VehicleType | null = null;
@@ -518,52 +849,67 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       if (closestId && closestType) {
         const parts = getVehicleParts(state.scene, closestId);
         if (parts) {
-          // Check every door this vehicle has, not just the driver's --
-          // whichever one is actually nearest (and within range) is the
-          // one used to get in. The final SEAT is still always seat_1 (see
-          // getVehicleEntrances' own comment for why); only the entrance
-          // point/side/door vary.
-          const entrances = getVehicleEntrances(parts.root);
-          let bestEntrance: VehicleEntrance | null = null;
-          let bestEntranceDist = VEHICLE_ENTRANCE_RANGE;
-          const candidatePos = new THREE.Vector3();
-          for (const candidate of entrances) {
-            candidate.entrance.getWorldPosition(candidatePos);
-            const d = playerPos.distanceTo(candidatePos);
-            if (d < bestEntranceDist) {
-              bestEntranceDist = d;
-              bestEntrance = candidate;
-            }
-          }
+          const found = findSeatAndEntry(parts.root, playerPos, wantsToDrive);
 
-          if (bestEntrance) {
+          if (found) {
             const entrancePos = new THREE.Vector3();
-            bestEntrance.entrance.getWorldPosition(entrancePos);
-            const entranceQuat = new THREE.Quaternion();
-            bestEntrance.entrance.getWorldQuaternion(entranceQuat);
-            const seatPos = new THREE.Vector3();
-            parts.seat.getWorldPosition(seatPos);
-            const side = sideOf(entrancePos, entranceQuat, seatPos);
+            found.entry.getWorldPosition(entrancePos);
 
-            vehicleTransition.current = {
-              mode: "entering",
-              vehicleId: closestId,
-              vehicleType: closestType,
-              t: 0,
-              duration: VEHICLE_ENTER_DURATION,
-              startPos: playerPos.clone(),
-              startQuat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), modelRotation.current),
-              anim: side === "left" ? "sit_down_left" : "sit_down_right",
-              exitVelocity: new THREE.Vector3(),
-            };
-            // See the big comment above this function's vehicle-entry section --
-            // stop colliding with anything (the target car included) for the
-            // whole time this body is associated with a vehicle, re-enabled
-            // only once fully exited below.
-            body.setEnabled(false);
-            setIsVehicleTransitioning(true, closestId, bestEntrance.doorName);
-            setTransitionMode("entering");
-            return;
+            // Stand-in for the legacy auto-walk: the player has to already
+            // be next to whichever entry point this resolved to.
+            if (playerPos.distanceTo(entrancePos) <= VEHICLE_ENTRANCE_RANGE) {
+              const entranceQuat = new THREE.Quaternion();
+              found.entry.getWorldQuaternion(entranceQuat);
+              const seatPos = new THREE.Vector3();
+              found.seat.node.getWorldPosition(seatPos);
+              const side = sideOf(entrancePos, entranceQuat, seatPos);
+
+              // boxman.glb actually ships dedicated enter_airplane_left/
+              // right clips (climbing up onto the wing/cockpit), distinct
+              // from the car's sit_down_left/right -- confirmed present in
+              // the glb's animation list but never referenced anywhere in
+              // this file, so every vehicle including the airplane was
+              // always using the car clip. Same idea as
+              // getEntryAnimations() in the legacy EnteringVehicle.ts,
+              // just inlined here since this port only ever needs the one
+              // animation-set distinction (car/heli share the same seated
+              // pose, only the airplane's is different).
+              const enterAnim = closestType === "airplane"
+                ? (side === "left" ? "enter_airplane_left" : "enter_airplane_right")
+                : (side === "left" ? "sit_down_left" : "sit_down_right");
+
+              vehicleTransition.current = {
+                mode: "entering",
+                vehicleId: closestId,
+                vehicleType: closestType,
+                targetNodeName: found.seat.name,
+                seatKind: found.seat.kind,
+                t: 0,
+                duration: VEHICLE_ENTER_DURATION,
+                startPos: playerPos.clone(),
+                startQuat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), modelRotation.current),
+                anim: enterAnim,
+                exitVelocity: new THREE.Vector3(),
+                // Landed in a passenger seat while actually wanting to
+                // drive (e.g. car.glb's seat_2, connected to the driver's
+                // seat_1) -- see Sitting.ts's own continuous wantsToDrive
+                // check, replicated on arrival in the completion branch
+                // above.
+                autoSwitchToDriverOnArrival: wantsToDrive && found.seat.kind === "passenger",
+              };
+              // See the big comment above this function's vehicle-entry section --
+              // stop colliding with anything (the target car included) for the
+              // whole time this body is associated with a vehicle, re-enabled
+              // only once fully exited below.
+              body.setEnabled(false);
+              setIsVehicleTransitioning(true, closestId, found.seat.doorName);
+              // Held open until the character's own close-door-from-inside
+              // animation runs (see the parked block above), not simply once
+              // this entering transition ends.
+              if (found.seat.doorName) setDoorOpen(closestId, found.seat.doorName, true);
+              setTransitionMode("entering");
+              return;
+            }
           }
         }
       }
@@ -736,6 +1082,38 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     }
   });
 
+  // Real re-parenting for the steady-state "seated and driving" case --
+  // the actual fix for "perche' non rifacciamo [l'attach originale]":
+  // rather than copying position AND rotation onto the RigidBody by hand
+  // every frame (fragile -- that's exactly how the RADIUS offset and the
+  // rotation-follow bugs both happened, one missed field at a time),
+  // createPortal renders clonedScene as a real three.js child of the
+  // vehicle's own seat_1 node for as long as we're fully seated. From then
+  // on ordinary matrixWorld propagation carries position AND full 3D
+  // rotation (pitch/roll included, e.g. an airplane banking -- something
+  // the Y-only modelRotation.current approach could never do) for free,
+  // every frame, with no per-frame code at all -- the same guarantee
+  // `vehicle.attach(this)` gave the original, just reached the React way
+  // (an imperative Object3D.attach() would fight the <primitive>'s own
+  // JSX-driven position/rotation props being re-applied on every re-render).
+  //
+  // Deliberately scoped to ONLY the steady-state period (not entering/
+  // exiting): the transition lerp's world-space math already works
+  // correctly (RADIUS + rotation both fixed above) and doing that part in
+  // local-seat-space too would mean re-deriving the entrance/seat relative
+  // offsets for comparatively little benefit, for more risk, than leaving
+  // an already-working animation alone.
+  const isPlayerActiveForRender = currentControllable === "player";
+  const seatedContainer =
+    !isPlayerActiveForRender && !isVehicleTransitioning && controlledEntityId
+      // Portal onto the ACTUAL occupied seat (controlledSeatName), not
+      // always seat_1 -- getVehicleParts().seat is hardcoded to the
+      // driver's seat, which was fine back when only the driver seat was
+      // ever occupiable, but a passenger sitting in seat_2/3/4 needs to be
+      // parented to their own seat node instead.
+      ? (getVehicleParts(worldScene, controlledEntityId)?.root.getObjectByName(controlledSeatName ?? "seat_1") ?? null)
+      : null;
+
   return (
     <>
       <RigidBody
@@ -777,12 +1155,32 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
             RigidBodyProps' TS type has no index signature for arbitrary
             Object3D props like `visible`. */}
         <group>
-          <group rotation={[0, modelRotation.current, 0]}>
-            <primitive object={clonedScene} position={[0, -RADIUS, 0]} />
-          </group>
-          <SpeechBubble message={playerMessage} position={[0, 1.2, 0]} />
+          {/* While actually seated (not mid entry/exit animation), the
+              model+bubble are portalled directly into the vehicle's seat
+              node below instead of rendered here -- see the big comment
+              above the seatedContainer computation. */}
+          {!seatedContainer && (
+            <>
+              <group rotation={[0, modelRotation.current, 0]}>
+                <primitive object={clonedScene} position={[0, -RADIUS, 0]} />
+              </group>
+              <SpeechBubble message={playerMessage} position={[0, 1.2, 0]} />
+            </>
+          )}
         </group>
       </RigidBody>
+      {seatedContainer && createPortal(
+        <>
+          {/* seat_1 is already authored at exactly the point the
+              character's root should sit (confirmed by the RADIUS math in
+              the transition lerp above: bodyOrigin = seatY + RADIUS, model
+              drawn at bodyOrigin - RADIUS, net = seatY) -- so, parented
+              directly to it, no local offset is needed at all. */}
+          <primitive object={clonedScene} position={[0, 0, 0]} quaternion={[0, 0, 0, 1]} />
+          <SpeechBubble message={playerMessage} position={[0, 1.2, 0]} />
+        </>,
+        seatedContainer
+      )}
       {Array.from(remotePlayers.values()).map((p) => (
         <NetworkPlayer key={p.id} data={p} />
       ))}

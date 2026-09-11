@@ -24,6 +24,21 @@ const _planeQuat = new THREE.Quaternion();
 const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'airplane-1' }) => {
   const { scene } = useGLTF('airplane.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
+
+  // car.glb's own "collision" helper meshes (boxes/spheres wrapping the
+  // body, authored in Blender only to help build the physics hull, never
+  // meant to be visible in-game) got hidden in Car.tsx a while back -- this
+  // glb bakes in the exact same kind of helpers (Cube.NNN boxes + Sphere.NNN
+  // spheres, all carrying userData.data === 'collision') and never got the
+  // same treatment, so they rendered as real geometry floating on the plane
+  // (see git history / chat: "l'aereo ha delle sfere visibili"). Purely
+  // visual -- the actual physics collider below (chassisHalfExtents) is
+  // unrelated to this hide.
+  useEffect(() => {
+    clonedScene.traverse((child) => {
+      if (child.userData?.data === 'collision') child.visible = false;
+    });
+  }, [clonedScene]);
   const input = useInput();
   // Vehicle entry/exit (including the exit key) is orchestrated centrally
   // by Player.tsx (see vehicleTransition there).
@@ -89,6 +104,22 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
     velocity.current[0] = lv.x;
     velocity.current[1] = lv.y;
     velocity.current[2] = lv.z;
+
+    // Keep the store's entities map accurate EVEN WHILE PARKED -- see
+    // Helicopter.tsx for the full writeup (same latent bug, same fix): this
+    // used to sit only in the isAirplaneActive branch below, so a
+    // never-entered airplane's stored position was frozen at whatever
+    // chassisRef.current.translation() happened to be at the very first
+    // mount-time snapshot, forever outside Player.tsx's
+    // VEHICLE_SEARCH_RADIUS. Throttled the same way (~10Hz) as the old
+    // active-only call it replaces.
+    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
+      const t0 = body.translation();
+      const rot0 = body.rotation();
+      _planeQuat.set(rot0.x, rot0.y, rot0.z, rot0.w);
+      _planeEuler.setFromQuaternion(_planeQuat, 'YXZ');
+      updateEntity(id, { type: 'airplane', position: [t0.x, t0.y, t0.z], rotation: _planeEuler.y });
+    }
 
     if (!isAirplaneActive) {
       if (enginePower.current > 0) enginePower.current = Math.max(0, enginePower.current - delta * 0.12);
@@ -172,13 +203,9 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
     // Update player info so camera/minimap follow the plane
     setPlayerInfo([planePos.x, planePos.y, planePos.z], planeEuler.y);
 
-    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
-      updateEntity(id, {
-        type: 'airplane',
-        position: [planePos.x, planePos.y, planePos.z],
-        rotation: planeEuler.y
-      });
-    }
+    // (Position/rotation for the store are now kept up to date
+    // unconditionally above, active or parked -- no need to duplicate it
+    // here.)
   });
 
   return (

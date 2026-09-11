@@ -13,6 +13,13 @@ import { getRoadOffset } from '../Environment/Road';
 interface CarProps {
   position?: [number, number, number];
   id?: string;
+  // Initial yaw, e.g. for a car spawned already facing along a road/curb
+  // (see CityDetails.tsx's parked cars, now real drivable Car instances
+  // instead of the old static ParkedCar decoration) -- purely a spawn-time
+  // orientation, exactly like `position`; the RigidBody is fully dynamic
+  // afterwards so this doesn't constrain it in any way once physics takes
+  // over.
+  rotation?: [number, number, number];
 }
 
 // ---------------------------------------------------------------------------
@@ -155,7 +162,7 @@ const _chassisUp = new THREE.Vector3();
 const _uprightQuat = new THREE.Quaternion();
 const _uprightEuler = new THREE.Euler();
 
-const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
+const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation = [0, 0, 0] }) => {
   const { scene } = useGLTF('car.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
   const { world } = useRapier();
@@ -200,13 +207,20 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
   }, [clonedScene]);
 
   const input = useInput();
-  const { currentControllable, controlledEntityId, isVehicleTransitioning, transitioningEntityId, transitioningDoorName, updateEntity, setPlayerInfo, isPaused } = useStore(
+  const { currentControllable, controlledEntityId, controlledSeatType, isVehicleTransitioning, transitioningEntityId, transitioningDoorName, openVehicleDoors, updateEntity, setPlayerInfo, isPaused } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
+      // Only an occupant of the DRIVER seat actually steers/throttles the
+      // car (see isCarActive below) -- a passenger just rides along, same
+      // as the legacy Sitting state never calling startControllingVehicle().
+      controlledSeatType: state.controlledSeatType,
       isVehicleTransitioning: state.isVehicleTransitioning,
       transitioningEntityId: state.transitioningEntityId,
       transitioningDoorName: state.transitioningDoorName,
+      // Doors held open by Player.tsx's close-door character animation
+      // states, independent of isVehicleTransitioning -- see store.ts.
+      openVehicleDoors: state.openVehicleDoors,
       updateEntity: state.updateEntity,
       setPlayerInfo: state.setPlayerInfo,
       isPaused: state.isPaused,
@@ -407,7 +421,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
       }
     }
 
-    const isCarActive = currentControllable === 'car' && controlledEntityId === id && !isVehicleTransitioning;
+    const isCarActive = currentControllable === 'car' && controlledEntityId === id && !isVehicleTransitioning && controlledSeatType === 'driver';
 
     if (!isCarActive) {
       // Parked/undriven: no self-propulsion, no brake, wheels centered --
@@ -581,16 +595,22 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
     // finishes, so during "entering" it still points at whatever was
     // controlled before (see transitioningEntityId in store.ts).
     {
-      // Only the door named by transitioningDoorName opens; every other
-      // door on this car animates back toward closed, same as before this
-      // was multi-door (see the doorsRef comment above).
-      const activeDoorName = isVehicleTransitioning && transitioningEntityId === id
+      // The door being actively walked through this instant (mid entering/
+      // exiting transition) always swings open; on top of that, ANY door
+      // Player.tsx has marked as held-open in the store (openVehicleDoors --
+      // set the moment it's walked through, cleared only once the
+      // character's own close-door animation finishes, see store.ts) stays
+      // open too. That's what lets the door hang open the whole time you're
+      // stopped mid-drive instead of auto-closing the instant the
+      // entering/exiting lerp itself ends.
+      const transitioningDoor = isVehicleTransitioning && transitioningEntityId === id
         ? (transitioningDoorName ?? 'door_1')
         : null;
       const step = DOOR_ROTATION_SPEED * delta;
       for (const doorName in doorsRef.current) {
         const door = doorsRef.current[doorName];
-        const target = doorName === activeDoorName ? 1 : 0;
+        const isHeldOpen = !!openVehicleDoors[`${id}:${doorName}`];
+        const target = (doorName === transitioningDoor || isHeldOpen) ? 1 : 0;
         const current = doorOpenFactors.current[doorName] ?? 0;
         const diff = target - current;
         const next = Math.abs(diff) <= step ? target : current + Math.sign(diff) * step;
@@ -668,6 +688,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1' }) => {
       type="dynamic"
       colliders={false}
       position={position}
+      rotation={rotation}
       linearDamping={0.01}
       angularDamping={0.01}
       canSleep={false}

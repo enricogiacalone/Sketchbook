@@ -27,13 +27,30 @@ const _heliQuat = new THREE.Quaternion();
 const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 'heli-1' }) => {
   const { scene } = useGLTF('heli.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
+
+  // Same fix as Airplane.tsx / Car.tsx: heli.glb bakes in its own
+  // "collision" helper meshes (Cube.NNN boxes + Sphere.NNN spheres, all
+  // carrying userData.data === 'collision') authored only to help build the
+  // physics hull in Blender, never meant to be visible in-game -- nothing
+  // was hiding them here, so they rendered as real geometry (see git
+  // history / chat: "l'elicottero ha delle sfere visibili").
+  useEffect(() => {
+    clonedScene.traverse((child) => {
+      if (child.userData?.data === 'collision') child.visible = false;
+    });
+  }, [clonedScene]);
   const input = useInput();
   // Vehicle entry/exit (including the exit key) is orchestrated centrally
   // by Player.tsx (see vehicleTransition there).
-  const { currentControllable, controlledEntityId, isVehicleTransitioning, updateEntity, setPlayerInfo, isPaused } = useStore(
+  const { currentControllable, controlledEntityId, controlledSeatType, isVehicleTransitioning, updateEntity, setPlayerInfo, isPaused } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
+      // Only the occupant of the driver seat (seat_1) actually flies the
+      // helicopter -- a passenger in seat_2 just rides along. See
+      // Player.tsx's getSeatInfo()/seat-switching and Car.tsx's identical
+      // isCarActive gate.
+      controlledSeatType: state.controlledSeatType,
       isVehicleTransitioning: state.isVehicleTransitioning,
       updateEntity: state.updateEntity,
       setPlayerInfo: state.setPlayerInfo,
@@ -74,7 +91,7 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
 
   useFrame((state, delta) => {
     const body = ref.current;
-    const isHeliActive = currentControllable === 'helicopter' && controlledEntityId === id && !isVehicleTransitioning;
+    const isHeliActive = currentControllable === 'helicopter' && controlledEntityId === id && !isVehicleTransitioning && controlledSeatType === 'driver';
 
     if (!body) return;
     // Same reasoning as Airplane.tsx: this vehicle's control logic lives in
@@ -92,6 +109,25 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     angularVelocity.current[0] = av.x;
     angularVelocity.current[1] = av.y;
     angularVelocity.current[2] = av.z;
+
+    // Keep the store's entities map accurate EVEN WHILE PARKED (nobody
+    // driving it yet) -- this used to sit only in the isHeliActive branch
+    // below, so a never-entered helicopter's stored position was frozen at
+    // whatever ref.current.translation() happened to be at the very first
+    // mount-time snapshot (still up near its spawn height, e.g. y=20),
+    // forever outside Player.tsx's VEHICLE_SEARCH_RADIUS -- explaining "F
+    // nn fa nulla vicino l'elicottero" (F does nothing near the
+    // helicopter): Player.tsx's nearest-vehicle search never found it in
+    // the first place, regardless of how close the player actually stood.
+    // Throttled the same way (~10Hz) as the old active-only call it
+    // replaces.
+    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
+      const t0 = body.translation();
+      const rot0 = body.rotation();
+      _heliQuat.set(rot0.x, rot0.y, rot0.z, rot0.w);
+      _heliEuler.setFromQuaternion(_heliQuat, 'YXZ');
+      updateEntity(id, { type: 'helicopter', position: [t0.x, t0.y, t0.z], rotation: _heliEuler.y });
+    }
 
     if (!isHeliActive) {
       if (enginePower.current > 0) enginePower.current = Math.max(0, enginePower.current - delta * 0.06);
@@ -182,13 +218,9 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     // Update player info so camera/minimap follow the helicopter
     setPlayerInfo([heliPos.x, heliPos.y, heliPos.z], heliEuler.y);
 
-    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
-      updateEntity(id, {
-        type: 'helicopter',
-        position: [heliPos.x, heliPos.y, heliPos.z],
-        rotation: heliEuler.y
-      });
-    }
+    // (Position/rotation for the store are now kept up to date
+    // unconditionally above, active or parked -- no need to duplicate it
+    // here.)
   });
 
   return (

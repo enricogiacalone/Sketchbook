@@ -1,13 +1,13 @@
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import * as THREE from 'three';
 import { RigidBody, CuboidCollider, CylinderCollider } from '@react-three/rapier';
-import { useGLTF } from '@react-three/drei';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset, ROAD_WIDTH, SIDEWALK_WIDTH } from './Road';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import Pedestrian from './Pedestrian';
 import Enemy from '../Enemy';
 import VideoBillboardScreen from './VideoBillboardScreen';
+import Car from '../Vehicles/Car';
 
 // Street-level detail pass -- benches/trash cans/hydrants/signs along the
 // sidewalks, plus a few statically-parked cars tucked against the curb.
@@ -117,53 +117,6 @@ const SidewalkBench: React.FC<{ x: number; z: number; rotationY: number }> = ({ 
         <meshStandardMaterial color="#333" />
       </mesh>
     </group>
-  );
-};
-
-// --- Parked car ----------------------------------------------------------
-
-// Statically-parked decoration -- same car.glb as the real drivable Car
-// (Vehicles/Car.tsx), but a plain fixed body with one simplified collision
-// box instead of the compound chassis/wheel-controller setup: nothing here
-// ever needs to drive, so none of that machinery is worth paying for.
-const ParkedCar: React.FC<{ x: number; z: number; rotationY: number }> = ({ x, z, rotationY }) => {
-  const { scene } = useGLTF('car.glb');
-  const clonedScene = useMemo(() => {
-    const clone = scene.clone();
-    clone.traverse((child) => {
-      // Same authoring-only helper meshes Car.tsx hides (collision hulls,
-      // the separate non-tire "wheel"-named interior steering wheel prop).
-      if (child.userData?.data === 'collision') child.visible = false;
-      if (child.userData?.data !== 'wheel' && child.name.toLowerCase().includes('wheel')) {
-        child.visible = false;
-      }
-    });
-    return clone;
-  }, [scene]);
-  const y = getTerrainHeight(x, z) + getRoadOffset(x, z);
-  // Matches the resting height a real (dynamic, wheel-suspended) Car.tsx
-  // instance settles to above flat ground -- measured live (~0.43) rather
-  // than guessed, since car.glb's own origin sits near the underside of the
-  // chassis, not at wheel-contact/ground level. The old value (mesh offset
-  // -0.35 cancelling a +0.35 RigidBody offset, netting the mesh origin
-  // right on the ground) buried the wheels in the terrain/road mesh.
-  const REST_HEIGHT = 0.43;
-
-  return (
-    <RigidBody
-      type="fixed"
-      colliders={false}
-      position={[x, y + REST_HEIGHT, z]}
-      rotation={[0, rotationY, 0]}
-      collisionGroups={groupsExcluding(CollisionGroups.Default)}
-    >
-      {/* Approximates Car.tsx's real two-box CHASSIS_SHAPES hull (lower
-          body + cabin) as one simplified box, recentered around the car's
-          actual vertical midpoint now that the mesh has no artificial
-          offset. */}
-      <CuboidCollider args={[0.65, 0.55, 1.25]} position={[0, 0.37, 0]} />
-      <primitive object={clonedScene} />
-    </RigidBody>
   );
 };
 
@@ -366,7 +319,17 @@ const CityDetails: React.FC = () => {
         return <StreetSign key={`f-${i}`} x={f.x} z={f.z} rotationY={f.rotationY} color={f.color ?? '#1565c0'} />;
       })}
       {parkedCars.map((c, i) => (
-        <ParkedCar key={`car-${i}`} x={c.x} z={c.z} rotationY={c.rotationY} />
+        <Car
+          key={`city-car-${i}`}
+          id={`city-car-${i}`}
+          // Spawned a bit above the curb/sidewalk surface, same convention
+          // as Scene.tsx's own named cars (flat ground + clearance) --
+          // real physics settle it the rest of the way, unlike the old
+          // fixed ParkedCar this replaces which had to precompute its own
+          // resting height by hand.
+          position={[c.x, getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + 1.2, c.z]}
+          rotation={[0, c.rotationY, 0]}
+        />
       ))}
       {pedestrians.map((p, i) => (
         <Pedestrian

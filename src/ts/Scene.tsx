@@ -9,6 +9,7 @@ import Road from "./components/Environment/Road";
 import City from "./components/Environment/City";
 import Park from "./components/Environment/Park";
 import CityDetails from "./components/Environment/CityDetails";
+import Airport, { RUNWAY_CENTER, HELIPORT_CENTER } from "./components/Environment/Airport";
 import Clouds from "./components/Environment/Clouds";
 import UFO from "./components/Environment/UFO";
 import MeteoriteSpawner from "./components/Environment/MeteoriteSpawner";
@@ -75,8 +76,12 @@ const Scene: React.FC = () => {
 
         {!DEBUG_DISABLE_CARS_AND_ENEMIES && (
           <>
-            <Airplane />
-            <Helicopter />
+            {/* Spawn on their own pad (see Airport.tsx) instead of the old,
+                somewhat arbitrary in-city coordinates -- same drop height
+                as before (a short fall onto a plain CuboidCollider, proven
+                safe for both, unlike the raycast-suspension cars). */}
+            <Airplane position={[RUNWAY_CENTER[0], 5, RUNWAY_CENTER[1]]} />
+            <Helicopter position={[HELIPORT_CENTER[0], 20, HELIPORT_CENTER[1]]} />
           </>
         )}
       </Suspense>
@@ -85,6 +90,7 @@ const Scene: React.FC = () => {
         <City />
         <Park />
         <CityDetails />
+        <Airport />
       </Suspense>
     </>
   );

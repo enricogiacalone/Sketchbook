@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 
 export type ControllableType = 'player' | 'car' | 'airplane' | 'helicopter';
+// Which kind of seat the player currently occupies inside a vehicle -- null
+// whenever currentControllable is 'player'. Mirrors the legacy SeatType
+// enum (driver/passenger), read straight off each seat's own
+// userData.seat_type (see Player.tsx's getSeatInfo()). Driver-seat occupancy
+// is what actually lets a vehicle read driving input (see Car.tsx/
+// Helicopter.tsx's isActive checks) -- sitting in a passenger seat just
+// rides along.
+export type SeatKind = 'driver' | 'passenger' | null;
 
 export interface EntityInfo {
   id: string;
@@ -15,6 +23,11 @@ interface GameState {
   armor: number;
   currentControllable: ControllableType;
   controlledEntityId: string | null;
+  // Which seat (by glb node name, e.g. "seat_2") and kind (driver/passenger)
+  // the player occupies while parked in a vehicle. Both null whenever
+  // currentControllable is 'player'. See setCurrentControllable.
+  controlledSeatType: SeatKind;
+  controlledSeatName: string | null;
   // True while the player is mid walk-in/walk-out of a vehicle (see
   // Player.tsx's vehicleTransition). Vehicles ignore driving input while
   // this is true, so you can't still steer a car away while visibly
@@ -33,6 +46,16 @@ interface GameState {
   // entrance (see Player.tsx's getVehicleEntrances) knows WHICH of its
   // doors to swing open, instead of always animating the driver's.
   transitioningDoorName: string | null;
+  // Doors left open independent of isVehicleTransitioning, keyed by
+  // "<vehicleId>:<doorName>". A door is added here the moment it's walked
+  // through (entering or exiting) and only removed once the character's own
+  // close-door animation finishes (see Player.tsx's doorCloseTransition /
+  // closingDoorOutside refs -- the ports of the legacy
+  // CloseVehicleDoorInside/Outside character states), NOT simply when the
+  // entering/exiting transition itself ends. That's what lets a car sit
+  // there with its door hanging open while you're stopped mid-drive, exactly
+  // like the original.
+  openVehicleDoors: Record<string, boolean>;
   // True while the game is paused (Start/Escape, or automatically when the
   // browser tab is backgrounded -- see App.tsx's visibilitychange listener).
   // Drives <Physics paused> in App.tsx plus explicit early-returns in
@@ -53,8 +76,9 @@ interface GameState {
   setHealth: (health: number) => void;
   setMaxHealth: (maxHealth: number) => void;
   setArmor: (armor: number) => void;
-  setCurrentControllable: (type: ControllableType, id?: string | null) => void;
+  setCurrentControllable: (type: ControllableType, id?: string | null, seatType?: SeatKind, seatName?: string | null) => void;
   setIsVehicleTransitioning: (transitioning: boolean, entityId?: string | null, doorName?: string | null) => void;
+  setDoorOpen: (vehicleId: string, doorName: string, open: boolean) => void;
   togglePause: () => void;
   setPaused: (paused: boolean) => void;
   setIsLoading: (loading: boolean) => void;
@@ -71,9 +95,12 @@ export const useStore = create<GameState>((set) => ({
   armor: 0,
   currentControllable: 'player',
   controlledEntityId: null,
+  controlledSeatType: null,
+  controlledSeatName: null,
   isVehicleTransitioning: false,
   transitioningEntityId: null,
   transitioningDoorName: null,
+  openVehicleDoors: {},
   isPaused: false,
   isLoading: false, // Set to false initially to show WelcomeScreen
   isCrosshairVisible: false,
@@ -84,11 +111,25 @@ export const useStore = create<GameState>((set) => ({
   setHealth: (health) => set({ health }),
   setMaxHealth: (maxHealth) => set({ maxHealth }),
   setArmor: (armor) => set({ armor }),
-  setCurrentControllable: (type, id = null) => set({ currentControllable: type, controlledEntityId: id }),
+  setCurrentControllable: (type, id = null, seatType = null, seatName = null) => set({
+    currentControllable: type,
+    controlledEntityId: id,
+    controlledSeatType: type === 'player' ? null : seatType,
+    controlledSeatName: type === 'player' ? null : seatName,
+  }),
   setIsVehicleTransitioning: (transitioning, entityId = null, doorName = null) => set({
     isVehicleTransitioning: transitioning,
     transitioningEntityId: transitioning ? entityId : null,
     transitioningDoorName: transitioning ? doorName : null,
+  }),
+  setDoorOpen: (vehicleId, doorName, open) => set((state) => {
+    const key = `${vehicleId}:${doorName}`;
+    const isOpen = !!state.openVehicleDoors[key];
+    if (isOpen === open) return state;
+    const next = { ...state.openVehicleDoors };
+    if (open) next[key] = true;
+    else delete next[key];
+    return { openVehicleDoors: next };
   }),
   togglePause: () => set((state) => ({ isPaused: !state.isPaused })),
   // Separate from togglePause: the tab-hidden auto-pause always wants to
