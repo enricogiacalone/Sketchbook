@@ -16,9 +16,16 @@ import { CollisionGroups, groupsExcluding } from "../enums/CollisionGroups";
 interface EnemyProps {
   id: string;
   initialPosition: [number, number, number];
+  // Called once this enemy has spent GIVE_UP_TIME straight without ever
+  // closing to within CATCH_DISTANCE of the player -- see the chase timer
+  // in the useFrame below. CityDetails.tsx's handler drops this id from
+  // its pedestrianEnemies list (unmounting this component) and the
+  // matching Pedestrian.tsx instance -- same id, never actually
+  // destroyed, just frozen -- picks its patrol back up on its own.
+  onGiveUp: (id: string) => void;
 }
 
-const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
+const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
   const { scene, animations } = useGLTF("boxman.glb");
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { actions } = useAnimations(animations, clonedScene);
@@ -73,6 +80,17 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
   const position = useRef([...initialPosition]);
   const modelRotation = useRef(0);
   const velocitySim = useSpringVector(60, 0.7);
+  // "Essere nemico e' un'istanza dei passanti che dopo un po', se non ti
+  // raggiungono, ridiventano semplici pedoni" -- an enemy that spends this
+  // long in a row without ever actually closing to CATCH_DISTANCE gives up
+  // the chase and reverts to an ordinary pedestrian (see onGiveUp). Reset
+  // to 0 any frame it IS that close, so a chase that's actually working
+  // (or one that briefly catches up before the player breaks away again)
+  // never times out -- only a chase that's genuinely going nowhere does.
+  const giveUpTimer = useRef(0);
+  const CATCH_DISTANCE = 1.6;
+  const GIVE_UP_TIME = 15;
+  const hasGivenUp = useRef(false);
 
   const phrases = [
     "I'm coming for you!",
@@ -100,6 +118,17 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition }) => {
     const enemyPos = new THREE.Vector3(...(position.current as [number, number, number]));
     const targetPos = new THREE.Vector3(...playerPos);
     const distance = enemyPos.distanceTo(targetPos);
+
+    if (distance <= CATCH_DISTANCE) {
+      giveUpTimer.current = 0;
+    } else {
+      giveUpTimer.current += delta;
+      if (giveUpTimer.current >= GIVE_UP_TIME && !hasGivenUp.current) {
+        hasGivenUp.current = true;
+        onGiveUp(id);
+        return;
+      }
+    }
 
     const direction = new THREE.Vector3().subVectors(targetPos, enemyPos);
     direction.y = 0;

@@ -227,6 +227,19 @@ const CityDetails: React.FC = () => {
   const handlePedestrianHit = useCallback((id: string, position: [number, number, number]) => {
     setPedestrianEnemies((prev) => (prev.some((e) => e.id === id) ? prev : [...prev, { id, position }]));
   }, []);
+  // Enemy.tsx calls this once it's been chasing without ever actually
+  // closing the distance for a while (see GIVE_UP_TIME there) -- "essere
+  // nemico e' un'istanza dei passanti che dopo un po', se non ti
+  // raggiungono, ridiventano semplici pedoni" (an enemy is just a
+  // passer-by instance -- give it long enough without catching you and it
+  // goes back to being an ordinary pedestrian). Dropping the id from this
+  // array unmounts the Enemy; the matching Pedestrian below (same id, see
+  // hostileIds) picks its patrol back up automatically since it was only
+  // ever frozen, never destroyed.
+  const handleEnemyGiveUp = useCallback((id: string) => {
+    setPedestrianEnemies((prev) => prev.filter((e) => e.id !== id));
+  }, []);
+  const hostileIds = useMemo(() => new Set(pedestrianEnemies.map((e) => e.id)), [pedestrianEnemies]);
 
   const { furniture, parkedCars, pedestrians, billboards } = useMemo(() => {
     const furnitureArr: Array<{ kind: 'bench' | 'trash' | 'hydrant' | 'sign'; x: number; z: number; rotationY: number; color?: string }> = [];
@@ -341,11 +354,12 @@ const CityDetails: React.FC = () => {
           z2={p.z2}
           speed={p.speed}
           phase={p.phase}
+          isHostile={hostileIds.has(`enemy-ped-${i}`)}
           onBecomeEnemy={handlePedestrianHit}
         />
       ))}
       {pedestrianEnemies.map((e) => (
-        <Enemy key={e.id} id={e.id} initialPosition={e.position} />
+        <Enemy key={e.id} id={e.id} initialPosition={e.position} onGiveUp={handleEnemyGiveUp} />
       ))}
       {billboards.map((b, i) => (
         <Billboard key={`bb-${i}`} x={b.x} z={b.z} rotationY={b.rotationY} schemeIndex={b.schemeIndex} />

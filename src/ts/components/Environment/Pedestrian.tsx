@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useGLTF, useAnimations } from '@react-three/drei';
 import * as THREE from 'three';
@@ -16,6 +16,18 @@ interface PedestrianProps {
   z2: number;
   speed?: number;
   phase?: number;
+  // Owned by CityDetails, not this component -- true for as long as this
+  // pedestrian's id is in its pedestrianEnemies list (i.e. a real Enemy.tsx
+  // is currently standing in for it). Used to be local state here
+  // (`isEnemy`) that only ever went true and never back, so a converted
+  // pedestrian stayed a hostile Enemy forever even once it gave up
+  // chasing. Controlling it from the parent instead means Enemy.tsx's own
+  // "give up after a while" timeout (see GIVE_UP_TIME there) can hand a
+  // pedestrian its old life back: CityDetails drops the id from
+  // pedestrianEnemies, this flips back to false, and this component just
+  // resumes its patrol from wherever its (never-reset) t/dir refs were
+  // frozen -- it was only ever skipped, not destroyed.
+  isHostile: boolean;
   // Called once, the moment the player (on foot or in any vehicle) gets
   // close enough to this pedestrian to count as a hit -- CityDetails.tsx
   // uses it to spawn a real Enemy.tsx in this pedestrian's place. Passed
@@ -37,7 +49,7 @@ interface PedestrianProps {
 // at a slow linear speed reads a little brisk up close, but at the
 // distances these are actually seen from around the city it's a fine
 // stand-in, and matches the run cycle Player.tsx itself already uses.
-const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2, phase = 0, onBecomeEnemy }) => {
+const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2, phase = 0, isHostile, onBecomeEnemy }) => {
   const { scene, animations } = useGLTF('boxman.glb');
   // Plain scene.clone() (Object3D.clone) does NOT re-bind skinned-mesh
   // skeletons -- every clone's SkinnedMesh would keep pointing at the
@@ -60,7 +72,6 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
   const currentAnim = useRef<string | null>(null);
   const pauseTimer = useRef(0);
   const scratchPos = useRef(new THREE.Vector3());
-  const [isEnemy, setIsEnemy] = useState(false);
   const { playerPos, currentControllable } = useStore(
     useShallow((state) => ({ playerPos: state.playerPos, currentControllable: state.currentControllable }))
   );
@@ -78,7 +89,11 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
   };
 
   useFrame((_state, delta) => {
-    if (!groupRef.current || segmentLength < 0.01) return;
+    // Frozen (not destroyed) for as long as CityDetails considers this id
+    // hostile -- Enemy.tsx is standing in for it during that time. Its
+    // t/dir/pauseTimer refs just stop advancing here and pick back up
+    // exactly where they left off once isHostile goes false again.
+    if (isHostile || !groupRef.current || segmentLength < 0.01) return;
 
     if (pauseTimer.current > 0) {
       pauseTimer.current -= delta;
@@ -114,15 +129,19 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
     const hitDx = playerPos[0] - pos.x;
     const hitDz = playerPos[2] - pos.z;
     if (hitDx * hitDx + hitDz * hitDz < HIT_RADIUS * HIT_RADIUS) {
-      setIsEnemy(true);
+      // CityDetails.tsx's own pedestrianEnemies state already no-ops a
+      // repeat hit for an id it's already tracking, so calling this again
+      // on the few frames before isHostile actually flips true (one
+      // render round-trip through the parent) is harmless.
       onBecomeEnemy(id, [pos.x, y, pos.z]);
     }
   });
 
   // The pedestrian itself disappears the instant it "becomes" the enemy --
   // Enemy.tsx (spawned by the onBecomeEnemy callback above) takes over
-  // rendering/physics/AI at this same spot from here on.
-  if (isEnemy) return null;
+  // rendering/physics/AI at this same spot from here on, until it either
+  // catches the player or gives up and this goes back to false.
+  if (isHostile) return null;
 
   return (
     <group ref={groupRef}>

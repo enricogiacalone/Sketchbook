@@ -181,9 +181,26 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     _heliVertStab.copy(up).multiplyScalar(gravityCompensation * enginePower.current);
     body.applyImpulse({ x: _heliVertStab.x, y: _heliVertStab.y, z: _heliVertStab.z }, true);
 
-    // 3. Positional Damping
+    // 3. Positional Damping (horizontal drag only -- legacy's
+    // Helicopter.ts never touches Y here, only x/z: `body.velocity.x *=
+    // lerp(1, 0.995, enginePower); body.velocity.z *= ...`, operating
+    // in-place on cannon-es's live velocity object).
+    // This used to read `velocity.current`, a snapshot taken at the very
+    // TOP of this frame -- i.e. BEFORE steps 1 (throttle) and 2 (gravity
+    // compensation) above had even applied their impulses -- and then
+    // setLinvel'd the whole vector (Y included) straight from that stale
+    // snapshot, silently discarding everything those two impulses had
+    // just done to the body's real velocity THIS SAME FRAME. Net result:
+    // Shift/Space (throttle) and the gravity-compensation impulse could
+    // never actually move the helicopter -- only gravity's own automatic
+    // per-step integration (untouched by any of this) still applied, so
+    // it just sat on the ground revving its rotors, unresponsive to every
+    // control (see git history / chat: "riesco ad entrare nell'elicottero
+    // ma nn parte"). Fixed by re-reading the CURRENT (post-impulse)
+    // velocity here instead, and leaving Y alone entirely, same as legacy.
+    const curVel = body.linvel();
     const damping = 1 - (0.005 * enginePower.current);
-    body.setLinvel({ x: velocity.current[0] * damping, y: velocity.current[1], z: velocity.current[2] * damping }, true);
+    body.setLinvel({ x: curVel.x * damping, y: curVel.y, z: curVel.z * damping }, true);
 
     // 4. Rotation Stabilization & Yaw
     _heliRotStabQuat.setFromUnitVectors(up, globalUp);
