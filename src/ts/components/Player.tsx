@@ -10,6 +10,7 @@ import { useStore } from "../store";
 import { useShallow } from "zustand/react/shallow";
 import { getTerrainHeight } from "./Environment/Terrain";
 import { getRoadOffset } from "./Environment/Road";
+import { getBuildingHeightOffset } from "./Environment/City";
 import { CollisionGroups, groupsExcluding } from "../enums/CollisionGroups";
 import NetworkPlayer from "./NetworkPlayer";
 import SpeechBubble from "./UI/SpeechBubble";
@@ -962,7 +963,16 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     // doesn't leave the character sunk into the (slightly lower) bare terrain.
     const terrainY = getTerrainHeight(position.current[0], position.current[2]);
     const roadOff = getRoadOffset(position.current[0], position.current[2]);
-    const groundY = terrainY + roadOff;
+    // Explorable buildings (Claude) -- "rendi i palazzi esplorabili, piani
+    // e scale che portano fino al tetto". getBuildingHeightOffset returns
+    // null whenever it doesn't apply (outside every building's footprint,
+    // or standing at plain ground-floor level), in which case this is a
+    // no-op and groundY is exactly what it was before -- see City.tsx's
+    // big comment above getBuildingHeightOffset for the full explanation
+    // of why building floors/stairs need to hook in HERE rather than
+    // relying on physics contact response like a normal collider would.
+    const buildingY = getBuildingHeightOffset(position.current[0], position.current[2], position.current[1]);
+    const groundY = buildingY !== null ? buildingY : terrainY + roadOff;
     const distToGround = position.current[1] - (groundY + RADIUS);
     // TEMP DEBUG (Claude)
     (window as any).__groundDebug = { pos: position.current.slice(), terrainY, roadOff, groundY, distToGround, isGrounded: isGrounded.current };

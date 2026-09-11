@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { RigidBody, CylinderCollider, CuboidCollider } from "@react-three/rapier";
 import { useTreeTemplates, TreeInstance, GrassPatch, Flowers } from "./ParkTrees";
 import { getTerrainHeight } from "./Terrain";
+import { streetLampBulbMaterial } from "./Road";
 import { CollisionGroups, groupsExcluding } from "../../enums/CollisionGroups";
 
 const BLOCK_MIN = 0;
@@ -212,9 +213,11 @@ const Bench: React.FC<{ x: number; z: number; rotationY: number }> = ({
 
 // --- Streetlamps -----------------------------------------------------------
 
+export const PARK_LAMP_POLE_HEIGHT = 4.5;
+
 const StreetLamp: React.FC<{ x: number; z: number }> = ({ x, z }) => {
   const y = getTerrainHeight(x, z);
-  const poleHeight = 4.5;
+  const poleHeight = PARK_LAMP_POLE_HEIGHT;
   const poleRadius = 0.12;
 
   return (
@@ -234,17 +237,16 @@ const StreetLamp: React.FC<{ x: number; z: number }> = ({ x, z }) => {
           <meshStandardMaterial color="#222222" roughness={0.6} metalness={0.6} />
         </mesh>
       </RigidBody>
-      <mesh position={[x, y + poleHeight + 0.15, z]}>
+      <mesh position={[x, y + poleHeight + 0.15, z]} material={streetLampBulbMaterial}>
         <sphereGeometry args={[0.28, 10, 10]} />
-        {/* Emissive glow reads as "lit" on its own -- no real pointLight
-            needed (see the matching note in Road.tsx's StreetLight: every
-            real light in the scene gets evaluated in the shader for every
-            lit fragment on every mesh, so lamps add up fast). */}
-        <meshStandardMaterial
-          color="#ffe9b0"
-          emissive="#ffcf70"
-          emissiveIntensity={1.4}
-        />
+        {/* Shared with Road.tsx's StreetLight bulbs -- "accendi i lampioni
+            di notte", one material + one useFrame (Road.tsx's
+            StreetLampCycle) turns every lamp in the city on/off together
+            instead of each lamp tracking day/night on its own. Emissive-
+            only, no real pointLight (see the matching note in Road.tsx's
+            StreetLight: every real light in the scene gets evaluated in
+            the shader for every lit fragment on every mesh, so lamps add
+            up fast). */}
       </mesh>
     </group>
   );
@@ -252,7 +254,10 @@ const StreetLamp: React.FC<{ x: number; z: number }> = ({ x, z }) => {
 
 // --- Park --------------------------------------------------------------
 
-const LAMP_POSITIONS: Array<[number, number]> = [
+// Exported: StreetLampGlow.tsx (light-pooling, "la citta nn e colpita
+// dai lampioni") needs every lamp's world position, park lamps included,
+// not just Road.tsx's ~100 intersection lamps.
+export const LAMP_POSITIONS: Array<[number, number]> = [
   [14, 14],
   [46, 14],
   [14, 46],

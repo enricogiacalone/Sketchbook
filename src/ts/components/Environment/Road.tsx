@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { RigidBody, TrimeshCollider, CylinderCollider } from '@react-three/rapier';
 import { getTerrainHeight } from './Terrain';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
+import { getSunDirection, getDayFactor } from '../../lib/SunCycle';
 
 // Shared road-grid layout, also consumed by Player.tsx (getRoadOffset) so the
 // character's manual ground-snapping agrees with the actual road geometry
@@ -35,12 +36,31 @@ export const SIDEWALK_HEIGHT = 0.04;
 // road's width) no matter where you look from.
 export const ROAD_THICKNESS = 1.0;
 
-const ROAD_OFFSETS: number[] = (() => {
+export const ROAD_OFFSETS: number[] = (() => {
   const arr: number[] = [];
   for (let i = -3; i <= 3; i++) {
     arr.push(i * ROAD_GRID_SPACING);
   }
   return arr;
+})();
+
+// Streetlamp world positions across the whole road grid, computed ONCE by
+// mirroring the exact placement formula used in Road()'s JSX below (two
+// StreetLights per intersection, at the corners diagonal from the traffic
+// lights). Needed by StreetLampGlow.tsx (light-pooling: "la citta nn e
+// colpita dai lampioni") to know where every lamp bulb is without a real
+// per-lamp light living here -- see the removed-pointLight comment on
+// StreetLight below for why there isn't one already.
+export const STREET_LIGHT_POLE_HEIGHT = 6;
+export const STREET_LIGHT_POSITIONS: Array<{ x: number; z: number }> = (() => {
+    const positions: Array<{ x: number; z: number }> = [];
+    for (const ox of ROAD_OFFSETS) {
+        for (const oz of ROAD_OFFSETS) {
+            positions.push({ x: ox - ROAD_WIDTH / 2 - 1, z: oz - ROAD_WIDTH / 2 - 1 });
+            positions.push({ x: ox + ROAD_WIDTH / 2 + 1, z: oz + ROAD_WIDTH / 2 + 1 });
+        }
+    }
+    return positions;
 })();
 
 // Returns the ground surface's extra elevation above the raw terrain height
@@ -375,9 +395,36 @@ const Crosswalk: React.FC<{ x: number, z: number }> = ({ x, z }) => {
     );
 };
 
+// Shared streetlamp bulb material -- "accendi i lampioni di notte". Every
+// StreetLight (Road.tsx, ~100 across the grid) AND Park.tsx's own
+// StreetLamp share this ONE material object (imported there), mutated by
+// the single StreetLampCycle below -- exactly the same trick
+// TrafficLightCycle/_trafficRedMat already use, for the same reason: one
+// useFrame + one material update lights up every lamp in the city at once,
+// instead of each of ~100 lamps running its own useFrame or owning its own
+// material. Emissive-only (see the removed-pointLight comment below this
+// used to sit on) -- intensity now tracks day/night instead of being a
+// constant "always lit" 2, so lamps actually look off in daylight.
+export const streetLampBulbMaterial = new THREE.MeshStandardMaterial({
+    color: '#ffe9b0',
+    emissive: '#ffcf70',
+    emissiveIntensity: 0,
+});
+
+// Mounted exactly once (in Road() below), same pattern as
+// TrafficLightCycle just above -- see that component's comment.
+const StreetLampCycle: React.FC = () => {
+    useFrame((state) => {
+        const dir = getSunDirection(state.clock.elapsedTime);
+        const dayFactor = getDayFactor(dir.y);
+        streetLampBulbMaterial.emissiveIntensity = THREE.MathUtils.lerp(2.2, 0, dayFactor);
+    });
+    return null;
+};
+
 const StreetLight: React.FC<{ x: number, z: number }> = ({ x, z }) => {
     const y = getTerrainHeight(x, z);
-    const poleHeight = 6;
+    const poleHeight = STREET_LIGHT_POLE_HEIGHT;
     const poleRadius = 0.15;
 
     return (
@@ -401,11 +448,8 @@ const StreetLight: React.FC<{ x: number, z: number }> = ({ x, z }) => {
                     <meshStandardMaterial color="#333" />
                 </mesh>
             </RigidBody>
-            <mesh position={[x, y + poleHeight, z]}>
+            <mesh position={[x, y + poleHeight, z]} material={streetLampBulbMaterial}>
                 <sphereGeometry args={[0.4, 8, 8]} />
-                {/* High emissiveIntensity gives the bulb its glow -- this
-                    alone reads as "lit" without needing a real light. */}
-                <meshStandardMaterial color="#fff" emissive="#ffffcc" emissiveIntensity={2} />
             </mesh>
             {/* Removed the real <pointLight> that used to be here. There's
                 one of these per street lamp -- ~100+ across the road grid --
@@ -414,8 +458,11 @@ const StreetLight: React.FC<{ x: number, z: number }> = ({ x, z }) => {
                 mesh, not just ones near a given lamp. 100+ real point lights
                 was almost certainly the single biggest cost in the whole
                 scene (confirmed live: window.__r3fState showed 107
-                PointLights). The emissive bulb above keeps the visual, this
-                just drops the actual light contribution. */}
+                PointLights). The emissive bulb above keeps the visual (now
+                day/night-aware, see streetLampBulbMaterial), this just
+                drops the actual light contribution -- night illumination
+                near lamps comes from NightSky/SunLight's ambient + moon
+                light instead. */}
         </group>
     );
 };
@@ -496,6 +543,7 @@ const Road: React.FC = () => {
       ))}
       {/* Intersections Details */}
       <TrafficLightCycle />
+      <StreetLampCycle />
       {offsets.map((ox) => 
         offsets.map((oz) => (
             <React.Fragment key={`inter-${ox}-${oz}`}>

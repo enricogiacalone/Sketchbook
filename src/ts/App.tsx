@@ -1,9 +1,12 @@
 import React, { Suspense, useState, useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
-import { Environment } from "@react-three/drei";
 import Scene from "./Scene";
 import Sky from "./components/Environment/Sky";
+import SunLight from "./components/Environment/SunLight";
+import WorldFog from "./components/Environment/WorldFog";
+import NightSky from "./components/Environment/NightSky";
+import StreetLampGlow from "./components/Environment/StreetLampGlow";
 import Ocean from "./components/Environment/Ocean";
 import StatusBars from "./components/UI/StatusBars";
 import Controls from "./components/UI/Controls";
@@ -106,10 +109,21 @@ const App: React.FC = () => {
         {isJoined && (
           <Suspense fallback={null}>
             <Sky />
+            <NightSky />
+            <WorldFog />
             <Ocean />
-            <Environment preset="city" />
-            <ambientLight intensity={0.5} />
-            <pointLight position={[10, 10, 10]} castShadow />
+            {/* Real sun-linked directional light + hemisphere ambient --
+                "sistemiamo il cielo... sole vero collegato alla luce".
+                Replaces the old fixed pointLight + flat ambientLight(0.5),
+                neither of which ever changed even though the sky dome
+                above them was already running a full day/night cycle.
+                Also drops drei's <Environment preset="city"> -- that was
+                a generic indoor-studio HDRI reflected on every metallic/
+                glass surface (buildings, cars) with zero relation to this
+                procedural sky, most noticeable on glass towers reflecting
+                a "city" that isn't the one around them. */}
+            <SunLight />
+            <StreetLampGlow />
 
             {/*
               Migrated from @react-three/cannon to @react-three/rapier.
