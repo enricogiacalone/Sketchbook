@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { useFrame, useThree, createPortal } from "@react-three/fiber";
-import { RigidBody, BallCollider, RapierRigidBody } from "@react-three/rapier";
+import { RigidBody, BallCollider, RapierRigidBody, CollisionEnterHandler } from "@react-three/rapier";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import * as THREE from "three";
 import { SkeletonUtils } from "three-stdlib";
@@ -12,6 +12,7 @@ import { getTerrainHeight } from "./Environment/Terrain";
 import { getRoadOffset } from "./Environment/Road";
 import { getBuildingHeightOffset } from "./Environment/City";
 import { CollisionGroups, groupsExcluding } from "../enums/CollisionGroups";
+import { UPPER_BODY_BONES, LOWER_BODY_BONES, filterTracksByBones } from "../lib/characterAnimation";
 import NetworkPlayer from "./NetworkPlayer";
 import SpeechBubble from "./UI/SpeechBubble";
 import Bullet from "./Bullet";
@@ -244,8 +245,9 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   //    (whichever locomotion clip, lower-filtered) and exactly one owns
   //    the arms/torso/head (the shoot overlay) -- no bone is ever driven
   //    by two weight=1 actions at once.
-  const UPPER_BODY_BONES = ["body_upper", "head", "arm_upper.L", "arm_lower.L", "arm_upper.R", "arm_lower.R"];
-  const LOWER_BODY_BONES = ["root", "butt_bone", "body_lower", "leg_upper.L", "leg_lower.L", "leg_upper.R", "leg_lower.R"];
+  // Bone lists + filterTracksByBones now live in ../lib/characterAnimation
+  // -- shared with Enemy.tsx so both characters (they're literally the same
+  // rig) define "upper body" / "lower body" in exactly one place.
   // Every clip name that can appear as `nextAnim` below -- these are the
   // only ones that ever need a lower-body-only stand-in for the
   // while-firing case.
@@ -256,11 +258,6 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const lowerActionsRef = useRef<Record<string, THREE.AnimationAction>>({});
   const wasFiringRef = useRef(false);
   const currentPoolRef = useRef<"full" | "lower">("full");
-
-  const filterTracksByBones = (clip: THREE.AnimationClip, bones: string[]) => {
-    const sanitized = bones.map((bone) => THREE.PropertyBinding.sanitizeNodeName(bone));
-    return clip.tracks.filter((t) => sanitized.some((bone) => t.name.startsWith(bone + ".")));
-  };
 
   useEffect(() => {
     const createdActions: THREE.AnimationAction[] = [];
@@ -342,6 +339,10 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     entities,
     setIsLoading,
     isPaused,
+    health,
+    maxHealth,
+    setHealth,
+    takeDamage,
   } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
@@ -360,6 +361,10 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       playerMessage: state.playerMessage,
       entities: state.entities,
       setIsLoading: state.setIsLoading,
+      health: state.health,
+      maxHealth: state.maxHealth,
+      setHealth: state.setHealth,
+      takeDamage: state.takeDamage,
     }))
   );
 
@@ -372,7 +377,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const [currentAnim, setCurrentAnim] = useState("idle");
   const currentAnimRef = useRef("idle");
 
-  const [bullets, setBullets] = useState<{ id: string, pos: [number, number, number], vel: [number, number, number] }[]>([]);
+  const [bullets, setBullets] = useState<{ id: string, pos: [number, number, number], vel: [number, number, number], owner: 'player' | 'enemy' }[]>([]);
   const lastFireTime = useRef(0);
 
   const { remotePlayers, sendChatMessage } = useNetwork(userName, posState, quatState, currentAnim);
@@ -552,6 +557,34 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const removeBullet = useCallback((id: string) => {
     setBullets(prev => prev.filter(b => b.id !== id));
   }, []);
+
+  // "se sparo ai pedoni diventano nemici e anche loro mi possono sparare" --
+  // the other half of that: an Enemy's own bullets (owner:'enemy', see
+  // Enemy.tsx) damage the player. Deliberately does NOT match owner:
+  // 'player' bullets -- the player's own muzzle spawns them ~0.5 units out
+  // (see the combat-logic block above), well inside this very collider's
+  // RADIUS, so without this owner check every shot would instantly damage
+  // the shooter. takeDamage is the store's own functional updater (reads
+  // state.health itself), not "health - amount" computed from this
+  // closure's possibly-stale destructured `health` -- see store.ts.
+  const handleEnemyBulletHit: CollisionEnterHandler = (payload) => {
+    const otherData = payload.other.rigidBodyObject?.userData as { type?: string; owner?: string } | undefined;
+    if (otherData?.type === 'bullet' && otherData?.owner === 'enemy') {
+      takeDamage(15);
+    }
+  };
+
+  // Simple death/respawn: once health hits 0, reset it and teleport back to
+  // the same spawn point the RigidBody itself starts at ([0, 15, 0] below)
+  // rather than adding a whole death-animation/game-over flow for a first
+  // pass at "anche loro mi possono sparare".
+  useEffect(() => {
+    if (health <= 0) {
+      setHealth(maxHealth);
+      rigidBodyRef.current?.setTranslation({ x: 0, y: 15, z: 0 }, true);
+      rigidBodyRef.current?.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    }
+  }, [health, maxHealth, setHealth]);
 
   useFrame((state, delta) => {
     const body = rigidBodyRef.current;
@@ -1145,7 +1178,8 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
         setBullets(prev => [...prev, {
             id: bulletId,
             pos: [position.current[0] + bDir.x * 0.5, position.current[1] + 0.2, position.current[2] + bDir.z * 0.5],
-            vel: [bDir.x * 50, 0, bDir.z * 50]
+            vel: [bDir.x * 50, 0, bDir.z * 50],
+            owner: 'player' as const
         }]);
         lastFireTime.current = state.clock.elapsedTime * 1000;
     }
@@ -1263,6 +1297,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
           // excludes TrimeshColliders for the reason explained above the
           // rigidBodyRef declaration.
           collisionGroups={groupsExcluding(CollisionGroups.Characters, CollisionGroups.TrimeshColliders)}
+          onCollisionEnter={handleEnemyBulletHit}
         />
         {/* Always visible now (Claude) -- this used to hide the character
             the instant control handed over to a vehicle (`visible={
@@ -1312,7 +1347,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
         <NetworkPlayer key={p.id} data={p} />
       ))}
       {bullets.map(b => (
-        <Bullet key={b.id} id={b.id} position={b.pos} velocity={b.vel} onKill={removeBullet} />
+        <Bullet key={b.id} id={b.id} position={b.pos} velocity={b.vel} owner={b.owner} onKill={removeBullet} />
       ))}
     </>
   );

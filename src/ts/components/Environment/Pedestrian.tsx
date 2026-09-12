@@ -3,6 +3,8 @@ import { useFrame } from '@react-three/fiber';
 import { useGLTF, useAnimations } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
+import { RigidBody, CapsuleCollider, RapierRigidBody, IntersectionEnterHandler } from '@react-three/rapier';
+import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { useStore } from '../../store';
@@ -62,10 +64,26 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const { actions } = useAnimations(animations, clonedScene);
   const groupRef = useRef<THREE.Group>(null);
+  // Physics body for the "se sparo ai pedoni diventano nemici" sensor
+  // collider below -- purely a bullet-detection volume, never a solid
+  // obstacle (see the RigidBody comment further down), so it's driven by
+  // setNextKinematicTranslation from the same t/dir walk logic that used
+  // to just poke groupRef.current.position directly.
+  const bodyRef = useRef<RapierRigidBody>(null);
 
   const start = useMemo(() => new THREE.Vector3(x1, 0, z1), [x1, z1]);
   const end = useMemo(() => new THREE.Vector3(x2, 0, z2), [x2, z2]);
   const segmentLength = useMemo(() => start.distanceTo(end), [start, end]);
+  const initialPos = useMemo(() => {
+    const p = new THREE.Vector3().lerpVectors(start, end, phase);
+    const y = getTerrainHeight(p.x, p.z) + getRoadOffset(p.x, p.z);
+    return [p.x, y, p.z] as [number, number, number];
+  }, [start, end, phase]);
+  // Last computed world position, kept alongside the RigidBody (which only
+  // exposes its CURRENT translation, not the "next" one just queued via
+  // setNextKinematicTranslation below) so handleBulletHit can report an
+  // up-to-date spot to onBecomeEnemy without waiting a physics step.
+  const lastPos = useRef<[number, number, number]>(initialPos);
 
   const t = useRef(phase);
   const dir = useRef(1);
@@ -80,6 +98,20 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
   // driving anywhere near one reliably counts, instead of needing to line
   // up the car's exact footprint against a stationary point target.
   const HIT_RADIUS = currentControllable === 'player' ? 1.1 : 2.2;
+  // "la pallottola attraversa i pedoni.. nn li colpisce" -- root cause: this
+  // was a small BallCollider centered at the RigidBody's own origin, which
+  // sits at GROUND level (the body tracks the character's feet, same
+  // convention as the old groupRef.current.position.set(pos.x, y, pos.z)
+  // it replaced -- the model itself has no extra offset, unlike
+  // Player.tsx's -RADIUS or Enemy.tsx's -bodyBottomOffset, because
+  // boxman.glb's root bone is already at the feet). A 0.4-radius ball
+  // there only covers shin height, while bullets fly past at
+  // chest/arm height -- always a clean miss. A vertical capsule spanning
+  // roughly ground to head height (matching Enemy.tsx's three-stacked-
+  // spheres coverage, ~0 to ~1.6m) catches a bullet at any height instead.
+  const BULLET_HIT_HALF_HEIGHT = 0.5;
+  const BULLET_HIT_RADIUS = 0.3;
+  const BULLET_HIT_CENTER_Y = 0.8;
 
   const playAnim = (name: string) => {
     if (currentAnim.current === name || !actions[name]) return;
@@ -88,12 +120,28 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
     actions[name]!.reset().fadeIn(0.2).play();
   };
 
+  // "se sparo ai pedoni diventano nemici e anche loro mi possono sparare" --
+  // fires when a bullet's sensor intersection starts against this
+  // pedestrian's collider. Reuses the EXISTING onBecomeEnemy callback (same
+  // one the run-over hit check below already calls) rather than a separate
+  // code path, so CityDetails.tsx's freeze/spawn-Enemy/eventual
+  // give-up-and-revert cycle handles this exactly like a run-over hit --
+  // its own pedestrianEnemies dedup-by-id already makes a repeat call
+  // harmless. Only a 'player'-owned bullet counts, so an Enemy's own shots
+  // (owner:'enemy', see Enemy.tsx) can't turn a pedestrian hostile.
+  const handleBulletHit: IntersectionEnterHandler = (payload) => {
+    const otherData = payload.other.rigidBodyObject?.userData as { type?: string; owner?: string } | undefined;
+    if (!isHostile && otherData?.type === 'bullet' && otherData?.owner === 'player') {
+      onBecomeEnemy(id, lastPos.current);
+    }
+  };
+
   useFrame((_state, delta) => {
     // Frozen (not destroyed) for as long as CityDetails considers this id
     // hostile -- Enemy.tsx is standing in for it during that time. Its
     // t/dir/pauseTimer refs just stop advancing here and pick back up
     // exactly where they left off once isHostile goes false again.
-    if (isHostile || !groupRef.current || segmentLength < 0.01) return;
+    if (isHostile || !groupRef.current || !bodyRef.current || segmentLength < 0.01) return;
 
     if (pauseTimer.current > 0) {
       pauseTimer.current -= delta;
@@ -114,7 +162,12 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
 
     const pos = scratchPos.current.lerpVectors(start, end, t.current);
     const y = getTerrainHeight(pos.x, pos.z) + getRoadOffset(pos.x, pos.z);
-    groupRef.current.position.set(pos.x, y, pos.z);
+    lastPos.current = [pos.x, y, pos.z];
+    // Moves the sensor collider (physics-step-integrated, unlike a plain
+    // setTranslation) -- the visible model, parented UNDER this body now
+    // (see the JSX), rides along for free and only needs its own cosmetic
+    // facing rotation set below, not a position.
+    bodyRef.current.setNextKinematicTranslation({ x: pos.x, y, z: pos.z });
 
     const facing = dir.current >= 0 ? end : start;
     const dx = facing.x - pos.x;
@@ -144,9 +197,33 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
   if (isHostile) return null;
 
   return (
-    <group ref={groupRef}>
-      <primitive object={clonedScene} />
-    </group>
+    <RigidBody
+      ref={bodyRef}
+      type="kinematicPosition"
+      colliders={false}
+      position={initialPos}
+    >
+      {/* Sensor, not solid -- a pedestrian was always walk-through (see the
+          module comment above about having no collider at all before this
+          feature), so this exists purely to detect bullets, never to block
+          the player or anything else physically. A sensor pair fires
+          onIntersectionEnter, not onCollisionEnter -- matched by Bullet.tsx
+          now having both handlers. Same collisionGroups convention as
+          Enemy.tsx (Characters membership, excluding TrimeshColliders) so
+          the existing bullet mask (which already includes Characters)
+          reaches it with no changes needed there. Vertical capsule, not a
+          single small ball -- see BULLET_HIT_* comment above. */}
+      <CapsuleCollider
+        args={[BULLET_HIT_HALF_HEIGHT, BULLET_HIT_RADIUS]}
+        position={[0, BULLET_HIT_CENTER_Y, 0]}
+        sensor
+        collisionGroups={groupsExcluding(CollisionGroups.Characters, CollisionGroups.TrimeshColliders)}
+        onIntersectionEnter={handleBulletHit}
+      />
+      <group ref={groupRef}>
+        <primitive object={clonedScene} />
+      </group>
+    </RigidBody>
   );
 };
 

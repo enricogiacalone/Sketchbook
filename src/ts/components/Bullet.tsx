@@ -6,10 +6,15 @@ interface BulletProps {
   id: string;
   position: [number, number, number];
   velocity: [number, number, number];
+  // Who fired this bullet -- checked by Player.tsx (only 'enemy' bullets
+  // damage the player) and Enemy.tsx (only 'player' bullets damage an
+  // enemy, preventing enemy-vs-enemy friendly fire), and by
+  // Pedestrian.tsx (only 'player' bullets turn a pedestrian hostile).
+  owner: 'player' | 'enemy';
   onKill: (id: string) => void;
 }
 
-const Bullet: React.FC<BulletProps> = ({ id, position, velocity, onKill }) => {
+const Bullet: React.FC<BulletProps> = ({ id, position, velocity, owner, onKill }) => {
   // Auto-kill bullet after 2 seconds if it doesn't hit anything
   useEffect(() => {
     const timer = setTimeout(() => onKill(id), 2000);
@@ -22,7 +27,7 @@ const Bullet: React.FC<BulletProps> = ({ id, position, velocity, onKill }) => {
       colliders={false}
       position={position}
       linearVelocity={velocity}
-      userData={{ type: 'bullet' }}
+      userData={{ type: 'bullet', owner }}
     >
       <BallCollider
         args={[0.1]}
@@ -39,6 +44,11 @@ const Bullet: React.FC<BulletProps> = ({ id, position, velocity, onKill }) => {
         // number).
         collisionGroups={interactionGroups([CollisionGroups.Bullet], [CollisionGroups.Default, CollisionGroups.Characters])}
         onCollisionEnter={() => onKill(id)}
+        // Pedestrian.tsx's collider is a SENSOR (so pedestrians don't
+        // physically block bullets/players) -- a sensor pair fires
+        // onIntersectionEnter instead of onCollisionEnter, so this bullet
+        // needs both handlers to despawn against either kind of target.
+        onIntersectionEnter={() => onKill(id)}
       />
       <mesh castShadow>
         <sphereGeometry args={[0.1, 8, 8]} />

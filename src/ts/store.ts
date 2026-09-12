@@ -84,6 +84,13 @@ interface GameState {
   setHealth: (health: number) => void;
   setMaxHealth: (maxHealth: number) => void;
   setArmor: (armor: number) => void;
+  // Functional (reads state.health itself) rather than Player.tsx computing
+  // "prev - amount" from its own destructured `health` snapshot and calling
+  // setHealth with the result -- two bullet hits landing in the same
+  // render tick would otherwise both subtract from the same stale prev
+  // value (classic lost-update), same reason Enemy.tsx's local
+  // setHealth(prev => ...) uses the updater form.
+  takeDamage: (amount: number) => void;
   setCurrentControllable: (type: ControllableType, id?: string | null, seatType?: SeatKind, seatName?: string | null) => void;
   setIsVehicleTransitioning: (transitioning: boolean, entityId?: string | null, doorName?: string | null) => void;
   setDoorOpen: (vehicleId: string, doorName: string, open: boolean) => void;
@@ -123,6 +130,7 @@ export const useStore = create<GameState>((set) => ({
   setHealth: (health) => set({ health }),
   setMaxHealth: (maxHealth) => set({ maxHealth }),
   setArmor: (armor) => set({ armor }),
+  takeDamage: (amount) => set((state) => ({ health: Math.max(0, state.health - amount) })),
   setCurrentControllable: (type, id = null, seatType = null, seatName = null) => set({
     currentControllable: type,
     controlledEntityId: id,

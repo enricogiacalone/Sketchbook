@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useMemo } from "react";
+import React, { useRef, useEffect, useState, useMemo, useCallback } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { RigidBody, BallCollider, RapierRigidBody, CollisionEnterHandler } from "@react-three/rapier";
 import { useGLTF, useAnimations, Html } from "@react-three/drei";
@@ -12,6 +12,8 @@ import Explosion from "./Environment/Explosion";
 import { getTerrainHeight } from "./Environment/Terrain";
 import { getRoadOffset } from "./Environment/Road";
 import { CollisionGroups, groupsExcluding } from "../enums/CollisionGroups";
+import { UPPER_BODY_BONES, LOWER_BODY_BONES, filterTracksByBones } from "../lib/characterAnimation";
+import Bullet from "./Bullet";
 
 interface EnemyProps {
   id: string;
@@ -28,7 +30,7 @@ interface EnemyProps {
 const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
   const { scene, animations } = useGLTF("boxman.glb");
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
-  const { actions } = useAnimations(animations, clonedScene);
+  const { actions, mixer, clips } = useAnimations(animations, clonedScene);
   const { playerPos, updateEntity, removeEntity } = useStore(
     useShallow((state) => ({
       playerPos: state.playerPos,
@@ -39,7 +41,6 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
 
   const [health, setHealth] = useState(100);
   const [isExploded, setIsExploded] = useState(false);
-  const [currentAnim, setCurrentAnim] = useState("idle");
   const [message, setMessage] = useState("");
 
   const radius = 0.3;
@@ -61,8 +62,15 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
   // usage elsewhere for the groups side of this) -- so the bullet's
   // userData is read off payload.other.rigidBodyObject here. Shared across
   // all three sphere colliders below since a bullet can hit any of them.
+  // "se sparo ai pedoni diventano nemici e anche loro mi possono sparare" --
+  // now that enemies fire their own bullets (owner:'enemy', see below), this
+  // needs an owner check too, otherwise one enemy's shot at the player
+  // would splash damage onto every OTHER enemy whose collider it also
+  // happens to touch along the way (all enemies share the same
+  // collisionGroups). Only bullets owned by the player count as a hit here.
   const handleBulletHit: CollisionEnterHandler = (payload) => {
-    if (payload.other.rigidBodyObject?.userData?.type === "bullet" && health > 0) {
+    const otherData = payload.other.rigidBodyObject?.userData as { type?: string; owner?: string } | undefined;
+    if (otherData?.type === "bullet" && otherData?.owner === "player" && health > 0) {
       setHealth((prev) => {
         const next = Math.max(0, prev - 25); // Increased damage
         if (next <= 0) {
@@ -91,6 +99,82 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
   const CATCH_DISTANCE = 1.6;
   const GIVE_UP_TIME = 15;
   const hasGivenUp = useRef(false);
+
+  // "anche loro mi possono sparare" -- an enemy's own ranged attack,
+  // mirroring Player.tsx's combat block (same Bullet component, same 50
+  // units/s muzzle velocity) rather than only ever catching up to melee
+  // range. Local state/refs exactly like Player.tsx's bullets/lastFireTime,
+  // scoped per-enemy since each Enemy instance fires independently.
+  const [bullets, setBullets] = useState<{ id: string; pos: [number, number, number]; vel: [number, number, number] }[]>([]);
+  const lastFireTime = useRef(0);
+  const FIRE_RANGE = 12;
+  const FIRE_COOLDOWN = 1200;
+  const removeBullet = useCallback((bulletId: string) => {
+    setBullets((prev) => prev.filter((b) => b.id !== bulletId));
+  }, []);
+
+  // "il nemico o il pedone o il player devono avere tutti le stesse
+  // animazioni e caratteristiche sono tutti characters" -- same layered
+  // upper/lower-body pool architecture as Player.tsx (see its big comment
+  // on why plain weight=1 blending doesn't work), built from the SAME
+  // shared bone lists (../lib/characterAnimation) so an enemy shooting
+  // looks identical to the player shooting: legs keep running/idling while
+  // only the upper body plays the aim/recoil pose. Limited to idle/run
+  // (enemies never sprint or jump) and to a single ONE-SHOT burst per
+  // bullet fired (see the fire block below) rather than Player's
+  // held-down loop, since an enemy fires in short bursts, not continuously.
+  const ENEMY_LOCOMOTION_CLIPS = ["idle", "run"];
+  const shootUpperActionRef = useRef<THREE.AnimationAction | null>(null);
+  const lowerActionsRef = useRef<Record<string, THREE.AnimationAction>>({});
+  const currentAnimRef = useRef("idle");
+  const currentPoolRef = useRef<"full" | "lower">("full");
+  const shootAnimTimer = useRef(0);
+
+  useEffect(() => {
+    const createdActions: THREE.AnimationAction[] = [];
+
+    const baseShootClip = clips.find((c) => c.name === "shoot");
+    let shootAction: THREE.AnimationAction | null = null;
+    if (baseShootClip) {
+      const upperClip = new THREE.AnimationClip("shoot_upper_enemy", baseShootClip.duration, filterTracksByBones(baseShootClip, UPPER_BODY_BONES));
+      shootAction = mixer.clipAction(upperClip, clonedScene);
+      shootAction.setLoop(THREE.LoopOnce, 1);
+      shootAction.clampWhenFinished = false;
+      createdActions.push(shootAction);
+    }
+    shootUpperActionRef.current = shootAction;
+
+    const lowerActions: Record<string, THREE.AnimationAction> = {};
+    for (const name of ENEMY_LOCOMOTION_CLIPS) {
+      const base = clips.find((c) => c.name === name);
+      if (!base) continue;
+      const lowerClip = new THREE.AnimationClip(name + "_lower_enemy", base.duration, filterTracksByBones(base, LOWER_BODY_BONES));
+      const action = mixer.clipAction(lowerClip, clonedScene);
+      lowerActions[name] = action;
+      createdActions.push(action);
+    }
+    lowerActionsRef.current = lowerActions;
+
+    return () => {
+      createdActions.forEach((action) => {
+        action.stop();
+        mixer.uncacheClip(action.getClip());
+      });
+      shootUpperActionRef.current = null;
+      lowerActionsRef.current = {};
+    };
+  }, [clips, mixer, clonedScene]);
+
+  const playAnim = (name: string, lowerOnly: boolean) => {
+    const pool: "full" | "lower" = lowerOnly ? "lower" : "full";
+    if (currentAnimRef.current === name && currentPoolRef.current === pool) return;
+    currentAnimRef.current = name;
+    currentPoolRef.current = pool;
+    Object.values(actions).forEach((action) => action?.fadeOut(0.2));
+    Object.values(lowerActionsRef.current).forEach((action) => action?.fadeOut(0.2));
+    const targetAction = lowerOnly ? lowerActionsRef.current[name] : actions[name];
+    if (targetAction) targetAction.reset().fadeIn(0.2).play();
+  };
 
   const phrases = [
     "I'm coming for you!",
@@ -127,6 +211,39 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
         hasGivenUp.current = true;
         onGiveUp(id);
         return;
+      }
+    }
+
+    // Ranged attack -- fires toward the player whenever in range, on its
+    // own cooldown, independent of the chase-timeout logic just above.
+    if (distance <= FIRE_RANGE) {
+      const nowMs = state.clock.elapsedTime * 1000;
+      if (nowMs - lastFireTime.current > FIRE_COOLDOWN) {
+        const fireDir = new THREE.Vector3().subVectors(targetPos, enemyPos);
+        fireDir.y = 0;
+        if (fireDir.lengthSq() > 0.0001) {
+          fireDir.normalize();
+          lastFireTime.current = nowMs;
+          const bulletId = `enemy-bullet-${id}-${Date.now()}`;
+          setBullets((prev) => [...prev, {
+            id: bulletId,
+            pos: [
+              enemyPos.x + fireDir.x * 0.5,
+              enemyPos.y + height / 2,
+              enemyPos.z + fireDir.z * 0.5,
+            ],
+            vel: [fireDir.x * 50, 0, fireDir.z * 50],
+          }]);
+          // Same upper-body overlay Player.tsx uses while firing, just
+          // triggered as a one-shot burst here instead of held for as long
+          // as a button is down -- shootAnimTimer keeps the lower-body-only
+          // pool selected below for exactly as long as this pose plays.
+          const shootAction = shootUpperActionRef.current;
+          if (shootAction) {
+            shootAnimTimer.current = shootAction.getClip().duration;
+            shootAction.reset().fadeIn(0.05).play();
+          }
+        }
       }
     }
 
@@ -177,10 +294,11 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
       setTimeout(() => setMessage(""), 3000);
     }
 
-    const nextAnim = isMoving ? "run" : "idle";
-    if (nextAnim !== currentAnim) {
-      setCurrentAnim(nextAnim);
+    if (shootAnimTimer.current > 0) {
+      shootAnimTimer.current = Math.max(0, shootAnimTimer.current - delta);
     }
+    const nextAnim = isMoving ? "run" : "idle";
+    playAnim(nextAnim, shootAnimTimer.current > 0);
 
     if (state.clock.getElapsedTime() % 0.2 < 0.02) {
       updateEntity(id, {
@@ -194,15 +312,6 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
       });
     }
   });
-
-  useEffect(() => {
-    if (health > 0) {
-      Object.values(actions).forEach((action) => action?.stop());
-      if (actions[currentAnim]) {
-        actions[currentAnim].reset().fadeIn(0.2).play();
-      }
-    }
-  }, [currentAnim, actions, health]);
 
   if (isExploded) {
     return (
@@ -220,6 +329,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
   }
 
   return (
+    <>
     <RigidBody
       ref={ref}
       type="dynamic"
@@ -321,6 +431,10 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
         </group>
       </group>
     </RigidBody>
+    {bullets.map((b) => (
+      <Bullet key={b.id} id={b.id} position={b.pos} velocity={b.vel} owner="enemy" onKill={removeBullet} />
+    ))}
+    </>
   );
 };
 
