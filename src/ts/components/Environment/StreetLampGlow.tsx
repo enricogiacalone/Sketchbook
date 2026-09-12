@@ -24,9 +24,18 @@ import { LAMP_POSITIONS, PARK_LAMP_POLE_HEIGHT } from './Park';
 // isn't lit either. Cost stays flat at POOL_SIZE real lights no matter how
 // many hundred lamps exist in the world.
 const POOL_SIZE = 16;
-const LIGHT_DISTANCE = 13;
-const LIGHT_DECAY = 2;
-const LIGHT_INTENSITY = 9;
+const LIGHT_DISTANCE = 16;
+// Same fix as BuildingLedGlow.tsx: three.js's default decay=2 (inverse-
+// square, "physically correct" candela units) needs intensity in the
+// hundreds to be visible at all more than a couple units out -- a plain
+// intensity=9 at decay=2 was almost certainly rendering as imperceptible,
+// same failure mode later confirmed live on the building LEDs ("i led
+// devono emettere luce" -> "nn si vedono"). decay=1 (illuminance ~ 1/d
+// instead of 1/d^2) plus a real candela bump actually lights the ground
+// under/near a lamp instead of only the lamp's own emissive bulb mesh
+// being visible.
+const LIGHT_DECAY = 1;
+const LIGHT_INTENSITY = 70;
 const LIGHT_COLOR = '#ffcf70';
 
 interface LampPos {

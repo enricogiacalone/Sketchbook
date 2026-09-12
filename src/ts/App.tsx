@@ -9,6 +9,7 @@ import NightSky from "./components/Environment/NightSky";
 import StreetLampGlow from "./components/Environment/StreetLampGlow";
 import Ocean from "./components/Environment/Ocean";
 import StatusBars from "./components/UI/StatusBars";
+import CollectiblesCounter from "./components/UI/CollectiblesCounter";
 import Controls from "./components/UI/Controls";
 import GithubCorner from "./components/UI/GithubCorner";
 import WelcomeScreen from "./components/UI/WelcomeScreen";
@@ -195,6 +196,7 @@ const App: React.FC = () => {
           </div>
           <Controls />
           <StatusBars />
+          <CollectiblesCounter />
           <ChatInput />
           <Minimap />
           <Crosshair />

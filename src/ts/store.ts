@@ -72,6 +72,14 @@ interface GameState {
   playerPos: [number, number, number];
   playerYaw: number;
   playerMessage: string;
+  // "aggiungi oggetti da collezionare per tutta la citta" -- total is
+  // set once by Collectibles.tsx on mount (it owns the actual list/
+  // positions), found increments as the player walks over one. Kept as
+  // plain counts (not the collected-id set itself, which stays local to
+  // Collectibles.tsx) so the HUD can subscribe to two numbers instead of
+  // re-rendering every time any single item's visibility changes.
+  collectiblesFound: number;
+  collectiblesTotal: number;
   entities: Map<string, EntityInfo>;
   setHealth: (health: number) => void;
   setMaxHealth: (maxHealth: number) => void;
@@ -85,6 +93,8 @@ interface GameState {
   setIsCrosshairVisible: (visible: boolean) => void;
   setPlayerInfo: (pos: [number, number, number], yaw: number) => void;
   setPlayerMessage: (message: string) => void;
+  setCollectiblesTotal: (total: number) => void;
+  collectItem: () => void;
   updateEntity: (id: string, info: Partial<EntityInfo>) => void;
   removeEntity: (id: string) => void;
 }
@@ -107,6 +117,8 @@ export const useStore = create<GameState>((set) => ({
   playerPos: [0, 0, 0],
   playerYaw: 0,
   playerMessage: '',
+  collectiblesFound: 0,
+  collectiblesTotal: 0,
   entities: new Map(),
   setHealth: (health) => set({ health }),
   setMaxHealth: (maxHealth) => set({ maxHealth }),
@@ -139,6 +151,8 @@ export const useStore = create<GameState>((set) => ({
   setIsCrosshairVisible: (visible) => set({ isCrosshairVisible: visible }),
   setPlayerInfo: (pos, yaw) => set({ playerPos: pos, playerYaw: yaw }),
   setPlayerMessage: (message) => set({ playerMessage: message }),
+  setCollectiblesTotal: (total) => set({ collectiblesTotal: total }),
+  collectItem: () => set((state) => ({ collectiblesFound: Math.min(state.collectiblesTotal, state.collectiblesFound + 1) })),
   updateEntity: (id, info) => set((state) => {
     const newEntities = new Map(state.entities);
     const existing = newEntities.get(id) || { id, type: 'enemy', position: [0,0,0], rotation: 0 };

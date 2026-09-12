@@ -9,6 +9,7 @@ import Road from "./components/Environment/Road";
 import City from "./components/Environment/City";
 import Park from "./components/Environment/Park";
 import CityDetails from "./components/Environment/CityDetails";
+import Collectibles from "./components/Environment/Collectibles";
 import Airport, { RUNWAY_CENTER, HELIPORT_CENTER } from "./components/Environment/Airport";
 import Clouds from "./components/Environment/Clouds";
 import UFO from "./components/Environment/UFO";
@@ -91,6 +92,7 @@ const Scene: React.FC = () => {
         <Park />
         <CityDetails />
         <Airport />
+        <Collectibles />
       </Suspense>
     </>
   );

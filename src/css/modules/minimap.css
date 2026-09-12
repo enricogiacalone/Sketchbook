@@ -4,10 +4,49 @@
   left: 20px;
   width: 200px;
   height: 200px;
-  background-color: rgba(0, 0, 0, 0.5);
-  border: 2px solid #555;
+  /* Dark navy "undeveloped" base -- district blocks (park/plaza/city) paint
+     over this for anywhere the city grid actually reaches; anything left
+     showing this colour is genuinely outside the built-up area. */
+  background-color: #0a0e14;
+  border: 2px solid #777;
   border-radius: 50%;
   overflow: hidden;
+}
+
+/* District/road backdrop -- "come in gta 5": these give the radar an
+   actual map to read distances and turns against, instead of dots
+   floating on plain black. All absolutely positioned by left/top (set
+   inline per-instance in Minimap.tsx) then centered on that point. */
+.minimap-block {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
+
+.minimap-block-park {
+  background-color: #1e5c2e;
+}
+
+.minimap-block-plaza {
+  background-color: #7a6a4f;
+}
+
+.minimap-block-city {
+  background-color: #262b33;
+}
+
+.minimap-road {
+  position: absolute;
+  background-color: #4a4a4a;
+}
+
+.minimap-road-h {
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.minimap-road-v {
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 #health-bar-container,
@@ -47,15 +86,21 @@
   transform: rotate(225deg);
 }
 
+/* Player blip -- fixed white chevron, always pointing straight up
+   (GTA-authentic colour/shape); the WORLD rotates underneath it
+   (#minimap-container's own rotate(-playerYaw), see Minimap.tsx) so this
+   element itself never rotates. */
 #minimap-player {
   position: absolute;
   width: 0;
   height: 0;
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
-  border-bottom: 12px solid #00ff00; /* Green arrow pointing up */
+  border-bottom: 12px solid #ffffff;
   transform: translate(-50%, -50%);
-  transform-origin: 50% 50%; /* Rotate around the center */
+  transform-origin: 50% 50%;
+  z-index: 2;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
 }
 
 #minimap-player::after {
@@ -65,16 +110,19 @@
   top: 12px;
   width: 6px;
   height: 6px;
-  background-color: #00ff00;
+  background-color: #ffffff;
 }
 
 .minimap-enemy {
   position: absolute;
   width: 8px;
   height: 8px;
-  background-color: #ff0000;
+  background-color: #ff3b30;
+  border: 1px solid #3a0000;
   border-radius: 50%;
   transform: translate(-50%, -50%);
+  box-shadow: 0 0 4px rgba(255, 59, 48, 0.9);
+  z-index: 1;
 }
 
 #minimap-north {
@@ -85,31 +133,33 @@
   color: white;
   font-weight: bold;
   font-size: 12px;
-  z-index: 1; /* Ensure it's above other elements if needed */
+  z-index: 3; /* Ensure it's above other elements if needed */
+  text-shadow: 1px 1px 1px #000;
 }
 
 .minimap-vehicle {
   position: absolute;
-  transform: translate(-50%, -50%);
+  z-index: 1;
 }
 
 .minimap-car {
   width: 10px;
   height: 6px;
-  background-color: #00aaff;
+  background-color: #ffd700;
+  border: 1px solid #5a4600;
 }
 
 .minimap-airplane {
   width: 4px;
   height: 12px;
-  background-color: #00aaff;
+  background-color: #ffd700;
 }
 
 .minimap-airplane::before,
 .minimap-airplane::after {
   content: "";
   position: absolute;
-  background-color: #00aaff;
+  background-color: #ffd700;
 }
 
 .minimap-airplane::before {
@@ -122,7 +172,7 @@
 .minimap-helicopter {
   width: 6px;
   height: 10px;
-  background-color: #00aaff;
+  background-color: #ffd700;
   border-radius: 3px;
 }
 
@@ -133,5 +183,5 @@
   height: 2px;
   left: -4px;
   top: -4px;
-  background-color: #00aaff;
+  background-color: #ffd700;
 }

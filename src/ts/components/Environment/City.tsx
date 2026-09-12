@@ -69,7 +69,7 @@ const BUILDING_TARGET_FLOOR_HEIGHT = 4.2;
 export const getBuildingNumFloors = (height: number): number =>
   Math.min(24, Math.max(1, Math.round(height / BUILDING_TARGET_FLOOR_HEIGHT)));
 
-interface CityBuildingRecord {
+export interface CityBuildingRecord {
   x: number; z: number; w: number; d: number; h: number;
   color: string; style: 'modern' | 'glass' | 'brick';
   corner: number; // 0-3, which footprint corner the stairwell shaft sits in
@@ -78,7 +78,7 @@ interface CityBuildingRecord {
   by: number; // ground height at (x,z), precomputed once
 }
 
-interface CityLayout {
+export interface CityLayout {
   buildings: CityBuildingRecord[];
   courtyards: Array<{ x: number; z: number }>;
   plazas: Array<{ x: number; z: number }>;
@@ -92,11 +92,20 @@ interface CityLayout {
 // there's now one single canonical building layout, generated once,
 // consumed both by <City>'s JSX and by this height function, instead of
 // being trapped inside a React component's private render state.
-const CITY_LAYOUT: CityLayout = (() => {
+// Exported: Collectibles.tsx ("aggiungi oggetti da collezionare per
+// tutta la citta") needs the real building/courtyard/plaza layout to
+// scatter pickups through the streets, park-less blocks and building
+// roofs, instead of duplicating this generation logic.
+// Exported so Minimap.tsx can draw the same block grid the city was
+// actually generated on ("sistema la minimappa come in gta 5") instead
+// of guessing/duplicating the 60-unit spacing.
+export const CITY_BLOCK_SIZE = 60;
+
+export const CITY_LAYOUT: CityLayout = (() => {
   const bArr: CityBuildingRecord[] = [];
   const cArr: Array<{ x: number; z: number }> = [];
   const pArr: Array<{ x: number; z: number }> = [];
-  const gridSpacing = 60;
+  const gridSpacing = CITY_BLOCK_SIZE;
   const buildingColorsByStyle: Record<'modern' | 'glass' | 'brick', string[]> = {
     modern: ['#c9c9c9', '#a3b1bf', '#8fa0ad', '#5a6b7a', '#3d4f5c', '#d9cdbb', '#8a8a8a'],
     glass: ['#88ccff', '#7fd8d8', '#a0e0ff', '#6fb8d9', '#9fc9e8'],
