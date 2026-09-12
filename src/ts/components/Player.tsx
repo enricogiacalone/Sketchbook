@@ -343,6 +343,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     maxHealth,
     setHealth,
     takeDamage,
+    setIsPlayerGrounded,
   } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
@@ -365,6 +366,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       maxHealth: state.maxHealth,
       setHealth: state.setHealth,
       takeDamage: state.takeDamage,
+      setIsPlayerGrounded: state.setIsPlayerGrounded,
     }))
   );
 
@@ -1109,6 +1111,14 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     // JUMP_LOCKOUT_TIME above).
     isGrounded.current = jumpLockout.current <= 0 && distToGround < 0.3 && velocity.current[1] < 2.0;
     wasGrounded.current = isGrounded.current;
+    // "ora ci cade sopra ma nn lo prende" -- Collectibles.tsx needs to know
+    // the player is actually standing, not still falling through a
+    // collectible's height on the way down, and a fixed post-spawn timer
+    // couldn't do that reliably (either still airborne when it expires, or
+    // already walked away by then). Mirrors this same ref into the store
+    // every frame -- setIsPlayerGrounded bails out itself when unchanged,
+    // so this doesn't spam subscribers while just standing or just falling.
+    setIsPlayerGrounded(isGrounded.current);
 
     if (wasGroundedPrev && !isGrounded.current && airPhase.current === "grounded") {
         // Left the ground without a jump this frame -- walked off a ledge.

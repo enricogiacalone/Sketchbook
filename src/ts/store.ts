@@ -80,6 +80,16 @@ interface GameState {
   // re-rendering every time any single item's visibility changes.
   collectiblesFound: number;
   collectiblesTotal: number;
+  // Mirrors Player.tsx's own isGrounded ref (recomputed every frame from
+  // distToGround + fall speed there) so OTHER systems that need to know
+  // "is the player actually standing, not mid-fall/mid-jump" -- currently
+  // just Collectibles.tsx, which must not count a pickup while the player
+  // is still falling through a collectible's height on the way down --
+  // don't need their own copy of that ground-snap math. Written every
+  // frame from Player.tsx but only actually changes (and notifies
+  // subscribers) on takeoff/landing -- see setIsPlayerGrounded's own bail-
+  // out, same pattern as updateEntity's.
+  isPlayerGrounded: boolean;
   entities: Map<string, EntityInfo>;
   setHealth: (health: number) => void;
   setMaxHealth: (maxHealth: number) => void;
@@ -101,6 +111,7 @@ interface GameState {
   setPlayerInfo: (pos: [number, number, number], yaw: number) => void;
   setPlayerMessage: (message: string) => void;
   setCollectiblesTotal: (total: number) => void;
+  setIsPlayerGrounded: (grounded: boolean) => void;
   collectItem: () => void;
   updateEntity: (id: string, info: Partial<EntityInfo>) => void;
   removeEntity: (id: string) => void;
@@ -126,6 +137,10 @@ export const useStore = create<GameState>((set) => ({
   playerMessage: '',
   collectiblesFound: 0,
   collectiblesTotal: 0,
+  // Starts false -- the character always spawns airborne at [0, 15, 0]
+  // and free-falls, and Player.tsx overwrites this with the real value
+  // within its first couple of frames regardless.
+  isPlayerGrounded: false,
   entities: new Map(),
   setHealth: (health) => set({ health }),
   setMaxHealth: (maxHealth) => set({ maxHealth }),
@@ -160,6 +175,7 @@ export const useStore = create<GameState>((set) => ({
   setPlayerInfo: (pos, yaw) => set({ playerPos: pos, playerYaw: yaw }),
   setPlayerMessage: (message) => set({ playerMessage: message }),
   setCollectiblesTotal: (total) => set({ collectiblesTotal: total }),
+  setIsPlayerGrounded: (grounded) => set((state) => (state.isPlayerGrounded === grounded ? state : { isPlayerGrounded: grounded })),
   collectItem: () => set((state) => ({ collectiblesFound: Math.min(state.collectiblesTotal, state.collectiblesFound + 1) })),
   // "serve ottimizzare ancora" -- every car/pedestrian/enemy calls this on
   // a fixed timer (Car.tsx ~10/s, Pedestrian.tsx ~5/s) regardless of

@@ -224,12 +224,33 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp }) => {
         if (fireDir.lengthSq() > 0.0001) {
           fireDir.normalize();
           lastFireTime.current = nowMs;
+          // "il nemico spara sempre troppo dall'alto.. perche nn si
+          // comporta come il player?" -- the previous fix (enemyPos.y +
+          // 0.2, copying Player.tsx's own "+0.2" literally) was still
+          // wrong because enemyPos.y and Player.tsx's position.current[1]
+          // are NOT the same kind of reference height, even though both
+          // are "this character's own RigidBody origin". Player.tsx's
+          // origin sits RADIUS (0.5) above ITS feet; this compound body's
+          // origin sits bodyBottomOffset (0.8) above ITS OWN feet -- a real
+          // 0.3 discrepancy from how the two colliders happen to be
+          // rigged, not an actual anatomical difference (same boxman.glb,
+          // same scale). Copying the "+0.2" as a flat offset from each
+          // character's own origin therefore put the enemy's muzzle 0.3
+          // higher in absolute world space than the player's. Fix: first
+          // subtract bodyBottomOffset back out to reach TRUE ground level
+          // (mirroring how the ground-snap block below reconstructs
+          // targetY = groundY + bodyBottomOffset, just inverted), then add
+          // the exact same absolute muzzle height above ground the player
+          // uses -- RADIUS (0.5) + 0.2 = 0.7 -- so both characters' guns
+          // sit at the same real height regardless of their own collider's
+          // internal offset convention.
           const bulletId = `enemy-bullet-${id}-${Date.now()}`;
+          const MUZZLE_HEIGHT_ABOVE_GROUND = 0.7; // matches Player.tsx: RADIUS(0.5) + 0.2
           setBullets((prev) => [...prev, {
             id: bulletId,
             pos: [
               enemyPos.x + fireDir.x * 0.5,
-              enemyPos.y + height / 2,
+              enemyPos.y - bodyBottomOffset + MUZZLE_HEIGHT_ABOVE_GROUND,
               enemyPos.z + fireDir.z * 0.5,
             ],
             vel: [fireDir.x * 50, 0, fireDir.z * 50],
