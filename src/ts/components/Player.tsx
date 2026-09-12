@@ -217,7 +217,88 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const { scene: worldScene } = useThree();
   const { scene, animations } = useGLTF("boxman.glb");
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
-  const { actions } = useAnimations(animations, clonedScene);
+  const { actions, mixer, clips } = useAnimations(animations, clonedScene);
+
+  // Upper/lower body split -- "dividiamo il busto dalle gambe... quando
+  // corro e sparo deve continuare a correre". The rig's own body_lower/
+  // body_upper spine boundary is the natural split point. Two mixer-level
+  // problems had to be solved, not just "make two clips":
+  //
+  // 1. GLTFLoader builds track names via THREE.PropertyBinding.
+  //    sanitizeNodeName(boneName), which STRIPS reserved characters --
+  //    including the literal "." in Blender's ".L"/".R" suffix convention
+  //    (e.g. "arm_upper.L" -> "arm_upperL"). Filtering by the raw bone
+  //    names matched nothing for any arm bone (only "head"/"body_upper"
+  //    have no dot to strip) -- sanitize the same way before comparing.
+  // 2. Simply layering a full-body locomotion action (run/idle/...) UNDER
+  //    a separate upper-body-only "shoot" action at weight 1 does NOT
+  //    override the arms the way a single playAnim() crossfade does --
+  //    three.js's PropertyMixer normalizes by the SUM of all active
+  //    weights touching a property (see accumulate()'s `mix = weight /
+  //    currentWeight`), so two weight=1 actions on the same bone blend
+  //    ~50/50 instead of one winning. That's why the arms sagged toward a
+  //    half-idle, half-aim pose ("tiene le mani basse") instead of
+  //    reaching the full aim height. The fix: while firing, ALSO swap the
+  //    base locomotion action for a LOWER-BODY-only filtered version of
+  //    the same clip, so at any moment exactly one action owns the legs
+  //    (whichever locomotion clip, lower-filtered) and exactly one owns
+  //    the arms/torso/head (the shoot overlay) -- no bone is ever driven
+  //    by two weight=1 actions at once.
+  const UPPER_BODY_BONES = ["body_upper", "head", "arm_upper.L", "arm_lower.L", "arm_upper.R", "arm_lower.R"];
+  const LOWER_BODY_BONES = ["root", "butt_bone", "body_lower", "leg_upper.L", "leg_lower.L", "leg_upper.R", "leg_lower.R"];
+  // Every clip name that can appear as `nextAnim` below -- these are the
+  // only ones that ever need a lower-body-only stand-in for the
+  // while-firing case.
+  const LOCOMOTION_CLIP_NAMES = ["idle", "run", "sprint", "jump_idle", "jump_running", "falling", "drop_idle", "drop_running", "drop_running_roll"];
+  const ONE_SHOT_LOCOMOTION_NAMES = ["jump_idle", "jump_running", "drop_idle", "drop_running", "drop_running_roll"];
+
+  const shootUpperActionRef = useRef<THREE.AnimationAction | null>(null);
+  const lowerActionsRef = useRef<Record<string, THREE.AnimationAction>>({});
+  const wasFiringRef = useRef(false);
+  const currentPoolRef = useRef<"full" | "lower">("full");
+
+  const filterTracksByBones = (clip: THREE.AnimationClip, bones: string[]) => {
+    const sanitized = bones.map((bone) => THREE.PropertyBinding.sanitizeNodeName(bone));
+    return clip.tracks.filter((t) => sanitized.some((bone) => t.name.startsWith(bone + ".")));
+  };
+
+  useEffect(() => {
+    const createdActions: THREE.AnimationAction[] = [];
+
+    const baseShootClip = clips.find((c) => c.name === "shoot");
+    let shootAction: THREE.AnimationAction | null = null;
+    if (baseShootClip) {
+      const upperClip = new THREE.AnimationClip("shoot_upper", baseShootClip.duration, filterTracksByBones(baseShootClip, UPPER_BODY_BONES));
+      shootAction = mixer.clipAction(upperClip, clonedScene);
+      shootAction.setLoop(THREE.LoopRepeat, Infinity);
+      createdActions.push(shootAction);
+    }
+    shootUpperActionRef.current = shootAction;
+
+    const lowerActions: Record<string, THREE.AnimationAction> = {};
+    for (const name of LOCOMOTION_CLIP_NAMES) {
+      const base = clips.find((c) => c.name === name);
+      if (!base) continue;
+      const lowerClip = new THREE.AnimationClip(name + "_lower", base.duration, filterTracksByBones(base, LOWER_BODY_BONES));
+      const action = mixer.clipAction(lowerClip, clonedScene);
+      if (ONE_SHOT_LOCOMOTION_NAMES.includes(name)) {
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+      }
+      lowerActions[name] = action;
+      createdActions.push(action);
+    }
+    lowerActionsRef.current = lowerActions;
+
+    return () => {
+      createdActions.forEach((action) => {
+        action.stop();
+        mixer.uncacheClip(action.getClip());
+      });
+      shootUpperActionRef.current = null;
+      lowerActionsRef.current = {};
+    };
+  }, [clips, mixer, clonedScene]);
 
   // One-shot transition/action clips need LoopOnce + clampWhenFinished --
   // three.js's AnimationAction defaults to LoopRepeat, which nothing here
@@ -439,12 +520,26 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const seatVelocityEstimate = useRef(new THREE.Vector3());
 
 
-  const playAnim = (name: string) => {
-    if (currentAnimRef.current === name) return;
+  // `lowerOnly` picks which pool drives this clip: false (normal) plays
+  // the full-body clip exactly as authored (natural arm swing during
+  // run/idle/jump/...); true plays the LOWER-BODY-only filtered stand-in
+  // instead, freeing the arms/torso/head to be driven entirely by the
+  // "shoot" overlay with no other action fighting it for those bones (see
+  // the big comment above the mixer-building effect for why that fight
+  // otherwise happens). Both the name AND the pool have to match the
+  // currently-playing one for this to no-op -- switching pools for the
+  // SAME clip name (e.g. "run" full -> "run" lower, when firing starts)
+  // must still cross-fade.
+  const playAnim = (name: string, lowerOnly: boolean = false) => {
+    const pool: "full" | "lower" = lowerOnly ? "lower" : "full";
+    if (currentAnimRef.current === name && currentPoolRef.current === pool) return;
     currentAnimRef.current = name;
+    currentPoolRef.current = pool;
     setCurrentAnim(name);
     Object.values(actions).forEach((action) => action?.fadeOut(0.1));
-    if (actions[name]) actions[name].reset().fadeIn(0.1).play();
+    Object.values(lowerActionsRef.current).forEach((action) => action?.fadeOut(0.1));
+    const targetAction = lowerOnly ? lowerActionsRef.current[name] : actions[name];
+    if (targetAction) targetAction.reset().fadeIn(0.1).play();
   };
 
   // Real clip length when it's loaded, otherwise a sane fallback -- mirrors
@@ -1079,8 +1174,30 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     } else if (hSpeed > 0.5) {
         nextAnim = hSpeed > RUN_SPEED * 1.3 ? "sprint" : "run";
     }
-    (window as any).__animDebug = { nextAnim, currentAnim: currentAnimRef.current, airPhase: airPhase.current, landingAnim: landingAnim.current, landingAnimTimer: landingAnimTimer.current, hSpeed, isGrounded: isGrounded.current };
-    playAnim(nextAnim);
+    // Computed before playAnim() below so the base layer can pick the
+    // right pool (full vs. lower-only) for whatever nextAnim resolved to
+    // -- see the big comment above the mixer-building effect.
+    const isFiring = !!input.primary;
+    (window as any).__animDebug = { nextAnim, currentAnim: currentAnimRef.current, airPhase: airPhase.current, landingAnim: landingAnim.current, landingAnimTimer: landingAnimTimer.current, hSpeed, isGrounded: isGrounded.current, isFiring };
+    playAnim(nextAnim, isFiring);
+
+    // Upper-body "shoot" overlay, independent of the base layer above --
+    // "l'animazione di sparo deve riguardare solo la parte superiore del
+    // corpo perche se corro o sn fermo deve continuare idle o run o walk
+    // che sia". Only transitions on actual press/release (mirrors
+    // playAnim's own early-return-if-unchanged) so reset()/fadeIn() don't
+    // restart the aim/recoil loop every single frame the button is held.
+    if (isFiring !== wasFiringRef.current) {
+        const shootAction = shootUpperActionRef.current;
+        if (shootAction) {
+            if (isFiring) {
+                shootAction.reset().fadeIn(0.1).play();
+            } else {
+                shootAction.fadeOut(0.15);
+            }
+        }
+        wasFiringRef.current = isFiring;
+    }
 
     // 6. Network & Store
     setPlayerInfo([position.current[0], position.current[1], position.current[2]], modelRotation.current);

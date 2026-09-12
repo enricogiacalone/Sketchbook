@@ -76,6 +76,12 @@ export interface CityBuildingRecord {
   numFloors: number;
   floorHeight: number;
   by: number; // ground height at (x,z), precomputed once
+  // "fai illuminare i palazzi come se avessero decorazioni led la notte" --
+  // a per-building accent color + phase for the roofline LED trim
+  // (BuildingLeds.tsx), picked once here alongside the building's own
+  // color/style instead of re-randomizing in the lighting component.
+  ledColor: string;
+  ledPhase: number;
 }
 
 export interface CityLayout {
@@ -112,8 +118,18 @@ export const CITY_LAYOUT: CityLayout = (() => {
     brick: ['#8b3a2c', '#a0522d', '#7a4a3a', '#9c5b45', '#6b3f36', '#b06040'],
   };
   const styles: ('modern' | 'glass' | 'brick')[] = ['modern', 'glass', 'brick'];
+  // Vivid architectural-accent-light palette -- unrelated to the
+  // day/lit building color above, this is purely the roofline LED trim's
+  // own color (BuildingLeds.tsx), same idea as real cities where a
+  // building's facade material and its night accent lighting are picked
+  // independently.
+  const LED_PALETTE = ['#00eaff', '#ff2fd0', '#7cff3a', '#ffb300', '#8a6bff', '#ff3b5c'];
 
-  const gridRadius = 2;
+  // "fai la citta piu piccola" -- 2 -> 1: a 3x3 block grid (8 built
+  // blocks + the center park) instead of 5x5 (24 + park). Also directly
+  // helps the ongoing perf work: roughly a third of the buildings, LED
+  // trims/lights, parked cars and pedestrians as before.
+  const gridRadius = 1;
   for (let i = -gridRadius; i <= gridRadius; i++) {
     for (let j = -gridRadius; j <= gridRadius; j++) {
       const blockX = i * gridSpacing + gridSpacing / 2;
@@ -121,7 +137,10 @@ export const CITY_LAYOUT: CityLayout = (() => {
 
       if (i === 0 && j === 0) continue;
 
-      if ((i === -2 && j === 1) || (i === 2 && j === -2)) {
+      // Plaza block coordinates must stay inside the (now smaller)
+      // [-gridRadius, gridRadius] range -- these two are picked to sit on
+      // opposite corners of the grid, same relative layout idea as before.
+      if ((i === -1 && j === 1) || (i === 1 && j === -1)) {
         pArr.push({ x: blockX, z: blockZ });
         continue;
       }
@@ -150,6 +169,8 @@ export const CITY_LAYOUT: CityLayout = (() => {
               corner: Math.floor(Math.random() * 4),
               numFloors,
               floorHeight: h / numFloors,
+              ledColor: LED_PALETTE[Math.floor(Math.random() * LED_PALETTE.length)],
+              ledPhase: Math.random() * Math.PI * 2,
               by: getTerrainHeight(x, z),
             });
             break;

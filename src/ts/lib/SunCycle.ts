@@ -27,8 +27,16 @@ export const DAY_CYCLE_SECONDS = 360; // full day/night in 360s -- user clarifie
 const SUN_PATH_TILT = Math.PI * 0.12;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
 
+// "fai cominciare il gioco di giorno" -- elapsedTime starts at 0 the
+// moment the Canvas mounts, which without this offset maps to
+// timeOfDay=0 (midnight, sun straight down) -- the game always started
+// at night. Shifting by half a cycle makes elapsedTime=0 read as noon
+// instead; the cycle still runs at the same speed and still goes
+// through a full day/night after that, just phase-shifted.
+const DAY_START_OFFSET = DAY_CYCLE_SECONDS / 2;
+
 export const getTimeOfDay = (elapsedTime: number): number =>
-  ((elapsedTime / DAY_CYCLE_SECONDS) * 24) % 24;
+  (((elapsedTime + DAY_START_OFFSET) / DAY_CYCLE_SECONDS) * 24) % 24;
 
 // Unit vector pointing FROM the world origin TOWARD the sun. y > 0 means
 // above the horizon. Traces a single vertical great circle per day (0 =

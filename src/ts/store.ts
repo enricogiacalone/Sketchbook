@@ -153,10 +153,34 @@ export const useStore = create<GameState>((set) => ({
   setPlayerMessage: (message) => set({ playerMessage: message }),
   setCollectiblesTotal: (total) => set({ collectiblesTotal: total }),
   collectItem: () => set((state) => ({ collectiblesFound: Math.min(state.collectiblesTotal, state.collectiblesFound + 1) })),
+  // "serve ottimizzare ancora" -- every car/pedestrian/enemy calls this on
+  // a fixed timer (Car.tsx ~10/s, Pedestrian.tsx ~5/s) regardless of
+  // whether it actually moved since the last call. A stationary parked car
+  // (of which a full city has ~30) was rebroadcasting an UNCHANGED
+  // position 10 times a second forever, and every single call cloned the
+  // ENTIRE entities Map (every car/pedestrian/enemy in the city) just to
+  // put back the same values -- pure allocation + zustand-notify churn for
+  // no actual change. Bail out (return the SAME state object, which
+  // zustand's own Object.is check treats as "nothing to do" and skips
+  // notifying subscribers entirely -- Minimap.tsx included) whenever the
+  // incoming position/rotation/type match what's already stored, within a
+  // small epsilon so ordinary physics/floating-point jitter on a
+  // "resting" body doesn't defeat this.
   updateEntity: (id, info) => set((state) => {
+    const existing = state.entities.get(id);
+    if (existing) {
+      const posSame =
+        !info.position ||
+        (Math.abs(info.position[0] - existing.position[0]) < 0.01 &&
+          Math.abs(info.position[1] - existing.position[1]) < 0.01 &&
+          Math.abs(info.position[2] - existing.position[2]) < 0.01);
+      const rotSame = info.rotation === undefined || Math.abs(info.rotation - existing.rotation) < 0.01;
+      const typeSame = info.type === undefined || info.type === existing.type;
+      if (posSame && rotSame && typeSame) return state;
+    }
     const newEntities = new Map(state.entities);
-    const existing = newEntities.get(id) || { id, type: 'enemy', position: [0,0,0], rotation: 0 };
-    newEntities.set(id, { ...existing, ...info } as EntityInfo);
+    const base = existing || { id, type: 'enemy', position: [0, 0, 0], rotation: 0 };
+    newEntities.set(id, { ...base, ...info } as EntityInfo);
     return { entities: newEntities };
   }),
   removeEntity: (id) => set((state) => {

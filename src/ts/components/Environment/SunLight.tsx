@@ -105,7 +105,15 @@ const SunLight: React.FC = () => {
       <directionalLight
         ref={lightRef}
         castShadow
-        shadow-mapSize={[2048, 2048]}
+        // "serve ottimizzare ancora" -- this shadow map can't be cached
+        // frame-to-frame like a static one: the camera-following recenter
+        // above means its position/target genuinely change every frame, so
+        // three.js has to fully redraw it every frame no matter what.
+        // Halving the resolution (2048 -> 1024) cuts that redraw cost to a
+        // quarter for a real, ongoing per-frame cost, at the price of
+        // slightly blockier shadow edges -- a good trade given this is the
+        // one shadow-casting light in the whole scene running every frame.
+        shadow-mapSize={[1024, 1024]}
         shadow-camera-left={-SHADOW_FRUSTUM}
         shadow-camera-right={SHADOW_FRUSTUM}
         shadow-camera-top={SHADOW_FRUSTUM}

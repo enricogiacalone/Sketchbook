@@ -450,25 +450,14 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     _velVec.set(linvel.x, linvel.y, linvel.z);
     const speed = _velVec.dot(_forward);
 
-    // TEMP DEBUG (Claude): per-car live telemetry for tuning ENGINE_FORCE/
-    // BRAKE_FORCE/etc. now that they're driving a real Rapier vehicle
-    // controller instead of the old dead-in-the-water cannon one.
-    if (import.meta.env.DEV) {
-      (window as any).__carDebug = (window as any).__carDebug || {};
-      (window as any).__carDebug[id] = {
-        velocity: [linvel.x, linvel.y, linvel.z],
-        speed,
-        gear: gear.current,
-        inputForward: input.forward,
-        inputBackward: input.backward,
-        steeringIndices: [...steeringIndices],
-        rwdIndices: [...rwdIndices],
-        steeringPos: steeringSpring.current.position,
-        steeringTarget: steeringSpring.current.target,
-        wheelsInContact: [0, 1, 2, 3].map((i) => controller.wheelIsInContact(i)),
-        wheelSuspensionLength: [0, 1, 2, 3].map((i) => controller.wheelSuspensionLength(i)),
-      };
-    }
+    // Tuning telemetry (ENGINE_FORCE/BRAKE_FORCE/etc.) removed now that
+    // the real Rapier vehicle controller is dialed in -- it was running 8
+    // extra wheelIsInContact()/wheelSuspensionLength() physics queries
+    // plus several array allocations every frame for whichever car was
+    // being driven. "ok ma dobbiamo ottimizzare le performance perche e
+    // rallentato il gioco" -- gone now, along with the matching per-frame
+    // debug block below that ran the same kind of query for EVERY car
+    // (parked ones included, ~35 in a full city), not just the driven one.
 
     // -- Transmission (straight port of Car.ts's engine/gear logic).
     // (Plain `for` loops rather than `[0,1,2,3].forEach(...)` throughout
@@ -560,18 +549,6 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     // while paused -- this plain useFrame isn't stopped by <Physics
     // paused>, only the useBeforePhysicsStep block above is.
     if (isPaused) return;
-
-    if (import.meta.env.DEV) {
-      const t0 = chassisRef.current.translation();
-      const controller0 = vehicleController.current;
-      (window as any).__carsPosDebug = (window as any).__carsPosDebug || {};
-      (window as any).__carsPosDebug[id] = {
-        pos: [t0.x, t0.y, t0.z],
-        hasController: !!controller0,
-        wheelDefsCount: wheelDefs.filter((d) => !!d?.node).length,
-        wheelsInContact: controller0 ? [0,1,2,3].map((i) => controller0.wheelIsInContact(i)) : null,
-      };
-    }
 
     if (import.meta.env.DEV && !(window as any).__seatDebug?.[id]) {
       (window as any).__seatDebug = (window as any).__seatDebug || {};

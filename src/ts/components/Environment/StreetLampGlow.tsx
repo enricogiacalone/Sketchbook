@@ -23,7 +23,7 @@ import { LAMP_POSITIONS, PARK_LAMP_POLE_HEIGHT } from './Park';
 // you can barely see the lamp itself, you can't tell the ground under it
 // isn't lit either. Cost stays flat at POOL_SIZE real lights no matter how
 // many hundred lamps exist in the world.
-const POOL_SIZE = 16;
+const POOL_SIZE = 10;
 const LIGHT_DISTANCE = 16;
 // Same fix as BuildingLedGlow.tsx: three.js's default decay=2 (inverse-
 // square, "physically correct" candela units) needs intensity in the
@@ -77,10 +77,19 @@ const StreetLampGlow: React.FC = () => {
     const dayFactor = getDayFactor(dir.y);
     const nightFactor = 1 - dayFactor;
 
-    // Daytime: every pool light off, skip the sort entirely.
+    // Daytime: every pool light OFF *and* invisible. Setting intensity=0
+    // alone still leaves the light registered with three.js's renderer,
+    // which evaluates every visible light in the scene for every lit
+    // fragment on every mesh regardless of its intensity -- "ok ma dobbiamo
+    // ottimizzare le performance perche e rallentato il gioco" traced back
+    // to exactly this (see BuildingLedGlow.tsx's own note): intensity=0
+    // was paying the full per-light shader cost 24/7, day included.
+    // light.visible=false actually drops it from that per-frame light
+    // list, so daytime -- most of the play session -- now costs nothing
+    // for either pool.
     if (nightFactor <= 0.01) {
       for (const light of lightRefs.current) {
-        if (light) light.intensity = 0;
+        if (light) { light.intensity = 0; light.visible = false; }
       }
       return;
     }
@@ -99,8 +108,10 @@ const StreetLampGlow: React.FC = () => {
       const lamp = _sorted[i];
       if (!lamp) {
         light.intensity = 0;
+        light.visible = false;
         continue;
       }
+      light.visible = true;
       light.position.set(lamp.x, lamp.y, lamp.z);
       light.intensity = nightFactor * LIGHT_INTENSITY;
     }

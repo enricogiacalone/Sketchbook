@@ -36,9 +36,12 @@ export const SIDEWALK_HEIGHT = 0.04;
 // road's width) no matter where you look from.
 export const ROAD_THICKNESS = 1.0;
 
+// "fai la citta piu piccola" -- kept one ring wider than City.tsx's own
+// gridRadius (1), same convention as before (was city radius 2 / road
+// radius 3): a spare outer perimeter road with no buildings past it.
 export const ROAD_OFFSETS: number[] = (() => {
   const arr: number[] = [];
-  for (let i = -3; i <= 3; i++) {
+  for (let i = -2; i <= 2; i++) {
     arr.push(i * ROAD_GRID_SPACING);
   }
   return arr;

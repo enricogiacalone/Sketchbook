@@ -5,7 +5,16 @@ import { getTerrainHeight } from './Terrain';
 
 const Grass: React.FC = () => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
-  const count = 20000;
+  // "serve ottimizzare ancora" -- this is a blind uniform scatter across
+  // the WHOLE 400x400 map with no exclusion for roads or buildings (unlike
+  // ParkTrees.tsx's GrassPatch, added later for "hai dimenticato l'erba e
+  // i fiori", which is properly bounded to courtyards/park/plazas and now
+  // covers all the areas that actually need grass). A large fraction of
+  // these blades were rendering pointlessly under road surfaces and
+  // building footprints -- cut from 20000 to 6000, still enough for
+  // ground cover out past the city grid where GrassPatch has no reach, at
+  // a third of the vertex/shader cost.
+  const count = 6000;
   
   const dummy = useMemo(() => new THREE.Object3D(), []);
 

@@ -15,7 +15,7 @@ import Car from '../Vehicles/Car';
 // so this stuff only shows up where there's actually a city block to
 // belong to, not scattered across the empty outer ring of the road grid.
 const GRID_SPACING = 60;
-const GRID_RADIUS = 2;
+const GRID_RADIUS = 1; // matches City.tsx's own (smaller) gridRadius
 const BLOCK_HALF = GRID_SPACING / 2;
 // Distance from a road's centerline to the middle of its sidewalk band --
 // mirrors the sidewalkOuter/SIDEWALK_HEIGHT math in Road.tsx's
@@ -28,8 +28,8 @@ const EDGE_SLOT_OFFSET = 12;
 
 const isSkippedBlock = (i: number, j: number): boolean =>
   (i === 0 && j === 0) || // park
-  (i === -2 && j === 1) || // plaza
-  (i === 2 && j === -2); // plaza
+  (i === -1 && j === 1) || // plaza -- matches City.tsx's CITY_LAYOUT.plazas
+  (i === 1 && j === -1); // plaza
 
 // --- Small street props -----------------------------------------------
 
