@@ -17,6 +17,7 @@ import Clouds from "./components/Environment/Clouds";
 import UFO from "./components/Environment/UFO";
 import MeteoriteSpawner from "./components/Environment/MeteoriteSpawner";
 import EnemySpawner from "./components/EnemySpawner";
+import MissionManager from "./components/Missions/MissionManager";
 import Car from "./components/Vehicles/Car"; // Import Car
 import Airplane from "./components/Vehicles/Airplane"; // Import Airplane
 import Helicopter from "./components/Vehicles/Helicopter"; // Import Helicopter
@@ -97,6 +98,7 @@ const Scene: React.FC = () => {
         <CityDetails />
         <Airport />
         <Collectibles />
+        <MissionManager />
       </Suspense>
     </>
   );

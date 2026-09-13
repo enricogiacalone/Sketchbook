@@ -125,6 +125,20 @@
   z-index: 1;
 }
 
+/* GTA-style yellow diamond mission-target blip -- "crea una missione come
+   in gta", shows on the radar where the current mission stage wants the
+   player to go (drive destination or elimination target). */
+.minimap-mission-target {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  background-color: #ffd54a;
+  border: 1px solid #7a5a00;
+  transform: translate(-50%, -50%) rotate(45deg);
+  box-shadow: 0 0 5px rgba(255, 213, 74, 0.9);
+  z-index: 1;
+}
+
 #minimap-north {
   position: absolute;
   top: 5px;

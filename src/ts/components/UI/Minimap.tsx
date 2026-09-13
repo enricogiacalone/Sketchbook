@@ -36,7 +36,7 @@ const ROAD_PX = (ROAD_WIDTH / worldSize) * mapSize;
 const ROAD_LINE_LENGTH = mapSize * 1.6; // overshoots the circle at any rotation
 
 const Minimap: React.FC = () => {
-  const { playerPos, playerYaw, entities, health, maxHealth, armor } = useStore(
+  const { playerPos, playerYaw, entities, health, maxHealth, armor, missionTargetPos } = useStore(
     useShallow((state) => ({
       playerPos: state.playerPos,
       playerYaw: state.playerYaw,
@@ -44,6 +44,7 @@ const Minimap: React.FC = () => {
       health: state.health,
       maxHealth: state.maxHealth,
       armor: state.armor,
+      missionTargetPos: state.missionTargetPos,
     }))
   );
 
@@ -142,6 +143,16 @@ const Minimap: React.FC = () => {
     return icons;
   }, [entities, playerPos]);
 
+  // Mission-target blip -- yellow diamond, wherever the active mission
+  // stage's targetPos currently points (drive destination or elimination
+  // target); null when no stage is active, so nothing renders then.
+  const missionTargetBlip = useMemo(() => {
+    if (!missionTargetPos) return null;
+    const { mapX, mapY } = worldToMap(missionTargetPos[0], missionTargetPos[1], playerPos);
+    if (!isNearCircle(mapX, mapY, 10)) return null;
+    return <div className="minimap-mission-target" style={{ left: mapX, top: mapY }} />;
+  }, [missionTargetPos, playerPos]);
+
   // Health and Armor Bar rotations
   const healthRotation = 45 + 180 * (health / (maxHealth || 100));
   const armorRotation = 225 + 180 * (armor / 100);
@@ -156,6 +167,7 @@ const Minimap: React.FC = () => {
         <div id="minimap-north" style={{ transform: `translateX(-50%) rotate(${playerYaw}rad)` }}>N</div>
         {enemyDots}
         {vehicleIcons}
+        {missionTargetBlip}
       </div>
 
       {/* GTA-style radar: the world rotates underneath (minimap-container's

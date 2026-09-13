@@ -10,6 +10,13 @@ export type ControllableType = 'player' | 'car' | 'airplane' | 'helicopter';
 // rides along.
 export type SeatKind = 'driver' | 'passenger' | null;
 
+// "crea una missione come in gta" -- a short chain of GTA-style
+// objectives (drive somewhere / eliminate a target / survive a wave).
+// MissionManager.tsx owns the actual per-frame state machine (timers,
+// spawning, success/fail checks); this is just the mirror of it that the
+// HUD, the minimap blip, and the in-world marker meshes all read.
+export type MissionStatus = 'inactive' | 'active' | 'success' | 'failed' | 'allComplete';
+
 export interface EntityInfo {
   id: string;
   type: 'player' | 'enemy' | 'car' | 'airplane' | 'helicopter' | 'ufo';
@@ -101,6 +108,23 @@ interface GameState {
   // value (classic lost-update), same reason Enemy.tsx's local
   // setHealth(prev => ...) uses the updater form.
   takeDamage: (amount: number) => void;
+  // Index into MissionManager.tsx's MISSIONS array -- which objective is
+  // current/next. Stays the same across a 'failed' status (retry the same
+  // stage) and only advances after a 'success'.
+  missionStage: number;
+  missionStatus: MissionStatus;
+  missionTitle: string;
+  missionBriefing: string;
+  missionTimeRemaining: number;
+  // World-space [x, z] of the current objective (drive destination or
+  // elimination target) -- null when the active mission has no fixed
+  // point (the survive-a-wave stage) or when no mission is active.
+  missionTargetPos: [number, number] | null;
+  setMissionStage: (stage: number) => void;
+  setMissionStatus: (status: MissionStatus) => void;
+  setMissionInfo: (title: string, briefing: string) => void;
+  setMissionTimeRemaining: (t: number) => void;
+  setMissionTargetPos: (pos: [number, number] | null) => void;
   setCurrentControllable: (type: ControllableType, id?: string | null, seatType?: SeatKind, seatName?: string | null) => void;
   setIsVehicleTransitioning: (transitioning: boolean, entityId?: string | null, doorName?: string | null) => void;
   setDoorOpen: (vehicleId: string, doorName: string, open: boolean) => void;
@@ -141,11 +165,22 @@ export const useStore = create<GameState>((set) => ({
   // and free-falls, and Player.tsx overwrites this with the real value
   // within its first couple of frames regardless.
   isPlayerGrounded: false,
+  missionStage: 0,
+  missionStatus: 'inactive',
+  missionTitle: '',
+  missionBriefing: '',
+  missionTimeRemaining: 0,
+  missionTargetPos: null,
   entities: new Map(),
   setHealth: (health) => set({ health }),
   setMaxHealth: (maxHealth) => set({ maxHealth }),
   setArmor: (armor) => set({ armor }),
   takeDamage: (amount) => set((state) => ({ health: Math.max(0, state.health - amount) })),
+  setMissionStage: (stage) => set({ missionStage: stage }),
+  setMissionStatus: (status) => set({ missionStatus: status }),
+  setMissionInfo: (title, briefing) => set({ missionTitle: title, missionBriefing: briefing }),
+  setMissionTimeRemaining: (t) => set({ missionTimeRemaining: t }),
+  setMissionTargetPos: (pos) => set({ missionTargetPos: pos }),
   setCurrentControllable: (type, id = null, seatType = null, seatName = null) => set({
     currentControllable: type,
     controlledEntityId: id,

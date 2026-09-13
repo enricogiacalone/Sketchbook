@@ -482,6 +482,19 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   // and cancel the jump before the body has visibly left the ground.
   const jumpLockout = useRef(0);
 
+  // "il player deve poter volare come superman se premo salto e ripremo
+  // salto prima che atterri" -- a second jump press while still airborne
+  // (from any takeoff -- an explicit jump OR just having walked off a
+  // ledge) toggles free flight instead of a second upward hop. canAirJump
+  // is the one-shot token for that: true whenever grounded, consumed the
+  // moment it's used, and only handed back out on the next landing -- see
+  // the landing block below -- so you get exactly one flight-trigger per
+  // trip through the air, matching "before it lands".
+  const isFlying = useRef(false);
+  const canAirJump = useRef(true);
+  const FLY_SPEED = RUN_SPEED * 1.4;
+  const FLY_VERTICAL_SPEED = 7;
+
   // -- Flight-phase state machine, modeled on the original (non-React)
   // Sketchbook's character states: Idle/Walk -> JumpIdle/JumpRunning or
   // Falling -> DropIdle/DropRunning/DropRolling (see character_states/).
@@ -585,6 +598,14 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       setHealth(maxHealth);
       rigidBodyRef.current?.setTranslation({ x: 0, y: 15, z: 0 }, true);
       rigidBodyRef.current?.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      // Dying mid-flight must not leave the respawned body permanently
+      // gravity-free (setGravityScale(0) from the flight takeoff below
+      // otherwise persists across the teleport).
+      if (isFlying.current) {
+        isFlying.current = false;
+        rigidBodyRef.current?.setGravityScale(1, true);
+      }
+      canAirJump.current = true;
     }
   }, [health, maxHealth, setHealth]);
 
@@ -1127,6 +1148,15 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
         airPhaseTimer.current = 0;
     }
     if (!wasGroundedPrev && isGrounded.current) {
+        // Just landed -- hand the flight-trigger token back out for the
+        // next trip through the air, and if we landed out of free flight,
+        // turn gravity back on (it was zeroed out for the duration of the
+        // flight, see the takeoff block below).
+        canAirJump.current = true;
+        if (isFlying.current) {
+            isFlying.current = false;
+            body.setGravityScale(1, true);
+        }
         // Just landed. Pick a recovery pose from the impact speed, same
         // thresholds as the original's setAppropriateDropState().
         airPhase.current = "grounded";
@@ -1173,9 +1203,39 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
             yVel = THREE.MathUtils.clamp(heightError * snapForce, -MAX_SNAP_SPEED, MAX_SNAP_SPEED);
         }
     } else {
-        // Air control
-        finalVel.x = THREE.MathUtils.lerp(velocity.current[0], finalVel.x, 0.05);
-        finalVel.z = THREE.MathUtils.lerp(velocity.current[2], finalVel.z, 0.05);
+        // "premo salto e ripremo salto prima che atterri" -- a second jump
+        // press while airborne and not already flying (canAirJump still
+        // unconsumed since the last landing) engages free flight instead
+        // of a normal double-hop. Zeroing gravityScale is what makes it
+        // actually free flight and not just "fall very slowly" -- without
+        // it the hover branch below would forever be fighting gravity's
+        // own accumulated downward velocity.
+        if (!isFlying.current && canAirJump.current && input.consumeJustPressed('jump')) {
+            isFlying.current = true;
+            canAirJump.current = false;
+            body.setGravityScale(0, true);
+        }
+
+        if (isFlying.current) {
+            // Superman-style flight: full camera-relative horizontal
+            // movement at FLY_SPEED (moveDir was already normalized above,
+            // if isMoving -- reused here instead of the RUN/SPRINT-scaled
+            // finalVel computed earlier), jump held to ascend, shift held
+            // to descend, and a gentle self-leveling hover (lerp toward 0
+            // vertical speed) when neither is pressed.
+            finalVel.copy(isMoving ? moveDir.clone().multiplyScalar(FLY_SPEED) : new THREE.Vector3(0, 0, 0));
+            if (input.jump) {
+                yVel = FLY_VERTICAL_SPEED;
+            } else if (input.shift) {
+                yVel = -FLY_VERTICAL_SPEED;
+            } else {
+                yVel = THREE.MathUtils.lerp(velocity.current[1], 0, 0.15);
+            }
+        } else {
+            // Air control
+            finalVel.x = THREE.MathUtils.lerp(velocity.current[0], finalVel.x, 0.05);
+            finalVel.z = THREE.MathUtils.lerp(velocity.current[2], finalVel.z, 0.05);
+        }
     }
 
     // Apply Physics
