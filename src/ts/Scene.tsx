@@ -14,6 +14,7 @@ import BuildingLeds from "./components/Environment/BuildingLeds";
 import BuildingLedGlow from "./components/Environment/BuildingLedGlow";
 import Airport, { RUNWAY_CENTER, HELIPORT_CENTER } from "./components/Environment/Airport";
 import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from "./components/Environment/RaceTrack";
+import Planets from "./components/Environment/Planets";
 import Clouds from "./components/Environment/Clouds";
 import UFO from "./components/Environment/UFO";
 import MeteoriteSpawner from "./components/Environment/MeteoriteSpawner";
@@ -74,6 +75,13 @@ const Scene: React.FC = () => {
   const isCleanTest = testScene !== 'none';
   const isCarTest = testScene === 'car';
   const isRaceTest = testScene === 'race';
+  // "aggiungi ... gli ufo e [le meteoriti]" -- the race scenario wants
+  // some sci-fi atmosphere/spectacle overhead (it's a "gara", not a
+  // precision physics test), so UFO + MeteoriteSpawner get an exception to
+  // the clean-scenario strip-down specifically for testScene==='race'.
+  // The airplane/helicopter/car test scenarios stay exactly as
+  // distraction-free as before -- this doesn't touch those.
+  const showSkyAtmosphere = !isCleanTest || isRaceTest;
   return (
     <>
       <Terrain />
@@ -81,8 +89,9 @@ const Scene: React.FC = () => {
       {!isCleanTest && <Road />}
       {!isCleanTest && <Clouds />}
       <Ocean />
-      {!isCleanTest && <UFO initialPosition={[0, 150, 0]} />}
-      {!isCleanTest && <MeteoriteSpawner />}
+      <Planets />
+      {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}
+      {showSkyAtmosphere && <MeteoriteSpawner />}
       {!isCleanTest && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
 
       {/* Carichiamo i modelli in blocchi separati per non bloccare la fisica */}

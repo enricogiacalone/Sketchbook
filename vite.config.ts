@@ -8,6 +8,12 @@ export default defineConfig({
   publicDir: "public",
   server: {
     open: true,
+    // Bind to 0.0.0.0 (all network interfaces), not just localhost, so a
+    // friend on the same LAN/Wi-Fi can reach the dev server directly --
+    // Vite prints the actual "Network: http://<lan-ip>:5173/" URL to use
+    // once this is on (requires restarting `npm run dev`, not just HMR --
+    // this is server bind config, not app code).
+    host: true,
   },
   build: {
     outDir: "build",

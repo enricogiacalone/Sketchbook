@@ -62,19 +62,27 @@ export const RACE_TRACK: [number, number][] = [
   [-195.0, -180.0],
 ];
 
-// Starting grid -- 2x2, on the long bottom straight (z=-180, running along
-// +X toward RACE_TRACK[0] at x=195 -- every Car's aiTargetIndex starts at
-// 0, see Car.tsx, so the 3 cops head straight there the instant they spawn,
-// no extra wiring needed here). Facing +X matches this codebase's own
-// convention for "rotation aligned with a route's first leg" (see
-// Scene.tsx's POLICE_ROUTE rotation comment). Kept well inside
-// TRACK_WIDTH's +/-10 corridor around z=-180.
+// Starting grid -- a SINGLE ROW, all 4 cars at the same x, side by side
+// across 4 lanes in z. Originally this was a 2x2 grid (2 rows, front/back
+// in x) -- caught live (window.__sim telemetry): with every car facing +X
+// and the 3 AI cops gunning it for RACE_TRACK[0] the instant they spawn
+// (every Car's aiTargetIndex starts at 0, see Car.tsx), a "back row" car
+// shared its EXACT lane (z) with a "front row" car directly ahead of it in
+// the travel direction -- the back car accelerated straight into the
+// front one from behind and launched it hundreds of units down the
+// straight before the player had touched a key. A single row side by side
+// means no car ever starts in front of another along the direction of
+// travel, so there's nothing to rear-end at the start. Facing +X matches
+// this codebase's own convention for "rotation aligned with a route's
+// first leg" (see Scene.tsx's POLICE_ROUTE rotation comment). All 4 lanes
+// sit inside TRACK_WIDTH's +/-10 corridor around z=-180 with margin to
+// spare.
 export const RACE_START_ROTATION: [number, number, number] = [0, Math.PI / 2, 0];
 export const RACE_GRID = {
-  player: [-150, 1.2, -184] as [number, number, number],
-  cop1: [-150, 1.2, -176] as [number, number, number],
-  cop2: [-160, 1.2, -184] as [number, number, number],
-  cop3: [-160, 1.2, -176] as [number, number, number],
+  player: [-150, 1.2, -187] as [number, number, number],
+  cop1: [-150, 1.2, -181] as [number, number, number],
+  cop2: [-150, 1.2, -175] as [number, number, number],
+  cop3: [-150, 1.2, -169] as [number, number, number],
 };
 
 // Speed bumps ("dossi") -- deliberately placed ONLY on the two long,
@@ -142,7 +150,12 @@ function buildRibbonGeometry(): THREE.BufferGeometry {
 
 const RaceTrack: React.FC = () => {
   const ribbonGeometry = useMemo(() => buildRibbonGeometry(), []);
-  const [gridX, , gridZ] = RACE_GRID.player;
+  // Stripe sits on the track's own centerline (z=-180 -- see RACE_TRACK's
+  // bottom edge), NOT derived from any one car's individual starting lane
+  // (RACE_GRID's 4 lanes straddle z=-180 symmetrically), so it visually
+  // crosses squarely in front of the whole starting row.
+  const [gridX] = RACE_GRID.player;
+  const gridZ = -180;
 
   return (
     <group>
@@ -157,7 +170,7 @@ const RaceTrack: React.FC = () => {
           below) and its long side (TRACK_WIDTH) becomes the one that maps
           to world Z, i.e. actually crosses the track instead of running
           along it. */}
-      <mesh position={[gridX + 8, 0.04, gridZ + 4]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[gridX + 8, 0.04, gridZ]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[3, TRACK_WIDTH]} />
         <meshStandardMaterial color="#ffffff" side={THREE.DoubleSide} />
       </mesh>
