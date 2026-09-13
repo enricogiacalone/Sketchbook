@@ -1,12 +1,18 @@
 import React, { useRef, useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { RigidBody, CuboidCollider, RapierRigidBody } from '@react-three/rapier';
+import { RigidBody, CuboidCollider, RapierRigidBody, useRapier } from '@react-three/rapier';
+// CoefficientCombineRule isn't re-exported by @react-three/rapier's own
+// types (only as a TS type, not the runtime enum) -- pulled directly from
+// its underlying @dimforge/rapier3d-compat dependency instead (already in
+// node_modules via @react-three/rapier, just not a direct package.json dep).
+import { CoefficientCombineRule } from '@dimforge/rapier3d-compat';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
+import { simDebug } from '../../debug/simDebug';
 
 interface HelicopterProps {
   position?: [number, number, number];
@@ -27,6 +33,9 @@ const _heliQuat = new THREE.Quaternion();
 const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 'heli-1' }) => {
   const { scene } = useGLTF('heli.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
+  // For window.__sim's `grounded`/`numContacts` telemetry -- see
+  // Airplane.tsx / debug/simDebug.ts for the full explanation.
+  const { world } = useRapier();
 
   // Same fix as Airplane.tsx / Car.tsx: heli.glb bakes in its own
   // "collision" helper meshes (Cube.NNN boxes + Sphere.NNN spheres, all
@@ -80,14 +89,19 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
   const rotorsRef = useRef<THREE.Object3D[]>([]);
 
   useEffect(() => {
-    if (scene) {
+    // Same bug/fix as Airplane.tsx: this traversed `scene` (the shared,
+    // cached, never-rendered GLTF scene) instead of `clonedScene` (what
+    // the <primitive> below actually renders) -- rotating the found
+    // "rotor" nodes every frame had no visible effect since they belonged
+    // to a completely different, invisible clone of the object graph.
+    if (clonedScene) {
       const rotors: THREE.Object3D[] = [];
-      scene.traverse((child) => {
+      clonedScene.traverse((child) => {
         if (child.userData.data === 'rotor') rotors.push(child);
       });
       rotorsRef.current = rotors;
     }
-  }, [scene]);
+  }, [clonedScene]);
 
   useFrame((state, delta) => {
     const body = ref.current;
@@ -129,8 +143,50 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
       updateEntity(id, { type: 'helicopter', position: [t0.x, t0.y, t0.z], rotation: _heliEuler.y });
     }
 
+    // Unified telemetry for window.__sim (debug/simDebug.ts) -- see
+    // Airplane.tsx for the full writeup; the helicopter previously had NO
+    // debug hooks at all, unlike the airplane's ad hoc ones.
+    const reportTelemetry = (active: boolean, extra?: Record<string, unknown>) => {
+      const rotT = body.rotation();
+      _heliQuat.set(rotT.x, rotT.y, rotT.z, rotT.w);
+      _heliEuler.setFromQuaternion(_heliQuat, 'YXZ');
+      const posT = body.translation();
+      const velT = body.linvel();
+      const angvelT = body.angvel();
+      const collider0 = body.collider(0);
+      let numContacts = 0;
+      if (collider0) world.contactPairsWith(collider0, () => { numContacts += 1; });
+      simDebug.registerVehicle('helicopter', body, {
+        id,
+        active,
+        paused: isPaused,
+        enginePower: enginePower.current,
+        // Drop consumeJustPressed (a function, not a flag) so this is a
+        // plain, JSON.stringify-able snapshot of the actual held keys.
+        input: Object.fromEntries(Object.entries(input).filter(([, v]) => typeof v === 'boolean')),
+        pos: [posT.x, posT.y, posT.z],
+        quat: [rotT.x, rotT.y, rotT.z, rotT.w],
+        eulerDeg: [
+          THREE.MathUtils.radToDeg(_heliEuler.y),
+          THREE.MathUtils.radToDeg(_heliEuler.x),
+          THREE.MathUtils.radToDeg(_heliEuler.z),
+        ],
+        vel: [velT.x, velT.y, velT.z],
+        speed: Math.hypot(velT.x, velT.y, velT.z),
+        localSpeed: null,
+        angvel: [angvelT.x, angvelT.y, angvelT.z],
+        sleeping: body.isSleeping(),
+        friction: collider0 ? collider0.friction() : null,
+        frictionCombineRule: collider0 ? collider0.frictionCombineRule() : null,
+        numContacts,
+        grounded: numContacts > 0,
+        extra,
+      });
+    };
+
     if (!isHeliActive) {
       if (enginePower.current > 0) enginePower.current = Math.max(0, enginePower.current - delta * 0.06);
+      if (import.meta.env.DEV) reportTelemetry(false);
       return;
     }
 
@@ -151,80 +207,102 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     _heliForward.set(0, 0, 1).applyQuaternion(quat);
     const forward = _heliForward;
 
-    // Throttle and the pitch/roll torques below are fixed impulses applied
-    // once per RENDERED frame with no time scaling -- so, like the car and
-    // airplane, their actual per-second effect depended entirely on the
-    // display's refresh rate. dt60 renormalizes to the tuning's implicit
-    // 60fps baseline (dt60 == 1 at exactly 60fps). The gravity-compensation
-    // impulse below already does its own delta scaling and is left alone.
-    // Clamped so a dropped/backgrounded frame (a big one-off `delta`)
-    // can't fling the helicopter with a single huge impulse -- caps the
-    // renormalization at 3x the 60fps baseline instead of following an
-    // arbitrarily large delta.
+    // Legacy Helicopter.ts (pre-React) drove the physics body directly every
+    // ~60Hz substep -- `body.velocity +=`, `body.angularVelocity +=`, and
+    // `*=`/lerp for damping -- entirely independent of the body's mass or
+    // inertia tensor. This port instead used applyImpulse/applyTorqueImpulse
+    // for throttle and pitch/roll, which divide by mass and by the (very
+    // uneven, box-shaped) inertia tensor: the exact same numeric constant
+    // ended up producing wildly different actual responsiveness per axis
+    // (roll came out ~3x stronger than pitch). On top of that, roll's
+    // left/right (A/D) sign was flipped relative to legacy's rollLeft/
+    // rollRight -- so rolling was both backwards AND disproportionately
+    // strong ("l'elicottero funziona a cazzo"). Fixed by reading the
+    // current linear/angular velocity once, accumulating every term into it
+    // exactly like legacy did (restoring legacy's exact per-axis constants
+    // and roll sign), and writing the result back with a single
+    // setLinvel/setAngvel -- mass/inertia-independent again.
+    // dt60 renormalizes legacy's implicit-60fps-per-step constants to the
+    // real frame delta (dt60 == 1 at exactly 60fps), clamped so a dropped/
+    // backgrounded frame can't apply a single huge jump.
     const dt60 = Math.min(delta * 60, 3);
 
-    // 1. Throttle (Ascend/Descend)
-    const throttleFactor = 15 * enginePower.current * dt60;
+    // 1. Throttle (Ascend/Descend) -- legacy: body.velocity += up * 0.15 * enginePower
+    const curVel = body.linvel();
+    const vel = { x: curVel.x, y: curVel.y, z: curVel.z };
+    const throttleFactor = 0.15 * enginePower.current * dt60;
     if (input.shift) {
-        body.applyImpulse({ x: up.x * throttleFactor, y: up.y * throttleFactor, z: up.z * throttleFactor }, true);
+        vel.x += up.x * throttleFactor; vel.y += up.y * throttleFactor; vel.z += up.z * throttleFactor;
     }
     if (input.jump) {
-        body.applyImpulse({ x: -up.x * throttleFactor, y: -up.y * throttleFactor, z: -up.z * throttleFactor }, true);
+        vel.x -= up.x * throttleFactor; vel.y -= up.y * throttleFactor; vel.z -= up.z * throttleFactor;
     }
 
-    // 2. Vertical Stabilization (Gravity compensation)
+    // 2. Vertical Stabilization (Gravity compensation) -- legacy:
+    // gravityCompensation = |gravity| * physicsFrameTime * 0.98 * sqrt(clamp(dot(globalUp,up),0,1))
+    // vertDamping = (0, vel.y, 0) * -0.01; vertStab = (up*gravityCompensation + vertDamping) * enginePower
     const gravity = 20;
-    let gravityCompensation = gravity * 50 * delta * 0.98;
+    let gravityCompensation = gravity * delta * 0.98;
     const dot = globalUp.dot(up);
     gravityCompensation *= Math.sqrt(THREE.MathUtils.clamp(dot, 0, 1));
-    
-    _heliVertStab.copy(up).multiplyScalar(gravityCompensation * enginePower.current);
-    body.applyImpulse({ x: _heliVertStab.x, y: _heliVertStab.y, z: _heliVertStab.z }, true);
+    const vertDampY = vel.y * -0.01;
+    _heliVertStab.set(up.x * gravityCompensation, up.y * gravityCompensation + vertDampY, up.z * gravityCompensation);
+    _heliVertStab.multiplyScalar(enginePower.current);
+    vel.x += _heliVertStab.x; vel.y += _heliVertStab.y; vel.z += _heliVertStab.z;
 
-    // 3. Positional Damping (horizontal drag only -- legacy's
-    // Helicopter.ts never touches Y here, only x/z: `body.velocity.x *=
-    // lerp(1, 0.995, enginePower); body.velocity.z *= ...`, operating
-    // in-place on cannon-es's live velocity object).
-    // This used to read `velocity.current`, a snapshot taken at the very
-    // TOP of this frame -- i.e. BEFORE steps 1 (throttle) and 2 (gravity
-    // compensation) above had even applied their impulses -- and then
-    // setLinvel'd the whole vector (Y included) straight from that stale
-    // snapshot, silently discarding everything those two impulses had
-    // just done to the body's real velocity THIS SAME FRAME. Net result:
-    // Shift/Space (throttle) and the gravity-compensation impulse could
-    // never actually move the helicopter -- only gravity's own automatic
-    // per-step integration (untouched by any of this) still applied, so
-    // it just sat on the ground revving its rotors, unresponsive to every
-    // control (see git history / chat: "riesco ad entrare nell'elicottero
-    // ma nn parte"). Fixed by re-reading the CURRENT (post-impulse)
-    // velocity here instead, and leaving Y alone entirely, same as legacy.
-    const curVel = body.linvel();
-    const damping = 1 - (0.005 * enginePower.current);
-    body.setLinvel({ x: curVel.x * damping, y: curVel.y, z: curVel.z * damping }, true);
+    // 3. Positional Damping (horizontal drag only -- legacy's Helicopter.ts
+    // never touches Y here, only x/z: `body.velocity.x *= lerp(1, 0.995,
+    // enginePower); body.velocity.z *= ...`). Math.pow(base, dt60) instead
+    // of a flat multiply so this multiplicative damping also generalizes
+    // across frame rates instead of only being correct at 60fps.
+    const damping = Math.pow(THREE.MathUtils.lerp(1, 0.995, enginePower.current), dt60);
+    vel.x *= damping;
+    vel.z *= damping;
 
-    // 4. Rotation Stabilization & Yaw
+    body.setLinvel(vel, true);
+
+    // 4. Rotation Stabilization, Yaw, Pitch & Roll (Controls) -- legacy
+    // applied every rotation term directly onto angularVelocity each step,
+    // then did one `angularVelocity *= 0.97` damping pass at the end;
+    // ported 1:1 here into a single accumulate-then-setAngvel, instead of
+    // the previous split of "setAngvel for stabilization+yaw" followed by
+    // a separate applyTorqueImpulse (inertia-tensor-divided) for pitch/roll.
     _heliRotStabQuat.setFromUnitVectors(up, globalUp);
     _heliRotStabEuler.setFromQuaternion(_heliRotStabQuat);
 
-    let yawSpeed = 0;
-    if (input.yawLeft) yawSpeed = 1.8 * enginePower.current;
-    if (input.yawRight) yawSpeed = -1.8 * enginePower.current;
+    const angDamping = Math.pow(0.97, dt60);
+    let angX = angularVelocity.current[0] * angDamping;
+    let angY = angularVelocity.current[1] * angDamping;
+    let angZ = angularVelocity.current[2] * angDamping;
 
-    body.setAngvel({
-        x: angularVelocity.current[0] * 0.95 + _heliRotStabEuler.x * enginePower.current * 2.0,
-        y: angularVelocity.current[1] * 0.95 + yawSpeed,
-        z: angularVelocity.current[2] * 0.95 + _heliRotStabEuler.z * enginePower.current * 2.0
-    }, true);
+    // Self-leveling -- legacy: angularVelocity += rotStabEuler * enginePower
+    angX += _heliRotStabEuler.x * enginePower.current * 2.0;
+    angZ += _heliRotStabEuler.z * enginePower.current * 2.0;
 
-    // 5. Controls (Torques)
-    const torqueFactor = 3.5 * enginePower.current * dt60;
-    // Pitch (W/S)
-    if (input.forward) body.applyTorqueImpulse({ x: right.x * torqueFactor, y: right.y * torqueFactor, z: right.z * torqueFactor }, true);
-    if (input.backward) body.applyTorqueImpulse({ x: -right.x * torqueFactor, y: -right.y * torqueFactor, z: -right.z * torqueFactor }, true);
+    // Yaw (Q/E) -- legacy: angularVelocity += up * 0.07 * enginePower (yawLeft/Q), -= (yawRight/E)
+    const rotFactor = 0.07 * enginePower.current * dt60;
+    if (input.yawLeft) { angX += up.x * rotFactor; angY += up.y * rotFactor; angZ += up.z * rotFactor; }
+    if (input.yawRight) { angX -= up.x * rotFactor; angY -= up.y * rotFactor; angZ -= up.z * rotFactor; }
 
-    // Roll (A/D)
-    if (input.left) body.applyTorqueImpulse({ x: forward.x * torqueFactor, y: forward.y * torqueFactor, z: forward.z * torqueFactor }, true);
-    if (input.right) body.applyTorqueImpulse({ x: -forward.x * torqueFactor, y: -forward.y * torqueFactor, z: -forward.z * torqueFactor }, true);
+    // Pitch (W/S) -- legacy: angularVelocity += right * 0.07 * enginePower (pitchDown/W), -= (pitchUp/S)
+    if (input.forward) { angX += right.x * rotFactor; angY += right.y * rotFactor; angZ += right.z * rotFactor; }
+    if (input.backward) { angX -= right.x * rotFactor; angY -= right.y * rotFactor; angZ -= right.z * rotFactor; }
+
+    // Roll (A/D) -- legacy: angularVelocity -= forward * 0.07 * enginePower (rollLeft/A), += (rollRight/D).
+    // (Previously flipped here: A applied +forward and D applied -forward --
+    // backwards relative to legacy, on top of being inertia-tensor-scaled.)
+    if (input.left) { angX -= forward.x * rotFactor; angY -= forward.y * rotFactor; angZ -= forward.z * rotFactor; }
+    if (input.right) { angX += forward.x * rotFactor; angY += forward.y * rotFactor; angZ += forward.z * rotFactor; }
+
+    body.setAngvel({ x: angX, y: angY, z: angZ }, true);
+
+    if (import.meta.env.DEV) {
+      reportTelemetry(true, {
+        throttleFactor, gravityCompensation, vertDampY, damping, dt60,
+        vertStab: [_heliVertStab.x, _heliVertStab.y, _heliVertStab.z],
+        velAfterSet: [vel.x, vel.y, vel.z],
+      });
+    }
 
     const t = body.translation();
     _heliPos.set(t.x, t.y, t.z);
@@ -249,7 +327,11 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
       position={position}
       collisionGroups={groupsExcluding(CollisionGroups.Default)}
     >
-      <CuboidCollider args={chassisHalfExtents} mass={50} />
+      {/* Same fix as Airplane.tsx: a bare box chassis with no wheel/
+          traction model was resting on Rapier's default friction
+          (~0.5) -- low friction here so it doesn't get glued down or
+          snag while sliding/tipping on the ground. */}
+      <CuboidCollider args={chassisHalfExtents} mass={50} friction={0.05} restitution={0} frictionCombineRule={CoefficientCombineRule.Min} />
       {/* Chassis box half-height is 0.75; the glb's lowest point sits
           0.673 below the model's own origin, so -0.08 aligns it with
           the box's bottom face. */}

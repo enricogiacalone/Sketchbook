@@ -39,6 +39,24 @@ const App: React.FC = () => {
     }))
   );
 
+  // TEMP DEBUG (Claude) turned permanent test convenience: joining used to
+  // mean clicking through WelcomeScreen (type a name, click "Enter
+  // Playground") by hand for every single browser-automation test session
+  // -- "sistemati la login in modo da nn doverla fare per ogni test che
+  // fai". Visiting with ?autojoin (optionally ?autojoin=SomeName) skips
+  // straight past WelcomeScreen and also pre-arms the two other things
+  // every test session was manually setting via the console right after
+  // joining anyway (window.__disableAutoPause, window.__forceTimeOfDay --
+  // see App.tsx's visibilitychange handler / lib/SunCycle.ts). Dev-only
+  // (import.meta.env.DEV): a real deployed build ignores this query param
+  // entirely and always shows WelcomeScreen normally.
+  const autoJoinName = React.useMemo(() => {
+    if (!import.meta.env.DEV) return null;
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has("autojoin")) return null;
+    return params.get("autojoin") || "Claude";
+  }, []);
+
   const handleJoin = (name: string, controlMethod: string) => {
     setUserName(name);
     setIsJoined(true);
@@ -53,8 +71,18 @@ const App: React.FC = () => {
     // three's own .d.ts mistypes getContext()'s return as the wrapper
     // class instead of the native AudioContext (its own JSDoc says
     // Window.AudioContext) -- cast to reach the real .resume().
-    (THREE.AudioContext.getContext() as unknown as globalThis.AudioContext).resume().catch(() => {});
+    (THREE.AudioContext.getContext() as unknown as globalThis.AudioContext)
+      .resume()
+      .catch(() => {});
   };
+
+  useEffect(() => {
+    if (!autoJoinName || isJoined) return;
+    (window as any).__disableAutoPause = true;
+    (window as any).__forceTimeOfDay = 12;
+    handleJoin(autoJoinName, "keyboard");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoJoinName]);
 
   // Auto-pause when the tab is backgrounded. This isn't just a nicety: a
   // hidden tab gets requestAnimationFrame throttled by the browser (down to
@@ -76,18 +104,26 @@ const App: React.FC = () => {
   // now applies in dev too. Our own browser-automation testing can resume
   // manually via `useStore.getState().setPaused(false)` if a background
   // tab switch pauses it mid-test.
+  // TEMP DEBUG (Claude): browser-automation testing legitimately switches
+  // desktop Spaces/windows mid-test (a real player tab-switch doesn't), and
+  // this fires the exact same auto-pause every time, freezing the sim for
+  // any script driving the page from outside. window.__disableAutoPause
+  // lets a test session opt out from the console (`window.__disableAutoPause
+  // = true`) without touching the real behavior real players get.
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.hidden) setPaused(true);
+      if (document.hidden && !(window as any).__disableAutoPause)
+        setPaused(true);
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [setPaused]);
 
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#111" }}>
       {/* Show WelcomeScreen if not joined */}
-      {!isJoined && <WelcomeScreen onJoin={handleJoin} />}
+      {!isJoined && !autoJoinName && <WelcomeScreen onJoin={handleJoin} />}
 
       {/* Show LoadingScreen if joined but still loading assets */}
       {isJoined && isLoading && <LoadingScreen />}

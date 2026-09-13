@@ -2,11 +2,12 @@ import { useEffect } from 'react';
 import GUI from 'lil-gui';
 import { RUNWAY_CENTER, HELIPORT_CENTER } from '../Environment/Airport';
 
-// Debug-only teleport panel ("Scenari") built on the __teleportPlayer hook
-// Player.tsx already exposes on window for exactly this kind of manual
-// testing (see the "TEMP DEBUG (Claude)" block there). Gated the same way
-// that hook is -- import.meta.env.DEV only -- so it never ships to a real
-// build, matching the rest of this file's debug-only precedent.
+// Debug-only teleport/test panel ("Scenari") built on the __teleportPlayer
+// hook Player.tsx already exposes on window for manual testing (see the
+// "TEMP DEBUG (Claude)" block there), plus window.__sim's startTest()/
+// endTest() (debug/simDebug.ts) for the two clean flight-test scenarios.
+// Gated the same way those are -- import.meta.env.DEV only -- so none of
+// this ever ships to a real build.
 const ScenariosGUI: React.FC = () => {
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -23,10 +24,40 @@ const ScenariosGUI: React.FC = () => {
       'Vai all\'elicottero': () => {
         (window as any).__teleportPlayer?.(HELIPORT_CENTER[0] + 4, HELIPORT_CENTER[1]);
       },
+      // Clean, distraction-free test scenarios: strips the city/traffic/
+      // collectibles/missions out of the world (see Scene.tsx's
+      // `testScene`), drops the player straight into the cockpit (no
+      // walk-up-and-press-F needed), and resets the vehicle to a known
+      // pose above its pad. Same one-call setup a console/browser-
+      // automation test session gets from window.__sim.startTest().
+      'Test volo: Aereo (pulito)': () => {
+        (window as any).__sim?.startTest('airplane');
+      },
+      'Test volo: Elicottero (pulito)': () => {
+        (window as any).__sim?.startTest('helicopter');
+      },
+      'Test guida: Macchina (pulito)': () => {
+        (window as any).__sim?.startTest('car');
+      },
+      // "una gara contro 3 poliziotti in un percorso con curve e dossi" --
+      // RaceTrack.tsx's closed-loop circuit, player vs 3 AI police on a
+      // starting grid (see Scene.tsx's isRaceTest / debug/simDebug.ts's
+      // startRace()).
+      'Gara: Auto vs Polizia (3)': () => {
+        (window as any).__sim?.startRace();
+      },
+      'Torna al mondo normale': () => {
+        (window as any).__sim?.endTest();
+      },
     };
 
     scenari.add(scenarios, 'Vai all\'aereo');
     scenari.add(scenarios, 'Vai all\'elicottero');
+    scenari.add(scenarios, 'Test volo: Aereo (pulito)');
+    scenari.add(scenarios, 'Test volo: Elicottero (pulito)');
+    scenari.add(scenarios, 'Test guida: Macchina (pulito)');
+    scenari.add(scenarios, 'Gara: Auto vs Polizia (3)');
+    scenari.add(scenarios, 'Torna al mondo normale');
     scenari.open();
 
     return () => gui.destroy();

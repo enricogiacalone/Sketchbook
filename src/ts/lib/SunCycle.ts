@@ -35,8 +35,19 @@ const UP_AXIS = new THREE.Vector3(0, 1, 0);
 // through a full day/night after that, just phase-shifted.
 const DAY_START_OFFSET = DAY_CYCLE_SECONDS / 2;
 
-export const getTimeOfDay = (elapsedTime: number): number =>
-  (((elapsedTime + DAY_START_OFFSET) / DAY_CYCLE_SECONDS) * 24) % 24;
+// TEMP DEBUG (Claude): browser-automation testing can't wait out a real
+// day/night cycle (or see anything useful at night), and switching desktop
+// Spaces mid-test trips App.tsx's own auto-pause (see the
+// __disableAutoPause hook there) -- window.__forceTimeOfDay lets a test
+// session pin the sun to a fixed hour (e.g. 12 for noon) regardless of
+// elapsedTime, consistently across every consumer of this function (Sky,
+// SunLight, WorldFog, NightSky all call getTimeOfDay, never compute their
+// own time), without touching the real day/night cycle for actual players.
+export const getTimeOfDay = (elapsedTime: number): number => {
+  const forced = (window as any).__forceTimeOfDay;
+  if (typeof forced === 'number') return forced;
+  return (((elapsedTime + DAY_START_OFFSET) / DAY_CYCLE_SECONDS) * 24) % 24;
+};
 
 // Unit vector pointing FROM the world origin TOWARD the sun. y > 0 means
 // above the horizon. Traces a single vertical great circle per day (0 =

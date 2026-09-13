@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import * as THREE from "three";
-import { RigidBody, HeightfieldCollider } from "@react-three/rapier";
+import { RigidBody, HeightfieldCollider, CuboidCollider } from "@react-three/rapier";
 import { CollisionGroups, groupsExcluding } from "../../enums/CollisionGroups";
 
 // Flattened (Claude): this used to default to a +/-0.5 sine wave over a
@@ -77,6 +77,27 @@ const Terrain: React.FC = () => {
     return flat;
   }, [size, segments, maxHeight]);
 
+  // World-edge boundary walls -- invisible, solid, fully enclosing the
+  // 600x600 terrain (Claude). "l'auto e' caduta dal piano dove circolava":
+  // a car (or anything else) driven hard enough in one direction for long
+  // enough eventually crosses the heightfield's own edge at +/-size/2 --
+  // there's nothing at all beyond it, no ground, no wall, so it just falls
+  // into the void. This isn't a terrain bump or a one-off fluke, it's the
+  // literal edge of the playable world, reachable by any fast vehicle
+  // (confirmed live: a test car under sustained throttle+steering covered
+  // ~300+ units in a few seconds, well past the boundary). Four thin, tall
+  // CuboidColliders along each edge close that off for every vehicle AND
+  // the on-foot player uniformly, without needing separate "don't fall off
+  // the map" logic duplicated in Car.tsx/Airplane.tsx/Helicopter.tsx/
+  // Player.tsx. Tall enough (WALL_HALF_HEIGHT) to also stop a plane/heli
+  // skimming low near the edge, and dipped slightly below y=0
+  // (WALL_Y_CENTER - WALL_HALF_HEIGHT < 0) so there's no gap under it for
+  // something already airborne-but-low to slip through.
+  const WALL_HALF_THICK = 1;
+  const WALL_HALF_HEIGHT = 60;
+  const WALL_Y_CENTER = 45;
+  const halfSize = size / 2;
+
   return (
     <>
       <RigidBody type="fixed" colliders={false} position={[0, 0, 0]} friction={0.7} restitution={0}>
@@ -87,6 +108,30 @@ const Terrain: React.FC = () => {
           // colliding them with each other can only ever be a costly no-op
           // -- there's no dynamic response to produce.
           collisionGroups={groupsExcluding(CollisionGroups.TrimeshColliders, CollisionGroups.TrimeshColliders)}
+        />
+      </RigidBody>
+      <RigidBody type="fixed" colliders={false} position={[0, 0, 0]} friction={0.5} restitution={0}>
+        {/* North / South (perpendicular to Z) */}
+        <CuboidCollider
+          args={[halfSize + WALL_HALF_THICK, WALL_HALF_HEIGHT, WALL_HALF_THICK]}
+          position={[0, WALL_Y_CENTER, halfSize]}
+          collisionGroups={groupsExcluding(CollisionGroups.Default)}
+        />
+        <CuboidCollider
+          args={[halfSize + WALL_HALF_THICK, WALL_HALF_HEIGHT, WALL_HALF_THICK]}
+          position={[0, WALL_Y_CENTER, -halfSize]}
+          collisionGroups={groupsExcluding(CollisionGroups.Default)}
+        />
+        {/* East / West (perpendicular to X) */}
+        <CuboidCollider
+          args={[WALL_HALF_THICK, WALL_HALF_HEIGHT, halfSize + WALL_HALF_THICK]}
+          position={[halfSize, WALL_Y_CENTER, 0]}
+          collisionGroups={groupsExcluding(CollisionGroups.Default)}
+        />
+        <CuboidCollider
+          args={[WALL_HALF_THICK, WALL_HALF_HEIGHT, halfSize + WALL_HALF_THICK]}
+          position={[-halfSize, WALL_Y_CENTER, 0]}
+          collisionGroups={groupsExcluding(CollisionGroups.Default)}
         />
       </RigidBody>
       <mesh receiveShadow position={[0, 0, 0]}>

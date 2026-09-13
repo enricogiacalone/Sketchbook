@@ -8,6 +8,7 @@ import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
+import { simDebug } from '../../debug/simDebug';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { getRoadOffset } from '../Environment/Road';
 
@@ -174,6 +175,12 @@ const _uprightEuler = new THREE.Euler();
 const _aiViewDir = new THREE.Vector3();
 const _aiCross = new THREE.Vector3();
 const _aiSegDir = new THREE.Vector3();
+// Dedicated telemetry scratch objects (window.__sim, debug/simDebug.ts)
+// -- kept separate from _chassisQuat/_carEuler above so reading telemetry
+// can never race with what the driving/wheel-sync logic is doing with
+// those in the same callback.
+const _carTelQuat = new THREE.Quaternion();
+const _carTelEuler = new THREE.Euler();
 
 // "crea la polizia che gira in auto per la citta" -- ported from the
 // original vanilla engine's FollowPath.ts/FollowTarget.ts (character AI
@@ -491,6 +498,11 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     return () => {
       world.removeVehicleController(controller);
       vehicleController.current = null;
+      // Drop this car's window.__sim telemetry entry on unmount (e.g.
+      // leaving the race/car-test scenario) so a stale, no-longer-driven
+      // body's last-known position/velocity doesn't linger forever in
+      // state().vehicles under this id.
+      if (import.meta.env.DEV) simDebug.unregisterVehicle(id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [world, wheelConnectionPoints]);
@@ -570,6 +582,49 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     const isAiDriving = !!patrolRoute && patrolRoute.length >= 2 && !humanIsDriving;
     const isCarActive = humanIsDriving || isAiDriving;
 
+    // Unified telemetry for window.__sim (debug/simDebug.ts) -- same idea
+    // as Airplane.tsx/Helicopter.tsx's reportTelemetry, adapted to this
+    // vehicle's real DynamicRayCastVehicleController: "enginePower" here is
+    // the last wheel engine force actually applied, normalized to
+    // [-1, 1] by ENGINE_FORCE (this vehicle has no single 0..1 throttle
+    // ramp like the air vehicles), and gear/steering/brake/AI-vs-human go
+    // in `extra`.
+    const reportTelemetry = (active: boolean, extra?: Record<string, unknown>) => {
+      const rotT = chassis.rotation();
+      _carTelQuat.set(rotT.x, rotT.y, rotT.z, rotT.w);
+      _carTelEuler.setFromQuaternion(_carTelQuat, 'YXZ');
+      const posT = chassis.translation();
+      const velT = chassis.linvel();
+      const angvelT = chassis.angvel();
+      const collider0 = chassis.collider(0);
+      let numContacts = 0;
+      world.contactPairsWith(collider0, () => { numContacts += 1; });
+      simDebug.registerVehicle('car', chassis, {
+        id,
+        active,
+        paused: isPaused,
+        enginePower: typeof extra?.engineForce === 'number' ? (extra.engineForce as number) / ENGINE_FORCE : 0,
+        input: Object.fromEntries(Object.entries(input).filter(([, v]) => typeof v === 'boolean')),
+        pos: [posT.x, posT.y, posT.z],
+        quat: [rotT.x, rotT.y, rotT.z, rotT.w],
+        eulerDeg: [
+          THREE.MathUtils.radToDeg(_carTelEuler.y),
+          THREE.MathUtils.radToDeg(_carTelEuler.x),
+          THREE.MathUtils.radToDeg(_carTelEuler.z),
+        ],
+        vel: [velT.x, velT.y, velT.z],
+        speed: Math.hypot(velT.x, velT.y, velT.z),
+        localSpeed: typeof extra?.forwardSpeed === 'number' ? (extra.forwardSpeed as number) : null,
+        angvel: [angvelT.x, angvelT.y, angvelT.z],
+        sleeping: chassis.isSleeping(),
+        friction: collider0 ? collider0.friction() : null,
+        frictionCombineRule: collider0 ? collider0.frictionCombineRule() : null,
+        numContacts,
+        grounded: numContacts > 0,
+        extra,
+      });
+    };
+
     // Only the driver's own key press flips THIS car's switch -- input is
     // a global keyboard read, so without the isCarActive gate every other
     // Car instance on screen (parked, or someone else's) would toggle its
@@ -597,6 +652,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       gear.current = 1;
       shiftTimer.current = 0;
       controller.updateVehicle(dt);
+      if (import.meta.env.DEV) reportTelemetry(false);
       return;
     }
 
@@ -700,6 +756,10 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     // every few seconds once enough of that piles up. Same reasoning behind
     // the module-level scratch vectors above instead of a fresh
     // `new THREE.Vector3()`/`new THREE.Quaternion()` per car per call.)
+    // Tracks whatever was last actually handed to
+    // controller.setWheelEngineForce() below -- purely for window.__sim's
+    // telemetry (see reportTelemetry above), no effect on driving.
+    let appliedEngineForce = 0;
     if (shiftTimer.current > 0) {
       shiftTimer.current = Math.max(0, shiftTimer.current - dt);
     } else if (activeBackward) {
@@ -711,6 +771,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       // convention, so accelerator and reverse were swapped end to end
       // (see git history / chat: "l'acceleratore e la retromarcia sn
       // invertite").
+      appliedEngineForce = -force;
       for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, -force);
     } else {
       const top = GEARS_MAX_SPEEDS[String(gear.current)];
@@ -737,6 +798,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
         // touching the speed/gear logic, which was already measuring
         // "forward" consistently via the `_forward` vector -- only the
         // force applied to actually go there was inverted.
+        appliedEngineForce = force;
         for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, force);
       } else {
         for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, 0);
@@ -772,6 +834,19 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     for (let j = 0; j < rwdIndices.length; j++) controller.setWheelBrake(rwdIndices[j], brakeForce);
 
     controller.updateVehicle(dt);
+
+    if (import.meta.env.DEV) {
+      reportTelemetry(true, {
+        engineForce: appliedEngineForce,
+        forwardSpeed: speed,
+        gear: gear.current,
+        isAiDriving,
+        humanIsDriving,
+        steeringTarget: steeringSpring.current.target,
+        steeringPosition: steeringSpring.current.position,
+        brakeForce,
+      });
+    }
   });
 
   useFrame((state, delta) => {

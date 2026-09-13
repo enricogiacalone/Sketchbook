@@ -111,7 +111,31 @@ const VideoBillboardScreen: React.FC<VideoBillboardScreenProps> = ({ src, localP
 
     return () => {
       video.pause();
-      sound.disconnect();
+      // TEMP DEBUG (Claude) turned PERMANENT FIX: this component previously
+      // only ever unmounted when the whole page did (nothing in the app
+      // conditionally removed City/billboards at runtime), so this
+      // disconnect() had never actually been exercised. Adding the
+      // "Scenari" clean flight-test scenes (Scene.tsx's testScene, which
+      // unmounts <City> -- and everything inside it, this billboard
+      // included -- to strip distractions out) exercises it for the first
+      // time and immediately crashed the whole <Canvas> (blank white
+      // screen, "WrongDocumentError"/"InvalidAccessError... the given
+      // destination is not connected" in the console): if autoplay was
+      // still blocked/pending when this unmounts (tryPlay()'s play()
+      // rejected and is waiting on a user gesture that never came, e.g. the
+      // player never walked near this specific billboard before switching
+      // scenes), THREE.Audio's internal source was never actually
+      // connect()-ed, and disconnect() on an unconnected WebAudio node
+      // throws -- uncaught, since this runs inside a React effect cleanup,
+      // which crashed the entire tree. Real players would eventually hit
+      // this too (leaving before ever interacting with the page, or a
+      // billboard despawning) -- not test-only, so this stays even after
+      // the debug scaffolding elsewhere is cleaned up.
+      try {
+        sound.disconnect();
+      } catch {
+        // Never got connected -- nothing to disconnect.
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

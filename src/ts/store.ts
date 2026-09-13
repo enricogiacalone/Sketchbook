@@ -97,6 +97,14 @@ interface GameState {
   // subscribers) on takeoff/landing -- see setIsPlayerGrounded's own bail-
   // out, same pattern as updateEntity's.
   isPlayerGrounded: boolean;
+  // TEMP DEBUG (Claude): which clean, distraction-free test scenario is
+  // active -- 'none' is the normal game world. Scene.tsx reads this to
+  // strip the city/traffic/collectibles/missions out and leave just the
+  // ground + airport pads + the two flyable vehicles, so testing flight
+  // physics isn't confounded by unrelated systems (other cars, enemies,
+  // meteorites...). Set via window.__sim.startTest()/endTest() (see
+  // debug/simDebug.ts) or the "Scenari" lil-gui panel (ScenariosGUI.tsx).
+  testScene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race';
   entities: Map<string, EntityInfo>;
   setHealth: (health: number) => void;
   setMaxHealth: (maxHealth: number) => void;
@@ -136,6 +144,7 @@ interface GameState {
   setPlayerMessage: (message: string) => void;
   setCollectiblesTotal: (total: number) => void;
   setIsPlayerGrounded: (grounded: boolean) => void;
+  setTestScene: (scene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race') => void;
   collectItem: () => void;
   updateEntity: (id: string, info: Partial<EntityInfo>) => void;
   removeEntity: (id: string) => void;
@@ -165,6 +174,7 @@ export const useStore = create<GameState>((set) => ({
   // and free-falls, and Player.tsx overwrites this with the real value
   // within its first couple of frames regardless.
   isPlayerGrounded: false,
+  testScene: 'none',
   missionStage: 0,
   missionStatus: 'inactive',
   missionTitle: '',
@@ -211,6 +221,7 @@ export const useStore = create<GameState>((set) => ({
   setPlayerMessage: (message) => set({ playerMessage: message }),
   setCollectiblesTotal: (total) => set({ collectiblesTotal: total }),
   setIsPlayerGrounded: (grounded) => set((state) => (state.isPlayerGrounded === grounded ? state : { isPlayerGrounded: grounded })),
+  setTestScene: (testScene) => set({ testScene }),
   collectItem: () => set((state) => ({ collectiblesFound: Math.min(state.collectiblesTotal, state.collectiblesFound + 1) })),
   // "serve ottimizzare ancora" -- every car/pedestrian/enemy calls this on
   // a fixed timer (Car.tsx ~10/s, Pedestrian.tsx ~5/s) regardless of

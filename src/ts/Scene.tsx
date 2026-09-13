@@ -13,6 +13,7 @@ import Collectibles from "./components/Environment/Collectibles";
 import BuildingLeds from "./components/Environment/BuildingLeds";
 import BuildingLedGlow from "./components/Environment/BuildingLedGlow";
 import Airport, { RUNWAY_CENTER, HELIPORT_CENTER } from "./components/Environment/Airport";
+import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from "./components/Environment/RaceTrack";
 import Clouds from "./components/Environment/Clouds";
 import UFO from "./components/Environment/UFO";
 import MeteoriteSpawner from "./components/Environment/MeteoriteSpawner";
@@ -21,6 +22,7 @@ import MissionManager from "./components/Missions/MissionManager";
 import Car from "./components/Vehicles/Car"; // Import Car
 import Airplane from "./components/Vehicles/Airplane"; // Import Airplane
 import Helicopter from "./components/Vehicles/Helicopter"; // Import Helicopter
+import { useStore } from "./store";
 
 // Pre-caricamento intensivo
 useGLTF.preload("car.glb");
@@ -61,19 +63,31 @@ const POLICE_ROUTE_OUTER: [number, number][] = [
 ];
 
 const Scene: React.FC = () => {
+  // TEMP DEBUG (Claude): 'airplane'/'helicopter'/'car' test scenarios strip
+  // everything below that isn't the ground, the airport pads, or the
+  // vehicle actually being tested -- "senza citta e distrazioni" -- so a
+  // physics test isn't sharing frame budget or collision volume with 30
+  // parked cars, pedestrians, a UFO, meteorites, missions, etc. See
+  // store.ts's testScene and window.__sim.startTest()/endTest()
+  // (debug/simDebug.ts).
+  const testScene = useStore((state) => state.testScene);
+  const isCleanTest = testScene !== 'none';
+  const isCarTest = testScene === 'car';
+  const isRaceTest = testScene === 'race';
   return (
     <>
       <Terrain />
-      <Road />
-      <Clouds />
+      {isRaceTest && <RaceTrack />}
+      {!isCleanTest && <Road />}
+      {!isCleanTest && <Clouds />}
       <Ocean />
-      <UFO initialPosition={[0, 150, 0]} />
-      <MeteoriteSpawner />
-      {!DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
+      {!isCleanTest && <UFO initialPosition={[0, 150, 0]} />}
+      {!isCleanTest && <MeteoriteSpawner />}
+      {!isCleanTest && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
 
       {/* Carichiamo i modelli in blocchi separati per non bloccare la fisica */}
       <Suspense fallback={null}>
-        {!DEBUG_DISABLE_CARS_AND_ENEMIES && (
+        {!isCleanTest && !DEBUG_DISABLE_CARS_AND_ENEMIES && (
           <>
             {/* Spawn Y lowered from 5 -> 1.2 (Claude): with the old cannon-worker
                 setup this height didn't matter -- the car's position was
@@ -104,28 +118,66 @@ const Scene: React.FC = () => {
           </>
         )}
 
-        {!DEBUG_DISABLE_CARS_AND_ENEMIES && (
+        {/* Airplane/Helicopter stay mounted through their OWN clean test
+            scenarios and in the normal world (unlike the city cars above) --
+            both scenari ('Test Volo: Aereo' and 'Test Volo: Elicottero')
+            need to be reachable without an unmount/remount, and their pads
+            (see Airport.tsx) are already far enough apart that the other
+            vehicle sitting idle at its own pad isn't the kind of
+            "distrazione" being asked to go away here. Hidden specifically
+            during the CAR test scenario, though -- that one's about testing
+            the car in isolation, so it gets the same "just this vehicle"
+            treatment. Spawn on their own pad instead of the old, somewhat
+            arbitrary in-city coordinates -- same drop height as before (a
+            short fall onto a plain CuboidCollider, proven safe for both,
+            unlike the raycast-suspension cars). */}
+        {!isCarTest && !isRaceTest && (isCleanTest || !DEBUG_DISABLE_CARS_AND_ENEMIES) && (
           <>
-            {/* Spawn on their own pad (see Airport.tsx) instead of the old,
-                somewhat arbitrary in-city coordinates -- same drop height
-                as before (a short fall onto a plain CuboidCollider, proven
-                safe for both, unlike the raycast-suspension cars). */}
             <Airplane position={[RUNWAY_CENTER[0], 5, RUNWAY_CENTER[1]]} />
             <Helicopter position={[HELIPORT_CENTER[0], 20, HELIPORT_CENTER[1]]} />
           </>
         )}
+
+        {/* "Test volo: Macchina (pulito)" scenario -- a single test car,
+            spawned at car-1's own known-good coordinates (already proven
+            safe: flat enough terrain for the raycast suspension to catch it
+            on the first drop, see the comment above), with none of the
+            other 7 city/police cars around to get in the way or confuse
+            which one is actually being driven. */}
+        {isCarTest && <Car id="test-car-1" position={[10, 1.2, 0]} />}
+
+        {/* "una gara contro 3 poliziotti in un percorso con curve e dossi" --
+            the player's own racer plus 3 AI police, all on RaceTrack.tsx's
+            starting grid. The 3 cops reuse the existing patrolRoute AI
+            (Car.tsx) unchanged -- same system as the city's 2 patrol cars --
+            just given the race track's waypoints instead of a city block. */}
+        {isRaceTest && (
+          <>
+            <Car id="race-player" position={RACE_GRID.player} rotation={RACE_START_ROTATION} />
+            <Car id="race-cop-1" position={RACE_GRID.cop1} rotation={RACE_START_ROTATION} patrolRoute={RACE_TRACK} />
+            <Car id="race-cop-2" position={RACE_GRID.cop2} rotation={RACE_START_ROTATION} patrolRoute={RACE_TRACK} />
+            <Car id="race-cop-3" position={RACE_GRID.cop3} rotation={RACE_START_ROTATION} patrolRoute={RACE_TRACK} />
+          </>
+        )}
       </Suspense>
 
-      <Suspense fallback={null}>
-        <City />
-        <BuildingLeds />
-        <BuildingLedGlow />
-        <Park />
-        <CityDetails />
-        <Airport />
-        <Collectibles />
-        <MissionManager />
-      </Suspense>
+      {/* Airport (runway/heliport pads + markings) stays in every scenario --
+          it's the ground truth the vehicles actually sit on/take off from,
+          not a "distrazione". Everything else here (city, park, LEDs,
+          collectibles, missions) is exactly the clutter the clean test
+          scenarios are meant to remove. */}
+      <Airport />
+      {!isCleanTest && (
+        <Suspense fallback={null}>
+          <City />
+          <BuildingLeds />
+          <BuildingLedGlow />
+          <Park />
+          <CityDetails />
+          <Collectibles />
+          <MissionManager />
+        </Suspense>
+      )}
     </>
   );
 };
