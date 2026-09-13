@@ -40,6 +40,26 @@ const DEBUG_DISABLE_CARS_AND_ENEMIES = false;
 // way. Flip back to true to bring them back.
 const DEBUG_DISABLE_ENEMIES = true;
 
+// "crea la polizia che gira in auto per la citta" -- two closed loops of
+// real road-grid intersections (Road.tsx's ROAD_OFFSETS: -120/-60/0/60/120,
+// spacing 60), so a straight line between consecutive waypoints always
+// runs exactly along an actual road instead of cutting through a block.
+// POLICE_ROUTE_INNER patrols one central block; POLICE_ROUTE_OUTER patrols
+// the whole city's outer perimeter road, so the two together read as
+// actual coverage rather than one car looping the same corner forever.
+const POLICE_ROUTE_INNER: [number, number][] = [
+  [-60, -60],
+  [60, -60],
+  [60, 60],
+  [-60, 60],
+];
+const POLICE_ROUTE_OUTER: [number, number][] = [
+  [-120, -120],
+  [120, -120],
+  [120, 120],
+  [-120, 120],
+];
+
 const Scene: React.FC = () => {
   return (
     <>
@@ -75,6 +95,12 @@ const Scene: React.FC = () => {
             <Car id="car-4" position={[-60, 1.2, 60]} />
             <Car id="car-5" position={[60, 1.2, 60]} />
             <Car id="car-6" position={[-60, 1.2, -60]} />
+
+            {/* Police patrol cars -- rotation Math.PI/2 faces +X, matching
+                each route's first leg (see POLICE_ROUTE_INNER/OUTER above:
+                first waypoint -> second waypoint both run along +X). */}
+            <Car id="police-1" position={[POLICE_ROUTE_INNER[0][0], 1.2, POLICE_ROUTE_INNER[0][1]]} rotation={[0, Math.PI / 2, 0]} patrolRoute={POLICE_ROUTE_INNER} />
+            <Car id="police-2" position={[POLICE_ROUTE_OUTER[0][0], 1.2, POLICE_ROUTE_OUTER[0][1]]} rotation={[0, Math.PI / 2, 0]} patrolRoute={POLICE_ROUTE_OUTER} />
           </>
         )}
 

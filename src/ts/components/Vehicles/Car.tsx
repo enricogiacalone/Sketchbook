@@ -1,8 +1,9 @@
-import React, { useRef, useMemo, useEffect } from 'react';
+import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RigidBody, CuboidCollider, RapierRigidBody, useRapier, useBeforePhysicsStep } from '@react-three/rapier';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF, useAnimations, Html } from '@react-three/drei';
 import * as THREE from 'three';
+import { SkeletonUtils } from 'three-stdlib';
 import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
@@ -13,6 +14,13 @@ import { getRoadOffset } from '../Environment/Road';
 interface CarProps {
   position?: [number, number, number];
   id?: string;
+  // "crea la polizia che gira in auto per la citta" -- a closed loop of
+  // world (x,z) waypoints. When set, this Car drives itself (AI, ported
+  // from the original vanilla engine's FollowPath/FollowTarget character
+  // AI -- see the AI block in useFrame below) instead of sitting parked,
+  // and shows a driver (Officer, below) in its seat -- unless/until an
+  // actual player boards and drives it themselves (see humanIsDriving).
+  patrolRoute?: [number, number][];
   // Initial yaw, e.g. for a car spawned already facing along a road/curb
   // (see CityDetails.tsx's parked cars, now real drivable Car instances
   // instead of the old static ParkedCar decoration) -- purely a spawn-time
@@ -97,11 +105,11 @@ const WHEEL_DIRECTION_AXIS = new THREE.Vector3(...DIRECTION_LOCAL).normalize();
 // RaycastVehicle -- see git history) should carry over directly. Still,
 // this hasn't been live-tested yet post-migration -- see the dev-only
 // __carDebug hook below for tuning once it has.
-const ENGINE_FORCE = 700;
+const ENGINE_FORCE = 500; // Restored to match the original vanilla Sketchbook's Car.ts tuning.
 const MAX_GEARS = 5;
 const TIME_TO_SHIFT = 0.2;
 const GEARS_MAX_SPEEDS: Record<string, number> = { R: -4, '0': 0, '1': 5, '2': 9, '3': 13, '4': 17, '5': 22 };
-const BRAKE_FORCE = 500000;
+const BRAKE_FORCE = 1000000; // Restored to match the original vanilla Sketchbook's Car.ts tuning.
 const MAX_STEER_VAL = 0.8;
 
 // -- Flip recovery tuning. A car counts as "flipped" once its own local up
@@ -161,8 +169,51 @@ const _spinQuat = new THREE.Quaternion();
 const _chassisUp = new THREE.Vector3();
 const _uprightQuat = new THREE.Quaternion();
 const _uprightEuler = new THREE.Euler();
+// AI patrol scratch vectors -- see the FollowPath-derived AI block in
+// useFrame below.
+const _aiViewDir = new THREE.Vector3();
+const _aiCross = new THREE.Vector3();
+const _aiSegDir = new THREE.Vector3();
 
-const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation = [0, 0, 0] }) => {
+// "crea la polizia che gira in auto per la citta" -- ported from the
+// original vanilla engine's FollowPath.ts/FollowTarget.ts (character AI
+// driving a vehicle toward a moving target node, advancing along a linked
+// list of PathNodes). Re-tuned for a simple looping array of waypoints
+// instead of a linked list (this only ever needs one-way loops, not the
+// original's reversible traversal), and for city-block scale distances.
+const PATROL_NODE_RADIUS = 8; // ~ROAD_WIDTH -- "arrived" once this close, matching how wide the road itself is
+const PATROL_STEER_DEADZONE = 0.15; // radians, matches the original's angle threshold
+const PATROL_CORNER_SLOWDOWN_DOT = 0.7; // matches the original's slowDownAngle threshold
+const PATROL_CORNER_SLOWDOWN_DIST = 15;
+const PATROL_CORNER_SLOWDOWN_SPEED = 6;
+const PATROL_STUCK_TIMEOUT = 5; // seconds, matches the original's staleTimer
+
+// The officer visibly driving a patrol car -- a separate component (not
+// inlined into Car) so its useGLTF('boxman.glb')/useAnimations/
+// SkeletonUtils.clone cost is only ever paid for the 1-2 actual patrol
+// cars, never for the ~35 ordinary parked Car instances CityDetails.tsx
+// spawns across the city (conditionally MOUNTING this, not conditionally
+// calling hooks inside Car itself, is what keeps that cost out of every
+// other car -- same lesson as the headlights: "il gioco e' rallentato di
+// molto" the first time real per-instance cost wasn't gated behind an
+// actual mount/unmount).
+const Officer: React.FC<{ seatPosition: [number, number, number]; seatQuaternion: [number, number, number, number] }> = ({ seatPosition, seatQuaternion }) => {
+  const { scene, animations } = useGLTF('boxman.glb');
+  const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  const { actions } = useAnimations(animations, clonedScene);
+
+  useEffect(() => {
+    actions['driving']?.reset().fadeIn(0.2).play();
+  }, [actions]);
+
+  return (
+    <group position={seatPosition} quaternion={seatQuaternion}>
+      <primitive object={clonedScene} />
+    </group>
+  );
+};
+
+const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation = [0, 0, 0], patrolRoute }) => {
   const { scene } = useGLTF('car.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
   const { world } = useRapier();
@@ -227,6 +278,42 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     }))
   );
 
+  // Render-scope (not just inside useFrame) because the Officer/label JSX
+  // below needs it too, to disappear the instant an actual player takes
+  // the wheel of a patrol car -- R3F's useFrame always runs the latest
+  // render's callback, so reading this same variable inside useFrame below
+  // is exactly as fresh as recomputing it there every frame would be.
+  const humanIsDriving = currentControllable === 'car' && controlledEntityId === id && controlledSeatType === 'driver';
+
+  // AI patrol state (see the useFrame block below) -- only ever advanced
+  // when patrolRoute is set; harmless idle refs otherwise.
+  const aiTargetIndex = useRef(0);
+  const aiStaleTimer = useRef(0);
+
+  // Officer's seat transform, in THIS car's own local space (same frame
+  // <primitive object={clonedScene}> and the headlights already use) --
+  // computed once off the glb's own seat_1 node rather than a hardcoded
+  // guess (unlike the headlights, which have no such node to read).
+  // clonedScene has no parent of its own at this point, so its world
+  // transform IS its local transform -- exactly the frame the Officer
+  // needs to be positioned in as a sibling of <primitive> inside the same
+  // RigidBody.
+  const officerSeatTransform = useMemo(() => {
+    if (!patrolRoute) return null;
+    const seatNode = clonedScene.getObjectByName('seat_1');
+    if (!seatNode) return null;
+    clonedScene.updateMatrixWorld(true);
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+    seatNode.getWorldPosition(worldPos);
+    seatNode.getWorldQuaternion(worldQuat);
+    const localPos = clonedScene.worldToLocal(worldPos.clone());
+    return {
+      position: [localPos.x, localPos.y, localPos.z] as [number, number, number],
+      quaternion: [worldQuat.x, worldQuat.y, worldQuat.z, worldQuat.w] as [number, number, number, number],
+    };
+  }, [clonedScene, patrolRoute]);
+
   // -- Doors, mirroring the original's VehicleDoor: whichever door the
   // player is actually walking through swings open for the whole
   // entering/exiting transition and closes the rest of the time (parked or
@@ -252,6 +339,65 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     });
     doorsRef.current = doors;
   }, [clonedScene]);
+
+  // "aggiungi dei fari veri alla macchina che accendo a comando" -- car.glb
+  // ships no headlight geometry at all (confirmed: no light/lamp nodes in
+  // the glb), so both the glowing lens (bulb mesh, purely cosmetic) and the
+  // actual light source are new here. Positions are read off the glb's own
+  // front-bumper-corner collision spheres (~x=+-0.306, y=0.151, z=0.943)
+  // nudged to the very front face (chassis half-depth ~1.21 -- see
+  // CHASSIS_SHAPES) -- local space, since these mount as siblings of
+  // <primitive object={clonedScene}> inside the same RigidBody. +Z is
+  // forward here (wheel_fl/fr sit at z=+0.86 vs the rear wheels' z=-0.79).
+  //
+  // "il gioco e' rallentato di molto" -- the first version kept the
+  // <spotLight> elements permanently mounted on EVERY Car instance
+  // (intensity toggled 0/45 via a ref) so flipping the switch wouldn't
+  // re-render. That's backwards for a scene with dozens of these: City.tsx/
+  // CityDetails.tsx spawn a real drivable <Car> for every parked car in the
+  // whole city (see the GRID_RADIUS loop), so that kept 2 real SpotLights
+  // PER PARKED CAR permanently in the scene graph -- three.js still counts
+  // a light toward the shader's light loop regardless of intensity=0 (the
+  // exact "per-lamp lights don't scale with lamp count" problem
+  // StreetLampGlow.tsx/BuildingLedGlow.tsx's own pooling comments already
+  // called out for streetlamps/LEDs), so this was 40-100+ always-on real
+  // lights city-wide. Conditionally rendering on `headlightsOn` instead
+  // means only the ONE car actually being driven, and only while its
+  // lights are actually switched on, ever has real lights in the scene at
+  // all -- toggling is rare enough that the resulting re-render is free.
+  const HEADLIGHT_X = 0.32;
+  const HEADLIGHT_Y = 0.18;
+  const HEADLIGHT_Z = 1.18;
+  const HEADLIGHT_INTENSITY = 45;
+  const HEADLIGHT_BULB_EMISSIVE = 3;
+  const leftHeadlightRef = useRef<THREE.SpotLight>(null);
+  const rightHeadlightRef = useRef<THREE.SpotLight>(null);
+  const leftHeadlightTargetRef = useRef<THREE.Object3D>(null);
+  const rightHeadlightTargetRef = useRef<THREE.Object3D>(null);
+  // Persists across the driver getting in/out -- toggling isn't tied to
+  // isCarActive (a real car's headlights stay on after you park and walk
+  // away), only WHO can flip the switch is (see the consumeJustPressed
+  // check in useFrame below). React state, not a ref, precisely BECAUSE it
+  // needs to trigger the mount/unmount below -- the opposite tradeoff from
+  // the usual "ref avoids a re-render" pattern elsewhere in this file.
+  const [headlightsOn, setHeadlightsOn] = useState(false);
+
+  useEffect(() => {
+    // THREE.SpotLight.target defaults to a detached Object3D at the world
+    // origin -- pointing it at our own sibling target node (also a child
+    // of this RigidBody, so it inherits the same local->world transform
+    // every frame) is what makes the beam actually follow the car instead
+    // of always aiming at (0,0,0) in world space. Depends on headlightsOn
+    // because the light/target pair only exists in the tree while on (see
+    // the conditional render below) -- this needs to re-wire the target
+    // every time they're freshly mounted, not just once on first mount.
+    if (leftHeadlightRef.current && leftHeadlightTargetRef.current) {
+      leftHeadlightRef.current.target = leftHeadlightTargetRef.current;
+    }
+    if (rightHeadlightRef.current && rightHeadlightTargetRef.current) {
+      rightHeadlightRef.current.target = rightHeadlightTargetRef.current;
+    }
+  }, [headlightsOn]);
 
   // Chassis -- migrated from @react-three/cannon's useCompoundBody to
   // @react-three/rapier's <RigidBody>/<CuboidCollider>. Built from the car's
@@ -421,7 +567,19 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       }
     }
 
-    const isCarActive = currentControllable === 'car' && controlledEntityId === id && !isVehicleTransitioning && controlledSeatType === 'driver';
+    const isAiDriving = !!patrolRoute && patrolRoute.length >= 2 && !humanIsDriving;
+    const isCarActive = humanIsDriving || isAiDriving;
+
+    // Only the driver's own key press flips THIS car's switch -- input is
+    // a global keyboard read, so without the isCarActive gate every other
+    // Car instance on screen (parked, or someone else's) would toggle its
+    // headlights too every time anyone pressed L. The state update itself
+    // (and the resulting mount/unmount of the actual light objects, see
+    // the JSX below) only happens on the rare frame the key is pressed --
+    // everywhere else this is a plain boolean read.
+    if (humanIsDriving && input.consumeJustPressed('headlights')) {
+      setHeadlightsOn((v) => !v);
+    }
 
     if (!isCarActive) {
       // Parked/undriven: no self-propulsion, no brake, wheels centered --
@@ -450,6 +608,79 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     _velVec.set(linvel.x, linvel.y, linvel.z);
     const speed = _velVec.dot(_forward);
 
+    // -- AI patrol input, ported from FollowPath.ts/FollowTarget.ts (see
+    // the big comment on PATROL_NODE_RADIUS above) -- only computed for an
+    // AI-driven car; the real keyboard `input` is used untouched otherwise.
+    let aiForward = false, aiBackward = false, aiLeft = false, aiRight = false;
+    if (isAiDriving && patrolRoute && patrolRoute.length >= 2) {
+      const posNow = chassis.translation();
+      const wp = patrolRoute[aiTargetIndex.current];
+      _aiViewDir.set(wp[0] - posNow.x, 0, wp[1] - posNow.z);
+      const distToTarget = _aiViewDir.length();
+
+      if (distToTarget > 0.001) {
+        _aiViewDir.multiplyScalar(1 / distToTarget);
+
+        // Throttle vs reverse: original's `forward.dot(viewVector) < 0.0`.
+        aiBackward = _forward.dot(_aiViewDir) < 0;
+        aiForward = !aiBackward;
+
+        // Steering: which side of our own forward the target sits on,
+        // using the same cross(dir, forward)/_up sign convention as the
+        // driftCorrection computation just below (input.left -> positive
+        // steeringSpring target in this codebase's convention).
+        const angleToTarget = _forward.angleTo(_aiViewDir);
+        if (angleToTarget > PATROL_STEER_DEADZONE) {
+          _aiCross.crossVectors(_aiViewDir, _forward);
+          if (_up.dot(_aiCross) < 0) aiLeft = true;
+          else aiRight = true;
+        }
+
+        // Corner slowdown: brake (reverse) instead of accelerating into a
+        // sharp upcoming turn -- original's slowDownAngle check against
+        // the segment AFTER the current target node.
+        const nextWp = patrolRoute[(aiTargetIndex.current + 1) % patrolRoute.length];
+        const afterWp = patrolRoute[(aiTargetIndex.current + 2) % patrolRoute.length];
+        _aiSegDir.set(afterWp[0] - nextWp[0], 0, afterWp[1] - nextWp[1]);
+        if (_aiSegDir.lengthSq() > 0.001) {
+          _aiSegDir.normalize();
+          const slowDownDot = _aiViewDir.dot(_aiSegDir);
+          if (slowDownDot < PATROL_CORNER_SLOWDOWN_DOT && distToTarget < PATROL_CORNER_SLOWDOWN_DIST && speed > PATROL_CORNER_SLOWDOWN_SPEED) {
+            aiForward = false;
+            aiBackward = true;
+          }
+        }
+      }
+
+      // Stuck recovery, mirroring the original's staleTimer -> teleport
+      // back above the current target node -- a patrol car wedged against
+      // a curb/wall/another car otherwise stays stuck there forever.
+      if (Math.abs(speed) < 1) {
+        aiStaleTimer.current += dt;
+      } else {
+        aiStaleTimer.current = 0;
+      }
+      if (aiStaleTimer.current > PATROL_STUCK_TIMEOUT) {
+        const groundY = getTerrainHeight(wp[0], wp[1]) + getRoadOffset(wp[0], wp[1]);
+        const yaw = _uprightEuler.setFromQuaternion(_chassisQuat, 'YXZ').y;
+        _uprightQuat.setFromEuler(_uprightEuler.set(0, yaw, 0));
+        chassis.setTranslation({ x: wp[0], y: groundY + 1.2, z: wp[1] }, true);
+        chassis.setRotation({ x: _uprightQuat.x, y: _uprightQuat.y, z: _uprightQuat.z, w: _uprightQuat.w }, true);
+        chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        aiStaleTimer.current = 0;
+      }
+
+      if (distToTarget < PATROL_NODE_RADIUS) {
+        aiTargetIndex.current = (aiTargetIndex.current + 1) % patrolRoute.length;
+      }
+    }
+
+    const activeForward = humanIsDriving ? input.forward : aiForward;
+    const activeBackward = humanIsDriving ? input.backward : aiBackward;
+    const activeLeft = humanIsDriving ? input.left : aiLeft;
+    const activeRight = humanIsDriving ? input.right : aiRight;
+
     // Tuning telemetry (ENGINE_FORCE/BRAKE_FORCE/etc.) removed now that
     // the real Rapier vehicle controller is dialed in -- it was running 8
     // extra wheelIsInContact()/wheelSuspensionLength() physics queries
@@ -471,7 +702,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     // `new THREE.Vector3()`/`new THREE.Quaternion()` per car per call.)
     if (shiftTimer.current > 0) {
       shiftTimer.current = Math.max(0, shiftTimer.current - dt);
-    } else if (input.backward) {
+    } else if (activeBackward) {
       const powerFactor = (GEARS_MAX_SPEEDS['R'] - speed) / Math.abs(GEARS_MAX_SPEEDS['R']);
       const force = (ENGINE_FORCE / gear.current) * Math.abs(powerFactor);
       // Sign flipped (Claude) -- see the "forward" branch below, same fix,
@@ -494,7 +725,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
         gear.current -= 1;
         shiftTimer.current = TIME_TO_SHIFT;
         for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, 0);
-      } else if (input.forward) {
+      } else if (activeForward) {
         const force = (ENGINE_FORCE / gear.current) * powerFactor;
         // Sign flipped (Claude) -- was `-force`. Rapier's vehicle
         // controller's positive wheel engine force turned out to drive
@@ -524,10 +755,10 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     const driftCorrection = _up.dot(_cross) < 0 ? -angleTo : angleTo;
 
     const speedFactor = THREE.MathUtils.clamp(speed * 0.3, 1, Number.MAX_VALUE);
-    if (input.right) {
+    if (activeRight) {
       const steering = Math.min(-MAX_STEER_VAL / speedFactor, -driftCorrection);
       steeringSpring.current.target = THREE.MathUtils.clamp(steering, -MAX_STEER_VAL, MAX_STEER_VAL);
-    } else if (input.left) {
+    } else if (activeLeft) {
       const steering = Math.max(MAX_STEER_VAL / speedFactor, -driftCorrection);
       steeringSpring.current.target = THREE.MathUtils.clamp(steering, -MAX_STEER_VAL, MAX_STEER_VAL);
     } else {
@@ -681,6 +912,72 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
         />
       ))}
       <primitive object={clonedScene} />
+
+      {/* Headlights -- conditionally mounted (see the big comment above):
+          only exist in the scene graph at all while `headlightsOn`, so a
+          parked/off car costs nothing extra. */}
+      {headlightsOn && (
+        <>
+          <spotLight
+            ref={leftHeadlightRef}
+            position={[HEADLIGHT_X, HEADLIGHT_Y, HEADLIGHT_Z]}
+            angle={0.45}
+            penumbra={0.5}
+            distance={26}
+            decay={1}
+            intensity={HEADLIGHT_INTENSITY}
+            color="#fff4d6"
+          />
+          <object3D ref={leftHeadlightTargetRef} position={[HEADLIGHT_X, HEADLIGHT_Y - 1, HEADLIGHT_Z + 20]} />
+          <mesh position={[HEADLIGHT_X, HEADLIGHT_Y, HEADLIGHT_Z]}>
+            <sphereGeometry args={[0.06, 12, 12]} />
+            <meshStandardMaterial color="#fffbe6" emissive="#fff4d6" emissiveIntensity={HEADLIGHT_BULB_EMISSIVE} toneMapped={false} />
+          </mesh>
+
+          <spotLight
+            ref={rightHeadlightRef}
+            position={[-HEADLIGHT_X, HEADLIGHT_Y, HEADLIGHT_Z]}
+            angle={0.45}
+            penumbra={0.5}
+            distance={26}
+            decay={1}
+            intensity={HEADLIGHT_INTENSITY}
+            color="#fff4d6"
+          />
+          <object3D ref={rightHeadlightTargetRef} position={[-HEADLIGHT_X, HEADLIGHT_Y - 1, HEADLIGHT_Z + 20]} />
+          <mesh position={[-HEADLIGHT_X, HEADLIGHT_Y, HEADLIGHT_Z]}>
+            <sphereGeometry args={[0.06, 12, 12]} />
+            <meshStandardMaterial color="#fffbe6" emissive="#fff4d6" emissiveIntensity={HEADLIGHT_BULB_EMISSIVE} toneMapped={false} />
+          </mesh>
+        </>
+      )}
+
+      {/* "un character dentro un auto che gira in citta" -- the officer,
+          only while an actual player hasn't taken the wheel (see
+          humanIsDriving). Purely visual: the AI drives the RigidBody
+          directly (activeForward/Backward/Left/Right above), same as a
+          human would via the keyboard -- this is just who you see doing it. */}
+      {patrolRoute && !humanIsDriving && officerSeatTransform && (
+        <Officer seatPosition={officerSeatTransform.position} seatQuaternion={officerSeatTransform.quaternion} />
+      )}
+      {patrolRoute && !humanIsDriving && (
+        <Html position={[0, 2.2, 0]} center distanceFactor={12} occlude={false}>
+          <div
+            style={{
+              color: '#dfe9ff',
+              background: 'rgba(10,30,80,0.65)',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+            }}
+          >
+            Polizia
+          </div>
+        </Html>
+      )}
     </RigidBody>
   );
 };

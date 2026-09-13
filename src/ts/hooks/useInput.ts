@@ -6,7 +6,7 @@ const STICK_DEADZONE = 0.25;
 const ACTION_NAMES = [
   'forward', 'backward', 'left', 'right', 'jump', 'shift',
   'yawLeft', 'yawRight', 'enter', 'enter_passenger', 'seat_switch',
-  'camera', 'fly', 'respawn', 'primary', 'secondary', 'pause',
+  'camera', 'fly', 'respawn', 'primary', 'secondary', 'pause', 'headlights',
 ] as const;
 type Action = (typeof ACTION_NAMES)[number];
 
@@ -28,6 +28,7 @@ const emptyActionMap = (): Record<Action, boolean> => ({
   primary: false,
   secondary: false,
   pause: false,
+  headlights: false,
 });
 
 export const useInput = () => {
@@ -77,6 +78,10 @@ export const useInput = () => {
     KeyB: 'fly',
     KeyQ: 'yawLeft',
     KeyR: 'respawn',
+    // "aggiungi dei fari veri alla macchina che accendo a comando" -- 'L'
+    // for "luci" (only actually read while driving, see Car.tsx's isCarActive
+    // gate on consumeJustPressed('headlights')).
+    KeyL: 'headlights',
     Escape: 'pause',
   };
 

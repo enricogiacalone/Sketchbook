@@ -172,7 +172,11 @@ const _networkQuat = new THREE.Quaternion();
 type VehicleType = "car" | "airplane" | "helicopter";
 
 interface VehicleTransition {
-  mode: "entering" | "exiting" | "switching";
+  // "opening" mirrors the legacy OpenVehicleDoor character state -- a
+  // pre-entry beat (reach for the door, it swings open) that runs BEFORE
+  // "entering" (the climb-in + sit-down lerp); see the entry-initiation
+  // and completion blocks below for how one hands off to the other.
+  mode: "opening" | "entering" | "exiting" | "switching";
   vehicleId: string;
   vehicleType: VehicleType;
   // Name of the glb node the body lerps TO: a seat_N for "entering"/
@@ -206,6 +210,15 @@ interface VehicleTransition {
   // transition into the connected driver seat, mirroring Sitting.ts's own
   // continuous wantsToDrive check auto-triggering SwitchingSeats.
   autoSwitchToDriverOnArrival?: boolean;
+  // "opening" phase only (legacy OpenVehicleDoor -> EnteringVehicle
+  // handoff): the door swung open partway through this phase (mirrors the
+  // original's `timer > 0.3 -> seat.door.open()`), and the seat/animation
+  // to hand off to once the open-door animation finishes.
+  doorName?: string | null;
+  doorOpened?: boolean;
+  nextSeatName?: string;
+  nextAnim?: string;
+  nextAutoSwitch?: boolean;
 }
 
 const Player: React.FC<{ userName: string }> = ({ userName }) => {
@@ -521,7 +534,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   // don't trigger a render, and we want the character to stay visible
   // through the "exiting" animation instead of popping in only at the end.
   const vehicleTransition = useRef<VehicleTransition | null>(null);
-  const [transitionMode, setTransitionMode] = useState<"entering" | "exiting" | "switching" | null>(null);
+  const [transitionMode, setTransitionMode] = useState<"opening" | "entering" | "exiting" | "switching" | null>(null);
   // Legacy CloseVehicleDoorInside port: plays while seated/driving, once
   // this seat's own door is open and nobody's pressing a direction (see the
   // parked block below). Purely cosmetic -- doesn't move the body, just
@@ -651,28 +664,60 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     if (transition) {
       transition.t += delta;
       const factor = THREE.MathUtils.clamp(transition.t / transition.duration, 0, 1);
-      const eased = -(Math.cos(Math.PI * factor) - 1) / 2; // easeInOutSine, same as the original
+      // Legacy ExitingAirplane: jumping clear of a plane doesn't ease the
+      // same way as every other transition -- the character holds still
+      // for the first 30% of the animation, then rises with easeOutQuad
+      // over the rest (`ExitingAirplane.ts`'s own beginningCutoff/
+      // easeOutQuad), instead of the easeInOutSine every other transition
+      // uses throughout.
+      const isAirplaneExit = transition.mode === "exiting" && transition.vehicleType === "airplane";
+      let eased: number;
+      if (isAirplaneExit) {
+        const cutoff = 0.3;
+        const f = THREE.MathUtils.clamp((factor - cutoff) / (1 - cutoff), 0, 1);
+        eased = 1 - (1 - f) * (1 - f); // easeOutQuad
+      } else {
+        eased = -(Math.cos(Math.PI * factor) - 1) / 2; // easeInOutSine, same as the original
+      }
 
       const parts = getVehicleParts(state.scene, transition.vehicleId);
       const targetPos = new THREE.Vector3();
       const targetQuat = new THREE.Quaternion();
       if (parts) {
-        // "entering"/"switching" lerp to a seat_N; "exiting" lerps to an
-        // entrance_N -- both authored at the surface the character's base
-        // should rest on (see the RADIUS comment below), so a single named
-        // lookup against the vehicle's own root covers all three modes.
-        const targetObj = parts.root.getObjectByName(transition.targetNodeName)
-          ?? (transition.mode === "exiting" ? parts.entrance : parts.seat);
-        targetObj.getWorldPosition(targetPos);
-        targetObj.getWorldQuaternion(targetQuat);
-        // The RigidBody's origin is the BallCollider's center, but the
-        // model is drawn RADIUS below it (see the <primitive> below --
-        // same convention as standing on the ground at groundY + RADIUS).
-        // seat_1/entrance_1 are authored at the surface the character's
-        // base should rest on, so without this the body (and therefore
-        // the visible model) ends up RADIUS too low, clipping into the
-        // vehicle's floor/seat mesh.
-        targetPos.y += RADIUS;
+        if (isAirplaneExit) {
+          // No door, no entry point to walk to (airplane seats have
+          // neither in this rig) -- rise straight up along the vehicle's
+          // OWN current up vector from the live seat node instead,
+          // mirroring the original's local-space "+1 on Y" (there the
+          // character was a literal scene-graph child of the plane, so
+          // its "+Y" automatically followed the plane's own bank/pitch).
+          // Reading the seat node fresh every frame, rather than a
+          // one-off snapshot, means a plane still moving/banking during
+          // the ~0.5s jump doesn't leave the character behind mid-air.
+          const seatNode = parts.root.getObjectByName(transition.targetNodeName) ?? parts.seat;
+          seatNode.getWorldPosition(targetPos);
+          seatNode.getWorldQuaternion(targetQuat);
+          const seatUp = new THREE.Vector3(0, 1, 0).applyQuaternion(targetQuat);
+          targetPos.addScaledVector(seatUp, 1);
+          targetPos.y += RADIUS;
+        } else {
+          // "entering"/"switching" lerp to a seat_N; "exiting" lerps to an
+          // entrance_N -- both authored at the surface the character's base
+          // should rest on (see the RADIUS comment below), so a single named
+          // lookup against the vehicle's own root covers all three modes.
+          const targetObj = parts.root.getObjectByName(transition.targetNodeName)
+            ?? (transition.mode === "exiting" ? parts.entrance : parts.seat);
+          targetObj.getWorldPosition(targetPos);
+          targetObj.getWorldQuaternion(targetQuat);
+          // The RigidBody's origin is the BallCollider's center, but the
+          // model is drawn RADIUS below it (see the <primitive> below --
+          // same convention as standing on the ground at groundY + RADIUS).
+          // seat_1/entrance_1 are authored at the surface the character's
+          // base should rest on, so without this the body (and therefore
+          // the visible model) ends up RADIUS too low, clipping into the
+          // vehicle's floor/seat mesh.
+          targetPos.y += RADIUS;
+        }
       }
 
       const lerpPos = new THREE.Vector3().lerpVectors(transition.startPos, targetPos, eased);
@@ -685,7 +730,49 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       playAnim(transition.anim);
       setPlayerInfo([lerpPos.x, lerpPos.y, lerpPos.z], modelRotation.current);
 
+      // Legacy OpenVehicleDoor: `if (this.timer > 0.3 && !this.hasOpenedDoor)
+      // this.seat.door?.open();` -- the door swings open partway through
+      // the reach-for-it animation, not the instant the phase starts.
+      if (transition.mode === "opening" && !transition.doorOpened && transition.t > 0.3 && transition.doorName) {
+        transition.doorOpened = true;
+        setDoorOpen(transition.vehicleId, transition.doorName, true);
+      }
+
       if (factor >= 1) {
+        if (transition.mode === "opening") {
+          // Legacy OpenVehicleDoor.animationEnded(): if a direction key is
+          // already held once the reach-for-the-door animation finishes,
+          // bail back out to normal on-foot control instead of climbing
+          // in -- you changed your mind mid-reach.
+          if (input.forward || input.backward || input.left || input.right) {
+            body.setEnabled(true);
+            vehicleTransition.current = null;
+            setIsVehicleTransitioning(false);
+            setTransitionMode(null);
+            return;
+          }
+          // Hand off to the climb-in + sit-down lerp (legacy
+          // EnteringVehicle), continuing on exactly from where the
+          // door-opening lerp left off (targetPos/targetQuat here are this
+          // frame's fully-reached entrance position/rotation).
+          const nextAnim = transition.nextAnim ?? "sit_down_left";
+          vehicleTransition.current = {
+            mode: "entering",
+            vehicleId: transition.vehicleId,
+            vehicleType: transition.vehicleType,
+            targetNodeName: transition.nextSeatName ?? transition.targetNodeName,
+            seatKind: transition.seatKind,
+            t: 0,
+            duration: clipDuration(nextAnim, VEHICLE_ENTER_DURATION),
+            startPos: targetPos.clone(),
+            startQuat: targetQuat.clone(),
+            anim: nextAnim,
+            exitVelocity: new THREE.Vector3(),
+            autoSwitchToDriverOnArrival: transition.nextAutoSwitch,
+          };
+          setTransitionMode("entering");
+          return;
+        }
         if (
           transition.mode === "entering" &&
           transition.autoSwitchToDriverOnArrival &&
@@ -929,19 +1016,50 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       }
 
       if (input.consumeJustPressed("enter") && controlledEntityId && parts) {
-        // Leave through THIS seat's own entry point (legacy's
-        // ExitingVehicle.ts: `this.exitPoint = seat.entryPoints[0]`) --
-        // faithful now that passenger seats are real occupiable seats, not
-        // just always the driver's own front door.
         const seatForExit = mySeat ?? getSeatInfo(parts.root, "seat_1");
-        const entryNode = seatForExit?.entryPointName ? parts.root.getObjectByName(seatForExit.entryPointName) : null;
-        const exitPointNode = entryNode ?? parts.entrance;
 
         const startPos = new THREE.Vector3();
         (seatForExit?.node ?? parts.seat).getWorldPosition(startPos);
         startPos.y += RADIUS; // matches the seat-follow correction above
         const startQuat = new THREE.Quaternion();
         (seatForExit?.node ?? parts.seat).getWorldQuaternion(startQuat);
+
+        // Legacy's Character.exitVehicle() branches by EntityType:
+        // Airplane -> ExitingAirplane (jump clear, no door, ends in
+        // Falling), anything else -> ExitingVehicle (walk out through the
+        // seat's own entry point). Airplane seats also have no
+        // entryPoints/door in this rig at all (see findSeatAndEntry), so
+        // there's nothing to walk out to even if we wanted to.
+        if (currentControllable === "airplane") {
+          vehicleTransition.current = {
+            mode: "exiting",
+            vehicleId: controlledEntityId,
+            vehicleType: currentControllable as VehicleType,
+            // Resolved specially in the per-frame lerp block below (rise
+            // off the live seat node instead of walking to an entry
+            // point) -- see the isAirplaneExit branch there.
+            targetNodeName: seatForExit?.name ?? "seat_1",
+            seatKind: seatForExit?.kind ?? "driver",
+            t: 0,
+            duration: clipDuration("jump_idle", VEHICLE_EXIT_DURATION),
+            startPos,
+            startQuat,
+            anim: "jump_idle",
+            exitVelocity: seatVelocityEstimate.current.clone(),
+            originSeatName: seatForExit?.name ?? "seat_1",
+            exitDoorName: null,
+          };
+          setIsVehicleTransitioning(true, controlledEntityId, null);
+          setTransitionMode("exiting");
+          return;
+        }
+
+        // Leave through THIS seat's own entry point (legacy's
+        // ExitingVehicle.ts: `this.exitPoint = seat.entryPoints[0]`) --
+        // faithful now that passenger seats are real occupiable seats, not
+        // just always the driver's own front door.
+        const entryNode = seatForExit?.entryPointName ? parts.root.getObjectByName(seatForExit.entryPointName) : null;
+        const exitPointNode = entryNode ?? parts.entrance;
         const entrancePos = new THREE.Vector3();
         exitPointNode.getWorldPosition(entrancePos);
         const side = sideOf(startPos, startQuat, entrancePos);
@@ -1030,24 +1148,37 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
                 ? (side === "left" ? "enter_airplane_left" : "enter_airplane_right")
                 : (side === "left" ? "sit_down_left" : "sit_down_right");
 
+              // Legacy's OpenVehicleDoor: reach-for-the-door beat plays
+              // FIRST (open_door_standing_left/right), lerping to the
+              // entry point itself; only once that finishes do we hand off
+              // to the climb-in + sit-down lerp (built on completion,
+              // below, from nextSeatName/nextAnim/nextAutoSwitch) -- see
+              // findSeatAndEntry for why entrancePos/entranceQuat are the
+              // ones already computed just above.
+              const openDoorAnim = side === "left" ? "open_door_standing_left" : "open_door_standing_right";
+
               vehicleTransition.current = {
-                mode: "entering",
+                mode: "opening",
                 vehicleId: closestId,
                 vehicleType: closestType,
-                targetNodeName: found.seat.name,
+                targetNodeName: found.entry.name,
                 seatKind: found.seat.kind,
                 t: 0,
-                duration: VEHICLE_ENTER_DURATION,
+                duration: clipDuration(openDoorAnim, 0.5),
                 startPos: playerPos.clone(),
                 startQuat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), modelRotation.current),
-                anim: enterAnim,
+                anim: openDoorAnim,
                 exitVelocity: new THREE.Vector3(),
+                doorName: found.seat.doorName,
+                doorOpened: false,
+                nextSeatName: found.seat.name,
+                nextAnim: enterAnim,
                 // Landed in a passenger seat while actually wanting to
                 // drive (e.g. car.glb's seat_2, connected to the driver's
                 // seat_1) -- see Sitting.ts's own continuous wantsToDrive
                 // check, replicated on arrival in the completion branch
                 // above.
-                autoSwitchToDriverOnArrival: wantsToDrive && found.seat.kind === "passenger",
+                nextAutoSwitch: wantsToDrive && found.seat.kind === "passenger",
               };
               // See the big comment above this function's vehicle-entry section --
               // stop colliding with anything (the target car included) for the
@@ -1055,11 +1186,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
               // only once fully exited below.
               body.setEnabled(false);
               setIsVehicleTransitioning(true, closestId, found.seat.doorName);
-              // Held open until the character's own close-door-from-inside
-              // animation runs (see the parked block above), not simply once
-              // this entering transition ends.
-              if (found.seat.doorName) setDoorOpen(closestId, found.seat.doorName, true);
-              setTransitionMode("entering");
+              setTransitionMode("opening");
               return;
             }
           }

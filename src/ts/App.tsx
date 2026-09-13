@@ -19,6 +19,7 @@ import ChatInput from "./components/UI/ChatInput";
 import Minimap from "./components/UI/Minimap";
 import Crosshair from "./components/UI/Crosshair";
 import GamepadDebug from "./components/UI/GamepadDebug";
+import ScenariosGUI from "./components/UI/ScenariosGUI";
 import Loader from "./components/UI/Loader"; // Helper to track loading
 import Player from "./components/Player"; // Import Player directly to pass userName
 import ThirdPersonCamera from "./components/ThirdPersonCamera";
@@ -203,6 +204,7 @@ const App: React.FC = () => {
           <Minimap />
           <Crosshair />
           <GamepadDebug />
+          <ScenariosGUI />
           {isPaused && (
             <div
               style={{
