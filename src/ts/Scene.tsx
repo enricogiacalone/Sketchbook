@@ -25,6 +25,7 @@ import Airplane from "./components/Vehicles/Airplane"; // Import Airplane
 import Helicopter from "./components/Vehicles/Helicopter"; // Import Helicopter
 import { useStore } from "./store";
 
+
 // Pre-caricamento intensivo
 useGLTF.preload("car.glb");
 useGLTF.preload("airplane.glb");

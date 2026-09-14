@@ -16,6 +16,7 @@ import { UPPER_BODY_BONES, LOWER_BODY_BONES, filterTracksByBones } from "../lib/
 import NetworkPlayer from "./NetworkPlayer";
 import SpeechBubble from "./UI/SpeechBubble";
 import Bullet from "./Bullet";
+import { DRONE_ID } from "./Drone";
 
 // -- Vehicle seat/entrance lookup -------------------------------------------
 // Every vehicle glb (car/airplane/heli) ships the same authored empties the
@@ -169,6 +170,13 @@ const findSeatAndEntry = (
 const _networkYAxis = new THREE.Vector3(0, 1, 0);
 const _networkQuat = new THREE.Quaternion();
 
+// Full 3D camera-forward direction for aiming (section 4 below) --
+// deliberately NOT flattened like section 1's own `forward`, which only
+// ever drives ground movement and has y forced to 0. Aiming needs the
+// real pitch too, or looking up/down with the mouse would never change
+// where a bullet actually goes.
+const _aimDir = new THREE.Vector3();
+
 type VehicleType = "car" | "airplane" | "helicopter";
 
 interface VehicleTransition {
@@ -231,6 +239,11 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
   const { scene: worldScene } = useThree();
   const { scene, animations } = useGLTF("boxman.glb");
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  // "il drone e' il compagno del player" -- the drone (mesh, flight
+  // physics, combat) now lives entirely in its own Drone.tsx, a
+  // persistent companion entity mounted once alongside Player in
+  // App.tsx, not something this component transforms into anymore. See
+  // git history for the version of this file where it did.
   const { actions, mixer, clips } = useAnimations(animations, clonedScene);
 
   // Upper/lower body split -- "dividiamo il busto dalle gambe... quando
@@ -357,6 +370,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     setHealth,
     takeDamage,
     setIsPlayerGrounded,
+    setIsDrone,
   } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
@@ -380,6 +394,7 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       setHealth: state.setHealth,
       takeDamage: state.takeDamage,
       setIsPlayerGrounded: state.setIsPlayerGrounded,
+      setIsDrone: state.setIsDrone,
     }))
   );
 
@@ -901,6 +916,32 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     }
 
     if (!isPlayerActive) {
+      // "il drone e' il compagno del player ... quando premo b ne prendo
+      // il controllo" -- piloting the companion drone parks the player
+      // exactly like being inside a vehicle (isPlayerActive false), but
+      // with none of the seats/doors/entry-point machinery below: the
+      // player's body just stands wherever it already was, frozen, idle,
+      // while Drone.tsx's own useFrame drives the drone (and calls
+      // setPlayerInfo with ITS OWN position while active, same as every
+      // vehicle already does) -- checked FIRST so none of the vehicle-
+      // specific lookups just below ever run for a plain string id that
+      // was never a real vehicle in the first place.
+      if (currentControllable === 'drone') {
+        body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        playAnim('idle');
+        // Drain (without acting on) any 'fly' press that happens while
+        // parked -- this component's own useInput() instance tracks
+        // "just pressed" independently of Drone.tsx's (see useInput.ts's
+        // per-hook `justPressed` ref), so the B press that's actually
+        // EXITING the drone right now would otherwise sit here
+        // unconsumed and get misread as a fresh press the instant
+        // isPlayerActive flips back to true next frame, re-entering the
+        // drone right after leaving it. Same reasoning as Drone.tsx's own
+        // unconditional drain on its side of this handoff.
+        input.consumeJustPressed('fly');
+        return;
+      }
+
       // Parked inside a vehicle. The visible model's position AND rotation
       // are no longer copied by hand here -- see the createPortal block in
       // the render below, which re-parents clonedScene onto the vehicle's
@@ -1087,6 +1128,20 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
 
     lastSeatPos.current = null;
 
+    // "quando premo b ne prendo il controllo" -- hand control over to
+    // the companion drone (Drone.tsx), exactly like starting to drive a
+    // car except there's no seat/door to walk to first: it's already
+    // right there, floating alongside. Only reachable here when
+    // isPlayerActive (this whole function returned early above
+    // otherwise), so this is the "take control" side; "give control
+    // back" is handled symmetrically inside Drone.tsx's own useFrame
+    // (it's the one reading its own useInput() while it's the active
+    // entity, same as how a car reads its own 'enter' for exiting).
+    if (input.consumeJustPressed('fly')) {
+      setIsDrone(true);
+      setCurrentControllable('drone', DRONE_ID);
+    }
+
     // Vehicle entry: find the nearest vehicle within reach of its door.
     // Two-stage search mirrors the original's findVehicleToEnter() --
     // nearest vehicle overall, then (via findSeatAndEntry) the best SEAT
@@ -1194,6 +1249,11 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
       }
     }
 
+    // Sections 1-5 (ground/air movement, vehicle-entry animation
+    // fallout, combat, and animation selection), always on-foot logic
+    // now -- reaching this point already implies isPlayerActive (every
+    // other case returned earlier above), so there's nothing left to
+    // gate here.
     // 1. Camera-Relative Input. Computed before the ground analysis below
     // because the landing-recovery pick needs to know whether a movement
     // key is held, exactly like the original's setAppropriateDropState().
@@ -1369,15 +1429,44 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
     body.setLinvel({ x: finalVel.x, y: yVel, z: finalVel.z }, true);
 
     // 4. Combat logic
+    // "anche la direzione delle pallottole deve seguire il centro del
+    // pointer" -- bullets used to always fly flat (y=0) along
+    // modelRotation, the CHARACTER's own facing, which only turns while
+    // actually moving (see section 1's isMoving block) -- so aiming with
+    // the mouse alone (camera pitch/yaw with no WASD held) never changed
+    // where a shot went, and looking up/down couldn't be represented at
+    // all. Crosshair.tsx renders dead-center of the viewport, so "where
+    // the pointer is" IS the camera's forward ray -- bullets now travel
+    // along that instead, full 3D (pitch included).
     if (input.primary && state.clock.elapsedTime * 1000 - lastFireTime.current > 200) {
+        state.camera.getWorldDirection(_aimDir);
+
+        // Snap the character to face the shot while firing (flat, yaw
+        // only -- the model has no separate upper-body aim pose) so
+        // standing still and shooting doesn't leave the body facing one
+        // way while the tracer flies off in whatever direction the
+        // camera happens to be pointed. Same smoothing factor as
+        // section 1's own movement-turn lerp just above.
+        const aimYaw = Math.atan2(_aimDir.x, _aimDir.z);
+        let aimDiff = aimYaw - modelRotation.current;
+        while (aimDiff < -Math.PI) aimDiff += Math.PI * 2;
+        while (aimDiff > Math.PI) aimDiff -= Math.PI * 2;
+        modelRotation.current += aimDiff * 0.2;
+
         const bulletId = `bullet-${Date.now()}`;
-        const bDir = new THREE.Vector3(Math.sin(modelRotation.current), 0, Math.cos(modelRotation.current));
         setBullets(prev => [...prev, {
             id: bulletId,
-            pos: [position.current[0] + bDir.x * 0.5, position.current[1] + 0.2, position.current[2] + bDir.z * 0.5],
-            vel: [bDir.x * 50, 0, bDir.z * 50],
+            pos: [
+                position.current[0] + _aimDir.x * 0.5,
+                position.current[1] + 0.2 + _aimDir.y * 0.5,
+                position.current[2] + _aimDir.z * 0.5,
+            ],
+            vel: [_aimDir.x * 50, _aimDir.y * 50, _aimDir.z * 50],
             owner: 'player' as const
         }]);
+        if (import.meta.env.DEV) {
+          (window as any).__bulletDebug = { aimDir: _aimDir.toArray(), vel: [_aimDir.x * 50, _aimDir.y * 50, _aimDir.z * 50] };
+        }
         lastFireTime.current = state.clock.elapsedTime * 1000;
     }
 
@@ -1520,6 +1609,9 @@ const Player: React.FC<{ userName: string }> = ({ userName }) => {
               above the seatedContainer computation. */}
           {!seatedContainer && (
             <>
+              {/* The drone companion is its own persistent entity now
+                  (Drone.tsx) -- this is always the on-foot character,
+                  never swapped out in place anymore. */}
               <group rotation={[0, modelRotation.current, 0]}>
                 <primitive object={clonedScene} position={[0, -RADIUS, 0]} />
               </group>

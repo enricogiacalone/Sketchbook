@@ -136,6 +136,7 @@ export const simDebug = {
       controlledEntityId: s.controlledEntityId,
       controlledSeatType: s.controlledSeatType,
       playerPos: s.playerPos,
+      isDrone: s.isDrone,
       vehicles,
     };
   },
@@ -256,6 +257,15 @@ export const simDebug = {
     useStore.getState().setTestScene('none');
     this.clearKeys();
     useStore.getState().setCurrentControllable('player');
+  },
+
+  // Direct pause control for a driving/automation session -- e.g. clicking
+  // the canvas via CDP synthetic events doesn't always count as a "real"
+  // user gesture for the browser's own pointer-lock-loss auto-pause /
+  // Escape toggle to unwind cleanly, so this is the one-line console/
+  // automation escape hatch instead of hand-rolling a togglePause() call.
+  setPaused(paused: boolean) {
+    useStore.getState().setPaused(paused);
   },
 
   // Samples state() every intervalMs for durationMs and resolves with the

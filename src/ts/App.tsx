@@ -22,6 +22,7 @@ import GamepadDebug from "./components/UI/GamepadDebug";
 import ScenariosGUI from "./components/UI/ScenariosGUI";
 import Loader from "./components/UI/Loader"; // Helper to track loading
 import Player from "./components/Player"; // Import Player directly to pass userName
+import Drone from "./components/Drone";
 import ThirdPersonCamera from "./components/ThirdPersonCamera";
 import { useStore } from "./store";
 import { useShallow } from "zustand/react/shallow";
@@ -197,6 +198,11 @@ const App: React.FC = () => {
               <Scene />
               {/* Player needs userName for network identification */}
               <Player userName={userName} />
+              {/* "il drone e' il compagno del player e gli fluttua
+                  attorno" -- always mounted, own persistent entity (see
+                  Drone.tsx), not something Player.tsx spawns/despawns on
+                  the fly toggle anymore. */}
+              <Drone />
             </Physics>
 
             <ThirdPersonCamera />

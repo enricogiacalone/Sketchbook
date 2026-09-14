@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type ControllableType = 'player' | 'car' | 'airplane' | 'helicopter';
+export type ControllableType = 'player' | 'car' | 'airplane' | 'helicopter' | 'drone';
 // Which kind of seat the player currently occupies inside a vehicle -- null
 // whenever currentControllable is 'player'. Mirrors the legacy SeatType
 // enum (driver/passenger), read straight off each seat's own
@@ -74,6 +74,12 @@ interface GameState {
   // the world is stepping, so anything still calling those every frame
   // would keep moving things even while "paused".
   isPaused: boolean;
+  // "il personaggio si trasforma nel drone ... ha le stesse funzioni di
+  // volo" (droneWorld) -- global so both Player.tsx (which drives it) and
+  // useThirdPersonCamera.ts (which needs to know whether the mouse should
+  // pilot the drone or orbit the camera, see there) can read it without
+  // threading a prop between two independently-mounted hooks.
+  isDrone: boolean;
   isLoading: boolean;
   isCrosshairVisible: boolean;
   playerPos: [number, number, number];
@@ -137,6 +143,7 @@ interface GameState {
   setIsVehicleTransitioning: (transitioning: boolean, entityId?: string | null, doorName?: string | null) => void;
   setDoorOpen: (vehicleId: string, doorName: string, open: boolean) => void;
   togglePause: () => void;
+  setIsDrone: (isDrone: boolean) => void;
   setPaused: (paused: boolean) => void;
   setIsLoading: (loading: boolean) => void;
   setIsCrosshairVisible: (visible: boolean) => void;
@@ -163,6 +170,7 @@ export const useStore = create<GameState>((set) => ({
   transitioningDoorName: null,
   openVehicleDoors: {},
   isPaused: false,
+  isDrone: false,
   isLoading: false, // Set to false initially to show WelcomeScreen
   isCrosshairVisible: false,
   playerPos: [0, 0, 0],
@@ -212,6 +220,7 @@ export const useStore = create<GameState>((set) => ({
     return { openVehicleDoors: next };
   }),
   togglePause: () => set((state) => ({ isPaused: !state.isPaused })),
+  setIsDrone: (isDrone) => set({ isDrone }),
   // Separate from togglePause: the tab-hidden auto-pause always wants to
   // force pause ON, never flip an already-paused game back to running.
   setPaused: (paused) => set({ isPaused: paused }),
