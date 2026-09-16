@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { RigidBody, CylinderCollider, CuboidCollider } from "@react-three/rapier";
-import { useTreeTemplates, TreeInstance, GrassPatch, Flowers } from "./ParkTrees";
+import { useTreeTemplates, TreeInstance, Flowers } from "./ParkTrees";
+import { RealGrassPatch } from "./RealGrass";
 import { getTerrainHeight } from "./Terrain";
 import { streetLampBulbMaterial } from "./Road";
 import { CollisionGroups, groupsExcluding } from "../../enums/CollisionGroups";
@@ -199,11 +200,13 @@ const Bench: React.FC<{ x: number; z: number; rotationY: number }> = ({
 };
 
 // --- Grass -----------------------------------------------------------
-// Real grass (instanced, wind-shader) now lives in ./ParkTrees as
-// <GrassPatch> (shared with City.tsx's green courtyards/plazas -- see git
-// history / chat: "hai dimenticato l'erba e i fiori"); this file just calls
-// it below with Park's own bounds/avoid-fountain settings, same tuning as
-// before.
+// The cheap flat-plane mock-shader grass (<GrassPatch>, ./ParkTrees) is
+// still what City.tsx's green courtyards/plazas use. Here in the park we
+// now use <RealGrassPatch> (./RealGrass) instead -- the real pmndrs
+// grass-shader port with proper tapered blade geometry and simplex-noise
+// wind sway ("ruba il grass da qui
+// https://pmndrs.github.io/examples/grass-shader/ e mettilo nel parco"),
+// same bounds/avoid-fountain settings as before.
 
 // --- Trees ---------------------------------------------------------------
 // Real ez-tree generation + rendering now lives in ./ParkTrees (shared with
@@ -322,7 +325,7 @@ const Park: React.FC = () => {
 
   return (
     <group>
-      <GrassPatch
+      <RealGrassPatch
         minX={AREA_MIN}
         maxX={AREA_MAX}
         minZ={AREA_MIN}

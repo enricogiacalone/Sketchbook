@@ -4,7 +4,8 @@ import { RigidBody, CuboidCollider } from '@react-three/rapier';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
-import { useTreeTemplates, TreeInstance, TreeTemplate, GrassPatch, Flowers } from './ParkTrees';
+import { useTreeTemplates, TreeInstance, TreeTemplate, Flowers } from './ParkTrees';
+import { RealGrassPatch } from './RealGrass';
 
 const _windowDummy = new THREE.Object3D();
 const _windowColor = new THREE.Color();
@@ -678,17 +679,21 @@ const GreenCourtyard: React.FC<{ x: number, z: number, treeTemplates: TreeTempla
                     </mesh>
                 ))}
             </group>
-            {/* Real grass + flowers, same deal as the trees above -- "le
-                aree verdi devono avere la vegetazione del parco" (and
-                "hai dimenticato l'erba e i fiori"). Bounds match the 20x20
-                courtyard plane above; counts scaled down proportionally
-                from Park's own 51x51 area. */}
-            <GrassPatch
+            {/* Real grass (same pmndrs shader-ported blades as Park.tsx,
+                see RealGrass.tsx/GrassMaterial.ts for attribution) +
+                flowers, same deal as the trees above -- "le aree verdi
+                devono avere la vegetazione del parco" (and "hai
+                dimenticato l'erba e i fiori"), upgraded from the flat
+                mock-shader GrassPatch to match the park ("mettilo al
+                posto dell'altro grass"). Bounds match the 20x20 courtyard
+                plane above; counts scaled down proportionally from Park's
+                own 51x51 area. */}
+            <RealGrassPatch
                 minX={x - 10}
                 maxX={x + 10}
                 minZ={z - 10}
                 maxZ={z + 10}
-                count={700}
+                instances={700}
             />
             <Flowers
                 minX={x - 10}
@@ -745,16 +750,16 @@ const City: React.FC = () => {
                   </mesh>
               ))}
           </group>
-          {/* Real grass + flowers, same deal as GreenCourtyard above --
-              bounds match the 45x45 plaza plane, avoiding the central
-              monument box. Density closer to Park's own (51x51 / 4000
-              grass / 60 flowers) since plazas are nearly as big. */}
-          <GrassPatch
+          {/* Same real pmndrs-ported grass as the courtyards above +
+              flowers -- bounds match the 45x45 plaza plane, avoiding the
+              central monument box. Density closer to Park's own (51x51 /
+              8000 grass / 60 flowers) since plazas are nearly as big. */}
+          <RealGrassPatch
               minX={p.x - 22}
               maxX={p.x + 22}
               minZ={p.z - 22}
               maxZ={p.z + 22}
-              count={3200}
+              instances={3200}
               avoid={[{ x: p.x, z: p.z, radius: 4 }]}
           />
           <Flowers

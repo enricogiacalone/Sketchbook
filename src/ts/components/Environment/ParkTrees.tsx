@@ -128,80 +128,14 @@ export interface AvoidZone {
   radius: number;
 }
 
-const grassVertexShader = `
-  varying vec2 vUv;
-  uniform float uTime;
-  void main() {
-    vUv = uv;
-    vec3 pos = position;
-    float wave = sin(uTime + instanceMatrix[3][0] * 0.5) * 0.08 * (1.0 - uv.y);
-    pos.x += wave;
-    gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(pos, 1.0);
-  }
-`;
-
-const grassFragmentShader = `
-  varying vec2 vUv;
-  void main() {
-    vec3 color = mix(vec3(0.12, 0.42, 0.12), vec3(0.45, 0.72, 0.25), vUv.y);
-    gl_FragColor = vec4(color, 1.0);
-  }
-`;
-
-// Scratch object reused across instances -- module-level like Park's
-// original _dummy, kept private to this file (Flowers/trees don't need it).
-const _grassDummy = new THREE.Object3D();
-
-export const GrassPatch: React.FC<{
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-  count?: number;
-  avoid?: AvoidZone[];
-}> = ({ minX, maxX, minZ, maxZ, count = 4000, avoid = [] }) => {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
-  const uniforms = useMemo(() => ({ uTime: { value: 0 } }), []);
-
-  useFrame((state) => {
-    uniforms.uTime.value = state.clock.elapsedTime;
-  });
-
-  return (
-    <instancedMesh
-      ref={meshRef}
-      args={[null as any, null as any, count]}
-      onUpdate={(self) => {
-        for (let i = 0; i < count; i++) {
-          const x = minX + Math.random() * (maxX - minX);
-          const z = minZ + Math.random() * (maxZ - minZ);
-          const y = getTerrainHeight(x, z);
-          const blocked = avoid.some(
-            (a) => Math.hypot(x - a.x, z - a.z) < a.radius
-          );
-          if (blocked) {
-            _grassDummy.scale.setScalar(0);
-          } else {
-            _grassDummy.position.set(x, y, z);
-            _grassDummy.rotation.set(0, Math.random() * Math.PI, 0);
-            _grassDummy.scale.setScalar(0.5 + Math.random() * 0.5);
-          }
-          _grassDummy.updateMatrix();
-          self.setMatrixAt(i, _grassDummy.matrix);
-        }
-        self.instanceMatrix.needsUpdate = true;
-      }}
-    >
-      <planeGeometry args={[0.2, 1, 1, 4]} />
-      <shaderMaterial
-        vertexShader={grassVertexShader}
-        fragmentShader={grassFragmentShader}
-        uniforms={uniforms}
-        side={THREE.DoubleSide}
-      />
-    </instancedMesh>
-  );
-};
+// The flat mock-shader instanced grass that used to live here
+// (GrassPatch: plane geometry + a one-line sine-wave vertex shader) has
+// been replaced everywhere by the real pmndrs-ported grass -- see
+// ./RealGrass's RealGrassPatch (used by Park.tsx and, for the courtyards/
+// plazas above, City.tsx) and ./GrassMaterial for the shader + full
+// attribution chain ("ruba il grass da qui
+// https://pmndrs.github.io/examples/grass-shader/ e mettilo nel parco...
+// mettilo al posto dell'altro grass"). Flowers below are unchanged.
 
 const DEFAULT_FLOWER_COLORS = ["#ff4444", "#ffff44", "#ff44ff", "#ffffff"];
 
