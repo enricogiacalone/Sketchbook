@@ -149,6 +149,7 @@ function createFighters(count: number, mode: GameMode, center: [number, number],
       triggerHit: null,
       hitFromX: 0,
       hitFromZ: 0,
+      hurtboxHandle: null,
     });
   }
   return fighters;

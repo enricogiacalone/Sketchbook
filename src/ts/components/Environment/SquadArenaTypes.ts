@@ -20,6 +20,14 @@ export interface AnimCatalog {
   victory: string;
   death: string;
   attacks: string[];
+  // Second, deterministic punch (as opposed to `attacks`, which is always
+  // a random pick) -- "aggiungi un secondo input di pugno" -- lets
+  // PlayerCombatSoldier.tsx give the player a distinct, player-chosen
+  // second attack on its own key rather than only the random one on
+  // primary. Built the same way as `attacks` (see both fighters'
+  // animCatalog useMemo) so it's always a real clip this rig has, never
+  // an empty string.
+  attackAlt: string;
 }
 
 export interface FighterData {
@@ -51,6 +59,15 @@ export interface FighterData {
   // struck segment's own center -- see useRagdoll.ts's pulseHit.
   hitFromX: number;
   hitFromZ: number;
+  // "voglio che il colpo avvenga proprio dove ho colpito, non in un
+  // range" -- this fighter's own Rapier hurtbox collider handle (see
+  // useRagdoll.ts's getHurtboxHandle), refreshed every frame by its own
+  // component. An attacker reads the TARGET's handle here and queries it
+  // via THEIR OWN ragdoll.pointIntersectsHurtbox -- fighters never call
+  // into each other's hooks directly, only through this shared plain-data
+  // object, same as every other field here. null until that fighter's
+  // hurtbox has been created (its first update() call).
+  hurtboxHandle: number | null;
 }
 
 export interface TowerData {

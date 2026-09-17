@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
-import { useRapier } from '@react-three/rapier';
-import type { RigidBody as RapierRigidBody, ImpulseJoint } from '@dimforge/rapier3d-compat';
+import { useRapier, interactionGroups } from '@react-three/rapier';
+import type { RigidBody as RapierRigidBody, ImpulseJoint, Collider } from '@dimforge/rapier3d-compat';
 import { CollisionGroups, groupsExcluding } from '../../../enums/CollisionGroups';
 import { RAGDOLL_PULSE_NEARBY, RAGDOLL_SEGMENTS, RAGDOLL_SEGMENT_FROZEN_BONES, RagdollSegment } from './ragdollConfig';
 
@@ -38,6 +38,23 @@ import { RAGDOLL_PULSE_NEARBY, RAGDOLL_SEGMENTS, RAGDOLL_SEGMENT_FROZEN_BONES, R
 const HIT_PULSE_DURATION = 0.22; // secondi in cui il corpo e' guidato al 100% dalla fisica dopo un colpo -- "il contraccolpo e' troppo": accorciato cosi' la gravita'/inerzia ha meno tempo per trascinare l'arto prima che si rimetta a sfumare verso l'animazione
 const HIT_BLEND_OUT_DURATION = 0.35; // secondi di sfumatura (slerp) verso l'animazione
 const HIT_MARKER_DURATION = 0.3; // secondi di vita del lampo visivo sul punto colpito
+
+// "voglio che il colpo avvenga proprio dove ho colpito, non in un range"
+// -- a permanent (not pulse-only) sensor capsule approximating this
+// fighter's standing body, feet to head, used purely for a real Rapier
+// shape-intersection query in the attacker's checkAttackContact (see
+// PlayerCombatSoldier.tsx/CombatSoldier.tsx) instead of hand-rolled
+// distance math. HURTBOX_HEIGHT/RADIUS are deliberately independent of
+// RAGDOLL_SEGMENTS' own per-limb capsules -- this is one coarse volume
+// for "is this fighter's body here at all", not a per-body-part rig.
+const HURTBOX_HEIGHT = 1.65; // feet to roughly head height
+const HURTBOX_RADIUS = 0.28;
+// Member of AND only collides-with Hurtbox -- so a query using this same
+// group only ever matches another fighter's hurtbox, never terrain,
+// ragdoll pieces, or anything else sharing the physics world.
+const HURTBOX_GROUPS = interactionGroups([CollisionGroups.Hurtbox], [CollisionGroups.Hurtbox]);
+const HAND_QUERY_RADIUS = 0.06; // tiny sphere cast at the attacking hand's position, see pointIntersectsHurtbox
+const _identityRot = { x: 0, y: 0, z: 0, w: 1 };
 
 interface BodyEntry {
   segment: RagdollSegment;
@@ -85,6 +102,27 @@ export interface RagdollController {
   // walk the skeleton a second time. Returns false (and leaves `target`
   // untouched) if the rig has no bone by that name.
   getBoneWorldPosition: (boneName: string, target: THREE.Vector3) => boolean;
+  // "voglio che il colpo avvenga proprio dove ho colpito, non in un
+  // range" -- a real Rapier sensor collider (see HURTBOX_* below)
+  // representing this fighter's standing body, lazily created on first
+  // use and kept following modelRootRef every update() call. Returns
+  // null until the first update() has run (nothing to attack before
+  // then).
+  getHurtboxHandle: () => number | null;
+  // Casts a tiny sphere at `worldPos` and checks whether the Hurtbox-group
+  // collider it lands on is specifically the one identified by
+  // `targetHandle` (another fighter's own getHurtboxHandle() result) --
+  // a genuine Rapier shape-intersection query, not distance math.
+  pointIntersectsHurtbox: (worldPos: THREE.Vector3, targetHandle: number) => boolean;
+  // "mi piacerebbe che il busto seguisse il movimento" -- tilts the spine
+  // forward/back by `pitchRad` on top of whatever the AnimationMixer just
+  // set this frame (additive local-space rotation, same "mixer writes
+  // first, this overwrites/adjusts specific bones after" ordering
+  // syncBonesFromPhysics already relies on -- see its own comment). Only
+  // the player's own fighter calls this (PlayerCombatSoldier.tsx, driven
+  // by camera pitch); the AI never does. No-ops while a hit-pulse or
+  // death is active so it doesn't fight the ragdoll physics.
+  applySpineLean: (pitchRad: number) => void;
 }
 
 const _v1 = new THREE.Vector3();
@@ -96,10 +134,14 @@ const _worldMatrix = new THREE.Matrix4();
 const _parentInverse = new THREE.Matrix4();
 const _unitScale = new THREE.Vector3(1, 1, 1);
 const _yAxis = new THREE.Vector3(0, 1, 0);
+const _xAxis = new THREE.Vector3(1, 0, 0);
+const _leanQuat = new THREE.Quaternion();
+// Split across both spine bones rather than piling the whole tilt onto
+// one joint -- reads as a smoother, more natural bend (same reasoning as
+// RAGDOLL_SEGMENT_FROZEN_BONES.Torso already grouping these two).
+const SPINE_LEAN_BONES = ['spine_02', 'spine_03'];
 const _identityQuat = new THREE.Quaternion();
 const _segmentByName: Record<string, RagdollSegment> = {};
-const _dbgWorldPos = new THREE.Vector3(); // TEMP DEBUG, see update()
-let __dbgFrameCount = 0; // TEMP DEBUG, see update()
 for (const seg of RAGDOLL_SEGMENTS) _segmentByName[seg.name] = seg;
 
 function freshState(): RagdollState {
@@ -115,6 +157,7 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
   const anchorsRef = useRef<Record<string, AnchorEntry>>({});
   const jointsRef = useRef<ImpulseJoint[]>([]);
   const stateRef = useRef<RagdollState>(freshState());
+  const hurtboxRef = useRef<{ body: RapierRigidBody; collider: Collider } | null>(null);
 
   // "metti un segnale su dove e' stato colpito" -- a single reusable
   // glowing marker per character, lazily created on the first hit that
@@ -136,6 +179,47 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
     bonesRef.current = map;
     return map;
   }, [modelRootRef]);
+
+  // Lazily creates this fighter's permanent hurtbox (see HURTBOX_* above)
+  // -- a KINEMATIC (position-driven, no physics response needed -- it's
+  // a sensor, purely for intersection queries) capsule, built once and
+  // then just repositioned every frame by syncHurtbox. Unlike the live-
+  // pulse ragdoll bodies, this is NOT torn down between hits -- it lives
+  // for as long as the fighter does.
+  const ensureHurtbox = useCallback((): { body: RapierRigidBody; collider: Collider } | null => {
+    if (hurtboxRef.current) return hurtboxRef.current;
+    const root = modelRootRef.current;
+    if (!root) return null;
+    root.getWorldPosition(_v1);
+    const bodyDesc = rapier.RigidBodyDesc.kinematicPositionBased().setTranslation(
+      _v1.x,
+      _v1.y + HURTBOX_HEIGHT / 2,
+      _v1.z
+    );
+    const body = world.createRigidBody(bodyDesc);
+    const halfHeight = Math.max(0.01, HURTBOX_HEIGHT / 2 - HURTBOX_RADIUS);
+    const colliderDesc = rapier.ColliderDesc.capsule(halfHeight, HURTBOX_RADIUS)
+      .setSensor(true)
+      .setCollisionGroups(HURTBOX_GROUPS)
+      .setSolverGroups(HURTBOX_GROUPS);
+    const collider = world.createCollider(colliderDesc, body);
+    const entry = { body, collider };
+    hurtboxRef.current = entry;
+    return entry;
+  }, [rapier, world, modelRootRef]);
+
+  // Every update() frame: re-centers the hurtbox capsule on wherever the
+  // character's root actually is right now (same live-tracking idea as
+  // syncAnchors, just for one permanent collider instead of several
+  // transient ones).
+  const syncHurtbox = useCallback(() => {
+    const entry = ensureHurtbox();
+    if (!entry) return;
+    const root = modelRootRef.current;
+    if (!root) return;
+    root.getWorldPosition(_v1);
+    entry.body.setNextKinematicTranslation({ x: _v1.x, y: _v1.y + HURTBOX_HEIGHT / 2, z: _v1.z });
+  }, [ensureHurtbox, modelRootRef]);
 
   const destroyBodies = useCallback(() => {
     for (const joint of jointsRef.current) {
@@ -462,8 +546,6 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
     (worldImpulseDir: THREE.Vector3, magnitude: number, atSegment: string = 'Torso', attackerX?: number, attackerZ?: number) => {
       if (stateRef.current.isDeath) return; // already a corpse -- a pulse on top would fight the death ragdoll
 
-      __dbgFrameCount = 0; // TEMP DEBUG -- restart the per-pulse frame log on every new hit
-
       // "anche il braccio/gamba piu' vicino per un effetto un po' piu'
       // ampio" -- see ragdollConfig.ts's RAGDOLL_PULSE_NEARBY.
       const nearbyOptions = RAGDOLL_PULSE_NEARBY[atSegment] ?? [];
@@ -527,28 +609,6 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
 
   const update = useCallback(
     (delta: number) => {
-      // TEMP DEBUG -- "il personaggio si trasla in aria quando prende un
-      // colpo, continua a succedere" -- printing the WORLD Y of every
-      // live ragdoll bone plus the group's own world Y for the first ~40
-      // frames of each pulse, so we can see numerically what's actually
-      // moving instead of guessing again. Remove once root-caused.
-      if (stateRef.current.active && !stateRef.current.isDeath) {
-        __dbgFrameCount++;
-        if (__dbgFrameCount <= 40) {
-          const entries = bodiesRef.current;
-          const parts: string[] = [];
-          for (const key of Object.keys(entries)) {
-            const { bone } = entries[key];
-            bone.getWorldPosition(_dbgWorldPos);
-            parts.push(`${key}.worldY=${_dbgWorldPos.y.toFixed(3)}`);
-          }
-          if (modelRootRef.current) {
-            parts.push(`modelRootY=${modelRootRef.current.position.y.toFixed(3)}`);
-          }
-          console.log(`[RAGDOLL_DEBUG f${__dbgFrameCount}]`, parts.join(' '));
-        }
-      }
-
       // Hit-marker fade runs independently of ragdoll state -- it can
       // still be fading out slightly after the pulse itself has already
       // fully blended back to pure animation.
@@ -559,6 +619,11 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
         markerRef.current.scale.setScalar(0.4 + t * 0.6);
         if (t >= 1) markerRef.current.visible = false;
       }
+
+      // The hurtbox (see HURTBOX_* above) tracks this fighter for as long
+      // as it's alive, independently of whether a ragdoll pulse/death is
+      // currently active -- unlike everything below this line.
+      syncHurtbox();
 
       const s = stateRef.current;
       if (!s.active) return;
@@ -586,7 +651,7 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
       }
       syncBonesFromPhysics(weight);
     },
-    [syncBonesFromPhysics, destroyBodies, syncAnchors, clampBodyVelocities]
+    [syncBonesFromPhysics, destroyBodies, syncAnchors, clampBodyVelocities, syncHurtbox]
   );
 
   const deactivate = useCallback(() => {
@@ -621,6 +686,73 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
     [resolveBones]
   );
 
+  const getHurtboxHandle = useCallback((): number | null => {
+    return hurtboxRef.current ? hurtboxRef.current.collider.handle : null;
+  }, []);
+
+  // "voglio che il colpo avvenga proprio dove ho colpito, non in un
+  // range" -- a real Rapier query: casts a tiny sphere at `worldPos`
+  // (the attacker's own hand, read via getBoneWorldPosition) and asks
+  // Rapier which Hurtbox-group colliders it actually overlaps, rather
+  // than hand-rolling distance-to-capsule math against the target's root
+  // position. filterGroups=HURTBOX_GROUPS keeps this from ever matching
+  // terrain, ragdoll pieces, or anything outside the Hurtbox group.
+  const pointIntersectsHurtbox = useCallback(
+    (worldPos: THREE.Vector3, targetHandle: number): boolean => {
+      let hit = false;
+      const shape = new rapier.Ball(HAND_QUERY_RADIUS);
+      world.intersectionsWithShape(
+        { x: worldPos.x, y: worldPos.y, z: worldPos.z },
+        _identityRot,
+        shape,
+        (collider) => {
+          if (collider.handle === targetHandle) {
+            hit = true;
+            return false; // stop as soon as we've found it
+          }
+          return true;
+        },
+        undefined,
+        HURTBOX_GROUPS
+      );
+      return hit;
+    },
+    [rapier, world]
+  );
+
+  const applySpineLean = useCallback(
+    (pitchRad: number) => {
+      // Don't fight an in-progress hit reaction or the death ragdoll --
+      // both already own spine_02/03 (RAGDOLL_SEGMENT_FROZEN_BONES.Torso)
+      // every frame they're active, via syncBonesFromPhysics.
+      if (stateRef.current.active) return;
+      const bones = resolveBones();
+      if (!bones) return;
+      const perBone = pitchRad / SPINE_LEAN_BONES.length;
+      for (const boneName of SPINE_LEAN_BONES) {
+        const bone = bones[boneName];
+        if (!bone) continue;
+        _leanQuat.setFromAxisAngle(_xAxis, perBone);
+        bone.quaternion.multiply(_leanQuat);
+      }
+    },
+    [resolveBones]
+  );
+
+  // The hurtbox is the one piece of this hook's state that ISN'T torn
+  // down by destroyBodies/deactivate (it's meant to outlive every
+  // individual pulse) -- so it needs its own unmount cleanup, same
+  // reasoning as the hit-marker mesh below.
+  useEffect(
+    () => () => {
+      if (hurtboxRef.current) {
+        world.removeRigidBody(hurtboxRef.current.body);
+        hurtboxRef.current = null;
+      }
+    },
+    [world]
+  );
+
   return {
     isActive: () => stateRef.current.active,
     isDeath: () => stateRef.current.isDeath,
@@ -629,5 +761,8 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
     update,
     deactivate,
     getBoneWorldPosition,
+    getHurtboxHandle,
+    pointIntersectsHurtbox,
+    applySpineLean,
   };
 }

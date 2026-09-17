@@ -41,11 +41,10 @@ export const ATTACK_RANGE = 1.8; // exported so DuelArena.tsx can drive the cros
 const HIT_STAGGER_DURATION = 0.35;
 const DODGE_SPEED = 7.5; // units/sec while the roll's physically covering ground
 const DODGE_EXTRA_LOCK = 0.35; // extra cooldown (seconds) tacked on after the roll animation itself finishes, so it can't be chained instantly
-// How much of the remaining facing-angle gap closes per frame -- same
-// convention/units as CombatSoldier.tsx's own duel-facing turn (there
-// 0.15); a touch snappier here since this is player-driven aiming, not an
-// ambient AI's idle turn.
-const FACE_TURN_RATE = 0.22;
+// Max torso tilt (either direction) applied from camera pitch -- see the
+// facing/lean block in the main useFrame below. Kept comfortably short of
+// 90 deg so looking straight up/down doesn't fold the spine in half.
+const SPINE_LEAN_MAX = THREE.MathUtils.degToRad(40);
 
 // Module-level scratch objects -- avoids a per-frame allocation burst,
 // matching this file's siblings (City.tsx's _windowDummy, CombatSoldier's
@@ -58,16 +57,10 @@ const _toOpponent = new THREE.Vector3();
 const _worldUp = new THREE.Vector3(0, 1, 0);
 const _handPos = new THREE.Vector3(); // scratch for checkAttackContact's hand-bone reads
 
-// "il colpo deve essere sferrato dove effettivamente le mesh collidono" --
-// the opponent's body, treated as a vertical cylinder around its root
-// position (XZ only, no Y check -- a punch's hand height during a real
-// swing is already roughly chest/head height, and the rig has no single
-// bone worth measuring against for "torso height" cheaply here). This is
-// deliberately tighter than ATTACK_RANGE (1.8, root-to-root, used only
-// for the crosshair/UI "in range" hint): it approximates actual body
-// thickness/shoulder width plus a little for the fist itself, not the
-// two fighters' whole reach envelope.
-const HIT_CONTACT_RADIUS = 0.45;
+// "il colpo deve essere sferrato dove effettivamente le mesh collidono,
+// non in un range" -- checked via a real Rapier shape-intersection query
+// (useRagdoll.ts's pointIntersectsHurtbox) against the opponent's actual
+// hurtbox collider, not a hand-rolled distance formula.
 const ATTACK_HAND_BONES = ['hand_l', 'hand_r'] as const;
 
 interface PlayerCombatSoldierProps {
@@ -96,14 +89,15 @@ interface PlayerCombatSoldierProps {
 // a punch lands the same whichever side threw it) and replaces the AI
 // decision tree with real input.
 //
-// Movement is camera-relative, the same technique Player.tsx's own
-// on-foot movement uses (state.camera.getWorldDirection() projected flat).
-// Facing is NOT movement-direction based, unlike Player.tsx -- it's
-// always locked onto the opponent (a duel-camera choice: in a 1v1 you're
-// always squared up to whoever you're fighting, strafing and back-
-// pedaling like a real fighting-game character), using the exact same
-// atan2(...)+PI convention CombatSoldier.tsx uses so both fighters read
-// consistently.
+// Movement AND facing are both camera-relative, the same technique
+// Player.tsx's own on-foot movement uses for ITS movement axes
+// (state.camera.getWorldDirection() projected flat) -- here it also
+// drives which way the soldier's yaw points every frame: look right,
+// he turns right, same for left, while W/A/S/D still strafe/back-pedal
+// around that facing rather than walking the character to face its own
+// heading (unlike Player.tsx). CombatSoldier.tsx (the AI) is unrelated
+// to this -- it still locks its own facing onto its target via the
+// atan2(...)+PI convention this file used to share with it.
 const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponent, entityName, globalSpeed }) => {
   const groupRef = useRef<THREE.Group>(null);
   // Points at the SkeletonUtils clone (set below) so useRagdoll can walk
@@ -195,6 +189,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         pickAnim(['Melee_Hook', 'Punch_Jab']),
         pickAnim(['Fighting Right Jab', 'Fighting Left Jab']),
       ],
+      // Deterministic second punch -- see AnimCatalog's own comment.
+      // 'Fighting Left Jab' is real but, given the fallback order above,
+      // never actually gets reached by `attacks`' random pick.
+      attackAlt: pickAnim(['Fighting Left Jab', 'Punch_Jab']),
     };
 
     if (actMap[catalog.idle]) {
@@ -256,11 +254,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   // swing never got close enough -- copied verbatim from the old
   // instant-on-click branch, just no longer gated on distance at t=0.
   const checkAttackContact = (): boolean => {
+    if (opponent.hurtboxHandle === null) return false; // opponent's hurtbox not created yet (its very first frame)
     for (const boneName of ATTACK_HAND_BONES) {
       if (!ragdoll.getBoneWorldPosition(boneName, _handPos)) continue;
-      const dx = _handPos.x - opponent.position.x;
-      const dz = _handPos.z - opponent.position.z;
-      if (dx * dx + dz * dz > HIT_CONTACT_RADIUS * HIT_CONTACT_RADIUS) continue;
+      if (!ragdoll.pointIntersectsHurtbox(_handPos, opponent.hurtboxHandle)) continue;
 
       // Damage/blocking/death formulas copied VERBATIM from
       // CombatSoldier.tsx's own attack-resolution branch, on purpose -- a
@@ -297,6 +294,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // simulating/blending out even once the rest of the state machine has
     // moved on.
     ragdoll.update(delta);
+    // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
+    // fighter (their own checkAttackContact reads it off `opponent`) --
+    // see FighterData's comment.
+    data.hurtboxHandle = ragdoll.getHurtboxHandle();
     if (!groupRef.current) return;
 
     const applyTransform = () => {
@@ -373,32 +374,37 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
 
     if (dodgeLockRef.current > 0) dodgeLockRef.current -= delta * globalSpeed;
 
-    // Facing: always locked onto the opponent (see the file-level comment
-    // above), using the exact atan2(...)+PI convention CombatSoldier.tsx
-    // uses -- both fighters share the same rotated primitive below, so
-    // this is what keeps them reading consistently at a glance.
+    // _toOpponent is no longer used to drive facing (see below), but the
+    // dodge block's "no direction held" fallback still needs an
+    // away-from-opponent vector, so it's still kept current here.
     _toOpponent.subVectors(opponent.position, data.position);
     _toOpponent.y = 0;
-    if (_toOpponent.lengthSq() > 0.0001) {
-      _toOpponent.normalize();
-      const targetRotation = Math.atan2(_toOpponent.x, _toOpponent.z) + Math.PI;
-      let angleDiff = targetRotation - data.rotation;
-      angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
-      data.rotation += angleDiff * FACE_TURN_RATE;
-    }
+    if (_toOpponent.lengthSq() > 0.0001) _toOpponent.normalize();
 
-    // Camera-relative movement axes, computed here (rather than down by
-    // the movement block below) so the dodge can also use them -- "quando
-    // clicco schiva con shift fa un salto indietro anche se sto andando
-    // avanti" -- the dodge used to always hop away from the opponent no
-    // matter which movement key was held; now it goes wherever you're
-    // currently pressing (WASD), same as normal movement, and only falls
-    // back to "away from the opponent" if you're not holding any
-    // direction (a neutral-input dodge still needs to go SOMEWHERE).
+    // Facing + camera-relative movement axes, both from the SAME
+    // camera.getWorldDirection() read -- "l'orbit control dovrebbe
+    // controllare il forward del soldato che comando: se guardo a destra
+    // anche lui si orienta a destra e viceversa a sinistra" -- this
+    // replaces the old always-face-opponent auto-turn: the soldier's yaw
+    // now directly follows the camera's own yaw every frame, same as
+    // Player.tsx's on-foot movement already does for ITS axes. Landing a
+    // hit is therefore on the player to aim (real Hurtbox collision, see
+    // checkAttackContact), not something the game does automatically
+    // anymore. +PI matches the exact convention the old opponent-facing
+    // code used (the primitive below is itself pre-rotated 180°).
     camera.getWorldDirection(_forward);
+    // Pitch (looking up/down), read from the RAW vertical component
+    // before _forward gets flattened just below -- "per quanto riguarda
+    // guardare su e giu mi piacerebbe che il busto seguisse il
+    // movimento" -- fed to the ragdoll rig's spine bones every frame we
+    // reach this point (i.e. not dead/victorious/mid-swing/mid-dodge/
+    // hit-staggered, all of which already returned earlier this frame).
+    const camPitch = Math.atan2(_forward.y, Math.sqrt(_forward.x * _forward.x + _forward.z * _forward.z));
+    ragdoll.applySpineLean(THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX));
     _forward.y = 0;
     _forward.normalize();
     _right.crossVectors(_forward, _worldUp).normalize();
+    data.rotation = Math.atan2(_forward.x, _forward.z) + Math.PI;
 
     _moveDir.set(0, 0, 0);
     if (input.forward) _moveDir.add(_forward);
@@ -445,6 +451,24 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       // since attackHasLandedRef resets to false here) decides whether
       // and when it actually connects. Still whiffs harmlessly if the
       // hand never gets close enough before the swing ends.
+      isAttackingRef.current = true;
+      attackHasLandedRef.current = false;
+      applyTransform();
+      return;
+    }
+
+    // --- Second punch (tap Q) -- "aggiungi un secondo input di pugno" --
+    // deterministic (always animCatalog.attackAlt) rather than random, on
+    // its own key so it's a real player choice instead of a second roll
+    // of the same dice as primary. Reuses the 'yawLeft' action (bound to
+    // KeyQ in useInput.ts) since nothing in this file ever reads it
+    // otherwise -- no new action/keybinding needed. Everything else below
+    // mirrors the primary-attack block above exactly (same attackLock/
+    // checkAttackContact machinery, which doesn't care which clip is
+    // playing).
+    if (input.consumeJustPressed('yawLeft')) {
+      data.state = `Attacco (${animCatalog.attackAlt})`;
+      data.attackLock = transitionToAnimation(animCatalog.attackAlt, 0.1, false);
       isAttackingRef.current = true;
       attackHasLandedRef.current = false;
       applyTransform();

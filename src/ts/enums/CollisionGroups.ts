@@ -21,6 +21,14 @@ export enum CollisionGroups {
   // pieces of the same ragdoll (e.g. an arm swinging across the chest)
   // can still self-intersect a little -- a known, accepted simplification.
   Ragdoll = 5,
+  // "voglio che il colpo avvenga proprio dove ho colpito, non in un
+  // range" -- a real Rapier sensor collider per fighter (useRagdoll.ts's
+  // hurtbox), queried via a genuine shape-intersection test against the
+  // attacker's actual hand position instead of hand-rolled distance math.
+  // Its own group so the intersection query only ever matches OTHER
+  // hurtboxes -- never terrain, ragdoll pieces, or anything else sharing
+  // the world.
+  Hurtbox = 6,
 }
 
 const ALL_GROUP_INDICES = Array.from({ length: 16 }, (_, i) => i);

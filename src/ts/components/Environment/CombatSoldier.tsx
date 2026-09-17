@@ -23,10 +23,11 @@ const TEAM_COLOR: Record<string, string> = { RED: '#ef4444', BLUE: '#38bdf8' };
 // Scratch vector for the hit-reaction ragdoll impulse direction (see the
 // triggerHit branch below) -- avoids a per-hit allocation.
 const _hitImpulseDir = new THREE.Vector3();
-// "il colpo deve essere sferrato dove effettivamente le mesh collidono" --
-// see the identical constants/comment in PlayerCombatSoldier.tsx.
+// "il colpo deve essere sferrato dove effettivamente le mesh collidono,
+// non in un range" -- checked via a real Rapier shape-intersection query
+// (useRagdoll.ts's pointIntersectsHurtbox), not distance math -- see the
+// identical setup in PlayerCombatSoldier.tsx.
 const _handPos = new THREE.Vector3();
-const HIT_CONTACT_RADIUS = 0.45;
 const ATTACK_HAND_BONES = ['hand_l', 'hand_r'] as const;
 
 interface CombatSoldierProps {
@@ -144,6 +145,10 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         pickAnim(['Melee_Hook', 'Punch_Jab']),
         pickAnim(['Fighting Right Jab', 'Fighting Left Jab']),
       ],
+      // Deterministic second punch -- see AnimCatalog's own comment.
+      // 'Fighting Left Jab' is real but, given the fallback order above,
+      // never actually gets reached by `attacks`' random pick.
+      attackAlt: pickAnim(['Fighting Left Jab', 'Punch_Jab']),
     };
 
     if (actMap[catalog.idle]) {
@@ -199,11 +204,10 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
   // from the ref directly so a null-check only has to happen once at the
   // call site.
   const checkAttackContact = (theTarget: FighterData): boolean => {
+    if (theTarget.hurtboxHandle === null) return false; // target's hurtbox not created yet (its very first frame)
     for (const boneName of ATTACK_HAND_BONES) {
       if (!ragdoll.getBoneWorldPosition(boneName, _handPos)) continue;
-      const dx = _handPos.x - theTarget.position.x;
-      const dz = _handPos.z - theTarget.position.z;
-      if (dx * dx + dz * dz > HIT_CONTACT_RADIUS * HIT_CONTACT_RADIUS) continue;
+      if (!ragdoll.pointIntersectsHurtbox(_handPos, theTarget.hurtboxHandle)) continue;
 
       if (theTarget.currentAnim === theTarget.animCatalog?.block) {
         theTarget.hp -= 5;
@@ -233,8 +237,18 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     // Runs every frame regardless of which branch below fires -- a hit-
     // reaction pulse (see the triggerHit branch) needs to keep simulating
     // and blending back out even once attackLock has expired and the rest
-    // of the state machine has moved on.
-    if (enableRagdoll) ragdoll.update(delta);
+    // of the state machine has moved on. No longer gated on enableRagdoll:
+    // the reactive pulse/death bodies still only ever get built when
+    // enableRagdoll is true (pulseHit/activateDeath are only ever CALLED
+    // under that same gate, below), but update() now also drives this
+    // fighter's permanent hurtbox (see useRagdoll.ts's HURTBOX_* /
+    // syncHurtbox) -- "il colpo deve avvenire dove le mesh collidono"
+    // needs that hurtbox to exist for EVERY fighter, including the
+    // city-wide arena's up-to-120, not just the 1v1 duel.
+    ragdoll.update(delta);
+    // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
+    // fighter (their own checkAttackContact reads it off `theTarget`).
+    data.hurtboxHandle = ragdoll.getHurtboxHandle();
     if (!groupRef.current) return;
 
     // "voglio estendere il loro ground a tutta la citta" -- fighters now
