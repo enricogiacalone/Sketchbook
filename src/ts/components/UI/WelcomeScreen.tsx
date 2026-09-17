@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
 
 interface WelcomeScreenProps {
-  onJoin: (name: string, controlMethod: string) => void;
+  // "crea una sezione dedicata nel menu di avvio del gioco che mi fa
+  // entrare in un'arena" -- the third arg picks which world you land in:
+  // 'world' is the existing "Enter Playground" flow, 'duel' drops you
+  // straight into the 1v1 arena (see App.tsx's handleJoin).
+  onJoin: (name: string, controlMethod: string, mode: 'world' | 'duel') => void;
 }
 
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
@@ -15,7 +19,15 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
       setError('Please enter your name!');
       return;
     }
-    onJoin(name.trim(), controlMethod);
+    onJoin(name.trim(), controlMethod, 'world');
+  };
+
+  const handleDuelClick = () => {
+    if (!name.trim()) {
+      setError('Please enter your name!');
+      return;
+    }
+    onJoin(name.trim(), controlMethod, 'duel');
   };
 
   return (
@@ -72,6 +84,13 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
 
           <button className="welcome-button" type="submit">
             Enter Playground 🚀
+          </button>
+
+          {/* "siamo io che controllo un combat soldier contro un altro
+              combat soldier" -- a dedicated entry point straight into the
+              1v1 duel arena, alongside (not instead of) the normal city. */}
+          <button className="welcome-button welcome-button-duel" type="button" onClick={handleDuelClick}>
+            ⚔️ Duello 1v1
           </button>
         </form>
       </div>

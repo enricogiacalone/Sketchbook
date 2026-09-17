@@ -42,6 +42,15 @@ export interface FighterData {
   animCatalog: AnimCatalog | null;
   state: string;
   triggerHit: string | null;
+  // World-space X/Z of whoever landed the hit that just set `triggerHit`,
+  // captured by the ATTACKER at the moment of impact (see CombatSoldier.tsx/
+  // PlayerCombatSoldier.tsx's attack-resolution branches). Lets the
+  // victim's own ragdoll pulse ("il colpo deve avvenire precisamente dove
+  // le mesh si sono toccate") place the hit-marker on the actual side of
+  // their body that was facing the attacker, instead of always the
+  // struck segment's own center -- see useRagdoll.ts's pulseHit.
+  hitFromX: number;
+  hitFromZ: number;
 }
 
 export interface TowerData {

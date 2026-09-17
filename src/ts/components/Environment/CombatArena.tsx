@@ -147,6 +147,8 @@ function createFighters(count: number, mode: GameMode, center: [number, number],
       animCatalog: null,
       state: 'In guardia',
       triggerHit: null,
+      hitFromX: 0,
+      hitFromZ: 0,
     });
   }
   return fighters;

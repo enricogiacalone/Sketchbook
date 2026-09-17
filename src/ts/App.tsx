@@ -21,6 +21,8 @@ import Crosshair from "./components/UI/Crosshair";
 import GamepadDebug from "./components/UI/GamepadDebug";
 import ScenariosGUI from "./components/UI/ScenariosGUI";
 import CombatArenaGUI from "./components/UI/CombatArenaGUI";
+import DuelHUD from "./components/UI/DuelHUD";
+import { DUEL_PLAYER_ID } from "./components/Environment/DuelArena";
 import Loader from "./components/UI/Loader"; // Helper to track loading
 import Player from "./components/Player"; // Import Player directly to pass userName
 import Drone from "./components/Drone";
@@ -32,12 +34,13 @@ import * as THREE from "three";
 const App: React.FC = () => {
   const [isJoined, setIsJoined] = useState(false);
   const [userName, setUserName] = useState("");
-  const { isLoading, setIsLoading, isPaused, setPaused } = useStore(
+  const { isLoading, setIsLoading, isPaused, setPaused, testScene } = useStore(
     useShallow((state) => ({
       isLoading: state.isLoading,
       setIsLoading: state.setIsLoading,
       isPaused: state.isPaused,
       setPaused: state.setPaused,
+      testScene: state.testScene,
     }))
   );
 
@@ -59,11 +62,24 @@ const App: React.FC = () => {
     return params.get("autojoin") || "Claude";
   }, []);
 
-  const handleJoin = (name: string, controlMethod: string) => {
+  const handleJoin = (name: string, controlMethod: string, mode: 'world' | 'duel' = 'world') => {
     setUserName(name);
     setIsJoined(true);
     setIsLoading(true); // Start showing loader while Suspense does its thing
-    console.log(`Joined as ${name} with ${controlMethod}`);
+    console.log(`Joined as ${name} with ${controlMethod} (${mode})`);
+    // "crea una sezione dedicata nel menu di avvio del gioco che mi fa
+    // entrare in un'arena, siamo io che controllo un combat soldier
+    // contro un altro combat soldier" -- WelcomeScreen's "Duello 1v1"
+    // button routes here. Same store calls DuelArena.tsx's own mount
+    // effect makes (belt-and-suspenders, in case a future entry point
+    // skips WelcomeScreen entirely): testScene='duel' makes Scene.tsx
+    // mount DuelArena.tsx instead of the normal city, and
+    // setCurrentControllable hands the camera/input over to the duel's
+    // player fighter (see useThirdPersonCamera.ts's isFootController).
+    if (mode === 'duel') {
+      useStore.getState().setTestScene('duel');
+      useStore.getState().setCurrentControllable('combatSoldier', DUEL_PLAYER_ID);
+    }
     // Unlocks the shared Web Audio context (used by every billboard's
     // THREE.PositionalAudio, and its underlying <video> elements) from
     // inside this real, same-origin click -- browsers only need this ONE
@@ -197,13 +213,28 @@ const App: React.FC = () => {
             >
               {/* Scene contains the world environment */}
               <Scene />
-              {/* Player needs userName for network identification */}
-              <Player userName={userName} />
-              {/* "il drone e' il compagno del player e gli fluttua
-                  attorno" -- always mounted, own persistent entity (see
-                  Drone.tsx), not something Player.tsx spawns/despawns on
-                  the fly toggle anymore. */}
-              <Drone />
+              {/* "togli boxman e il drone dalla scena del duello" -- the
+                  1v1 duel gives you a combat soldier to control instead
+                  (see PlayerCombatSoldier.tsx/DuelArena.tsx), so the
+                  default boxman.glb avatar and its drone companion have
+                  nothing to do there and would otherwise just sit
+                  visibly parked in/near the arena wherever they last
+                  were. Unmounting (not just hiding) also frees their
+                  RigidBodies from the physics world for the duration of
+                  the fight -- both remount fresh the moment testScene
+                  leaves 'duel' (see DuelHUD.tsx's "Esci dal Duello"). */}
+              {testScene !== 'duel' && (
+                <>
+                  {/* Player needs userName for network identification */}
+                  <Player userName={userName} />
+                  {/* "il drone e' il compagno del player e gli fluttua
+                      attorno" -- always mounted outside the duel, own
+                      persistent entity (see Drone.tsx), not something
+                      Player.tsx spawns/despawns on the fly toggle
+                      anymore. */}
+                  <Drone />
+                </>
+              )}
             </Physics>
 
             <ThirdPersonCamera />
@@ -249,6 +280,7 @@ const App: React.FC = () => {
           <GamepadDebug />
           <ScenariosGUI />
           <CombatArenaGUI />
+          <DuelHUD />
           {isPaused && (
             <div
               style={{

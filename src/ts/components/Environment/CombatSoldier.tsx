@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
+import { useRagdoll } from './ragdoll/useRagdoll';
 import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode, AnimCatalog } from './SquadArenaTypes';
 
 const MODEL_URL = 'soldier-citizen.glb';
@@ -12,6 +13,9 @@ const BASE_ANIMS_URL = 'soldier-citizen-base-animations.glb';
 const ADDON_ANIMS_URL = 'soldier-citizen-addon-animations.glb';
 
 const TEAM_COLOR: Record<string, string> = { RED: '#ef4444', BLUE: '#38bdf8' };
+// Scratch vector for the hit-reaction ragdoll impulse direction (see the
+// triggerHit branch below) -- avoids a per-hit allocation.
+const _hitImpulseDir = new THREE.Vector3();
 
 interface CombatSoldierProps {
   data: FighterData;
@@ -23,6 +27,14 @@ interface CombatSoldierProps {
   medkitPoolRef: React.MutableRefObject<number>;
   setMedkitPoolCount: (n: number) => void;
   globalSpeed: number;
+  // "riusciamo a Ricreare la fisica ragdoll attiva in stile Euphoria?" --
+  // opt-in (default false): a physics ragdoll per fighter is real Rapier
+  // bodies+joints, fine for a 1v1 duel (PlayerCombatSoldier.tsx/
+  // DuelArena.tsx pass true) but NOT something to turn on for the
+  // city-wide CombatArena, which can have up to 120 fighters at once (see
+  // its "Combattenti" slider) -- CombatArena.tsx deliberately leaves this
+  // unset/false to avoid spawning up to ~1200 extra ragdoll bodies.
+  enableRagdoll?: boolean;
 }
 
 // Ported from simulation-citta's "RiggedCitizen" -- the full duel AI this
@@ -43,9 +55,16 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
   medkitPoolRef,
   setMedkitPoolCount,
   globalSpeed,
+  enableRagdoll = false,
 }) => {
   const groupRef = React.useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
+  // Points at the SkeletonUtils clone (set below, once it exists) so
+  // useRagdoll can walk its bone hierarchy -- kept as its own ref rather
+  // than reading `clone` directly since useRagdoll is a hook and must be
+  // called unconditionally every render regardless of `enableRagdoll`.
+  const modelRootRef = React.useRef<THREE.Object3D | null>(null);
+  const ragdoll = useRagdoll(modelRootRef);
 
   const { scene } = useGLTF(MODEL_URL);
   const { animations: baseAnims } = useGLTF(BASE_ANIMS_URL);
@@ -112,6 +131,10 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
 
   useAnimations(animations, clone);
 
+  React.useEffect(() => {
+    modelRootRef.current = clone;
+  }, [clone]);
+
   const transitionToAnimation = (animName: string, duration = 0.15, shouldLoop = true, timeScale = 1.0) => {
     const target = actions[animName] ? animName : animCatalog.idle;
     if (!target || !actions[target]) return 1.0;
@@ -143,6 +166,11 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
 
   useFrame((_state, delta) => {
     if (mixer) mixer.update(delta * globalSpeed);
+    // Runs every frame regardless of which branch below fires -- a hit-
+    // reaction pulse (see the triggerHit branch) needs to keep simulating
+    // and blending back out even once attackLock has expired and the rest
+    // of the state machine has moved on.
+    if (enableRagdoll) ragdoll.update(delta);
     if (!groupRef.current) return;
 
     // "voglio estendere il loro ground a tutta la citta" -- fighters now
@@ -166,6 +194,13 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         transitionToAnimation(animCatalog.death, 0.2, false);
         data.state = 'K.O.';
       }
+      // "punto 1: ragdoll passivo alla morte" -- idempotent (checks its
+      // own state), safe to call every frame while dead. From here on
+      // ragdoll.update() above overwrites the skeleton's bone transforms
+      // from real Rapier physics every frame; the death clip started just
+      // above still plays underneath but only affects bones the ragdoll
+      // rig doesn't cover (fingers etc.), see ragdollConfig.ts.
+      if (enableRagdoll) ragdoll.activateDeath();
       applyTransform();
       return;
     }
@@ -175,6 +210,17 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       data.attackLock = transitionToAnimation(hitAnim, 0.1, false);
       data.state = 'Colpito!';
       data.triggerHit = null;
+      // "punto 2: che gli attacchi sembrino veri" -- a real physical
+      // impulse at the moment of impact (knocked backward-and-up relative
+      // to which way this fighter is currently facing -- `triggerHit` is
+      // set by the ATTACKER elsewhere in this file, which doesn't thread
+      // its own position through, so this is a reasonable stand-in for
+      // "away from whoever just hit you"), not just an animation. The
+      // torso/head alternate so consecutive hits don't all look identical.
+      if (enableRagdoll) {
+        _hitImpulseDir.set(Math.sin(data.rotation), 0.35, Math.cos(data.rotation));
+        ragdoll.pulseHit(_hitImpulseDir, 1.6, Math.random() > 0.5 ? 'Head' : 'Torso', data.hitFromX, data.hitFromZ);
+      }
     }
 
     if (data.attackLock > 0) {
@@ -351,6 +397,13 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
             theTarget.attackLock = 0;
           } else {
             theTarget.triggerHit = Math.random() > 0.5 ? 'Hit_Chest' : 'Hit_Head';
+            // "il colpo deve avvenire precisamente dove le mesh si sono
+            // toccate" -- stash where THIS fighter (the attacker) was
+            // standing right now, so theTarget's own pulseHit can place
+            // the hit-marker on the side of its body that was actually
+            // facing the attacker.
+            theTarget.hitFromX = data.position.x;
+            theTarget.hitFromZ = data.position.z;
           }
         }
       }

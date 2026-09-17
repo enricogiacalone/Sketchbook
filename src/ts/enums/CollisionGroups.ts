@@ -12,6 +12,15 @@ export enum CollisionGroups {
   TrimeshColliders = 2,
   Bullet = 3,
   Tornado = 4,
+  // Ragdoll rig pieces (useRagdoll.ts) -- own group mainly so a corpse's
+  // capsules don't need to reason about anything special to fall onto
+  // terrain/roads/buildings like everything else in `Default`. Two
+  // capsules connected by a joint never collide with each other anyway
+  // (Rapier disables that pair automatically for jointed bodies), so no
+  // exclusion is needed for the rig's own adjacent pieces; NON-adjacent
+  // pieces of the same ragdoll (e.g. an arm swinging across the chest)
+  // can still self-intersect a little -- a known, accepted simplification.
+  Ragdoll = 5,
 }
 
 const ALL_GROUP_INDICES = Array.from({ length: 16 }, (_, i) => i);

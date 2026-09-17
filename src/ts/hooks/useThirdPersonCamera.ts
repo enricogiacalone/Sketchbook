@@ -13,6 +13,11 @@ import { droneMouseDelta, droneOrientation, droneShake } from '../lib/droneFligh
 // frame, there's no smoothing on it (only `radius` is lerped, same as here).
 const PLAYER_RADIUS = 1.6;
 const VEHICLE_RADIUS = 3;
+// "siamo io che controllo un combat soldier" -- the 1v1 duel's player-
+// controlled fighter (see PlayerCombatSoldier.tsx/DuelArena.tsx) is an
+// on-foot human character, same silhouette/height as 'player', so it gets
+// player-like framing too rather than the wider vehicle-style radius/Y
+// offset below -- see isFootController's use further down.
 const MIN_RADIUS = 1;
 const MAX_RADIUS = 20;
 const VEHICLE_TARGET_Y_OFFSET = 0.5;
@@ -210,6 +215,10 @@ export const useThirdPersonCamera = () => {
       }
     }
 
+    // Both 'player' and 'combatSoldier' are on-foot human characters --
+    // only vehicles ('car'/'airplane'/'helicopter'/'drone') get the wider
+    // vehicle-style framing below.
+    const isFootController = currentControllable === 'player' || currentControllable === 'combatSoldier';
     const targetName = currentControllable === 'player' ? 'player' : controlledEntityId;
     if (!targetName) return;
 
@@ -227,14 +236,14 @@ export const useThirdPersonCamera = () => {
     // Snap the radius instantly when switching what's controlled (getting
     // in/out of a vehicle), same as the original's setRadius(value, true).
     if (prevControllable.current !== currentControllable) {
-      const snapped = currentControllable === 'player' ? PLAYER_RADIUS : VEHICLE_RADIUS;
+      const snapped = isFootController ? PLAYER_RADIUS : VEHICLE_RADIUS;
       targetRadius.current = snapped;
       radius.current = snapped;
       prevControllable.current = currentControllable;
     }
 
     targetObj.getWorldPosition(target.current);
-    if (currentControllable !== 'player') {
+    if (!isFootController) {
       target.current.y += VEHICLE_TARGET_Y_OFFSET;
     }
 

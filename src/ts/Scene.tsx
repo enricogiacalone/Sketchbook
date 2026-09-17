@@ -13,6 +13,7 @@ import BuildingLeds from "./components/Environment/BuildingLeds";
 import BuildingLedGlow from "./components/Environment/BuildingLedGlow";
 import Airport, { RUNWAY_CENTER, HELIPORT_CENTER } from "./components/Environment/Airport";
 import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from "./components/Environment/RaceTrack";
+import DuelArena from "./components/Environment/DuelArena";
 import Planets from "./components/Environment/Planets";
 import Clouds from "./components/Environment/Clouds";
 import UFO from "./components/Environment/UFO";
@@ -76,6 +77,15 @@ const Scene: React.FC = () => {
   const isCleanTest = testScene !== 'none';
   const isCarTest = testScene === 'car';
   const isRaceTest = testScene === 'race';
+  // "crea una sezione dedicata nel menu di avvio del gioco che mi fa
+  // entrare in un'arena" -- the 1v1 duel scenario, same isCleanTest
+  // family as the flight/car/race tests above (SoldierSpawner/City/
+  // Road/etc. are already stripped for ANY testScene !== 'none' -- see
+  // isCleanTest below); this just additionally mounts DuelArena.tsx.
+  const isDuelTest = testScene === 'duel';
+  // "aggiungi il tasto retry" -- read fresh each render so a change
+  // (see store.ts's retryDuel) flows straight into the key below.
+  const duelRound = useStore((state) => state.duelRound);
   // "aggiungi ... gli ufo e [le meteoriti]" -- the race scenario wants
   // some sci-fi atmosphere/spectacle overhead (it's a "gara", not a
   // precision physics test), so UFO + MeteoriteSpawner get an exception to
@@ -171,6 +181,16 @@ const Scene: React.FC = () => {
             <Car id="race-cop-3" position={RACE_GRID.cop3} rotation={RACE_START_ROTATION} patrolRoute={RACE_TRACK} />
           </>
         )}
+
+        {/* "siamo io che controllo un combat soldier contro un altro
+            combat soldier" -- exactly two fighters, face to face, on
+            their own quiet patch of terrain (see DuelArena.tsx). */}
+        {/* key=duelRound: a fresh key on retry unmounts this whole
+            fight (dead player, dead AI, ragdolls, everything) and mounts
+            a brand new one -- the simplest correct way to "restart the
+            match" given DuelArena.tsx builds its FighterData once via
+            useMemo(..., []). */}
+        {isDuelTest && <DuelArena key={duelRound} />}
       </Suspense>
 
       {/* Airport (runway/heliport pads + markings) stays in every scenario --

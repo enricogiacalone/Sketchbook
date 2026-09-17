@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { GameMode } from './components/Environment/SquadArenaTypes';
 
-export type ControllableType = 'player' | 'car' | 'airplane' | 'helicopter' | 'drone';
+export type ControllableType = 'player' | 'car' | 'airplane' | 'helicopter' | 'drone' | 'combatSoldier';
 // Which kind of seat the player currently occupies inside a vehicle -- null
 // whenever currentControllable is 'player'. Mirrors the legacy SeatType
 // enum (driver/passenger), read straight off each seat's own
@@ -111,7 +111,7 @@ interface GameState {
   // physics isn't confounded by unrelated systems (other cars, enemies,
   // meteorites...). Set via window.__sim.startTest()/endTest() (see
   // debug/simDebug.ts) or the "Scenari" lil-gui panel (ScenariosGUI.tsx).
-  testScene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race';
+  testScene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race' | 'duel';
   // "fammi scegliere ... le modalita di scontro dei manichini" -- which
   // CombatArena.tsx duel mode is active (TERRITORY_CONTROL/TEAMS/FFA, same
   // three options simulation-citta's own "Modalita Scontro" dropdown had --
@@ -125,6 +125,23 @@ interface GameState {
   // range slider (there capped at min 2; 0 is allowed here so the arena can
   // be switched off entirely). See CombatArenaGUI.tsx.
   arenaFighterCount: number;
+  // "fai che gli attacchi sembrino veri e il combattimento sembri vero" --
+  // the 1v1 duel's own HUD (DuelHUD.tsx) reads these three every frame to
+  // draw two HP bars + a win/lose banner. Written every frame by
+  // DuelArena.tsx from the two FighterData objects it owns (see
+  // PlayerCombatSoldier.tsx/CombatSoldier.tsx, which mutate those in
+  // place) -- kept here rather than read directly off the FighterData refs
+  // because DuelHUD.tsx lives in the plain DOM overlay, outside the R3F
+  // tree that owns those objects.
+  duelPlayerHp: number;
+  duelEnemyHp: number;
+  duelResult: 'none' | 'win' | 'lose';
+  // "aggiungi il tasto retry" -- bumped by retryDuel() below; Scene.tsx
+  // passes it as DuelArena's own React `key`, so changing it unmounts the
+  // old (dead/won) fight and mounts a brand new one -- fresh FighterData,
+  // fresh position/hp/ragdoll state -- without leaving testScene='duel'
+  // or touching the menu at all.
+  duelRound: number;
   entities: Map<string, EntityInfo>;
   setHealth: (health: number) => void;
   setMaxHealth: (maxHealth: number) => void;
@@ -165,9 +182,11 @@ interface GameState {
   setPlayerMessage: (message: string) => void;
   setCollectiblesTotal: (total: number) => void;
   setIsPlayerGrounded: (grounded: boolean) => void;
-  setTestScene: (scene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race') => void;
+  setTestScene: (scene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race' | 'duel') => void;
   setArenaGameMode: (mode: GameMode) => void;
   setArenaFighterCount: (count: number) => void;
+  setDuelStatus: (playerHp: number, enemyHp: number, result: 'none' | 'win' | 'lose') => void;
+  retryDuel: () => void;
   collectItem: () => void;
   updateEntity: (id: string, info: Partial<EntityInfo>) => void;
   removeEntity: (id: string) => void;
@@ -201,6 +220,10 @@ export const useStore = create<GameState>((set) => ({
   testScene: 'none',
   arenaGameMode: 'TERRITORY_CONTROL',
   arenaFighterCount: 20,
+  duelPlayerHp: 100,
+  duelEnemyHp: 100,
+  duelResult: 'none',
+  duelRound: 0,
   missionStage: 0,
   missionStatus: 'inactive',
   missionTitle: '',
@@ -251,6 +274,13 @@ export const useStore = create<GameState>((set) => ({
   setTestScene: (testScene) => set({ testScene }),
   setArenaGameMode: (arenaGameMode) => set({ arenaGameMode }),
   setArenaFighterCount: (arenaFighterCount) => set({ arenaFighterCount }),
+  setDuelStatus: (duelPlayerHp, duelEnemyHp, duelResult) => set({ duelPlayerHp, duelEnemyHp, duelResult }),
+  retryDuel: () => set((state) => ({
+    duelRound: state.duelRound + 1,
+    duelPlayerHp: 100,
+    duelEnemyHp: 100,
+    duelResult: 'none',
+  })),
   collectItem: () => set((state) => ({ collectiblesFound: Math.min(state.collectiblesTotal, state.collectiblesFound + 1) })),
   // "serve ottimizzare ancora" -- every car/pedestrian/enemy calls this on
   // a fixed timer (Car.tsx ~10/s, Pedestrian.tsx ~5/s) regardless of
