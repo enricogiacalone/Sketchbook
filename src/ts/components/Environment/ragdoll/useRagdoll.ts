@@ -35,7 +35,7 @@ import { RAGDOLL_PULSE_NEARBY, RAGDOLL_SEGMENTS, RAGDOLL_SEGMENT_FROZEN_BONES, R
 // (CombatSoldier.tsx e PlayerCombatSoldier.tsx) -- basta passargli il ref
 // del gruppo che contiene le ossa clonate.
 
-const HIT_PULSE_DURATION = 0.45; // secondi in cui il corpo e' guidato al 100% dalla fisica dopo un colpo
+const HIT_PULSE_DURATION = 0.22; // secondi in cui il corpo e' guidato al 100% dalla fisica dopo un colpo -- "il contraccolpo e' troppo": accorciato cosi' la gravita'/inerzia ha meno tempo per trascinare l'arto prima che si rimetta a sfumare verso l'animazione
 const HIT_BLEND_OUT_DURATION = 0.35; // secondi di sfumatura (slerp) verso l'animazione
 const HIT_MARKER_DURATION = 0.3; // secondi di vita del lampo visivo sul punto colpito
 
@@ -43,6 +43,13 @@ interface BodyEntry {
   segment: RagdollSegment;
   body: RapierRigidBody;
   bone: THREE.Bone;
+  // The bone's own LOCAL position at the moment its body was created --
+  // i.e. whatever the AnimationMixer had already written for it (bone
+  // lengths are constant for a normal skeletal rig, so this is the
+  // "correct" resting offset). Captured so syncBonesFromPhysics can lerp
+  // back to it during blend-out instead of leaving position frozen at
+  // wherever gravity/impulse last placed it -- see that function's comment.
+  restLocalPos: THREE.Vector3;
 }
 
 // A kinematic (position-driven, unaffected by forces/gravity) stand-in
@@ -69,6 +76,15 @@ export interface RagdollController {
   pulseHit: (worldImpulseDir: THREE.Vector3, magnitude: number, atSegment?: string, attackerX?: number, attackerZ?: number) => void;
   update: (delta: number) => void;
   deactivate: () => void;
+  // "il colpo deve essere sferrato dove effettivamente le mesh collidono"
+  // -- lets the combat code (PlayerCombatSoldier.tsx/CombatSoldier.tsx)
+  // track a fighter's OWN hand bones every frame during a swing, to
+  // resolve a hit against real reach instead of a single distance check
+  // taken the instant the attack button is pressed. Reuses this file's
+  // own bone cache (resolveBones/bonesRef) rather than making combat code
+  // walk the skeleton a second time. Returns false (and leaves `target`
+  // untouched) if the rig has no bone by that name.
+  getBoneWorldPosition: (boneName: string, target: THREE.Vector3) => boolean;
 }
 
 const _v1 = new THREE.Vector3();
@@ -82,6 +98,8 @@ const _unitScale = new THREE.Vector3(1, 1, 1);
 const _yAxis = new THREE.Vector3(0, 1, 0);
 const _identityQuat = new THREE.Quaternion();
 const _segmentByName: Record<string, RagdollSegment> = {};
+const _dbgWorldPos = new THREE.Vector3(); // TEMP DEBUG, see update()
+let __dbgFrameCount = 0; // TEMP DEBUG, see update()
 for (const seg of RAGDOLL_SEGMENTS) _segmentByName[seg.name] = seg;
 
 function freshState(): RagdollState {
@@ -220,11 +238,33 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
         const colliderDesc = rapier.ColliderDesc.capsule(halfHeight, segment.radius)
           .setTranslation(capsuleOffset.x, capsuleOffset.y, capsuleOffset.z)
           .setRotation({ x: capsuleRot.x, y: capsuleRot.y, z: capsuleRot.z, w: capsuleRot.w })
-          .setCollisionGroups(groupsExcluding(CollisionGroups.Ragdoll))
+          // "il personaggio si trasla in aria quando prende un colpo" --
+          // root cause: this excluded ONLY other Ragdoll-group pieces
+          // (redundant anyway -- Rapier already disables collision
+          // between two bodies it just jointed together), so the
+          // Characters group stayed in the filter. This capsule spawns
+          // at the struck bone's live world position, i.e. ALREADY deep
+          // inside the character's own main capsule collider (also in
+          // Characters) -- so the instant it's created (before any hit
+          // impulse even applies), Rapier's own contact solver saw a
+          // massive overlap with the character's real movement capsule
+          // and shoved them violently apart, launching the whole
+          // character upward until the overlap resolved and gravity/the
+          // controller pulled it back down. Excluding Characters here
+          // stops the ragdoll rig from ever pushing on any character's
+          // own movement collider, while it still falls/collides
+          // normally against terrain, roads, buildings, etc.
+          // "il personaggio si trasla in aria" -- confirmed via a live test (collide
+          // with NOTHING at all) that collision isn't the cause, it's the joint
+          // solver (see clampBodyVelocities' comment) -- so this stays a normal
+          // exclusion (ragdoll pieces still fall/collide against terrain, roads,
+          // buildings etc, just not against any character's own movement
+          // collider, and not needlessly against each other either).
+          .setCollisionGroups(groupsExcluding(CollisionGroups.Ragdoll, CollisionGroups.Characters))
           .setDensity(1.0);
         world.createCollider(colliderDesc, body);
 
-        entries[segment.name] = { segment, body, bone };
+        entries[segment.name] = { segment, body, bone, restLocalPos: bone.position.clone() };
 
         if (segment.parent) {
           const parentEntry = entries[segment.parent];
@@ -256,6 +296,38 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
     },
     [rapier, world, resolveBones]
   );
+
+  // "il personaggio si trasla in aria quando prende un colpo" -- root
+  // cause found empirically (a temporary debug log printed every live
+  // body's world Y every frame): the spherical joints occasionally send
+  // a segment's linear velocity into the tens of m/s within 2-3 physics
+  // substeps of being created, even though the anchor math is exactly
+  // zero-error at creation time (verified by hand) and even with the
+  // capsules' own collision entirely disabled (so it's not a collision
+  // popping them apart -- confirmed live, same explosion either way).
+  // That points at the joint SOLVER itself occasionally overshooting
+  // (a known class of Rapier joint-stiffness issue with small/light
+  // capsule bodies), not a bug in this file's own math. Rather than
+  // chase an intermittent solver edge case, this clamps every live
+  // ragdoll body's linear speed every frame -- a standard, blunt safety
+  // net for exactly this failure mode: it can't stop a single bad
+  // substep, but it stops that bad substep's velocity from ever being
+  // visible for more than one frame, so a solver hiccup reads as a tiny
+  // stutter instead of a launch into orbit. HIT_MAX_LINVEL is well above
+  // the intended 0.3 m/s hit-impulse kick, so normal recoil is untouched.
+  const HIT_MAX_LINVEL = 3; // m/s
+  const clampBodyVelocities = useCallback(() => {
+    const entries = bodiesRef.current;
+    for (const key of Object.keys(entries)) {
+      const { body } = entries[key];
+      const v = body.linvel();
+      const speedSq = v.x * v.x + v.y * v.y + v.z * v.z;
+      if (speedSq > HIT_MAX_LINVEL * HIT_MAX_LINVEL) {
+        const scale = HIT_MAX_LINVEL / Math.sqrt(speedSq);
+        body.setLinvel({ x: v.x * scale, y: v.y * scale, z: v.z * scale }, true);
+      }
+    }
+  }, []);
 
   // Re-points every kinematic anchor (see buildBodies) at its tracked
   // bone's CURRENT world transform -- that bone keeps being driven by the
@@ -294,7 +366,7 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
   const syncBonesFromPhysics = useCallback((weight: number) => {
     const entries = bodiesRef.current;
     for (const key of Object.keys(entries)) {
-      const { body, bone } = entries[key];
+      const { body, bone, restLocalPos } = entries[key];
       if (!bone.parent) continue;
       const t = body.translation();
       const r = body.rotation();
@@ -310,6 +382,17 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
         bone.position.copy(_v2);
         bone.quaternion.copy(_q2);
       } else {
+        // "il personaggio si trasla in aria quando prende un colpo" --
+        // position used to be left untouched here, frozen at whatever
+        // the physics last computed (often airborne, thanks to gravity
+        // plus the hit impulse's own upward component) for the WHOLE
+        // 0.35s blend-out, since most bones have no position keyframes
+        // of their own for the mixer to overwrite it with. Lerping it
+        // back toward the bone's captured resting offset (same rate as
+        // the rotation slerp) fixes the floating limb without the
+        // "stretching" risk a naive continuous blend would have, since
+        // both ends of this lerp are physically valid local offsets.
+        bone.position.lerpVectors(restLocalPos, _v2, weight);
         bone.quaternion.slerp(_q2, weight);
       }
     }
@@ -379,6 +462,8 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
     (worldImpulseDir: THREE.Vector3, magnitude: number, atSegment: string = 'Torso', attackerX?: number, attackerZ?: number) => {
       if (stateRef.current.isDeath) return; // already a corpse -- a pulse on top would fight the death ragdoll
 
+      __dbgFrameCount = 0; // TEMP DEBUG -- restart the per-pulse frame log on every new hit
+
       // "anche il braccio/gamba piu' vicino per un effetto un po' piu'
       // ampio" -- see ragdollConfig.ts's RAGDOLL_PULSE_NEARBY.
       const nearbyOptions = RAGDOLL_PULSE_NEARBY[atSegment] ?? [];
@@ -442,6 +527,28 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
 
   const update = useCallback(
     (delta: number) => {
+      // TEMP DEBUG -- "il personaggio si trasla in aria quando prende un
+      // colpo, continua a succedere" -- printing the WORLD Y of every
+      // live ragdoll bone plus the group's own world Y for the first ~40
+      // frames of each pulse, so we can see numerically what's actually
+      // moving instead of guessing again. Remove once root-caused.
+      if (stateRef.current.active && !stateRef.current.isDeath) {
+        __dbgFrameCount++;
+        if (__dbgFrameCount <= 40) {
+          const entries = bodiesRef.current;
+          const parts: string[] = [];
+          for (const key of Object.keys(entries)) {
+            const { bone } = entries[key];
+            bone.getWorldPosition(_dbgWorldPos);
+            parts.push(`${key}.worldY=${_dbgWorldPos.y.toFixed(3)}`);
+          }
+          if (modelRootRef.current) {
+            parts.push(`modelRootY=${modelRootRef.current.position.y.toFixed(3)}`);
+          }
+          console.log(`[RAGDOLL_DEBUG f${__dbgFrameCount}]`, parts.join(' '));
+        }
+      }
+
       // Hit-marker fade runs independently of ragdoll state -- it can
       // still be fading out slightly after the pulse itself has already
       // fully blended back to pure animation.
@@ -462,6 +569,7 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
       }
 
       syncAnchors();
+      clampBodyVelocities();
 
       s.pulseElapsed += delta;
       if (s.pulseElapsed < HIT_PULSE_DURATION) {
@@ -478,7 +586,7 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
       }
       syncBonesFromPhysics(weight);
     },
-    [syncBonesFromPhysics, destroyBodies, syncAnchors]
+    [syncBonesFromPhysics, destroyBodies, syncAnchors, clampBodyVelocities]
   );
 
   const deactivate = useCallback(() => {
@@ -502,6 +610,17 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
     [destroyBodies, scene]
   );
 
+  const getBoneWorldPosition = useCallback(
+    (boneName: string, target: THREE.Vector3): boolean => {
+      const bones = resolveBones();
+      const bone = bones?.[boneName];
+      if (!bone) return false;
+      bone.getWorldPosition(target);
+      return true;
+    },
+    [resolveBones]
+  );
+
   return {
     isActive: () => stateRef.current.active,
     isDeath: () => stateRef.current.isDeath,
@@ -509,5 +628,6 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
     pulseHit,
     update,
     deactivate,
+    getBoneWorldPosition,
   };
 }

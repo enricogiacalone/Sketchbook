@@ -11,11 +11,23 @@ import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode, Anim
 const MODEL_URL = 'soldier-citizen.glb';
 const BASE_ANIMS_URL = 'soldier-citizen-base-animations.glb';
 const ADDON_ANIMS_URL = 'soldier-citizen-addon-animations.glb';
+// "quell'animazione non serve piu'" -- see the identical constant/comment
+// in PlayerCombatSoldier.tsx: the Hit_Chest/Hit_Head clips' own baked-in
+// motion was the real source of "il personaggio si trasla in aria" (it
+// was already happening before the ragdoll rig existed), and useRagdoll's
+// pulseHit now sells the hit physically on its own. This just keeps the
+// old brief "can't act right after being hit" window.
+const HIT_STAGGER_DURATION = 0.35;
 
 const TEAM_COLOR: Record<string, string> = { RED: '#ef4444', BLUE: '#38bdf8' };
 // Scratch vector for the hit-reaction ragdoll impulse direction (see the
 // triggerHit branch below) -- avoids a per-hit allocation.
 const _hitImpulseDir = new THREE.Vector3();
+// "il colpo deve essere sferrato dove effettivamente le mesh collidono" --
+// see the identical constants/comment in PlayerCombatSoldier.tsx.
+const _handPos = new THREE.Vector3();
+const HIT_CONTACT_RADIUS = 0.45;
+const ATTACK_HAND_BONES = ['hand_l', 'hand_r'] as const;
 
 interface CombatSoldierProps {
   data: FighterData;
@@ -65,6 +77,14 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
   // called unconditionally every render regardless of `enableRagdoll`.
   const modelRootRef = React.useRef<THREE.Object3D | null>(null);
   const ragdoll = useRagdoll(modelRootRef);
+  // "il colpo deve essere sferrato dove effettivamente le mesh collidono"
+  // -- which FighterData this fighter's CURRENT swing is aimed at (the
+  // AI's own target-finding logic only re-runs once attackLock drops back
+  // to 0, so this snapshot is what the attackLock>0 branch below checks
+  // contact against on every later frame of the same swing), and whether
+  // that swing has already landed once (so it can't land twice).
+  const attackTargetRef = React.useRef<FighterData | null>(null);
+  const attackHasLandedRef = React.useRef(false);
 
   const { scene } = useGLTF(MODEL_URL);
   const { animations: baseAnims } = useGLTF(BASE_ANIMS_URL);
@@ -109,11 +129,20 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       taunt: pickAnim(['Taunt', 'Cheering', 'Victory']),
       victory: pickAnim(['Victory', 'Taunt']),
       death: pickAnim(['Death_D', 'Death_A', 'Death']),
+      // "il colpo va lo stesso a segno" -- 'Kick_Right'/'Spin_Kick'/
+      // 'Kick_Left'/'Uppercut' don't exist anywhere in this rig's base or
+      // addon animation packs (verified against both GLBs' own clip
+      // lists), so pickAnim silently fell back to 'Fighting Idle' for 2 of
+      // these 4 slots: half of all random attack picks played no visible
+      // swing at all while the damage/hit-reaction logic below fired
+      // unconditionally regardless of which clip (if any) actually
+      // played. Replaced with three more real punch/hook variants this
+      // rig actually has, so all four slots always animate.
       attacks: [
         pickAnim(['Punch_Jab', 'Fighting Left Jab']),
-        pickAnim(['Punch_Cross', 'Melee_Hook']),
-        pickAnim(['Kick_Right', 'Spin_Kick']),
-        pickAnim(['Kick_Left', 'Uppercut']),
+        pickAnim(['Punch_Cross', 'Fighting Right Jab']),
+        pickAnim(['Melee_Hook', 'Punch_Jab']),
+        pickAnim(['Fighting Right Jab', 'Fighting Left Jab']),
       ],
     };
 
@@ -164,6 +193,41 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     return clipsMap[target]?.duration || 1.0;
   };
 
+  // "il colpo deve essere sferrato dove effettivamente le mesh collidono"
+  // -- see the identical function/comment in PlayerCombatSoldier.tsx.
+  // `theTarget` is attackTargetRef's snapshot, passed in rather than read
+  // from the ref directly so a null-check only has to happen once at the
+  // call site.
+  const checkAttackContact = (theTarget: FighterData): boolean => {
+    for (const boneName of ATTACK_HAND_BONES) {
+      if (!ragdoll.getBoneWorldPosition(boneName, _handPos)) continue;
+      const dx = _handPos.x - theTarget.position.x;
+      const dz = _handPos.z - theTarget.position.z;
+      if (dx * dx + dz * dz > HIT_CONTACT_RADIUS * HIT_CONTACT_RADIUS) continue;
+
+      if (theTarget.currentAnim === theTarget.animCatalog?.block) {
+        theTarget.hp -= 5;
+        theTarget.state = 'Danno parato!';
+      } else {
+        theTarget.hp -= 25;
+        if (theTarget.hp <= 0) {
+          theTarget.hp = 0;
+          theTarget.isDead = true;
+          theTarget.attackLock = 0;
+        } else {
+          theTarget.triggerHit = Math.random() > 0.5 ? 'Hit_Chest' : 'Hit_Head';
+          // "il colpo deve avvenire precisamente dove le mesh si sono
+          // toccate" -- now the real hand contact point, not this
+          // fighter's root position.
+          theTarget.hitFromX = _handPos.x;
+          theTarget.hitFromZ = _handPos.z;
+        }
+      }
+      return true;
+    }
+    return false;
+  };
+
   useFrame((_state, delta) => {
     if (mixer) mixer.update(delta * globalSpeed);
     // Runs every frame regardless of which branch below fires -- a hit-
@@ -206,8 +270,12 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     }
 
     if (data.triggerHit) {
-      const hitAnim = actions[data.triggerHit] ? data.triggerHit : animCatalog.idle;
-      data.attackLock = transitionToAnimation(hitAnim, 0.1, false);
+      // No longer switches to the Hit_Chest/Hit_Head animation clip -- see
+      // HIT_STAGGER_DURATION's comment above/in PlayerCombatSoldier.tsx.
+      // The fighter keeps whatever animation was already playing; only the
+      // brief action-lock and the ragdoll's own physical pulse represent
+      // "being hit" now.
+      data.attackLock = HIT_STAGGER_DURATION;
       data.state = 'Colpito!';
       data.triggerHit = null;
       // "punto 2: che gli attacchi sembrino veri" -- a real physical
@@ -219,15 +287,23 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       // torso/head alternate so consecutive hits don't all look identical.
       if (enableRagdoll) {
         _hitImpulseDir.set(Math.sin(data.rotation), 0.35, Math.cos(data.rotation));
-        ragdoll.pulseHit(_hitImpulseDir, 1.6, Math.random() > 0.5 ? 'Head' : 'Torso', data.hitFromX, data.hitFromZ);
+        ragdoll.pulseHit(_hitImpulseDir, 0.3, Math.random() > 0.5 ? 'Head' : 'Torso', data.hitFromX, data.hitFromZ);
       }
     }
 
     if (data.attackLock > 0) {
       data.attackLock -= delta * globalSpeed;
+      // "il colpo deve essere sferrato dove effettivamente le mesh
+      // collidono" -- attackTargetRef is only set while a real attack
+      // swing (not some other attackLock use, like the hit-stagger above)
+      // is in progress -- see the attack-decision branch below.
+      if (attackTargetRef.current && !attackHasLandedRef.current && !attackTargetRef.current.isDead) {
+        if (checkAttackContact(attackTargetRef.current)) attackHasLandedRef.current = true;
+      }
       if (data.attackLock <= 0) {
         transitionToAnimation(animCatalog.idle, 0.2, true);
         data.state = 'In guardia';
+        attackTargetRef.current = null;
       }
       applyTransform();
       return;
@@ -385,27 +461,14 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         const chosenAttack = animCatalog.attacks[Math.floor(Math.random() * animCatalog.attacks.length)];
         data.state = `Attacco (${chosenAttack})`;
         data.attackLock = transitionToAnimation(chosenAttack, 0.1, false);
-
-        if (theTarget.currentAnim === theTarget.animCatalog?.block) {
-          theTarget.hp -= 5;
-          theTarget.state = 'Danno parato!';
-        } else {
-          theTarget.hp -= 25;
-          if (theTarget.hp <= 0) {
-            theTarget.hp = 0;
-            theTarget.isDead = true;
-            theTarget.attackLock = 0;
-          } else {
-            theTarget.triggerHit = Math.random() > 0.5 ? 'Hit_Chest' : 'Hit_Head';
-            // "il colpo deve avvenire precisamente dove le mesh si sono
-            // toccate" -- stash where THIS fighter (the attacker) was
-            // standing right now, so theTarget's own pulseHit can place
-            // the hit-marker on the side of its body that was actually
-            // facing the attacker.
-            theTarget.hitFromX = data.position.x;
-            theTarget.hitFromZ = data.position.z;
-          }
-        }
+        // "il colpo deve essere sferrato dove effettivamente le mesh
+        // collidono" -- no longer resolved instantly here (that used to
+        // gate purely on the AI's own 1.4 melee-range check, taken once
+        // the instant the swing starts). checkAttackContact, run every
+        // frame from the attackLock branch above against this snapshot,
+        // now decides if and when it actually connects.
+        attackTargetRef.current = theTarget;
+        attackHasLandedRef.current = false;
       }
     } else {
       if (distance < 2.0) {

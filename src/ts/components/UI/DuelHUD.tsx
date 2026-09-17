@@ -11,18 +11,21 @@ import { useShallow } from 'zustand/react/shallow';
 // parent conditionally mounting this, so it can keep listening for
 // duelResult flipping back to 'none' on the next duel without remounting.
 //
-// Reads duelPlayerHp/duelEnemyHp/duelResult from the store -- written
-// every frame by DuelArena.tsx's own useFrame from the two FighterData
-// objects PlayerCombatSoldier.tsx/CombatSoldier.tsx mutate in place; this
-// component itself never touches those refs directly, it's plain DOM
-// outside the R3F tree (same reasoning as StatusBars.tsx).
+// Reads duelPlayerHp/duelEnemyHp/duelResult/duelInRange from the store --
+// written every frame by DuelArena.tsx's own useFrame from the two
+// FighterData objects PlayerCombatSoldier.tsx/CombatSoldier.tsx mutate in
+// place; this component itself never touches those refs directly, it's
+// plain DOM outside the R3F tree (same reasoning as StatusBars.tsx).
 const DuelHUD: React.FC = () => {
-  const { testScene, duelPlayerHp, duelEnemyHp, duelResult } = useStore(
+  const { testScene, duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY } = useStore(
     useShallow((state) => ({
       testScene: state.testScene,
       duelPlayerHp: state.duelPlayerHp,
       duelEnemyHp: state.duelEnemyHp,
       duelResult: state.duelResult,
+      duelInRange: state.duelInRange,
+      duelReticleX: state.duelReticleX,
+      duelReticleY: state.duelReticleY,
     }))
   );
 
@@ -35,6 +38,64 @@ const DuelHUD: React.FC = () => {
 
   return (
     <>
+      {/* "il mirino deve essere come quelli che si usano per sparare..
+          non si accavalla al personaggio" -- a real FPS-style reticle:
+          four short separate ticks around an empty center, NOT a closed
+          shape (the first version was a solid circle, which visually
+          wrapped around/over the character standing right behind it at
+          screen-center in third person -- a shooter crosshair never
+          draws a continuous outline over the target for exactly that
+          reason, it's always a few disconnected marks with a gap in the
+          middle). Separate from the pre-existing global #crosshair
+          (Crosshair.tsx, currently unused/dormant elsewhere) since this
+          one needs its own per-mode color logic. Dim/neutral while out of
+          ATTACK_RANGE (see DuelArena.tsx's useFrame), lights up in the
+          same green as your own HP bar the instant a swing would actually
+          land. Hidden once the fight ends (duelResult !== 'none'), same
+          as the HP bars/exit button below would read as pointless
+          clutter over the win/lose banner. */}
+      {duelResult === 'none' &&
+        (() => {
+          const color = duelInRange ? '#22c55e' : 'rgba(255,255,255,0.7)';
+          const glow = duelInRange ? '0 0 6px 1px rgba(34,197,94,0.8)' : 'none';
+          const GAP = 7; // px from dead-center to the near edge of each tick
+          const LEN = 6; // px, each tick's own length
+          const THICK = 2; // px
+          const tickBase: React.CSSProperties = {
+            position: 'absolute',
+            background: color,
+            boxShadow: glow,
+            transition: 'background 0.12s ease-out, box-shadow 0.12s ease-out',
+          };
+          return (
+            <div
+              style={{
+                position: 'absolute',
+                // "il mirino e' ai piedi del giocatore.. deve stare piu'
+                // in alto" -- driven by DuelArena.tsx's own per-frame
+                // camera projection now, instead of a hardcoded 50%/50%
+                // (which always landed exactly on the player's ground-
+                // level root, since that's what the third-person camera
+                // itself looks at for on-foot controllers).
+                top: `${duelReticleY}%`,
+                left: `${duelReticleX}%`,
+                width: 0,
+                height: 0,
+                pointerEvents: 'none',
+              }}
+            >
+              {/* top */}
+              <div style={{ ...tickBase, left: -THICK / 2, top: -GAP - LEN, width: THICK, height: LEN }} />
+              {/* bottom */}
+              <div style={{ ...tickBase, left: -THICK / 2, top: GAP, width: THICK, height: LEN }} />
+              {/* left */}
+              <div style={{ ...tickBase, top: -THICK / 2, left: -GAP - LEN, width: LEN, height: THICK }} />
+              {/* right */}
+              <div style={{ ...tickBase, top: -THICK / 2, left: GAP, width: LEN, height: THICK }} />
+            </div>
+          );
+        })()}
+
       <div
         style={{
           position: 'absolute',

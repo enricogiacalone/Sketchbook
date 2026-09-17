@@ -25,7 +25,20 @@ const RUN_SPEED = 4.2; // units/sec
 // only swings when already in range, but a human mashing the attack
 // button doesn't have that luxury, so a swing thrown a hair too far away
 // still plays (a "whiff") instead of silently doing nothing.
-const ATTACK_RANGE = 1.8;
+export const ATTACK_RANGE = 1.8; // exported so DuelArena.tsx can drive the crosshair's in-range state off the same number
+// "quell'animazione non serve piu'" -- the Hit_Chest/Hit_Head clips used to
+// be what SOLD a hit (a full-body stagger animation), but useRagdoll.ts's
+// pulseHit now does that physically on the struck bone itself, and the
+// clips' own baked-in motion (however small on paper) was the real source
+// of "il personaggio si trasla in aria" -- it was already happening before
+// the ragdoll rig existed at all. So a hit no longer switches the whole
+// body's animation: it keeps playing whatever the fighter was already
+// doing (idle/walk/attack) and lets the ragdoll pulse alone read as the
+// reaction, while this constant keeps the old brief "can't act right after
+// being hit" stagger window (matches HIT_BLEND_OUT_DURATION in
+// useRagdoll.ts so the lock roughly tracks how long the ragdoll's own
+// recoil is still visibly playing out).
+const HIT_STAGGER_DURATION = 0.35;
 const DODGE_SPEED = 7.5; // units/sec while the roll's physically covering ground
 const DODGE_EXTRA_LOCK = 0.35; // extra cooldown (seconds) tacked on after the roll animation itself finishes, so it can't be chained instantly
 // How much of the remaining facing-angle gap closes per frame -- same
@@ -43,6 +56,19 @@ const _right = new THREE.Vector3();
 const _moveDir = new THREE.Vector3();
 const _toOpponent = new THREE.Vector3();
 const _worldUp = new THREE.Vector3(0, 1, 0);
+const _handPos = new THREE.Vector3(); // scratch for checkAttackContact's hand-bone reads
+
+// "il colpo deve essere sferrato dove effettivamente le mesh collidono" --
+// the opponent's body, treated as a vertical cylinder around its root
+// position (XZ only, no Y check -- a punch's hand height during a real
+// swing is already roughly chest/head height, and the rig has no single
+// bone worth measuring against for "torso height" cheaply here). This is
+// deliberately tighter than ATTACK_RANGE (1.8, root-to-root, used only
+// for the crosshair/UI "in range" hint): it approximates actual body
+// thickness/shoulder width plus a little for the fist itself, not the
+// two fighters' whole reach envelope.
+const HIT_CONTACT_RADIUS = 0.45;
+const ATTACK_HAND_BONES = ['hand_l', 'hand_r'] as const;
 
 interface PlayerCombatSoldierProps {
   // Owned by DuelArena.tsx, same FighterData shape CombatSoldier.tsx
@@ -99,6 +125,13 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   const dodgeLockRef = useRef(0);
   const dodgeDirRef = useRef(new THREE.Vector3());
   const isDodgingRef = useRef(false);
+  // Track the CURRENT swing's own state -- isAttacking distinguishes an
+  // attack's attackLock window from a dodge's or a hit-stagger's (all
+  // three reuse the same data.attackLock timer), and hasLanded makes sure
+  // a single swing can only land once even though the contact check now
+  // runs every frame it's active (see checkAttackContact below).
+  const isAttackingRef = useRef(false);
+  const attackHasLandedRef = useRef(false);
 
   const { scene } = useGLTF(MODEL_URL);
   const { animations: baseAnims } = useGLTF(BASE_ANIMS_URL);
@@ -147,11 +180,20 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       taunt: pickAnim(['Taunt', 'Cheering', 'Victory']),
       victory: pickAnim(['Victory', 'Taunt']),
       death: pickAnim(['Death_D', 'Death_A', 'Death']),
+      // "il colpo va lo stesso a segno" -- 'Kick_Right'/'Spin_Kick'/
+      // 'Kick_Left'/'Uppercut' don't exist anywhere in this rig's base or
+      // addon animation packs (verified against both GLBs' own clip
+      // lists), so pickAnim silently fell back to 'Fighting Idle' for 2 of
+      // these 4 slots: half of all random attack picks played no visible
+      // swing at all while the damage/hit-reaction logic below fired
+      // unconditionally regardless of which clip (if any) actually
+      // played. Replaced with three more real punch/hook variants this
+      // rig actually has, so all four slots always animate.
       attacks: [
         pickAnim(['Punch_Jab', 'Fighting Left Jab']),
-        pickAnim(['Punch_Cross', 'Melee_Hook']),
-        pickAnim(['Kick_Right', 'Spin_Kick']),
-        pickAnim(['Kick_Left', 'Uppercut']),
+        pickAnim(['Punch_Cross', 'Fighting Right Jab']),
+        pickAnim(['Melee_Hook', 'Punch_Jab']),
+        pickAnim(['Fighting Right Jab', 'Fighting Left Jab']),
       ],
     };
 
@@ -203,6 +245,51 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     return clipsMap[target]?.duration || 1.0;
   };
 
+  // "il colpo deve essere sferrato dove effettivamente le mesh collidono"
+  // -- called every frame a swing is active (see the attackLock branch in
+  // useFrame below), checks THIS fighter's own hand bones (both -- no
+  // per-clip left/right mapping is tracked, and checking both is cheap
+  // and robust) against `opponent`'s body cylinder. Resolves damage and
+  // returns true the first frame a hand is actually within reach; the
+  // caller uses that to latch attackHasLandedRef so a single swing can
+  // only ever land once. Returns false (a pure "whiff") if the whole
+  // swing never got close enough -- copied verbatim from the old
+  // instant-on-click branch, just no longer gated on distance at t=0.
+  const checkAttackContact = (): boolean => {
+    for (const boneName of ATTACK_HAND_BONES) {
+      if (!ragdoll.getBoneWorldPosition(boneName, _handPos)) continue;
+      const dx = _handPos.x - opponent.position.x;
+      const dz = _handPos.z - opponent.position.z;
+      if (dx * dx + dz * dz > HIT_CONTACT_RADIUS * HIT_CONTACT_RADIUS) continue;
+
+      // Damage/blocking/death formulas copied VERBATIM from
+      // CombatSoldier.tsx's own attack-resolution branch, on purpose -- a
+      // punch does the same thing whichever fighter threw it.
+      if (opponent.currentAnim === opponent.animCatalog?.block) {
+        opponent.hp -= 5;
+        opponent.state = 'Danno parato!';
+      } else {
+        opponent.hp -= 25;
+        if (opponent.hp <= 0) {
+          opponent.hp = 0;
+          opponent.isDead = true;
+          opponent.attackLock = 0;
+        } else {
+          opponent.triggerHit = Math.random() > 0.5 ? 'Hit_Chest' : 'Hit_Head';
+          // "il colpo deve avvenire precisamente dove le mesh si sono
+          // toccate" -- now using the actual hand contact point (rather
+          // than this fighter's root position) for an even more precise
+          // hit-marker placement -- see CombatSoldier.tsx's identical
+          // comment.
+          opponent.hitFromX = _handPos.x;
+          opponent.hitFromZ = _handPos.z;
+        }
+      }
+      return true;
+    }
+    return false;
+  };
+
   useFrame((_state, delta) => {
     if (mixer) mixer.update(delta * globalSpeed);
     // Runs every frame regardless of which branch below fires, same
@@ -245,15 +332,18 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     }
 
     if (data.triggerHit) {
-      const hitAnim = actions[data.triggerHit] ? data.triggerHit : animCatalog.idle;
-      data.attackLock = transitionToAnimation(hitAnim, 0.1, false);
+      // No longer switches to the Hit_Chest/Hit_Head animation clip -- see
+      // HIT_STAGGER_DURATION's comment above. The fighter keeps whatever
+      // animation was already playing; only the brief action-lock and the
+      // ragdoll's own physical pulse represent "being hit" now.
+      data.attackLock = HIT_STAGGER_DURATION;
       data.state = 'Colpito!';
       data.triggerHit = null;
       // "fai che gli attacchi sembrino veri" -- a real physical impulse at
       // the moment of impact, not just a hit-reaction animation. Same
       // hit-pulse technique as CombatSoldier.tsx -- see useRagdoll.ts.
       _hitImpulseDir.set(Math.sin(data.rotation), 0.35, Math.cos(data.rotation));
-      ragdoll.pulseHit(_hitImpulseDir, 1.6, Math.random() > 0.5 ? 'Head' : 'Torso', data.hitFromX, data.hitFromZ);
+      ragdoll.pulseHit(_hitImpulseDir, 0.3, Math.random() > 0.5 ? 'Head' : 'Torso', data.hitFromX, data.hitFromZ);
     }
 
     if (data.attackLock > 0) {
@@ -264,10 +354,18 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       if (isDodgingRef.current) {
         data.position.addScaledVector(dodgeDirRef.current, DODGE_SPEED * delta * globalSpeed);
       }
+      // "il colpo deve essere sferrato dove effettivamente le mesh
+      // collidono" -- while THIS swing is still live and hasn't already
+      // connected, check every frame instead of once at the moment the
+      // button was pressed (see checkAttackContact above).
+      if (isAttackingRef.current && !attackHasLandedRef.current && checkAttackContact()) {
+        attackHasLandedRef.current = true;
+      }
       if (data.attackLock <= 0) {
         transitionToAnimation(animCatalog.idle, 0.2, true);
         data.state = 'In guardia';
         isDodgingRef.current = false;
+        isAttackingRef.current = false;
       }
       applyTransform();
       return;
@@ -289,63 +387,14 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       data.rotation += angleDiff * FACE_TURN_RATE;
     }
 
-    // --- Block (held) ---
-    if (input.secondary) {
-      data.state = 'Parata';
-      transitionToAnimation(animCatalog.block, 0.15, true);
-      applyTransform();
-      return;
-    }
-
-    // --- Dodge (tap Shift) ---
-    if (input.consumeJustPressed('shift') && dodgeLockRef.current <= 0) {
-      data.state = 'Capriola';
-      // Hop directly away from the opponent -- _toOpponent is still valid
-      // from the facing update just above.
-      dodgeDirRef.current.copy(_toOpponent).multiplyScalar(-1);
-      isDodgingRef.current = true;
-      data.attackLock = transitionToAnimation(animCatalog.dodge, 0.1, false);
-      dodgeLockRef.current = data.attackLock + DODGE_EXTRA_LOCK;
-      applyTransform();
-      return;
-    }
-
-    // --- Attack (tap primary / left click) ---
-    if (input.consumeJustPressed('primary')) {
-      const distance = data.position.distanceTo(opponent.position);
-      const chosenAttack = animCatalog.attacks[Math.floor(Math.random() * animCatalog.attacks.length)];
-      data.state = `Attacco (${chosenAttack})`;
-      data.attackLock = transitionToAnimation(chosenAttack, 0.1, false);
-
-      // Out of range: the swing still plays (a "whiff"), just no damage --
-      // see ATTACK_RANGE's comment above.
-      if (distance <= ATTACK_RANGE) {
-        // Damage/blocking/death formulas copied VERBATIM from
-        // CombatSoldier.tsx's own attack-resolution branch, on purpose --
-        // a punch does the same thing whichever fighter threw it.
-        if (opponent.currentAnim === opponent.animCatalog?.block) {
-          opponent.hp -= 5;
-          opponent.state = 'Danno parato!';
-        } else {
-          opponent.hp -= 25;
-          if (opponent.hp <= 0) {
-            opponent.hp = 0;
-            opponent.isDead = true;
-            opponent.attackLock = 0;
-          } else {
-            opponent.triggerHit = Math.random() > 0.5 ? 'Hit_Chest' : 'Hit_Head';
-            // "il colpo deve avvenire precisamente dove le mesh si sono
-            // toccate" -- see CombatSoldier.tsx's identical comment.
-            opponent.hitFromX = data.position.x;
-            opponent.hitFromZ = data.position.z;
-          }
-        }
-      }
-      applyTransform();
-      return;
-    }
-
-    // --- Movement: camera-relative, same technique Player.tsx uses ---
+    // Camera-relative movement axes, computed here (rather than down by
+    // the movement block below) so the dodge can also use them -- "quando
+    // clicco schiva con shift fa un salto indietro anche se sto andando
+    // avanti" -- the dodge used to always hop away from the opponent no
+    // matter which movement key was held; now it goes wherever you're
+    // currently pressing (WASD), same as normal movement, and only falls
+    // back to "away from the opponent" if you're not holding any
+    // direction (a neutral-input dodge still needs to go SOMEWHERE).
     camera.getWorldDirection(_forward);
     _forward.y = 0;
     _forward.normalize();
@@ -357,6 +406,54 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     if (input.left) _moveDir.addScaledVector(_right, -1);
     if (input.right) _moveDir.add(_right);
 
+    // --- Block (held) ---
+    if (input.secondary) {
+      data.state = 'Parata';
+      transitionToAnimation(animCatalog.block, 0.15, true);
+      applyTransform();
+      return;
+    }
+
+    // --- Dodge (tap Space) -- moved off Shift, which is also "hold to
+    // sprint": sharing the key meant every sprint tap also fired a dodge.
+    if (input.consumeJustPressed('jump') && dodgeLockRef.current <= 0) {
+      data.state = 'Capriola';
+      if (_moveDir.lengthSq() > 0.0001) {
+        dodgeDirRef.current.copy(_moveDir).normalize();
+      } else {
+        // No direction held -- fall back to the old "away from the
+        // opponent" hop. _toOpponent is still valid from the facing
+        // update just above.
+        dodgeDirRef.current.copy(_toOpponent).multiplyScalar(-1);
+      }
+      isDodgingRef.current = true;
+      data.attackLock = transitionToAnimation(animCatalog.dodge, 0.1, false);
+      dodgeLockRef.current = data.attackLock + DODGE_EXTRA_LOCK;
+      applyTransform();
+      return;
+    }
+
+    // --- Attack (tap primary / left click) ---
+    if (input.consumeJustPressed('primary')) {
+      const chosenAttack = animCatalog.attacks[Math.floor(Math.random() * animCatalog.attacks.length)];
+      data.state = `Attacco (${chosenAttack})`;
+      data.attackLock = transitionToAnimation(chosenAttack, 0.1, false);
+      // No longer resolved here -- ATTACK_RANGE (root-to-root, generous)
+      // used to gate damage the instant the button was pressed. Now the
+      // swing just starts playing, and checkAttackContact (run every
+      // frame from the attackLock branch above, on THIS SAME NEW attack
+      // since attackHasLandedRef resets to false here) decides whether
+      // and when it actually connects. Still whiffs harmlessly if the
+      // hand never gets close enough before the swing ends.
+      isAttackingRef.current = true;
+      attackHasLandedRef.current = false;
+      applyTransform();
+      return;
+    }
+
+    // --- Movement: camera-relative, same technique Player.tsx uses --
+    // _forward/_right/_moveDir were already computed above (the dodge
+    // block needs them too).
     if (_moveDir.lengthSq() > 0.0001) {
       _moveDir.normalize();
       const speed = input.shift ? RUN_SPEED : WALK_SPEED;

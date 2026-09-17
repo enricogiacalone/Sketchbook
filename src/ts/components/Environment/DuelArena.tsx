@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import CombatSoldier from './CombatSoldier';
-import PlayerCombatSoldier from './PlayerCombatSoldier';
+import PlayerCombatSoldier, { ATTACK_RANGE } from './PlayerCombatSoldier';
 import { useStore } from '../../store';
 import { FighterData } from './SquadArenaTypes';
 
@@ -34,6 +34,33 @@ const GLOBAL_SPEED = 1.0;
 // store's duelPlayerHp/duelEnemyHp (DuelHUD.tsx's bars) stay 0-100
 // PERCENTAGES regardless -- see the useFrame below.
 const DUEL_MAX_HP = 250;
+// "il mirino e' ai piedi del giocatore.. deve stare piu' in alto" --
+// roughly chest/eye height (meters) above a foot-controller's own
+// ground-level root, used to project the crosshair's screen position
+// (see the useFrame below) instead of leaving it pinned to literal
+// screen-center, which is where the camera's own lookAt target sits for
+// on-foot controllers (useThirdPersonCamera.ts) -- i.e. the character's
+// feet.
+const AIM_HEIGHT_OFFSET = 1.5;
+// "il personaggio e' piu' a sinistra rispetto al centro quando spara" --
+// the reference over-the-shoulder aim framing: the character sits off to
+// one side of the frame while the reticle floats in the open space beside
+// them, never on top of their own silhouette. Rather than re-aiming the
+// shared third-person camera itself (useThirdPersonCamera.ts -- touching
+// its lookAt target would also shift the view for ordinary on-foot
+// exploration, not just this duel), this offsets ONLY the world point the
+// reticle is projected from, sideways along the CAMERA's own current
+// right vector -- so it stays stable in screen-space (always the same
+// side) no matter which way the camera is currently orbited around the
+// fight, matching how the reference screenshot's own crosshair sits
+// beside the character rather than on top of them.
+const _aimWorldPos = new THREE.Vector3();
+const _camForward = new THREE.Vector3();
+const _camRight = new THREE.Vector3();
+const _worldUp = new THREE.Vector3(0, 1, 0);
+// Half a step to the side -- enough to clear the character's own
+// silhouette without wandering off into empty space unrelated to them.
+const SHOULDER_OFFSET = 0.45;
 
 // Same atan2(...)+PI facing convention CombatSoldier.tsx/PlayerCombatSoldier.tsx
 // use everywhere else -- just so the two fighters start already roughly
@@ -93,6 +120,7 @@ const DuelArena: React.FC = () => {
   const noopSetMedkitPoolCount = () => {};
 
   const setDuelStatus = useStore((state) => state.setDuelStatus);
+  const { camera, scene } = useThree();
 
   // Hands control of the duel-player fighter over to the player the
   // moment this arena mounts -- a safety net alongside App.tsx's own
@@ -111,9 +139,64 @@ const DuelArena: React.FC = () => {
   // component tree.
   useFrame(() => {
     const result: 'none' | 'win' | 'lose' = enemyData.isDead ? 'win' : playerData.isDead ? 'lose' : 'none';
+    // "metti un mirino cosi' so dove sto per colpire" -- same range check
+    // PlayerCombatSoldier.tsx's own attack branch uses, just read here too
+    // so the crosshair can tell the player whether a swing would actually
+    // land BEFORE they throw it, rather than only after (see ATTACK_RANGE's
+    // export there).
+    const inRange = playerData.position.distanceTo(enemyData.position) <= ATTACK_RANGE;
+
+    // "il mirino e' ai piedi del giocatore.. controlla come si fa un
+    // mirino per sparare" -- the correct technique (how a real 3rd-person
+    // aim reticle is built): project an actual 3D point through the live
+    // camera into screen space every frame, rather than hardcoding 50/50.
+    // Reads the player's OWN group -- by name, the same lookup
+    // useThirdPersonCamera.ts itself uses -- so this already includes
+    // whatever ground/road height it was placed at this frame; adding
+    // AIM_HEIGHT_OFFSET moves the projected point up from the ground-level
+    // root (which is what literal screen-center already tracks, being the
+    // camera's own lookAt target) to roughly chest/eye height. Falls back
+    // to keeping the previous reticle position for the rare frame where
+    // the group isn't found yet (mount order), rather than snapping to a
+    // wrong default.
+    let reticleX = useStore.getState().duelReticleX;
+    let reticleY = useStore.getState().duelReticleY;
+    const playerObj = scene.getObjectByName(DUEL_PLAYER_ID);
+    if (playerObj) {
+      playerObj.getWorldPosition(_aimWorldPos);
+      _aimWorldPos.y += AIM_HEIGHT_OFFSET;
+
+      // "il personaggio e' piu' a sinistra rispetto al centro quando
+      // spara" -- shift the projected point sideways off the character's
+      // own silhouette, using the CAMERA's live right vector (same
+      // forward x worldUp convention PlayerCombatSoldier.tsx's own
+      // camera-relative movement uses) so the offset direction is always
+      // "screen right" no matter how the duel camera is currently
+      // orbited.
+      camera.getWorldDirection(_camForward);
+      _camForward.y = 0;
+      if (_camForward.lengthSq() > 0.0001) {
+        _camForward.normalize();
+        _camRight.crossVectors(_camForward, _worldUp).normalize();
+        _aimWorldPos.addScaledVector(_camRight, SHOULDER_OFFSET);
+      }
+
+      _aimWorldPos.project(camera);
+      // NDC (-1..1, +Y up) -> percentage of screen (0..100, +Y down, CSS convention)
+      reticleX = (_aimWorldPos.x * 0.5 + 0.5) * 100;
+      reticleY = (1 - (_aimWorldPos.y * 0.5 + 0.5)) * 100;
+    }
+
     // Normalized to 0-100 here (not raw hp) so DuelHUD.tsx's bars stay a
     // simple width:`${hp}%` regardless of DUEL_MAX_HP.
-    setDuelStatus((Math.max(0, playerData.hp) / DUEL_MAX_HP) * 100, (Math.max(0, enemyData.hp) / DUEL_MAX_HP) * 100, result);
+    setDuelStatus(
+      (Math.max(0, playerData.hp) / DUEL_MAX_HP) * 100,
+      (Math.max(0, enemyData.hp) / DUEL_MAX_HP) * 100,
+      result,
+      inRange,
+      reticleX,
+      reticleY
+    );
   });
 
   return (

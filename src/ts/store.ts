@@ -136,6 +136,25 @@ interface GameState {
   duelPlayerHp: number;
   duelEnemyHp: number;
   duelResult: 'none' | 'win' | 'lose';
+  // "metti un mirino cosi' so dove sto per colpire" -- true whenever the
+  // duel player is currently close enough to the AI for a swing to land
+  // (mirrors PlayerCombatSoldier.tsx's own ATTACK_RANGE check), written
+  // every frame alongside the rest of this block by DuelArena.tsx so
+  // DuelHUD.tsx's crosshair can recolor itself without reaching into the
+  // R3F-owned FighterData refs directly.
+  duelInRange: boolean;
+  // "il mirino e' ai piedi del giocatore.. deve stare piu' in alto" --
+  // screen-space position (0-100%, from top-left) of the duel crosshair,
+  // computed by DuelArena.tsx's useFrame by projecting a point roughly at
+  // the player's own chest/eye height through the active camera. Needed
+  // because useThirdPersonCamera.ts's own lookAt target sits at the
+  // player's ground-level root with no vertical offset for on-foot
+  // controllers (unlike vehicles), so literal screen-center (what a naive
+  // crosshair would use) lines up with the player's feet, not their
+  // torso. Defaults to dead-center (50/50) until the very first frame
+  // resolves a real value.
+  duelReticleX: number;
+  duelReticleY: number;
   // "aggiungi il tasto retry" -- bumped by retryDuel() below; Scene.tsx
   // passes it as DuelArena's own React `key`, so changing it unmounts the
   // old (dead/won) fight and mounts a brand new one -- fresh FighterData,
@@ -185,7 +204,7 @@ interface GameState {
   setTestScene: (scene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race' | 'duel') => void;
   setArenaGameMode: (mode: GameMode) => void;
   setArenaFighterCount: (count: number) => void;
-  setDuelStatus: (playerHp: number, enemyHp: number, result: 'none' | 'win' | 'lose') => void;
+  setDuelStatus: (playerHp: number, enemyHp: number, result: 'none' | 'win' | 'lose', inRange: boolean, reticleX: number, reticleY: number) => void;
   retryDuel: () => void;
   collectItem: () => void;
   updateEntity: (id: string, info: Partial<EntityInfo>) => void;
@@ -223,6 +242,9 @@ export const useStore = create<GameState>((set) => ({
   duelPlayerHp: 100,
   duelEnemyHp: 100,
   duelResult: 'none',
+  duelInRange: false,
+  duelReticleX: 50,
+  duelReticleY: 50,
   duelRound: 0,
   missionStage: 0,
   missionStatus: 'inactive',
@@ -274,7 +296,7 @@ export const useStore = create<GameState>((set) => ({
   setTestScene: (testScene) => set({ testScene }),
   setArenaGameMode: (arenaGameMode) => set({ arenaGameMode }),
   setArenaFighterCount: (arenaFighterCount) => set({ arenaFighterCount }),
-  setDuelStatus: (duelPlayerHp, duelEnemyHp, duelResult) => set({ duelPlayerHp, duelEnemyHp, duelResult }),
+  setDuelStatus: (duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY) => set({ duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY }),
   retryDuel: () => set((state) => ({
     duelRound: state.duelRound + 1,
     duelPlayerHp: 100,
