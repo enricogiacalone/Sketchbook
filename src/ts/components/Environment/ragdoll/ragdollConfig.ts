@@ -75,6 +75,47 @@ export const RAGDOLL_SEGMENTS: RagdollSegment[] = [
 // leaf helpers) is simply left alone -- whatever the AnimationMixer last
 // wrote for it stays, which is harmless since nothing simulated depends
 // on its exact pose.
+// "le parti del corpo devono seguire sempre i constraint dell'anatomia
+// umana.. a meno di un colpo davvero forte (di cui parleremo in futuro)"
+// -- every joint below gets a REAL limit now instead of the free-
+// spinning spherical joints this used to create for all 11 of them.
+//
+// Elbows and knees are genuine single-axis hinges anatomically, so they
+// get a real Rapier revolute joint with a hard [min, max] flexion limit
+// (degrees) -- see useRagdoll.ts's buildBodies, which passes these
+// straight to JointData.revolute(...).limits. The hinge AXIS itself is
+// computed at build time from live bone WORLD positions (thigh_l vs
+// thigh_r), not guessed from this rig's raw per-bone local axis
+// convention -- see buildBodies' own comment for why. Sign/exact plane
+// is a reasonable anatomical approximation, not biomechanically exact;
+// still, this is what actually stops "spinning 360" or bending
+// backwards through the joint, which is the point.
+export const RAGDOLL_HINGE_LIMITS_DEG: Record<string, [number, number]> = {
+  ForeArm_L: [-10, 150],
+  ForeArm_R: [-10, 150],
+  Shin_L: [-10, 150],
+  Shin_R: [-10, 150],
+};
+
+// Everything else (spine, neck, shoulders, hips) is genuinely multi-axis
+// in real anatomy -- shoulders in particular have a huge range of
+// motion -- so these stay real Rapier spherical joints (3 rotational
+// DOF), but useRagdoll.ts's clampJointCones() manually pulls each one
+// back every frame once it strays more than this many degrees (in ANY
+// direction at once, not a separate swing/twist split) from its own
+// "neutral" pose -- whatever the character was actually doing the
+// instant the hit landed, not a fixed bind/T-pose. Rapier's spherical
+// joint has no native angular-limit API in this version, hence the
+// manual clamp rather than a built-in one (see that function's comment).
+export const RAGDOLL_CONE_LIMIT_DEG: Record<string, number> = {
+  Torso: 45, // spine bend, relative to Hips
+  Head: 50, // neck, relative to Torso
+  UpperArm_L: 100, // shoulder, relative to Torso -- generous: real shoulders have a very wide range
+  UpperArm_R: 100,
+  Thigh_L: 80, // hip, relative to Hips
+  Thigh_R: 80,
+};
+
 export const RAGDOLL_SEGMENT_FROZEN_BONES: Record<string, string[]> = {
   Torso: ['spine_02', 'spine_03'],
   UpperArm_L: ['clavicle_l'],

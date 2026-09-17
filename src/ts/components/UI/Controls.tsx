@@ -22,6 +22,14 @@ const PAD_SHIFT = ['R1', 'L2']; // buttons 5 or 6
 const PAD_PRIMARY = ['R2']; // button 7
 const PAD_SECONDARY = ['○ Circle']; // button 1
 const PAD_ENTER = ['□ Square', '△ Triangle']; // buttons 2 or 3
+// Square and Triangle individually -- combatSoldier's Jab/Hook attacks
+// (see useInput.ts's gamepad section, where they ALSO still drive
+// PAD_ENTER's combined reading for vehicles; the two never overlap since
+// only one controllable is ever active at once).
+const PAD_TRIANGLE = ['△ Triangle']; // button 3
+// "con l2 usa il braccio sinistro" -- Square and L2 both throw the same
+// left-handed Jab (see useInput.ts's 'attackLeft' action).
+const PAD_JAB = ['□ Square', 'L2']; // button 2, or button 6
 
 const Controls: React.FC = () => {
   const currentControllable = useStore((state) => state.currentControllable);
@@ -65,11 +73,9 @@ const Controls: React.FC = () => {
         return [
           { keys: ['W', 'A', 'S', 'D'], pad: PAD_LEFT_STICK, desc: 'Move' },
           { keys: ['Shift'], pad: PAD_SHIFT, desc: 'Sprint' },
-          { keys: ['Left Click'], pad: PAD_PRIMARY, desc: 'Attack' },
-          // No gamepad binding exists for this yet (useInput.ts's gamepad
-          // section never sets g.yawLeft) -- left without a `pad` entry,
-          // same as the helicopter's Yaw row below.
-          { keys: ['Q'], desc: 'Second Punch' },
+          { keys: ['Left Click'], pad: PAD_PRIMARY, desc: 'Cross (R)' },
+          { keys: ['Q'], pad: PAD_JAB, desc: 'Jab (L)' },
+          { keys: ['E'], pad: PAD_TRIANGLE, desc: 'Hook' },
           { keys: ['Right Click', '(hold)'], pad: PAD_SECONDARY, desc: 'Block' },
           { keys: ['Space'], pad: PAD_JUMP, desc: 'Dodge' },
         ];

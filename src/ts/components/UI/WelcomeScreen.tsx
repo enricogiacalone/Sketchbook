@@ -9,7 +9,12 @@ interface WelcomeScreenProps {
 }
 
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
-  const [name, setName] = useState('');
+  // "aggiungi un nome precompilato nella login del gioco cosi' non devo
+  // metterla a mano ogni volta" -- pre-filled rather than starting empty;
+  // still a normal editable input (and still validated on submit below),
+  // just no longer something you have to type from scratch every single
+  // time you reload to test.
+  const [name, setName] = useState('Enrico');
   const [controlMethod, setControlMethod] = useState('keyboard');
   const [error, setError] = useState('');
 

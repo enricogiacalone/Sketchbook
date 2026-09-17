@@ -7,6 +7,15 @@ const ACTION_NAMES = [
   'forward', 'backward', 'left', 'right', 'jump', 'shift',
   'yawLeft', 'yawRight', 'enter', 'enter_passenger', 'seat_switch',
   'camera', 'fly', 'respawn', 'primary', 'secondary', 'pause', 'headlights',
+  // Gamepad-only for now (L2/button 6) -- "con l2 usa il braccio
+  // sinistro" -- kept as its OWN action rather than folded into
+  // 'yawLeft'/'shift' (L2 already drives 'shift' too, see the gamepad
+  // section below) specifically so it doesn't double up with anything
+  // 'shift' does elsewhere (e.g. Helicopter.tsx reads input.shift every
+  // frame to ascend -- piling a second, unrelated meaning onto the same
+  // held button while flying would be a real conflict, unlike the
+  // edge-triggered 'enter' reuse Square/Triangle already share).
+  'attackLeft',
 ] as const;
 type Action = (typeof ACTION_NAMES)[number];
 
@@ -29,6 +38,7 @@ const emptyActionMap = (): Record<Action, boolean> => ({
   secondary: false,
   pause: false,
   headlights: false,
+  attackLeft: false,
 });
 
 export const useInput = () => {
@@ -222,6 +232,25 @@ export const useInput = () => {
     // input.enter_passenger) 'enter_passenger' action; folded into 'enter'
     // per request so Triangle actually does something.
     g.enter = !!pad.buttons[2]?.pressed || !!pad.buttons[3]?.pressed; // Square or Triangle
+    // Square and Triangle ALSO independently drive yawLeft/yawRight --
+    // "ricordati del gamepad, ho quadrato e triangolo a disposizione".
+    // These two actions already exist (KeyQ/KeyE) but never had a
+    // gamepad binding. Firing them from the same buttons as 'enter' is
+    // harmless: only one controllable is ever active at a time, so
+    // whichever of 'enter' (Player.tsx, entering a vehicle),
+    // 'yawLeft'/'yawRight' (Helicopter/Airplane/Drone turning), or
+    // 'yawLeft'/'yawRight' (PlayerCombatSoldier.tsx's Cross/Hook
+    // attacks) actually gets read never overlaps with the others.
+    g.yawLeft = !!pad.buttons[2]?.pressed; // X/Square
+    g.yawRight = !!pad.buttons[3]?.pressed; // Y/Triangle
+    // L2 (button 6) already drives 'shift' above (RB/LT: run) -- this
+    // ADDS a second, independent action on the same physical button
+    // rather than replacing anything, so the existing L2-as-sprint
+    // behaviour is untouched. "con l2 usa il braccio sinistro e con r2
+    // quello destro" -- PlayerCombatSoldier.tsx's left-arm punch (Jab)
+    // checks this alongside 'yawLeft' (Q/Square), so all three fire the
+    // same strike.
+    g.attackLeft = !!pad.buttons[6]?.pressed; // L2
     // Back/Select: cycle the camera's 4 zoom presets (see ZOOM_LEVELS in
     // useThirdPersonCamera.ts). Reuses the 'camera' action, which already
     // existed with a keyboard binding (KeyC) but, like enter_passenger

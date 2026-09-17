@@ -90,6 +90,7 @@ function makeFighter(id: string, name: string, team: string, x: number, z: numbe
     hitFromX: 0,
     hitFromZ: 0,
     hurtboxHandle: null,
+    isPassive: false,
   };
 }
 
@@ -139,6 +140,14 @@ const DuelArena: React.FC = () => {
   // bars + a win/lose banner without reaching into refs owned by the R3F
   // component tree.
   useFrame(() => {
+    // "metti un opzione in cui l'avversario si ferma e non combatte che
+    // posso attivare a piacimento" -- mirrors the store's duelDummyMode
+    // (flipped by DuelHUD's own toggle button, outside the R3F tree) onto
+    // the one FighterData CombatSoldier.tsx actually reads every frame;
+    // see FighterData.isPassive's own comment for why this indirection
+    // exists at all rather than CombatSoldier reading the store directly.
+    enemyData.isPassive = useStore.getState().duelDummyMode;
+
     const result: 'none' | 'win' | 'lose' = enemyData.isDead ? 'win' : playerData.isDead ? 'lose' : 'none';
     // "metti un mirino cosi' so dove sto per colpire" -- same range check
     // PlayerCombatSoldier.tsx's own attack branch uses, just read here too

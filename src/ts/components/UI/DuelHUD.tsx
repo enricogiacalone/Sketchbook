@@ -17,7 +17,7 @@ import { useShallow } from 'zustand/react/shallow';
 // place; this component itself never touches those refs directly, it's
 // plain DOM outside the R3F tree (same reasoning as StatusBars.tsx).
 const DuelHUD: React.FC = () => {
-  const { testScene, duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY } = useStore(
+  const { testScene, duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY, duelDummyMode } = useStore(
     useShallow((state) => ({
       testScene: state.testScene,
       duelPlayerHp: state.duelPlayerHp,
@@ -26,6 +26,7 @@ const DuelHUD: React.FC = () => {
       duelInRange: state.duelInRange,
       duelReticleX: state.duelReticleX,
       duelReticleY: state.duelReticleY,
+      duelDummyMode: state.duelDummyMode,
     }))
   );
 
@@ -161,6 +162,33 @@ const DuelHUD: React.FC = () => {
         }}
       >
         ✕ Esci dal Duello
+      </button>
+
+      {/* "metti un opzione in cui l'avversario si ferma e non combatte
+          che posso attivare a piacimento" -- training-dummy toggle,
+          flippable mid-match (not gated on duelResult, unlike the retry/
+          exit buttons below, since the whole point is switching it on or
+          off WHILE fighting). See store.ts's duelDummyMode for the full
+          wiring. */}
+      <button
+        onClick={() => useStore.getState().toggleDuelDummyMode()}
+        style={{
+          position: 'absolute',
+          top: 60,
+          right: 20,
+          pointerEvents: 'auto',
+          fontFamily: 'monospace',
+          fontWeight: 'bold',
+          fontSize: 12,
+          color: '#fff',
+          background: duelDummyMode ? 'rgba(34,197,94,0.35)' : 'rgba(0,0,0,0.5)',
+          border: duelDummyMode ? '1px solid #22c55e' : '1px solid rgba(255,255,255,0.4)',
+          borderRadius: 6,
+          padding: '6px 10px',
+          cursor: 'pointer',
+        }}
+      >
+        {duelDummyMode ? '● Manichino: ON' : '○ Manichino: OFF'}
       </button>
 
       {duelResult !== 'none' && (

@@ -161,6 +161,18 @@ interface GameState {
   // fresh position/hp/ragdoll state -- without leaving testScene='duel'
   // or touching the menu at all.
   duelRound: number;
+  // "metti un opzione in cui l'avversario si ferma e non combatte che
+  // posso attivare a piacimento" -- a training-dummy toggle the player
+  // flips on/off mid-match from DuelHUD's own UI. Lives here (rather than
+  // directly on the enemy's FighterData, which DuelHUD can't reach --
+  // it's outside the R3F tree) purely as the bridge: DuelArena.tsx's own
+  // useFrame mirrors this onto enemyData.isPassive every frame (same
+  // "store value in, plain FighterData field out" direction already used
+  // for duelReticleX/Y, just reversed), and CombatSoldier.tsx only ever
+  // reads data.isPassive, never this store -- keeping the freeze scoped
+  // to that one fighter instance, never leaking into CombatArena.tsx's
+  // own (unrelated) 120 AI fighters.
+  duelDummyMode: boolean;
   entities: Map<string, EntityInfo>;
   setHealth: (health: number) => void;
   setMaxHealth: (maxHealth: number) => void;
@@ -205,6 +217,8 @@ interface GameState {
   setArenaGameMode: (mode: GameMode) => void;
   setArenaFighterCount: (count: number) => void;
   setDuelStatus: (playerHp: number, enemyHp: number, result: 'none' | 'win' | 'lose', inRange: boolean, reticleX: number, reticleY: number) => void;
+  toggleDuelDummyMode: () => void;
+  setDuelDummyMode: (active: boolean) => void;
   retryDuel: () => void;
   collectItem: () => void;
   updateEntity: (id: string, info: Partial<EntityInfo>) => void;
@@ -246,6 +260,7 @@ export const useStore = create<GameState>((set) => ({
   duelReticleX: 50,
   duelReticleY: 50,
   duelRound: 0,
+  duelDummyMode: false,
   missionStage: 0,
   missionStatus: 'inactive',
   missionTitle: '',
@@ -297,11 +312,17 @@ export const useStore = create<GameState>((set) => ({
   setArenaGameMode: (arenaGameMode) => set({ arenaGameMode }),
   setArenaFighterCount: (arenaFighterCount) => set({ arenaFighterCount }),
   setDuelStatus: (duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY) => set({ duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY }),
+  toggleDuelDummyMode: () => set((state) => ({ duelDummyMode: !state.duelDummyMode })),
+  setDuelDummyMode: (duelDummyMode) => set({ duelDummyMode }),
   retryDuel: () => set((state) => ({
     duelRound: state.duelRound + 1,
     duelPlayerHp: 100,
     duelEnemyHp: 100,
     duelResult: 'none',
+    // Deliberately NOT reset here -- "attivare a piacimento" reads as a
+    // practice-session setting the player controls, not per-round combat
+    // state, so it should survive a retry same as e.g. audio/graphics
+    // settings would, until the player turns it off themselves.
   })),
   collectItem: () => set((state) => ({ collectiblesFound: Math.min(state.collectiblesTotal, state.collectiblesFound + 1) })),
   // "serve ottimizzare ancora" -- every car/pedestrian/enemy calls this on

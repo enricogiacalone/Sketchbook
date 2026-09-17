@@ -4,7 +4,7 @@ import { useThree } from '@react-three/fiber';
 import { useRapier, interactionGroups } from '@react-three/rapier';
 import type { RigidBody as RapierRigidBody, ImpulseJoint, Collider } from '@dimforge/rapier3d-compat';
 import { CollisionGroups, groupsExcluding } from '../../../enums/CollisionGroups';
-import { RAGDOLL_PULSE_NEARBY, RAGDOLL_SEGMENTS, RAGDOLL_SEGMENT_FROZEN_BONES, RagdollSegment } from './ragdollConfig';
+import { RAGDOLL_PULSE_NEARBY, RAGDOLL_SEGMENTS, RAGDOLL_SEGMENT_FROZEN_BONES, RAGDOLL_HINGE_LIMITS_DEG, RAGDOLL_CONE_LIMIT_DEG, RagdollSegment } from './ragdollConfig';
 
 // "riusciamo a Ricreare la fisica ragdoll attiva in stile Euphoria?" --
 // vera Euphoria (NaturalMotion) e' tecnologia proprietaria, anni di lavoro
@@ -67,6 +67,18 @@ interface BodyEntry {
   // back to it during blend-out instead of leaving position frozen at
   // wherever gravity/impulse last placed it -- see that function's comment.
   restLocalPos: THREE.Vector3;
+  // This segment's rotation relative to its PARENT's rotation, at the
+  // moment its body was created (i.e. the "neutral" joint pose, whatever
+  // the character was actually doing -- mid-punch, mid-run -- when the
+  // hit landed). Only set for segments that have a parent (not Hips) AND
+  // aren't one of the hinge joints (ForeArm_*/Shin_*, which get a real
+  // Rapier revolute limit instead -- see buildBodies). clampJointCones
+  // uses this every frame to measure how far a ball-and-socket joint
+  // (spine/neck/shoulder/hip) has rotated away from that neutral pose in
+  // ANY direction, and pulls it back once it exceeds RAGDOLL_CONE_LIMIT_RAD
+  // -- "le parti del corpo devono seguire sempre i constraint dell
+  // anatomia umana".
+  restRelativeQuat?: THREE.Quaternion;
 }
 
 // A kinematic (position-driven, unaffected by forces/gravity) stand-in
@@ -114,15 +126,19 @@ export interface RagdollController {
   // `targetHandle` (another fighter's own getHurtboxHandle() result) --
   // a genuine Rapier shape-intersection query, not distance math.
   pointIntersectsHurtbox: (worldPos: THREE.Vector3, targetHandle: number) => boolean;
-  // "mi piacerebbe che il busto seguisse il movimento" -- tilts the spine
-  // forward/back by `pitchRad` on top of whatever the AnimationMixer just
-  // set this frame (additive local-space rotation, same "mixer writes
-  // first, this overwrites/adjusts specific bones after" ordering
-  // syncBonesFromPhysics already relies on -- see its own comment). Only
-  // the player's own fighter calls this (PlayerCombatSoldier.tsx, driven
-  // by camera pitch); the AI never does. No-ops while a hit-pulse or
-  // death is active so it doesn't fight the ragdoll physics.
-  applySpineLean: (pitchRad: number) => void;
+  // "mi piacerebbe che il busto seguisse il movimento" / "le gambe nn
+  // devono ruotare secondo l'orbit control" -- tilts the spine forward/
+  // back by `pitchRad` (camera up/down look) AND twists it left/right by
+  // `yawRad` (camera yaw relative to the legs, which auto-face the
+  // opponent independently -- see PlayerCombatSoldier.tsx) as ONE
+  // absolute local-space rotation per bone, entirely replacing whatever
+  // the AnimationMixer just set this frame for spine_02/03 (no animation
+  // blending at all -- "nessuna animazione si deve intromettere nella sua
+  // inclinazione"). Only the player's own fighter calls this
+  // (PlayerCombatSoldier.tsx, driven by the camera), the AI never does.
+  // No-ops while a hit-pulse or death is active so it doesn't fight the
+  // ragdoll physics.
+  applySpineLean: (pitchRad: number, yawRad: number) => void;
 }
 
 const _v1 = new THREE.Vector3();
@@ -135,14 +151,55 @@ const _parentInverse = new THREE.Matrix4();
 const _unitScale = new THREE.Vector3(1, 1, 1);
 const _yAxis = new THREE.Vector3(0, 1, 0);
 const _xAxis = new THREE.Vector3(1, 0, 0);
-const _leanQuat = new THREE.Quaternion();
 // Split across both spine bones rather than piling the whole tilt onto
 // one joint -- reads as a smoother, more natural bend (same reasoning as
 // RAGDOLL_SEGMENT_FROZEN_BONES.Torso already grouping these two).
 const SPINE_LEAN_BONES = ['spine_02', 'spine_03'];
+// Each spine bone's own TWIST axis ("up the spine", to rotate left/right
+// around) is derived geometrically from its own child bone's rest
+// position rather than guessed as a raw local axis name -- this file
+// already hit two real bugs (a compounding bug, then a genuine sign bug)
+// guessing spine_02/03's local axis convention for pitch alone, so the
+// yaw/twist axis is computed instead (see applySpineLean below).
+// pelvis -> spine_01 -> spine_02 -> spine_03 -> neck_01 -> head, per
+// ragdollConfig.ts's Torso segment (spine_01 -> neck_01).
+const SPINE_LEAN_CHILD_BONE: Record<string, string> = {
+  spine_02: 'spine_03',
+  spine_03: 'neck_01',
+};
+// Defense in depth -- PlayerCombatSoldier.tsx already clamps what it
+// passes in, but applySpineLean re-clamps here too rather than trusting
+// every future caller to remember.
+const SPINE_LEAN_MAX_RAD = THREE.MathUtils.degToRad(40);
+// Wider than the pitch clamp -- "le gambe nn devono ruotare secondo
+// l'orbit control" moved leg-facing off the camera entirely, so the
+// torso alone now has to cover the full left/right aim range on top of
+// whatever way the legs happen to be squared up, same idea as a real
+// boxer's hips-vs-shoulders separation.
+const SPINE_TWIST_MAX_RAD = THREE.MathUtils.degToRad(80);
+const _spineTwistAxis = new THREE.Vector3();
+const _spinePitchQuat = new THREE.Quaternion();
+const _spineTwistQuat = new THREE.Quaternion();
 const _identityQuat = new THREE.Quaternion();
 const _segmentByName: Record<string, RagdollSegment> = {};
 for (const seg of RAGDOLL_SEGMENTS) _segmentByName[seg.name] = seg;
+
+const RAGDOLL_CONE_LIMIT_RAD: Record<string, number> = {};
+for (const key of Object.keys(RAGDOLL_CONE_LIMIT_DEG)) {
+  RAGDOLL_CONE_LIMIT_RAD[key] = THREE.MathUtils.degToRad(RAGDOLL_CONE_LIMIT_DEG[key]);
+}
+
+// Scratch quaternions for clampJointCones -- kept separate from this
+// file's other _q1/_q2 scratch pair since buildBodies (which also uses
+// _q1/_q2) and clampJointCones never run inside the same call stack, but
+// giving this its own set avoids any future ordering footgun between them.
+const _coneParentQuat = new THREE.Quaternion();
+const _coneChildQuat = new THREE.Quaternion();
+const _coneRelQuat = new THREE.Quaternion();
+const _coneDeltaQuat = new THREE.Quaternion();
+const _coneClampedDelta = new THREE.Quaternion();
+const _coneCorrectedRel = new THREE.Quaternion();
+const _coneCorrectedWorld = new THREE.Quaternion();
 
 function freshState(): RagdollState {
   return { active: false, isDeath: false, pulseElapsed: 0, blendElapsed: 0 };
@@ -262,6 +319,25 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
       const bones = resolveBones();
       if (!bones) return;
 
+      // A rough, robust "character's own left-right" world direction at
+      // this exact moment -- used below as every hinge joint's (elbow/
+      // knee) bend axis. Derived purely from two bones' WORLD POSITIONS
+      // rather than guessing any single bone's own local axis convention
+      // (which this rig's raw export doesn't document, and which bit us
+      // once already on the spine-lean feature) -- so it works regardless
+      // of how soldier-citizen.glb's bones are locally oriented, and
+      // stays reasonable even mid-animation (not just in a bind pose).
+      const sideways = new THREE.Vector3(1, 0, 0);
+      const thighL = bones['thigh_l'];
+      const thighR = bones['thigh_r'];
+      if (thighL && thighR) {
+        thighL.getWorldPosition(_v1);
+        thighR.getWorldPosition(_v2);
+        sideways.subVectors(_v1, _v2);
+        if (sideways.lengthSq() > 0.0001) sideways.normalize();
+        else sideways.set(1, 0, 0);
+      }
+
       const segmentsToBuild = (
         activeSegments ? RAGDOLL_SEGMENTS.filter((s) => activeSegments.has(s.name)) : RAGDOLL_SEGMENTS
       ).filter((s) => !bodiesRef.current[s.name]);
@@ -368,10 +444,48 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
             parentBone.getWorldQuaternion(_q1);
             bone.getWorldPosition(_v2);
             const anchor1 = _v2.clone().sub(_v1).applyQuaternion(_q1.clone().invert());
-            const jointData = rapier.JointData.spherical(
-              { x: anchor1.x, y: anchor1.y, z: anchor1.z },
-              { x: 0, y: 0, z: 0 }
-            );
+
+            // "le parti del corpo devono seguire sempre i constraint dell
+            // anatomia umana" -- elbows/knees are real single-axis hinges,
+            // so they get an actual Rapier revolute joint with a hard
+            // flexion limit (RAGDOLL_HINGE_LIMITS_DEG) instead of a free
+            // spherical one. Everything else stays spherical (shoulders/
+            // hips/neck/spine genuinely need more than one rotational DOF)
+            // but gets its OWN limit enforced manually every frame by
+            // clampJointCones, via the restRelativeQuat captured below.
+            const hingeLimitsDeg = RAGDOLL_HINGE_LIMITS_DEG[segment.name];
+            let jointData;
+            if (hingeLimitsDeg) {
+              // axis is expressed "in the local-space of the rigid-bodies
+              // it is attached to" (both -- Rapier's revolute() only
+              // takes one). Converting our world-space `sideways` vector
+              // through the PARENT's inverse rotation is exact for that
+              // body; it's only approximate for the child if the two
+              // bones don't share a perfectly consistent local roll
+              // convention along this limb, which just means the hinge
+              // plane may be a few degrees off anatomically -- still
+              // firmly bounded either way, which is the actual goal here.
+              const axisLocal = sideways.clone().applyQuaternion(_q1.clone().invert());
+              jointData = rapier.JointData.revolute(
+                { x: anchor1.x, y: anchor1.y, z: anchor1.z },
+                { x: 0, y: 0, z: 0 },
+                { x: axisLocal.x, y: axisLocal.y, z: axisLocal.z }
+              );
+              jointData.limitsEnabled = true;
+              jointData.limits = [THREE.MathUtils.degToRad(hingeLimitsDeg[0]), THREE.MathUtils.degToRad(hingeLimitsDeg[1])];
+            } else {
+              jointData = rapier.JointData.spherical(
+                { x: anchor1.x, y: anchor1.y, z: anchor1.z },
+                { x: 0, y: 0, z: 0 }
+              );
+              // Neutral/rest pose for this joint, in the parent's local
+              // frame, captured NOW (whatever the character was actually
+              // doing when the hit landed) -- see clampJointCones and
+              // BodyEntry's own comment.
+              bone.getWorldQuaternion(_q2);
+              entries[segment.name].restRelativeQuat = _q1.clone().invert().multiply(_q2);
+            }
+
             const joint = world.createImpulseJoint(jointData, parentBody, body, true);
             jointsRef.current.push(joint);
           }
@@ -410,6 +524,70 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
         const scale = HIT_MAX_LINVEL / Math.sqrt(speedSq);
         body.setLinvel({ x: v.x * scale, y: v.y * scale, z: v.z * scale }, true);
       }
+    }
+  }, []);
+
+  // "le parti del corpo devono seguire sempre i constraint dell'anatomia
+  // umana.. a meno di un colpo davvero forte (di cui parleremo in
+  // futuro)" -- the hinge joints (elbow/knee) already get a hard limit
+  // straight from Rapier's own revolute solver (see buildBodies), but its
+  // spherical joints (spine/neck/shoulders/hips) have no native angular-
+  // limit API in this Rapier version, so this manually pulls each one
+  // back toward its own restRelativeQuat (the joint's pose at the moment
+  // THIS pulse/death started, not a fixed bind pose) whenever it strays
+  // more than RAGDOLL_CONE_LIMIT_DEG in ANY direction at once -- a single
+  // total-angle cone, not a separate swing/twist split, which is simpler
+  // and good enough for "does this look like a human body" rather than
+  // biomechanically exact per-axis ranges. The "colpo davvero forte"
+  // override mentioned above doesn't exist yet -- every hit is bound by
+  // this today, on purpose, until that's designed.
+  const clampJointCones = useCallback(() => {
+    const entries = bodiesRef.current;
+    const anchors = anchorsRef.current;
+    for (const key of Object.keys(entries)) {
+      const entry = entries[key];
+      if (!entry.restRelativeQuat || !entry.segment.parent) continue; // Hips (no parent), or a hinge joint (already limited above)
+      const maxAngle = RAGDOLL_CONE_LIMIT_RAD[entry.segment.name];
+      if (maxAngle === undefined) continue;
+
+      const parentEntry = entries[entry.segment.parent];
+      const parentAnchor = anchors[entry.segment.parent];
+      const parentRot = parentEntry ? parentEntry.body.rotation() : parentAnchor ? parentAnchor.body.rotation() : null;
+      if (!parentRot) continue;
+
+      _coneParentQuat.set(parentRot.x, parentRot.y, parentRot.z, parentRot.w);
+      const childRot = entry.body.rotation();
+      _coneChildQuat.set(childRot.x, childRot.y, childRot.z, childRot.w);
+
+      // relative = parentInv * child ; delta = restRelativeInv * relative
+      // -- see BodyEntry's own comment for what restRelativeQuat is.
+      _coneRelQuat.copy(_coneParentQuat).invert().multiply(_coneChildQuat);
+      _coneDeltaQuat.copy(entry.restRelativeQuat).invert().multiply(_coneRelQuat);
+
+      const w = THREE.MathUtils.clamp(Math.abs(_coneDeltaQuat.w), -1, 1);
+      const angle = 2 * Math.acos(w);
+      if (angle <= maxAngle || angle < 1e-5) continue;
+
+      // Scale the excess rotation back down to exactly maxAngle (same
+      // axis, smaller angle) via a slerp-from-identity, then rebuild the
+      // corrected world orientation and hard-set it on the body.
+      const t = maxAngle / angle;
+      _coneClampedDelta.copy(_identityQuat).slerp(_coneDeltaQuat, t);
+      _coneCorrectedRel.copy(entry.restRelativeQuat).multiply(_coneClampedDelta);
+      _coneCorrectedWorld.copy(_coneParentQuat).multiply(_coneCorrectedRel);
+      entry.body.setRotation(
+        { x: _coneCorrectedWorld.x, y: _coneCorrectedWorld.y, z: _coneCorrectedWorld.z, w: _coneCorrectedWorld.w },
+        true
+      );
+
+      // Without this, the solver's own momentum just drives it straight
+      // back past the limit next step and this ends up fighting itself
+      // every frame (visible as a buzz/jitter right at the limit) instead
+      // of settling there. A blunt full damping (not just the offending
+      // component) is fine since this only fires once a joint is already
+      // AT its limit, not during ordinary motion.
+      const av = entry.body.angvel();
+      entry.body.setAngvel({ x: av.x * 0.2, y: av.y * 0.2, z: av.z * 0.2 }, true);
     }
   }, []);
 
@@ -629,12 +807,18 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
       if (!s.active) return;
 
       if (s.isDeath) {
+        // Full 11-body collapse (no kinematic anchors involved -- see
+        // "1. crollo totale") still gets the same anatomical cone clamp
+        // as a live hit-reaction, so a K.O. reads as a body collapsing,
+        // not folding into a pretzel.
+        clampJointCones();
         syncBonesFromPhysics(1);
         return;
       }
 
       syncAnchors();
       clampBodyVelocities();
+      clampJointCones();
 
       s.pulseElapsed += delta;
       if (s.pulseElapsed < HIT_PULSE_DURATION) {
@@ -651,7 +835,7 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
       }
       syncBonesFromPhysics(weight);
     },
-    [syncBonesFromPhysics, destroyBodies, syncAnchors, clampBodyVelocities, syncHurtbox]
+    [syncBonesFromPhysics, destroyBodies, syncAnchors, clampBodyVelocities, clampJointCones, syncHurtbox]
   );
 
   const deactivate = useCallback(() => {
@@ -720,20 +904,58 @@ export function useRagdoll(modelRootRef: React.RefObject<THREE.Object3D | null>)
     [rapier, world]
   );
 
+  // "il movimento del busto devo controllarlo solo io con l'orbit
+  // control.. nessuna animazione si deve intromettere nella sua
+  // inclinazione" -- a hard, ABSOLUTE bone.quaternion.setFromAxisAngle(...)
+  // every frame: spine_02/spine_03's rotation is entirely and exclusively
+  // the camera pitch, whatever the currently-playing clip (idle/walk/
+  // punch/whatever) baked in for those two bones is fully discarded, not
+  // blended with. An absolute set also can't compound across frames the
+  // way an earlier relative-multiply version once did (that's what
+  // caused "sta ruotando sul bacino a 360 gradi") -- there's nothing to
+  // track/undo between calls anymore.
+  //
+  // "se guardo il personaggio da sotto lui piega il busto per guardare
+  // sotto ma dovrebbe essere al contrario" -- sign fix: camPitch (from
+  // PlayerCombatSoldier.tsx's camera.getWorldDirection) is positive when
+  // the camera is looking UP (e.g. orbited below the character looking
+  // up at them), and the torso should tilt to look the SAME way the
+  // camera is looking, not toward the camera itself. The un-negated
+  // angle had it backwards; negating it here (rather than flipping
+  // camPitch's own sign at the call site, which reads correctly as "the
+  // camera's own up/down look angle") keeps that meaning intact and
+  // scopes the sign correction to what it's actually compensating for --
+  // this bone's own local axis convention.
   const applySpineLean = useCallback(
-    (pitchRad: number) => {
+    (pitchRad: number, yawRad: number) => {
       // Don't fight an in-progress hit reaction or the death ragdoll --
       // both already own spine_02/03 (RAGDOLL_SEGMENT_FROZEN_BONES.Torso)
       // every frame they're active, via syncBonesFromPhysics.
       if (stateRef.current.active) return;
       const bones = resolveBones();
       if (!bones) return;
-      const perBone = pitchRad / SPINE_LEAN_BONES.length;
+      const clampedPitch = THREE.MathUtils.clamp(pitchRad, -SPINE_LEAN_MAX_RAD, SPINE_LEAN_MAX_RAD);
+      const clampedYaw = THREE.MathUtils.clamp(yawRad, -SPINE_TWIST_MAX_RAD, SPINE_TWIST_MAX_RAD);
+      const perBonePitch = -clampedPitch / SPINE_LEAN_BONES.length;
+      const perBoneYaw = clampedYaw / SPINE_LEAN_BONES.length;
       for (const boneName of SPINE_LEAN_BONES) {
         const bone = bones[boneName];
         if (!bone) continue;
-        _leanQuat.setFromAxisAngle(_xAxis, perBone);
-        bone.quaternion.multiply(_leanQuat);
+        // Twist axis = direction toward this bone's own child, in the
+        // bone's own local space -- bone.position is a constant bind-pose
+        // offset on a standard skeletal rig (only rotations animate), so
+        // the child's rest position IS "up the spine" from here, exactly
+        // the axis a spinal twist should turn around. Geometric, not
+        // guessed -- see SPINE_LEAN_CHILD_BONE's comment above.
+        const child = bones[SPINE_LEAN_CHILD_BONE[boneName]];
+        if (child && child.position.lengthSq() > 1e-8) {
+          _spineTwistAxis.copy(child.position).normalize();
+        } else {
+          _spineTwistAxis.copy(_yAxis); // fallback -- should never actually hit on this rig
+        }
+        _spinePitchQuat.setFromAxisAngle(_xAxis, perBonePitch);
+        _spineTwistQuat.setFromAxisAngle(_spineTwistAxis, perBoneYaw);
+        bone.quaternion.copy(_spineTwistQuat).multiply(_spinePitchQuat);
       }
     },
     [resolveBones]

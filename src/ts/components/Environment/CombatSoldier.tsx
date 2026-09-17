@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useGLTF, useAnimations, Html } from '@react-three/drei';
+import { useGLTF, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { getTerrainHeight } from './Terrain';
@@ -145,10 +145,13 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         pickAnim(['Melee_Hook', 'Punch_Jab']),
         pickAnim(['Fighting Right Jab', 'Fighting Left Jab']),
       ],
-      // Deterministic second punch -- see AnimCatalog's own comment.
-      // 'Fighting Left Jab' is real but, given the fallback order above,
-      // never actually gets reached by `attacks`' random pick.
-      attackAlt: pickAnim(['Fighting Left Jab', 'Punch_Jab']),
+      // Three player-choosable strikes -- see AnimCatalog's own comment.
+      // The AI never triggers these itself (still only ever reads
+      // `attacks` above at its own attack-resolution branch); populated
+      // here too only because AnimCatalog is one shared shape.
+      attackJab: pickAnim(['Punch_Jab', 'Fighting Left Jab']),
+      attackCross: pickAnim(['Punch_Cross', 'Fighting Right Jab']),
+      attackHook: pickAnim(['Melee_Hook', 'Punch_Jab']),
     };
 
     if (actMap[catalog.idle]) {
@@ -162,8 +165,6 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
 
     return { clone: clonedScene, mixer: animMixer, actions: actMap, clipsMap: cMap, animCatalog: catalog };
   }, [scene, animations, data]);
-
-  useAnimations(animations, clone);
 
   React.useEffect(() => {
     modelRootRef.current = clone;
@@ -319,6 +320,26 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         data.state = 'In guardia';
         attackTargetRef.current = null;
       }
+      applyTransform();
+      return;
+    }
+
+    // "metti un opzione in cui l'avversario si ferma e non combatte che
+    // posso attivare a piacimento" -- a training-dummy toggle (DuelHUD's
+    // own button, see store.ts's duelDummyMode / DuelArena.tsx's mirror
+    // onto this fighter's own data.isPassive). Placed AFTER the
+    // attackLock branch above so a swing already in flight still finishes
+    // instead of freezing mid-punch, but before every chase/attack/block
+    // decision below -- isDead (already handled above) and the ragdoll
+    // hit-reaction/hurtbox sync (already run unconditionally earlier this
+    // frame) are untouched, so a dummy still takes damage and still
+    // physically reacts to a hit, it just never initiates anything itself.
+    if (data.isPassive) {
+      if (data.currentAnim !== animCatalog.idle) {
+        transitionToAnimation(animCatalog.idle, 0.2, true);
+      }
+      data.state = 'Manichino';
+      data.isAttacking = false;
       applyTransform();
       return;
     }

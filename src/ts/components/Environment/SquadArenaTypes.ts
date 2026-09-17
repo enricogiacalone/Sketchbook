@@ -19,15 +19,22 @@ export interface AnimCatalog {
   taunt: string;
   victory: string;
   death: string;
+  // Random pool the AI (CombatSoldier.tsx) still picks from every swing
+  // -- unrelated to the three player-choosable strikes below, kept
+  // exactly as before so the AI's own attack variety is untouched.
   attacks: string[];
-  // Second, deterministic punch (as opposed to `attacks`, which is always
-  // a random pick) -- "aggiungi un secondo input di pugno" -- lets
-  // PlayerCombatSoldier.tsx give the player a distinct, player-chosen
-  // second attack on its own key rather than only the random one on
-  // primary. Built the same way as `attacks` (see both fighters'
-  // animCatalog useMemo) so it's always a real clip this rig has, never
-  // an empty string.
-  attackAlt: string;
+  // "dividi i colpi in piu tasti cosi riesco a sceglierli" -- three
+  // distinct, deterministic strikes, each bound to its OWN key/gamepad
+  // button in PlayerCombatSoldier.tsx (Jab: Left Click/R2, Cross:
+  // Q/Square, Hook: E/Triangle) instead of one button randomly picking
+  // from `attacks`. Built the same way as `attacks` (see both fighters'
+  // animCatalog useMemo) so each is always a real clip this rig has,
+  // never an empty string. The AI never reads these -- it still only
+  // uses `attacks` above -- but both catalogs populate them since
+  // AnimCatalog is one shared shape.
+  attackJab: string;
+  attackCross: string;
+  attackHook: string;
 }
 
 export interface FighterData {
@@ -68,6 +75,16 @@ export interface FighterData {
   // object, same as every other field here. null until that fighter's
   // hurtbox has been created (its first update() call).
   hurtboxHandle: number | null;
+  // "metti un opzione in cui l'avversario si ferma e non combatte che
+  // posso attivare a piacimento" -- when true, CombatSoldier.tsx (the AI)
+  // stands down: no chasing, no attacking, no blocking, just idle -- but
+  // still takes damage and still reacts physically to a hit (see its own
+  // useFrame guard). Always false for CombatArena.tsx's 120 city fighters
+  // (nothing ever sets it there); only DuelArena.tsx's single enemyData
+  // gets toggled, mirrored every frame off the store's duelDummyMode (see
+  // store.ts's own comment on that field for why the bridge runs through
+  // the store instead of a prop).
+  isPassive: boolean;
 }
 
 export interface TowerData {
