@@ -12,6 +12,122 @@ const _windowColor = new THREE.Color();
 const _slabDummy = new THREE.Object3D();
 const _stairDummy = new THREE.Object3D();
 
+// "le finestre devono essere veri buchi" -- the old windows were a flat
+// colored plane glued ~4cm in front of an otherwise UNBROKEN wall
+// surface: fine when buildings were just static exterior scenery, but
+// once the interior became walkable (see the big comment above
+// getBuildingHeightOffset) that reads as wrong from inside -- a solid
+// wall with no opening at all, since the decal plane is single-sided and
+// faces outward only. This builds an actual wall panel with rectangular
+// holes really cut through it (a 2D THREE.Shape with hole Paths, given
+// real thickness via ExtrudeGeometry), so light/sightlines genuinely pass
+// through where a window or the entrance door is. The colored plane from
+// before is kept too (now semi-transparent) sitting inside the opening as
+// the "glass", but the wall itself now actually has a gap behind it.
+interface WallHole { cx: number; cy: number; hw: number; hh: number; }
+
+function buildWallGeometry(span: number, wallHeight: number, thickness: number, holes: WallHole[]): THREE.ExtrudeGeometry {
+  const halfSpan = span / 2;
+  const shape = new THREE.Shape();
+  shape.moveTo(-halfSpan, 0);
+  shape.lineTo(halfSpan, 0);
+  shape.lineTo(halfSpan, wallHeight);
+  shape.lineTo(-halfSpan, wallHeight);
+  shape.lineTo(-halfSpan, 0);
+
+  for (const h of holes) {
+    const hole = new THREE.Path();
+    hole.moveTo(h.cx - h.hw, h.cy - h.hh);
+    hole.lineTo(h.cx + h.hw, h.cy - h.hh);
+    hole.lineTo(h.cx + h.hw, h.cy + h.hh);
+    hole.lineTo(h.cx - h.hw, h.cy + h.hh);
+    hole.lineTo(h.cx - h.hw, h.cy - h.hh);
+    shape.holes.push(hole);
+  }
+
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false, curveSegments: 1 });
+  geo.translate(0, 0, -thickness / 2);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+interface WallColliderBox { cx: number; cy: number; halfW: number; halfH: number; }
+
+// "nn riesco a passarci attraverso" -- the walls above got real holes for
+// windows/the door, but the RigidBody underneath was still the old
+// hardcoded 6-CuboidCollider box (solid back/left/right, a door gap only
+// on the front, nothing accounting for any window) -- so every opening
+// looked open but was still physically solid. This decomposes the SAME
+// hole list used to build a wall's visual geometry (buildWallGeometry
+// above) into a tiling of solid CuboidCollider rectangles that leaves a
+// real gap at every hole instead: holes are first grouped into
+// horizontal bands by their exact vertical span (each floor's window row
+// shares one band; the door -- a different height entirely -- is its own
+// band), full-span solid strips fill the wall above/below/between bands,
+// and within each band solid pillars fill whatever's left/right/between
+// that band's holes. Kept span-only (2D, in the wall's own local
+// width/height plane) since every caller below just maps the result onto
+// whichever world axis that wall panel actually spans.
+function buildWallColliderBoxes(span: number, wallHeight: number, holes: WallHole[]): WallColliderBox[] {
+  const halfSpan = span / 2;
+  if (holes.length === 0) {
+    return [{ cx: 0, cy: wallHeight / 2, halfW: halfSpan, halfH: wallHeight / 2 }];
+  }
+
+  const EPS = 0.01;
+  type Band = { yLow: number; yHigh: number; holes: { xLow: number; xHigh: number }[] };
+  const bands: Band[] = [];
+  for (const h of holes) {
+    const yLow = h.cy - h.hh;
+    const yHigh = h.cy + h.hh;
+    let band = bands.find((b) => Math.abs(b.yLow - yLow) < EPS && Math.abs(b.yHigh - yHigh) < EPS);
+    if (!band) {
+      band = { yLow, yHigh, holes: [] };
+      bands.push(band);
+    }
+    band.holes.push({ xLow: h.cx - h.hw, xHigh: h.cx + h.hw });
+  }
+  bands.sort((a, b) => a.yLow - b.yLow);
+
+  const boxes: WallColliderBox[] = [];
+
+  // Full-span solid strips: below the first band, between consecutive
+  // bands, and above the last band up to the roofline.
+  let cursorY = 0;
+  for (const band of bands) {
+    if (band.yLow > cursorY + EPS) {
+      const h = band.yLow - cursorY;
+      boxes.push({ cx: 0, cy: cursorY + h / 2, halfW: halfSpan, halfH: h / 2 });
+    }
+    cursorY = Math.max(cursorY, band.yHigh);
+  }
+  if (wallHeight > cursorY + EPS) {
+    const h = wallHeight - cursorY;
+    boxes.push({ cx: 0, cy: cursorY + h / 2, halfW: halfSpan, halfH: h / 2 });
+  }
+
+  // Within each band: solid pillars filling everything that isn't a hole.
+  for (const band of bands) {
+    const halfH = (band.yHigh - band.yLow) / 2;
+    const cy = (band.yLow + band.yHigh) / 2;
+    const sortedHoles = [...band.holes].sort((a, b) => a.xLow - b.xLow);
+    let cursorX = -halfSpan;
+    for (const hole of sortedHoles) {
+      if (hole.xLow > cursorX + EPS) {
+        const w = hole.xLow - cursorX;
+        boxes.push({ cx: cursorX + w / 2, cy, halfW: w / 2, halfH });
+      }
+      cursorX = Math.max(cursorX, hole.xHigh);
+    }
+    if (halfSpan > cursorX + EPS) {
+      const w = halfSpan - cursorX;
+      boxes.push({ cx: cursorX + w / 2, cy, halfW: w / 2, halfH });
+    }
+  }
+
+  return boxes;
+}
+
 const footprintOverlapsRoad = (x: number, z: number, width: number, depth: number): boolean => {
   const halfW = width / 2;
   const halfD = depth / 2;
@@ -189,7 +305,7 @@ export const CITY_LAYOUT: CityLayout = (() => {
 // own floor-slab/stair visuals -- both MUST agree exactly on this, or the
 // stairs would be climbable in a spot that doesn't visually line up (or
 // vice versa).
-const getHoleBounds = (w: number, d: number, corner: number) => {
+export const getHoleBounds = (w: number, d: number, corner: number) => {
   const sx = corner % 2 === 0 ? -1 : 1;
   const sz = corner < 2 ? -1 : 1;
   const holeMinX = sx < 0 ? -w / 2 : w / 2 - BUILDING_HOLE_SIZE;
@@ -283,15 +399,122 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
   // building share one BoxGeometry via instancing. floorHeight varies
   // per-building (see getBuildingNumFloors), so this can't be shared
   // globally across buildings, only within one.
+  // "sostituisci le scale con quelle di simulation-citta" -- that project's
+  // own Building() (its Hide & Seek demo) drew each flight as a stack of
+  // chunky individual boxGeometry(1.0, 0.2, 0.22) treads (see its
+  // src/App.js) instead of one continuous inclined plank. Ported as the
+  // same idea, generalized to whatever run (BUILDING_HOLE_SIZE) / rise
+  // (floorHeight) this building actually has: STAIR_STEP_COUNT treads per
+  // flight, each one a small flat box. IMPORTANT: this only changes what's
+  // DRAWN -- getBuildingHeightOffset above still returns a smooth
+  // continuous ramp inside the hole (unchanged), which is what Player.tsx
+  // actually climbs (see the big comment up top on why floors/stairs are
+  // height-field math, not physics). The step boxes below are laid out to
+  // sit right on top of that same ramp, tread by tread, purely for looks.
+  const STAIR_STEP_COUNT = 10;
   const stairGeometry = useMemo(() => {
-    const run = BUILDING_HOLE_SIZE;
-    const rise = floorHeight;
-    const length = Math.sqrt(run * run + rise * rise);
-    const theta = Math.atan2(rise, run);
-    const geo = new THREE.BoxGeometry(length, 0.2, BUILDING_STAIR_WIDTH);
-    geo.rotateZ(theta);
-    return geo;
+    const stepRun = (BUILDING_HOLE_SIZE / STAIR_STEP_COUNT) * 1.1; // slight overlap so treads don't show a gap
+    const stepRise = floorHeight / STAIR_STEP_COUNT;
+    return new THREE.BoxGeometry(stepRun, stepRise, BUILDING_STAIR_WIDTH);
   }, [floorHeight]);
+
+  // Real punched-hole wall panels (front/back/left/right) replacing the
+  // single solid box for anything that isn't a glass curtain-wall tower
+  // (glass towers keep the old clean box + mullion overlay below -- see
+  // that comment for why). Window hole positions/sizes mirror the
+  // windowInstances computed in `details` below exactly (same
+  // spacing/countW/countD/floor math) so the glass-pane decals line up
+  // with the actual openings; kept as a small separate computation here
+  // rather than threading it back out of `details` to avoid touching that
+  // memo's existing shape. WALL_HOLE_MARGIN shrinks each hole slightly
+  // versus its 1.3x1.9 glass pane so the pane's edge overlaps the
+  // punched opening instead of leaving a sliver of daylight-colored gap.
+  // Hole list shared by both the visual wall panels (wallGeometries) and
+  // their physics colliders (colliderBoxes) below -- computed once here so
+  // the two truly can't drift apart (they used to be two separate spacing/
+  // countW/countD/floor computations that just had to be kept in sync by
+  // hand; see git history for why that comment existed).
+  // "le finestre devono essere coerenti con i piani" -- f*floorHeight is
+  // a SLAB's height (see the slab instancedMesh below, f=1..numFloors-1),
+  // so a window centered there straddled the floor between two rooms
+  // instead of sitting inside either one. f+0.5 centers it in the middle
+  // of room f's own vertical span instead, room f=0 (ground) skipped
+  // same as before by starting at f=1.
+  const wallHoles = useMemo(() => {
+    if (style === 'glass') return null;
+    const spacing = 3.4;
+    const countW = Math.min(6, Math.max(1, Math.floor(width / spacing) - 1));
+    const countD = Math.min(6, Math.max(1, Math.floor(depth / spacing) - 1));
+    const WALL_HOLE_MARGIN = 0.05;
+    const holeHalfW = 1.3 / 2 - WALL_HOLE_MARGIN;
+    const holeHalfH = 1.9 / 2 - WALL_HOLE_MARGIN;
+
+    const holesW: WallHole[] = [];
+    const holesD: WallHole[] = [];
+    for (let f = 1; f < numFloors; f++) {
+      const wy = (f + 0.5) * floorHeight;
+      for (let cc = 0; cc < countW; cc++) {
+        const wx = (cc - (countW - 1) / 2) * spacing;
+        holesW.push({ cx: wx, cy: wy, hw: holeHalfW, hh: holeHalfH });
+      }
+      for (let rr = 0; rr < countD; rr++) {
+        const wz = (rr - (countD - 1) / 2) * spacing;
+        holesD.push({ cx: wz, cy: wy, hw: holeHalfW, hh: holeHalfH });
+      }
+    }
+
+    const doorHole: WallHole = { cx: 0, cy: BUILDING_DOOR_HEIGHT / 2, hw: BUILDING_DOOR_WIDTH / 2, hh: BUILDING_DOOR_HEIGHT / 2 };
+
+    return { holesW, holesD, doorHole };
+  }, [style, width, depth, height, floorHeight, numFloors]);
+
+  // Real punched-hole wall panels (front/back/left/right) replacing the
+  // single solid box for anything that isn't a glass curtain-wall tower
+  // (glass towers keep the old clean box + mullion overlay below -- see
+  // that comment for why). Window hole positions/sizes mirror the
+  // windowInstances computed in `details` below exactly (same
+  // spacing/countW/countD/floor math) so the glass-pane decals line up
+  // with the actual openings. WALL_HOLE_MARGIN (baked into wallHoles
+  // above) shrinks each hole slightly versus its 1.3x1.9 glass pane so
+  // the pane's edge overlaps the punched opening instead of leaving a
+  // sliver of daylight-colored gap.
+  const wallGeometries = useMemo(() => {
+    if (!wallHoles) return null;
+    const { holesW, holesD, doorHole } = wallHoles;
+    return {
+      // Front (-Z) is the door face -- windows AND the entrance opening.
+      front: buildWallGeometry(width, height, BUILDING_WALL_THICKNESS, [...holesW, doorHole]),
+      back: buildWallGeometry(width, height, BUILDING_WALL_THICKNESS, holesW),
+      // Left and right share one geometry -- identical window layout,
+      // just mirrored/repositioned via rotation below.
+      side: buildWallGeometry(depth, height, BUILDING_WALL_THICKNESS, holesD),
+    };
+  }, [wallHoles, width, depth, height]);
+
+  // "nn riesco a passarci attraverso" -- the physics counterpart of
+  // wallGeometries above, built from the exact same wallHoles so a window
+  // (or the door) is a real gap to WALK through, not just to see through.
+  // null for glass towers, which fall back to the old simple door-only
+  // collider set in the RigidBody below (see that block's comment for why).
+  const colliderBoxes = useMemo(() => {
+    if (!wallHoles) return null;
+    const { holesW, holesD, doorHole } = wallHoles;
+    return {
+      front: buildWallColliderBoxes(width, height, [...holesW, doorHole]),
+      back: buildWallColliderBoxes(width, height, holesW),
+      side: buildWallColliderBoxes(depth, height, holesD),
+    };
+  }, [wallHoles, width, depth, height]);
+
+  const wallMaterialProps = useMemo(
+    () => ({
+      color,
+      roughness: style === 'brick' ? 0.85 : 0.6,
+      metalness: style === 'brick' ? 0.05 : 0.25,
+      side: THREE.DoubleSide as THREE.Side,
+    }),
+    [color, style]
+  );
 
   // All the randomized "detail" decisions for this building are picked
   // ONCE per mount instead of directly in the render body (the roof-detail
@@ -338,11 +561,14 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
     const windowInstances: Array<{ x: number; y: number; z: number; rotationY: number; lit: boolean }> = [];
     if (style !== 'glass') {
       const spacing = 3.4;
-      const windowFloorCount = Math.max(0, numFloors - 1); // skip ground floor + roof
       const countW = Math.min(6, Math.max(1, Math.floor(width / spacing) - 1));
       const countD = Math.min(6, Math.max(1, Math.floor(depth / spacing) - 1));
-      for (let f = 0; f < windowFloorCount; f++) {
-        const wy = (f + 1) * floorHeight;
+      // Same room-centered fix as wallGeometries above -- f+0.5 puts the
+      // window in the middle of room f's own floor-to-ceiling span rather
+      // than on the slab between room f-1 and room f. f=0 (ground floor)
+      // still skipped by starting at f=1.
+      for (let f = 1; f < numFloors; f++) {
+        const wy = (f + 0.5) * floorHeight;
         for (let c = 0; c < countW; c++) {
           const wx = (c - (countW - 1) / 2) * spacing;
           windowInstances.push({ x: wx, y: wy, z: depth / 2 + 0.04, rotationY: 0, lit: Math.random() > 0.65 });
@@ -379,46 +605,110 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
         position={[x, y, z]}
         collisionGroups={groupsExcluding(CollisionGroups.Default)}
       >
-        <CuboidCollider
-          args={[(halfW - doorHalf) / 2, height / 2, BUILDING_WALL_THICKNESS / 2]}
-          position={[(-halfW - doorHalf) / 2, height / 2, -halfD]}
-        />
-        <CuboidCollider
-          args={[(halfW - doorHalf) / 2, height / 2, BUILDING_WALL_THICKNESS / 2]}
-          position={[(doorHalf + halfW) / 2, height / 2, -halfD]}
-        />
-        {hasLintel && (
-          <CuboidCollider
-            args={[doorHalf, (height - BUILDING_DOOR_HEIGHT) / 2, BUILDING_WALL_THICKNESS / 2]}
-            position={[0, (BUILDING_DOOR_HEIGHT + height) / 2, -halfD]}
-          />
+        {colliderBoxes ? (
+          <>
+            {colliderBoxes.front.map((b, i) => (
+              <CuboidCollider
+                key={`front-${i}`}
+                args={[b.halfW, b.halfH, BUILDING_WALL_THICKNESS / 2]}
+                position={[b.cx, b.cy, -halfD]}
+              />
+            ))}
+            {colliderBoxes.back.map((b, i) => (
+              <CuboidCollider
+                key={`back-${i}`}
+                args={[b.halfW, b.halfH, BUILDING_WALL_THICKNESS / 2]}
+                position={[b.cx, b.cy, halfD]}
+              />
+            ))}
+            {colliderBoxes.side.map((b, i) => (
+              <CuboidCollider
+                key={`left-${i}`}
+                args={[BUILDING_WALL_THICKNESS / 2, b.halfH, b.halfW]}
+                position={[-halfW, b.cy, b.cx]}
+              />
+            ))}
+            {colliderBoxes.side.map((b, i) => (
+              <CuboidCollider
+                key={`right-${i}`}
+                args={[BUILDING_WALL_THICKNESS / 2, b.halfH, b.halfW]}
+                position={[halfW, b.cy, b.cx]}
+              />
+            ))}
+          </>
+        ) : (
+          // Glass towers: wallGeometries/colliderBoxes are both null (no
+          // punched holes there -- see the mullion-overlay comment below),
+          // so this keeps the original simple door-only collider set:
+          // solid back/left/right, a real gap only at the door.
+          <>
+            <CuboidCollider
+              args={[(halfW - doorHalf) / 2, height / 2, BUILDING_WALL_THICKNESS / 2]}
+              position={[(-halfW - doorHalf) / 2, height / 2, -halfD]}
+            />
+            <CuboidCollider
+              args={[(halfW - doorHalf) / 2, height / 2, BUILDING_WALL_THICKNESS / 2]}
+              position={[(doorHalf + halfW) / 2, height / 2, -halfD]}
+            />
+            {hasLintel && (
+              <CuboidCollider
+                args={[doorHalf, (height - BUILDING_DOOR_HEIGHT) / 2, BUILDING_WALL_THICKNESS / 2]}
+                position={[0, (BUILDING_DOOR_HEIGHT + height) / 2, -halfD]}
+              />
+            )}
+            <CuboidCollider args={[halfW, height / 2, BUILDING_WALL_THICKNESS / 2]} position={[0, height / 2, halfD]} />
+            <CuboidCollider args={[BUILDING_WALL_THICKNESS / 2, height / 2, halfD]} position={[-halfW, height / 2, 0]} />
+            <CuboidCollider args={[BUILDING_WALL_THICKNESS / 2, height / 2, halfD]} position={[halfW, height / 2, 0]} />
+          </>
         )}
-        <CuboidCollider args={[halfW, height / 2, BUILDING_WALL_THICKNESS / 2]} position={[0, height / 2, halfD]} />
-        <CuboidCollider args={[BUILDING_WALL_THICKNESS / 2, height / 2, halfD]} position={[-halfW, height / 2, 0]} />
-        <CuboidCollider args={[BUILDING_WALL_THICKNESS / 2, height / 2, halfD]} position={[halfW, height / 2, 0]} />
       </RigidBody>
 
-      {/* Main Structure -- same one solid box mesh as before (exterior
-          look is unchanged), now DoubleSide so its INNER surface is also
-          visible once you're standing inside the hollowed-out building --
-          from in there this single box reads correctly as the surrounding
-          shell (all 4 walls + ceiling/roof underside) without needing any
-          separate interior lining geometry. */}
-      <mesh castShadow receiveShadow position={[x, y + height / 2, z]}>
-        <boxGeometry args={[width, height, depth]} />
-        <meshStandardMaterial
-          color={color}
-          roughness={style === 'glass' ? 0.1 : style === 'brick' ? 0.85 : 0.6}
-          metalness={style === 'glass' ? 0.9 : style === 'brick' ? 0.05 : 0.25}
-          side={THREE.DoubleSide}
-        />
-      </mesh>
+      {/* Main Structure. Glass curtain-wall towers keep the original
+          single solid box (no punched windows -- see the mullion-overlay
+          comment below for why); everything else ('modern'/'brick') now
+          gets real punched-hole wall panels instead of one unbroken box,
+          so a window (or the front door) is an actual gap through the
+          wall, not a decal glued in front of solid geometry -- see
+          buildWallGeometry's comment up top. DoubleSide throughout so the
+          inner surface is visible once you're standing inside. */}
+      {style === 'glass' || !wallGeometries ? (
+        <mesh castShadow receiveShadow position={[x, y + height / 2, z]}>
+          <boxGeometry args={[width, height, depth]} />
+          <meshStandardMaterial color={color} roughness={0.1} metalness={0.9} side={THREE.DoubleSide} />
+        </mesh>
+      ) : (
+        <>
+          <mesh geometry={wallGeometries.back} position={[x, y, z + halfD]} castShadow receiveShadow>
+            <meshStandardMaterial {...wallMaterialProps} />
+          </mesh>
+          <mesh geometry={wallGeometries.front} position={[x, y, z - halfD]} castShadow receiveShadow>
+            <meshStandardMaterial {...wallMaterialProps} />
+          </mesh>
+          <mesh geometry={wallGeometries.side} position={[x - halfW, y, z]} rotation={[0, Math.PI / 2, 0]} castShadow receiveShadow>
+            <meshStandardMaterial {...wallMaterialProps} />
+          </mesh>
+          <mesh geometry={wallGeometries.side} position={[x + halfW, y, z]} rotation={[0, -Math.PI / 2, 0]} castShadow receiveShadow>
+            <meshStandardMaterial {...wallMaterialProps} />
+          </mesh>
+          {/* Roof cap -- the punched wall panels above are just the 4
+              perimeter faces (each BUILDING_WALL_THICKNESS thick, not the
+              old full-depth solid box), so the volume needs its own lid;
+              the ground floor is intentionally left open (bare terrain,
+              same as before). */}
+          <mesh position={[x, y + height + BUILDING_WALL_THICKNESS / 2, z]} castShadow receiveShadow>
+            <boxGeometry args={[width, BUILDING_WALL_THICKNESS, depth]} />
+            <meshStandardMaterial {...wallMaterialProps} />
+          </mesh>
+        </>
+      )}
 
-      {/* Real punched windows (modern/brick) -- one instanced mesh per
-          building, lit (warm) vs unlit (dark) per-instance color, replaces
-          the old flat random-wireframe-box fake. Positions are absolute
-          world coords (x/z/y-from-ground) like every other sibling here,
-          since this <group> carries no transform of its own. */}
+      {/* Windows (modern/brick) -- one instanced mesh per building, lit
+          (warm) vs unlit (dark) per-instance color. This is the "glass"
+          sitting inside each real punched opening above: semi-transparent
+          now (rather than fully opaque) since the wall behind it is
+          genuinely gone, not just covered. Positions are absolute world
+          coords (x/z/y-from-ground) like every other sibling here, since
+          this <group> carries no transform of its own. */}
       {windowInstances.length > 0 && (
         <instancedMesh
           args={[null as any, null as any, windowInstances.length]}
@@ -437,7 +727,7 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           }}
         >
           <planeGeometry args={[1.3, 1.9]} />
-          <meshBasicMaterial vertexColors toneMapped={false} />
+          <meshBasicMaterial vertexColors toneMapped={false} transparent opacity={0.55} depthWrite={false} side={THREE.DoubleSide} />
         </instancedMesh>
       )}
 
@@ -532,18 +822,27 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           continuous incline regardless of angle, so it's fully walkable).
           All flights in this building share one instanced geometry. */}
       <instancedMesh
-        args={[null as any, null as any, numFloors]}
+        args={[null as any, null as any, numFloors * STAIR_STEP_COUNT]}
         onUpdate={(self) => {
           self.geometry = stairGeometry;
           for (let f = 0; f < numFloors; f++) {
-            _stairDummy.position.set(x + stairCenterX, y + f * floorHeight + floorHeight / 2, z + stairCenterZ);
-            _stairDummy.updateMatrix();
-            self.setMatrixAt(f, _stairDummy.matrix);
+            for (let i = 0; i < STAIR_STEP_COUNT; i++) {
+              // tCenter mirrors getBuildingHeightOffset's own `t` (0 at
+              // holeMinX, 1 at holeMaxX) so each tread's world X lines up
+              // with the invisible ramp height it's meant to sit on.
+              const tCenter = (i + 0.5) / STAIR_STEP_COUNT;
+              const stepLocalX = holeMinX + tCenter * BUILDING_HOLE_SIZE;
+              const stepLocalY = f * floorHeight + tCenter * floorHeight;
+              _stairDummy.position.set(x + stepLocalX, y + stepLocalY, z + stairCenterZ);
+              _stairDummy.rotation.set(0, 0, 0);
+              _stairDummy.updateMatrix();
+              self.setMatrixAt(f * STAIR_STEP_COUNT + i, _stairDummy.matrix);
+            }
           }
           self.instanceMatrix.needsUpdate = true;
         }}
       >
-        <meshStandardMaterial color="#777" roughness={0.85} />
+        <meshStandardMaterial color="#4f46e5" roughness={0.7} metalness={0.1} />
       </instancedMesh>
 
       {/* Entrance canopy -- thin overhang + two support posts over the

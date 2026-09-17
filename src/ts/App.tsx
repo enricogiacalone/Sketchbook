@@ -20,6 +20,7 @@ import Minimap from "./components/UI/Minimap";
 import Crosshair from "./components/UI/Crosshair";
 import GamepadDebug from "./components/UI/GamepadDebug";
 import ScenariosGUI from "./components/UI/ScenariosGUI";
+import CombatArenaGUI from "./components/UI/CombatArenaGUI";
 import Loader from "./components/UI/Loader"; // Helper to track loading
 import Player from "./components/Player"; // Import Player directly to pass userName
 import Drone from "./components/Drone";
@@ -247,6 +248,7 @@ const App: React.FC = () => {
           <Crosshair />
           <GamepadDebug />
           <ScenariosGUI />
+          <CombatArenaGUI />
           {isPaused && (
             <div
               style={{

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { GameMode } from './components/Environment/SquadArenaTypes';
 
 export type ControllableType = 'player' | 'car' | 'airplane' | 'helicopter' | 'drone';
 // Which kind of seat the player currently occupies inside a vehicle -- null
@@ -111,6 +112,19 @@ interface GameState {
   // meteorites...). Set via window.__sim.startTest()/endTest() (see
   // debug/simDebug.ts) or the "Scenari" lil-gui panel (ScenariosGUI.tsx).
   testScene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race';
+  // "fammi scegliere ... le modalita di scontro dei manichini" -- which
+  // CombatArena.tsx duel mode is active (TERRITORY_CONTROL/TEAMS/FFA, same
+  // three options simulation-citta's own "Modalita Scontro" dropdown had --
+  // see CombatArenaGUI.tsx). Lives here (rather than local state inside
+  // CombatArena) so the lil-gui panel, which is NOT a child of the R3F
+  // scene tree, can change it.
+  arenaGameMode: GameMode;
+  // "da un minimo di 0 a 120 combattenti" -- total fighter count across
+  // ALL of CombatArena.tsx's clusters combined (split as evenly as
+  // possible between them), mirroring simulation-citta's own "Combattenti"
+  // range slider (there capped at min 2; 0 is allowed here so the arena can
+  // be switched off entirely). See CombatArenaGUI.tsx.
+  arenaFighterCount: number;
   entities: Map<string, EntityInfo>;
   setHealth: (health: number) => void;
   setMaxHealth: (maxHealth: number) => void;
@@ -152,6 +166,8 @@ interface GameState {
   setCollectiblesTotal: (total: number) => void;
   setIsPlayerGrounded: (grounded: boolean) => void;
   setTestScene: (scene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race') => void;
+  setArenaGameMode: (mode: GameMode) => void;
+  setArenaFighterCount: (count: number) => void;
   collectItem: () => void;
   updateEntity: (id: string, info: Partial<EntityInfo>) => void;
   removeEntity: (id: string) => void;
@@ -183,6 +199,8 @@ export const useStore = create<GameState>((set) => ({
   // within its first couple of frames regardless.
   isPlayerGrounded: false,
   testScene: 'none',
+  arenaGameMode: 'TERRITORY_CONTROL',
+  arenaFighterCount: 20,
   missionStage: 0,
   missionStatus: 'inactive',
   missionTitle: '',
@@ -231,6 +249,8 @@ export const useStore = create<GameState>((set) => ({
   setCollectiblesTotal: (total) => set({ collectiblesTotal: total }),
   setIsPlayerGrounded: (grounded) => set((state) => (state.isPlayerGrounded === grounded ? state : { isPlayerGrounded: grounded })),
   setTestScene: (testScene) => set({ testScene }),
+  setArenaGameMode: (arenaGameMode) => set({ arenaGameMode }),
+  setArenaFighterCount: (arenaFighterCount) => set({ arenaFighterCount }),
   collectItem: () => set((state) => ({ collectiblesFound: Math.min(state.collectiblesTotal, state.collectiblesFound + 1) })),
   // "serve ottimizzare ancora" -- every car/pedestrian/enemy calls this on
   // a fixed timer (Car.tsx ~10/s, Pedestrian.tsx ~5/s) regardless of

@@ -18,6 +18,7 @@ import Clouds from "./components/Environment/Clouds";
 import UFO from "./components/Environment/UFO";
 import MeteoriteSpawner from "./components/Environment/MeteoriteSpawner";
 import EnemySpawner from "./components/EnemySpawner";
+import SoldierSpawner from "./components/SoldierSpawner";
 import MissionManager from "./components/Missions/MissionManager";
 import Car from "./components/Vehicles/Car"; // Import Car
 import Airplane from "./components/Vehicles/Airplane"; // Import Airplane
@@ -93,6 +94,8 @@ const Scene: React.FC = () => {
       {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}
       {showSkyAtmosphere && <MeteoriteSpawner />}
       {!isCleanTest && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
+      {/* Soldati portati da simulation-citta (AgentSoldier + RiggedCitizen), decorativi come i pedoni */}
+      {!isCleanTest && <SoldierSpawner />}
 
       {/* Carichiamo i modelli in blocchi separati per non bloccare la fisica */}
       <Suspense fallback={null}>
