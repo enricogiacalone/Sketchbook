@@ -31,6 +31,24 @@ export enum CollisionGroups {
   Hurtbox = 6,
 }
 
+// "ogni parte del corpo deve essere un collider.. se collide collide"
+// -- shared by every REAL solid-body collider in the duel: each
+// fighter's 11 permanent per-limb capsules (useRagdoll.ts's solid-body
+// system) AND the punching bag's own non-sensor capsule (PunchingBag.tsx)
+// all join this one group, so any of them can physically block or shove
+// any other member -- an arm, a leg, the torso, the bag, whatever
+// actually touches, touches; nothing here is a synthetic single-capsule
+// "whole body" stand-in or a distance check. Previously lived as
+// DUEL_BODY_GROUPS in useDuelBodyCollider.tsx (now removed -- that hook
+// was exactly the "one approximate capsule, stop at a distance" approach
+// this replaces); same underlying value, moved here since it's no longer
+// owned by one single-collider hook but by the whole solid-body system
+// plus the bag.
+export const SOLID_BODY_GROUPS = interactionGroups(
+  [CollisionGroups.Characters],
+  [CollisionGroups.Characters]
+);
+
 const ALL_GROUP_INDICES = Array.from({ length: 16 }, (_, i) => i);
 
 // Convenience wrapper around `interactionGroups`, for the very common

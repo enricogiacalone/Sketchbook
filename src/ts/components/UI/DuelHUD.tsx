@@ -17,7 +17,19 @@ import { useShallow } from 'zustand/react/shallow';
 // place; this component itself never touches those refs directly, it's
 // plain DOM outside the R3F tree (same reasoning as StatusBars.tsx).
 const DuelHUD: React.FC = () => {
-  const { testScene, duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY, duelDummyMode } = useStore(
+  const {
+    testScene,
+    duelPlayerHp,
+    duelEnemyHp,
+    duelResult,
+    duelInRange,
+    duelReticleX,
+    duelReticleY,
+    bagHitCount,
+    bagLastHitRadialOffset,
+    bagLastHitHeightOffset,
+    bagLastHitHand,
+  } = useStore(
     useShallow((state) => ({
       testScene: state.testScene,
       duelPlayerHp: state.duelPlayerHp,
@@ -26,7 +38,10 @@ const DuelHUD: React.FC = () => {
       duelInRange: state.duelInRange,
       duelReticleX: state.duelReticleX,
       duelReticleY: state.duelReticleY,
-      duelDummyMode: state.duelDummyMode,
+      bagHitCount: state.bagHitCount,
+      bagLastHitRadialOffset: state.bagLastHitRadialOffset,
+      bagLastHitHeightOffset: state.bagLastHitHeightOffset,
+      bagLastHitHand: state.bagLastHitHand,
     }))
   );
 
@@ -164,32 +179,50 @@ const DuelHUD: React.FC = () => {
         ✕ Esci dal Duello
       </button>
 
-      {/* "metti un opzione in cui l'avversario si ferma e non combatte
-          che posso attivare a piacimento" -- training-dummy toggle,
-          flippable mid-match (not gated on duelResult, unlike the retry/
-          exit buttons below, since the whole point is switching it on or
-          off WHILE fighting). See store.ts's duelDummyMode for the full
-          wiring. */}
-      <button
-        onClick={() => useStore.getState().toggleDuelDummyMode()}
+      {/* "il comando per rendere passivo l'avversario deve stare dentro
+          la sezione arena" -- this used to be its own floating button
+          here (top:60/right:20), duplicating the exact same
+          duelDummyMode toggle CombatArenaGUI.tsx's lil-gui panel now
+          also exposes, inside its "Arena" folder -- removed in favor of
+          that single control living in one place. */}
+
+      {/* "mi serve per capire la precisione delle collisioni" -- live
+          readout for PunchingBag.tsx's own hit counter/last-hit offsets
+          (see store.ts's registerBagHit). Always visible while in the
+          duel (not gated on duelResult -- same reasoning as the Manichino
+          toggle above, you might keep testing the bag after the fight
+          ends), bottom-left so it never competes with the HP bars/reticle
+          up top. Offsets shown in cm (the store keeps meters) since a few
+          centimeters is the actual precision resolution someone testing
+          hurtbox accuracy cares about. */}
+      <div
         style={{
           position: 'absolute',
-          top: 60,
-          right: 20,
-          pointerEvents: 'auto',
+          bottom: 20,
+          left: 20,
+          pointerEvents: 'none',
           fontFamily: 'monospace',
-          fontWeight: 'bold',
           fontSize: 12,
           color: '#fff',
-          background: duelDummyMode ? 'rgba(34,197,94,0.35)' : 'rgba(0,0,0,0.5)',
-          border: duelDummyMode ? '1px solid #22c55e' : '1px solid rgba(255,255,255,0.4)',
+          textShadow: '2px 2px 0px #000',
+          background: 'rgba(0,0,0,0.5)',
+          border: '1px solid rgba(255,221,85,0.5)',
           borderRadius: 6,
-          padding: '6px 10px',
-          cursor: 'pointer',
+          padding: '8px 10px',
+          minWidth: 190,
         }}
       >
-        {duelDummyMode ? '● Manichino: ON' : '○ Manichino: OFF'}
-      </button>
+        <div style={{ fontWeight: 'bold', marginBottom: 4, color: '#ffdd55' }}>🥊 Sacco: {bagHitCount} colpi</div>
+        {bagLastHitRadialOffset !== null && bagLastHitHeightOffset !== null ? (
+          <div style={{ opacity: 0.9 }}>
+            ultimo: mano {bagLastHitHand === 'hand_l' ? 'sx' : 'dx'}, {Math.round(bagLastHitRadialOffset * 100)}cm dal centro
+            ({bagLastHitHeightOffset >= 0 ? '+' : ''}
+            {Math.round(bagLastHitHeightOffset * 100)}cm vert.)
+          </div>
+        ) : (
+          <div style={{ opacity: 0.6 }}>colpisci il sacco per iniziare</div>
+        )}
+      </div>
 
       {duelResult !== 'none' && (
         <div

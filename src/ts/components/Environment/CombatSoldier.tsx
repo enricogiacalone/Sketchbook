@@ -6,6 +6,8 @@ import { SkeletonUtils } from 'three-stdlib';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { useRagdoll } from './ragdoll/useRagdoll';
+import SolidBodyDebugView from './SolidBodyDebugView';
+import type { PunchingBagHandle } from './PunchingBag';
 import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode, AnimCatalog } from './SquadArenaTypes';
 
 const MODEL_URL = 'soldier-citizen.glb';
@@ -48,6 +50,15 @@ interface CombatSoldierProps {
   // its "Combattenti" slider) -- CombatArena.tsx deliberately leaves this
   // unset/false to avoid spawning up to ~1200 extra ragdoll bodies.
   enableRagdoll?: boolean;
+  // "nn voglio che usi distanze per fermarlo.. se sbatto col sacco
+  // dovrei muoverlo" -- opt-in (same lifetime as enableRagdoll -- only
+  // DuelArena.tsx's own AI opponent instance passes these; the 120-
+  // fighter FFA arena never does, so its own cheap distance-avoidance
+  // hack below stays exactly as it was for that scale). Bag's solid
+  // collider handle + imperative ref, for real per-limb collision
+  // against the bag (useRagdoll.ts's resolveBodyMovement).
+  bagSolidHandle?: number | null;
+  bagRef?: React.RefObject<PunchingBagHandle | null>;
 }
 
 // Ported from simulation-citta's "RiggedCitizen" -- the full duel AI this
@@ -69,6 +80,8 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
   setMedkitPoolCount,
   globalSpeed,
   enableRagdoll = false,
+  bagSolidHandle,
+  bagRef,
 }) => {
   const groupRef = React.useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -201,34 +214,66 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
 
   // "il colpo deve essere sferrato dove effettivamente le mesh collidono"
   // -- see the identical function/comment in PlayerCombatSoldier.tsx.
-  // `theTarget` is attackTargetRef's snapshot, passed in rather than read
-  // from the ref directly so a null-check only has to happen once at the
-  // call site.
+  // `theTarget` e' lo snapshot di attackTargetRef, passato invece di
+  // rileggerlo dal ref cosi' il null-check serve una volta sola.
+  //
+  // "il colpo deve avvenire dove colpisce la mano" -- stessa fix, stesso
+  // pendingHitRef/finalizePendingHit di PlayerCombatSoldier.tsx (vedi il
+  // suo commento per i dettagli/prova empirica): non si risolve piu' al
+  // primo sfioramento del volume di query, si continua a tracciare la
+  // mano finche' resta dentro e si risolve solo quando esce, usando
+  // l'ultima posizione -- il punto di affondo piu' profondo raggiunto.
+  const pendingHitRef = React.useRef<{
+    bone: (typeof ATTACK_HAND_BONES)[number];
+    target: FighterData;
+    pos: THREE.Vector3;
+  } | null>(null);
+
+  const finalizePendingHit = (): boolean => {
+    const pending = pendingHitRef.current;
+    pendingHitRef.current = null;
+    if (!pending) return false;
+    const theTarget = pending.target;
+    if (theTarget.currentAnim === theTarget.animCatalog?.block) {
+      theTarget.hp -= 5;
+      theTarget.state = 'Danno parato!';
+    } else {
+      theTarget.hp -= 25;
+      if (theTarget.hp <= 0) {
+        theTarget.hp = 0;
+        theTarget.isDead = true;
+        theTarget.attackLock = 0;
+      } else {
+        theTarget.triggerHit = Math.random() > 0.5 ? 'Hit_Chest' : 'Hit_Head';
+        // "il colpo deve avvenire precisamente dove le mesh si sono
+        // toccate" -- il punto di affondo piu' profondo tracciato sopra,
+        // non piu' solo "il primo punto di contatto".
+        theTarget.hitFromX = pending.pos.x;
+        theTarget.hitFromZ = pending.pos.z;
+      }
+    }
+    return true;
+  };
+
   const checkAttackContact = (theTarget: FighterData): boolean => {
+    if (pendingHitRef.current) {
+      const pending = pendingHitRef.current;
+      const stillIn =
+        ragdoll.getBoneWorldPosition(pending.bone, _handPos) &&
+        pending.target.hurtboxHandle !== null &&
+        ragdoll.pointIntersectsHurtbox(_handPos, pending.target.hurtboxHandle);
+      if (stillIn) {
+        pending.pos.copy(_handPos);
+        return false;
+      }
+      return finalizePendingHit();
+    }
     if (theTarget.hurtboxHandle === null) return false; // target's hurtbox not created yet (its very first frame)
     for (const boneName of ATTACK_HAND_BONES) {
       if (!ragdoll.getBoneWorldPosition(boneName, _handPos)) continue;
       if (!ragdoll.pointIntersectsHurtbox(_handPos, theTarget.hurtboxHandle)) continue;
-
-      if (theTarget.currentAnim === theTarget.animCatalog?.block) {
-        theTarget.hp -= 5;
-        theTarget.state = 'Danno parato!';
-      } else {
-        theTarget.hp -= 25;
-        if (theTarget.hp <= 0) {
-          theTarget.hp = 0;
-          theTarget.isDead = true;
-          theTarget.attackLock = 0;
-        } else {
-          theTarget.triggerHit = Math.random() > 0.5 ? 'Hit_Chest' : 'Hit_Head';
-          // "il colpo deve avvenire precisamente dove le mesh si sono
-          // toccate" -- now the real hand contact point, not this
-          // fighter's root position.
-          theTarget.hitFromX = _handPos.x;
-          theTarget.hitFromZ = _handPos.z;
-        }
-      }
-      return true;
+      pendingHitRef.current = { bone: boneName, target: theTarget, pos: _handPos.clone() };
+      return false;
     }
     return false;
   };
@@ -266,6 +311,30 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       const groundY = getTerrainHeight(data.position.x, data.position.z) + getRoadOffset(data.position.x, data.position.z);
       groupRef.current!.position.set(data.position.x, groundY + data.position.y, data.position.z);
       groupRef.current!.rotation.y = data.rotation;
+    };
+
+    // "nn voglio che usi distanze per fermarlo.. ogni parte del corpo
+    // deve essere un collider.. se sbatto col sacco dovrei muoverlo" --
+    // same real per-limb resolution PlayerCombatSoldier.tsx uses, opt-in
+    // via enableRagdoll (only DuelArena.tsx's own AI opponent passes it
+    // true) -- the 120-fighter FFA arena never calls this, so it never
+    // pays for the 11 extra colliders per fighter.
+    const resolveAndApplyMovement = (desiredX: number, desiredZ: number) => {
+      if (!enableRagdoll) {
+        data.position.x += desiredX;
+        data.position.z += desiredZ;
+        return;
+      }
+      const corrected = ragdoll.resolveBodyMovement(
+        desiredX,
+        desiredZ,
+        bagSolidHandle ?? null,
+        bagRef?.current
+          ? (point, dir, blocked) => bagRef.current!.applyBodyBump(point, dir, blocked)
+          : undefined
+      );
+      data.position.x += corrected.x;
+      data.position.z += corrected.z;
     };
 
     if (data.isDead) {
@@ -316,6 +385,12 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         if (checkAttackContact(attackTargetRef.current)) attackHasLandedRef.current = true;
       }
       if (data.attackLock <= 0) {
+        // Rete di sicurezza -- vedi il commento identico in
+        // PlayerCombatSoldier.tsx: una mano ancora dentro il bersaglio
+        // quando lo swing finisce deve comunque risolversi.
+        if (attackTargetRef.current && !attackHasLandedRef.current && pendingHitRef.current) {
+          if (finalizePendingHit()) attackHasLandedRef.current = true;
+        }
         transitionToAnimation(animCatalog.idle, 0.2, true);
         data.state = 'In guardia';
         attackTargetRef.current = null;
@@ -468,13 +543,23 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     const distance = toTarget.length();
     toTarget.normalize();
 
-    allFightersData.forEach((other) => {
-      if (other.id === data.id || other.isDead) return;
-      if (data.position.distanceTo(other.position) < 1.0) {
-        const push = new THREE.Vector3().subVectors(data.position, other.position).normalize().multiplyScalar(0.02);
-        data.position.add(push);
-      }
-    });
+    // "nn voglio che usi distanze per fermarlo" -- this hand-rolled
+    // "push apart if closer than 1.0m" WAS exactly the fake distance-
+    // based avoidance the real per-limb solid-body system (see
+    // resolveAndApplyMovement above) now replaces -- kept ONLY for the
+    // 120-fighter FFA arena (enableRagdoll=false there), which still
+    // needs a cheap approximation at that scale; the duel's own AI
+    // opponent (enableRagdoll=true) gets real collision instead, so
+    // running both at once would just have them fighting each other.
+    if (!enableRagdoll) {
+      allFightersData.forEach((other) => {
+        if (other.id === data.id || other.isDead) return;
+        if (data.position.distanceTo(other.position) < 1.0) {
+          const push = new THREE.Vector3().subVectors(data.position, other.position).normalize().multiplyScalar(0.02);
+          data.position.add(push);
+        }
+      });
+    }
 
     const targetRotation = Math.atan2(toTarget.x, toTarget.z) + Math.PI;
     let angleDiff = targetRotation - data.rotation;
@@ -491,7 +576,7 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       if (distance > 1.4) {
         data.state = 'Carica';
         transitionToAnimation(animCatalog.run, 0.15, true, 1.3);
-        data.position.addScaledVector(toTarget, 0.05 * globalSpeed);
+        resolveAndApplyMovement(toTarget.x * 0.05 * globalSpeed, toTarget.z * 0.05 * globalSpeed);
       } else {
         const chosenAttack = animCatalog.attacks[Math.floor(Math.random() * animCatalog.attacks.length)];
         data.state = `Attacco (${chosenAttack})`;
@@ -510,7 +595,7 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         if (Math.random() > 0.5) {
           data.state = 'Capriola';
           transitionToAnimation(animCatalog.dodge, 0.1, false);
-          data.position.addScaledVector(toTarget, -0.04 * globalSpeed);
+          resolveAndApplyMovement(toTarget.x * -0.04 * globalSpeed, toTarget.z * -0.04 * globalSpeed);
         } else {
           data.state = 'Parata';
           transitionToAnimation(animCatalog.block, 0.15, true);
@@ -525,36 +610,43 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
   });
 
   return (
-    <group
-      ref={groupRef}
-      onPointerOver={() => setHovered(true)}
-      onPointerOut={() => setHovered(false)}
-    >
-      <primitive object={clone} scale={1} rotation={[0, Math.PI, 0]} />
-      {!data.isDead && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
-          <ringGeometry args={[0.35, 0.45, 24]} />
-          <meshBasicMaterial color={TEAM_COLOR[data.team] ?? '#f59e0b'} />
-        </mesh>
-      )}
-      {hovered && (
-        <Html position={[0, 2.3, 0]} center distanceFactor={10}>
-          <div
-            style={{
-              background: 'rgba(9, 9, 11, 0.95)',
-              color: 'white',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              fontSize: '11px',
-              whiteSpace: 'nowrap',
-              border: '1px solid rgba(255,255,255,0.2)',
-            }}
-          >
-            {data.name} ({Math.max(0, Math.floor(data.hp))} HP) — {data.state}
-          </div>
-        </Html>
-      )}
-    </group>
+    <>
+      <group
+        ref={groupRef}
+        onPointerOver={() => setHovered(true)}
+        onPointerOut={() => setHovered(false)}
+      >
+        <primitive object={clone} scale={1} rotation={[0, Math.PI, 0]} />
+        {!data.isDead && (
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+            <ringGeometry args={[0.35, 0.45, 24]} />
+            <meshBasicMaterial color={TEAM_COLOR[data.team] ?? '#f59e0b'} />
+          </mesh>
+        )}
+        {hovered && (
+          <Html position={[0, 2.3, 0]} center distanceFactor={10}>
+            <div
+              style={{
+                background: 'rgba(9, 9, 11, 0.95)',
+                color: 'white',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                fontSize: '11px',
+                whiteSpace: 'nowrap',
+                border: '1px solid rgba(255,255,255,0.2)',
+              }}
+            >
+              {data.name} ({Math.max(0, Math.floor(data.hp))} HP) — {data.state}
+            </div>
+          </Html>
+        )}
+      </group>
+      {/* "fai riferimenti visivi per ragdoll e fisica dei solidi" -- only
+          when this instance actually opted into the real solid-body
+          system (see enableRagdoll/resolveAndApplyMovement above) -- the
+          120-fighter FFA arena never has any solid colliders to draw. */}
+      {enableRagdoll && <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />}
+    </>
   );
 };
 

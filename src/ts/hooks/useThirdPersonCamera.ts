@@ -21,6 +21,36 @@ const VEHICLE_RADIUS = 3;
 const MIN_RADIUS = 1;
 const MAX_RADIUS = 20;
 const VEHICLE_TARGET_Y_OFFSET = 0.5;
+// "sistema la camera dietro il player comandato che guarda verso
+// l'avversario con il giusto zoom all'inizio del combattimento.. per ora
+// quando comincio vedo le gambe del player comandato" -- root cause,
+// found by reading the frame loop below: a foot controller's own orbit
+// `target` was left at the character's literal ROOT position (feet
+// height, ~0.15m off the ground here -- no Y offset at all, unlike
+// vehicles' own VEHICLE_TARGET_Y_OFFSET just above) AND theta/phi both
+// start at their module-level default of 0 with zero link to the
+// character's own starting rotation.y (DuelArena.tsx already spawns the
+// two fighters facing each other, via facingToward -- the MODEL turns to
+// face the opponent correctly, the camera orbit just never follows). At
+// theta=0/phi=0 the camera ends up at the exact same height as the
+// character's feet, PLAYER_RADIUS meters directly behind wherever
+// theta=0 happens to point in world space -- which has nothing to do
+// with which way the fighter is actually facing -- hence "vedo le
+// gambe" (a ground-level, off-angle close-up of the legs) the instant a
+// duel starts. Fixed below in two places: this Y offset (elevates the
+// orbit target to roughly chest height, same "chest/eye height above a
+// foot-controller's ground-level root" convention DuelArena.tsx's own
+// AIM_HEIGHT_OFFSET=1.5 already uses for the aim reticle), and the
+// combatSoldier-specific theta/phi/radius snap in the frame loop below.
+const FOOT_TARGET_Y_OFFSET = 1.3;
+// Entering the duel specifically gets its own slightly wider starting
+// radius than the base PLAYER_RADIUS (1.6) -- close enough to read as
+// combat, but with enough room in frame to see the opponent too (spawn
+// separation is DUEL_SEPARATION=4 in DuelArena.tsx), not just this
+// fighter's own back filling the screen -- and a gentle default downward
+// tilt (over-the-shoulder, not a flat eye-level stare).
+const DUEL_START_RADIUS = 2.6;
+const DUEL_START_PHI = 10; // degrees
 
 // Right-stick camera look. useInput.ts's poller only ever reads the LEFT
 // stick (axes[0]/[1], for movement) -- despite a comment further down in
@@ -239,13 +269,33 @@ export const useThirdPersonCamera = () => {
       const snapped = isFootController ? PLAYER_RADIUS : VEHICLE_RADIUS;
       targetRadius.current = snapped;
       radius.current = snapped;
+      // "la camera dietro il player comandato che guarda verso
+      // l'avversario ... all'inizio del combattimento" -- entering the
+      // duel specifically (free-roam 'player' keeps whatever look
+      // direction the person already had, unaffected) snaps theta to the
+      // SAME angle as the fighter's own rotation.y -- see
+      // FOOT_TARGET_Y_OFFSET's big comment above for why theta and
+      // rotation.y are directly interchangeable (both use the identical
+      // atan2(dx,dz)+PI convention) -- so the very first frame already
+      // reads as "behind the player, looking at the opponent" instead of
+      // a leftover angle from theta's module-level default (0) or
+      // whatever the camera was last left at.
+      if (currentControllable === 'combatSoldier') {
+        theta.current = THREE.MathUtils.radToDeg(targetObj.rotation.y);
+        phi.current = DUEL_START_PHI;
+        targetRadius.current = DUEL_START_RADIUS;
+        radius.current = DUEL_START_RADIUS;
+      }
       prevControllable.current = currentControllable;
     }
 
     targetObj.getWorldPosition(target.current);
-    if (!isFootController) {
-      target.current.y += VEHICLE_TARGET_Y_OFFSET;
-    }
+    // "vedo le gambe" -- see FOOT_TARGET_Y_OFFSET's own comment above:
+    // orbiting around the literal root position (feet height) put the
+    // camera at ankle height too whenever phi was ~0. Foot controllers
+    // now get their own (smaller) chest-height offset here, same as
+    // vehicles already got theirs.
+    target.current.y += isFootController ? FOOT_TARGET_Y_OFFSET : VEHICLE_TARGET_Y_OFFSET;
 
     // "faithful" drone flight (droneWorld): the mouse pilots the drone's
     // own orientation (see handleMouseMove above / Player.tsx's per-frame

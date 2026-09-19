@@ -6,8 +6,10 @@ import { SkeletonUtils } from 'three-stdlib';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { useRagdoll } from './ragdoll/useRagdoll';
+import SolidBodyDebugView from './SolidBodyDebugView';
 import { useInput } from '../../hooks/useInput';
 import { FighterData, AnimCatalog } from './SquadArenaTypes';
+import type { PunchingBagHandle } from './PunchingBag';
 
 const MODEL_URL = 'soldier-citizen.glb';
 const BASE_ANIMS_URL = 'soldier-citizen-base-animations.glb';
@@ -97,6 +99,21 @@ interface PlayerCombatSoldierProps {
   // group -- see useThirdPersonCamera.ts.
   entityName: string;
   globalSpeed: number;
+  // "crea un sacco su cui allenarmi.. mi serve per capire la precisione
+  // delle collisioni" -- optional second target, entirely independent of
+  // `opponent` above (see PunchingBag.tsx). Both undefined/null when
+  // DuelArena.tsx's own bag collider hasn't reported its handle yet (its
+  // very first frame or two) -- checkAttackContact below just skips the
+  // bag check in that case, same "not there yet" handling the opponent's
+  // own hurtboxHandle already needs.
+  bagHurtboxHandle?: number | null;
+  bagRef?: React.RefObject<PunchingBagHandle | null>;
+  // "se sbatto col sacco dovrei muoverlo" -- the bag's SOLID collider
+  // handle (not the sensor one above), so resolveBodyMovement can tell
+  // "the thing that just blocked one of my 11 real body-part colliders
+  // IS the bag" and push it for real instead of just stopping. Same
+  // "not there yet" null handling as bagHurtboxHandle.
+  bagSolidHandle?: number | null;
 }
 
 // The player-input-driven half of the 1v1 duel -- "siamo io che controllo
@@ -119,7 +136,7 @@ interface PlayerCombatSoldierProps {
 // applied via useRagdoll's applySpineLean), independent of which way the
 // legs are currently facing -- so punches can be aimed in 2D without
 // spinning the whole body around to do it.
-const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponent, entityName, globalSpeed }) => {
+const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponent, entityName, globalSpeed, bagHurtboxHandle, bagRef, bagSolidHandle }) => {
   const groupRef = useRef<THREE.Group>(null);
   // Points at the SkeletonUtils clone (set below) so useRagdoll can walk
   // its bone hierarchy -- see CombatSoldier.tsx for why this is a ref
@@ -269,22 +286,49 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   // "il colpo deve essere sferrato dove effettivamente le mesh collidono"
   // -- called every frame a swing is active (see the attackLock branch in
   // useFrame below), checks THIS fighter's own hand bones (both -- no
-  // per-clip left/right mapping is tracked, and checking both is cheap
-  // and robust) against `opponent`'s body cylinder. Resolves damage and
-  // returns true the first frame a hand is actually within reach; the
-  // caller uses that to latch attackHasLandedRef so a single swing can
-  // only ever land once. Returns false (a pure "whiff") if the whole
-  // swing never got close enough -- copied verbatim from the old
-  // instant-on-click branch, just no longer gated on distance at t=0.
-  const checkAttackContact = (): boolean => {
-    if (opponent.hurtboxHandle === null) return false; // opponent's hurtbox not created yet (its very first frame)
-    for (const boneName of ATTACK_HAND_BONES) {
-      if (!ragdoll.getBoneWorldPosition(boneName, _handPos)) continue;
-      if (!ragdoll.pointIntersectsHurtbox(_handPos, opponent.hurtboxHandle)) continue;
+  // per-clip left/right mapping is tracked/needed: provato dal vivo nel
+  // browser lanciando Jab/Hook/Cross contro il sacco, e' SEMPRE la stessa
+  // mano ad arrivare vicina al bersaglio da un dato angolo -- il sistema
+  // di aim del busto, non il nome del colpo, decide quale mano si
+  // avvicina davvero, quindi controllarle entrambe e' corretto, non un
+  // ripiego) against `opponent`'s body cylinder.
+  //
+  // "il colpo deve avvenire dove colpisce la mano" -- provato dal vivo:
+  // risolvere il colpo al PRIMO frame in cui la mano sfiora appena il
+  // bordo esterno del volume di query (query generosa apposta, per non
+  // "bucare" il bersaglio tra un frame e l'altro) lo faceva registrare
+  // mentre la mano era ancora a meta' del suo affondo -- un Jab sul sacco
+  // ha registrato il colpo a 0.26m dal centro, ma la stessa mano ha
+  // continuato ad avvicinarsi fino a 0.21m circa 150ms dopo, prima di
+  // ritirarsi. Fix: quando una mano ENTRA nel volume non si risolve
+  // subito -- resta "pending" (vedi pendingHitRef sotto) e si continua a
+  // tracciarla frame per frame finche' resta dentro, aggiornando la
+  // posizione registrata; si applica il colpo vero e proprio solo quando
+  // la mano ESCE di nuovo, usando l'ULTIMA posizione ancora a contatto --
+  // cioe' il punto di affondo piu' profondo realmente raggiunto, non il
+  // primo sfioramento. Returns true solo il frame in cui il colpo viene
+  // effettivamente risolto (puo' essere diversi frame dopo il primo
+  // contatto) -- il caller usa questo per latchare attackHasLandedRef.
+  const pendingHitRef = useRef<{
+    bone: (typeof ATTACK_HAND_BONES)[number];
+    kind: 'opponent' | 'bag';
+    pos: THREE.Vector3;
+  } | null>(null);
 
+  // Applica la risoluzione vera e propria (danno/marker) usando il punto
+  // di affondo piu' profondo tracciato in pendingHitRef, poi lo svuota.
+  // Separata da checkAttackContact cosi' sia il percorso normale ("la
+  // mano e' appena uscita dal volume") sia la rete di sicurezza qui sotto
+  // (lo swing finisce mentre la mano e' ANCORA dentro, quindi non c'e'
+  // mai un frame "appena uscita" a farla scattare) possono richiamarla.
+  const finalizePendingHit = (): boolean => {
+    const pending = pendingHitRef.current;
+    pendingHitRef.current = null;
+    if (!pending) return false;
+    if (pending.kind === 'opponent') {
       // Damage/blocking/death formulas copied VERBATIM from
-      // CombatSoldier.tsx's own attack-resolution branch, on purpose -- a
-      // punch does the same thing whichever fighter threw it.
+      // CombatSoldier.tsx's own attack-resolution branch, on purpose --
+      // a punch does the same thing whichever fighter threw it.
       if (opponent.currentAnim === opponent.animCatalog?.block) {
         opponent.hp -= 5;
         opponent.state = 'Danno parato!';
@@ -297,21 +341,86 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         } else {
           opponent.triggerHit = Math.random() > 0.5 ? 'Hit_Chest' : 'Hit_Head';
           // "il colpo deve avvenire precisamente dove le mesh si sono
-          // toccate" -- now using the actual hand contact point (rather
-          // than this fighter's root position) for an even more precise
-          // hit-marker placement -- see CombatSoldier.tsx's identical
-          // comment.
-          opponent.hitFromX = _handPos.x;
-          opponent.hitFromZ = _handPos.z;
+          // toccate" -- il punto di affondo piu' profondo tracciato sopra,
+          // non piu' solo "il primo punto di contatto".
+          opponent.hitFromX = pending.pos.x;
+          opponent.hitFromZ = pending.pos.z;
         }
       }
-      return true;
+    } else {
+      // "crea un sacco su cui allenarmi nell'arena.. mi serve per capire
+      // la precisione delle collisioni" -- stessa logica, contro il sacco.
+      bagRef?.current?.registerHit(pending.pos, pending.bone);
+    }
+    return true;
+  };
+
+  const checkAttackContact = (): boolean => {
+    // Gia' in contatto da un frame precedente di QUESTO stesso swing --
+    // continua a tracciare la STESSA mano/bersaglio invece di riscandire
+    // entrambe le mani (un colpo che sta gia' atterrando non deve
+    // "cambiare mano" a meta' strada).
+    if (pendingHitRef.current) {
+      const pending = pendingHitRef.current;
+      const stillIn =
+        ragdoll.getBoneWorldPosition(pending.bone, _handPos) &&
+        (pending.kind === 'opponent'
+          ? opponent.hurtboxHandle !== null && ragdoll.pointIntersectsHurtbox(_handPos, opponent.hurtboxHandle)
+          : bagHurtboxHandle !== null &&
+            bagHurtboxHandle !== undefined &&
+            ragdoll.pointIntersectsHurtbox(_handPos, bagHurtboxHandle));
+      if (stillIn) {
+        pending.pos.copy(_handPos); // ancora dentro -- continua a tracciare, non risolto
+        return false;
+      }
+      return finalizePendingHit(); // appena uscita -- risolvi ora, nel punto piu' profondo raggiunto
+    }
+
+    for (const boneName of ATTACK_HAND_BONES) {
+      if (!ragdoll.getBoneWorldPosition(boneName, _handPos)) continue;
+
+      if (opponent.hurtboxHandle !== null && ragdoll.pointIntersectsHurtbox(_handPos, opponent.hurtboxHandle)) {
+        pendingHitRef.current = { bone: boneName, kind: 'opponent', pos: _handPos.clone() };
+        return false;
+      }
+
+      // "crea un sacco su cui allenarmi nell'arena.. mi serve per capire
+      // la precisione delle collisioni" -- exact same real Rapier query
+      // as the opponent check above, just against the bag's own hurtbox
+      // collider (PunchingBag.tsx) instead. Landing on the bag never
+      // affects the fight (no hp/opponent state touched at all) -- it
+      // only feeds the bag's own hit counter/marker via registerHit.
+      if (
+        bagHurtboxHandle !== null &&
+        bagHurtboxHandle !== undefined &&
+        ragdoll.pointIntersectsHurtbox(_handPos, bagHurtboxHandle)
+      ) {
+        pendingHitRef.current = { bone: boneName, kind: 'bag', pos: _handPos.clone() };
+        return false;
+      }
     }
     return false;
   };
 
   useFrame((_state, delta) => {
     if (mixer) mixer.update(delta * globalSpeed);
+    // "coglione testa su chrome" -- temporary live-browser debug readout
+    // for the duel-player fighter's own internal state (input/attackLock/
+    // triggerHit), so a javascript_tool script driving the real game can
+    // see WHY movement might be blocked (e.g. a stuck attackLock) without
+    // guessing. Same spirit/safety as DuelArena.tsx's own __duelDebug.
+    (window as any).__pcsDebug = {
+      input: { ...input },
+      attackLock: data.attackLock,
+      triggerHit: !!data.triggerHit,
+      state: data.state,
+      isDead: data.isDead,
+      isAttacking: isAttackingRef.current,
+      isDodging: isDodgingRef.current,
+      posX: data.position.x,
+      posZ: data.position.z,
+      solidSegments: ragdoll.getSolidBodySegments(),
+    };
     // Runs every frame regardless of which branch below fires, same
     // reasoning as CombatSoldier.tsx: a hit-reaction pulse needs to keep
     // simulating/blending out even once the rest of the state machine has
@@ -366,6 +475,28 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       groupRef.current!.rotation.y = data.rotation;
     };
 
+    // "nn voglio che usi distanze per fermarlo.. ogni parte del corpo
+    // deve essere un collider.. se collide collide.. se sbatto col sacco
+    // dovrei muoverlo" -- routes ANY horizontal movement this fighter
+    // wants to make (walking, sprinting, dodging -- both call sites
+    // below) through the real per-limb collision resolution instead of
+    // applying it to data.position directly. onBagBump forwards a real
+    // Rapier contact (not a scripted animation) straight into
+    // PunchingBag.tsx's own applyBodyBump the instant any of this
+    // fighter's 11 solid colliders is the one that actually touched it.
+    const resolveAndApplyMovement = (desiredX: number, desiredZ: number) => {
+      const corrected = ragdoll.resolveBodyMovement(
+        desiredX,
+        desiredZ,
+        bagSolidHandle ?? null,
+        bagRef?.current
+          ? (point, dir, blocked) => bagRef.current!.applyBodyBump(point, dir, blocked)
+          : undefined
+      );
+      data.position.x += corrected.x;
+      data.position.z += corrected.z;
+    };
+
     // "punto 1: ragdoll passivo alla morte" -- identical treatment to
     // CombatSoldier.tsx's own dead branch: once dead, physics drives the
     // skeleton forever and every input below is ignored.
@@ -413,7 +544,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       // attack swing or a hit-stun both stay planted in place, same as
       // CombatSoldier.tsx.
       if (isDodgingRef.current) {
-        data.position.addScaledVector(dodgeDirRef.current, DODGE_SPEED * delta * globalSpeed);
+        resolveAndApplyMovement(dodgeDirRef.current.x * DODGE_SPEED * delta * globalSpeed, dodgeDirRef.current.z * DODGE_SPEED * delta * globalSpeed);
       }
       // "il colpo deve essere sferrato dove effettivamente le mesh
       // collidono" -- while THIS swing is still live and hasn't already
@@ -423,6 +554,14 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         attackHasLandedRef.current = true;
       }
       if (data.attackLock <= 0) {
+        // Rete di sicurezza: una mano ancora DENTRO il bersaglio quando
+        // l'animazione dello swing stesso finisce (nessun frame "appena
+        // uscita" naturale a far scattare finalizePendingHit sopra) deve
+        // comunque risolversi -- attackLock esaurito e' un segnale di
+        // "fine swing" chiaro quanto l'uscita dal volume.
+        if (isAttackingRef.current && !attackHasLandedRef.current && pendingHitRef.current) {
+          if (finalizePendingHit()) attackHasLandedRef.current = true;
+        }
         transitionToAnimation(animCatalog.idle, 0.2, true);
         data.state = 'In guardia';
         isDodgingRef.current = false;
@@ -434,27 +573,11 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
 
     if (dodgeLockRef.current > 0) dodgeLockRef.current -= delta * globalSpeed;
 
-    // Facing: back to always locking onto the opponent -- "le gambe nn
-    // devono ruotare secondo l'orbit control". Aiming punches is now
-    // entirely the torso's job (the camYaw/yawDiff block up top), so the
-    // legs go back to squaring up with the opponent on their own, same
-    // atan2(...)+PI convention and smoothed turn-rate CombatSoldier.tsx's
-    // AI uses, so both fighters' rotated primitive keeps reading
-    // consistently.
-    _toOpponent.subVectors(opponent.position, data.position);
-    _toOpponent.y = 0;
-    if (_toOpponent.lengthSq() > 0.0001) {
-      _toOpponent.normalize();
-      const targetRotation = Math.atan2(_toOpponent.x, _toOpponent.z) + Math.PI;
-      let angleDiff = targetRotation - data.rotation;
-      angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
-      data.rotation += angleDiff * FACE_TURN_RATE;
-    }
-
-    // Camera-relative movement axes -- facing no longer follows the
-    // camera (see above), but WASD still strafes/back-pedals relative to
-    // where you're LOOKING, same technique Player.tsx's own on-foot
-    // movement uses (state.camera.getWorldDirection() projected flat).
+    // Camera-relative movement axes -- computed FIRST now (used to be
+    // after the facing block below), since the facing decision itself
+    // now needs to know _moveDir when not locked on -- see below. Same
+    // technique Player.tsx's own on-foot movement uses (state.camera.
+    // getWorldDirection() projected flat).
     camera.getWorldDirection(_forward);
     _forward.y = 0;
     _forward.normalize();
@@ -465,6 +588,34 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     if (input.backward) _moveDir.addScaledVector(_forward, -1);
     if (input.left) _moveDir.addScaledVector(_right, -1);
     if (input.right) _moveDir.add(_right);
+
+    // _toOpponent -- needed both by the lock-on facing below and the
+    // dodge block's own "no direction held" fallback further down.
+    _toOpponent.subVectors(opponent.position, data.position);
+    _toOpponent.y = 0;
+    if (_toOpponent.lengthSq() > 0.0001) _toOpponent.normalize();
+
+    // Facing: "guardare l'avversario se tengo premuto l1. si accancia
+    // all'avversario piu' vicino" -- lock-on is now a HELD modifier
+    // (input.lockOn, L1/Ctrl sinistro) rather than always-on. Holding it
+    // snap-turns the legs toward the opponent (the only target this
+    // component ever has -- see PlayerCombatSoldierProps' own
+    // `opponent`); releasing it, the legs instead face wherever you're
+    // actually walking (same free-roam convention Player.tsx's own
+    // on-foot movement uses), or simply keep their current heading while
+    // standing still. Aiming punches stays entirely the torso's job
+    // either way (the camYaw/yawDiff block up top, unaffected by this).
+    let targetRotation: number | null = null;
+    if (input.lockOn && _toOpponent.lengthSq() > 0.0001) {
+      targetRotation = Math.atan2(_toOpponent.x, _toOpponent.z) + Math.PI;
+    } else if (_moveDir.lengthSq() > 0.0001) {
+      targetRotation = Math.atan2(_moveDir.x, _moveDir.z) + Math.PI;
+    }
+    if (targetRotation !== null) {
+      let angleDiff = targetRotation - data.rotation;
+      angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
+      data.rotation += angleDiff * FACE_TURN_RATE;
+    }
 
     // --- Block (held) ---
     if (input.secondary) {
@@ -565,7 +716,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     if (_moveDir.lengthSq() > 0.0001) {
       _moveDir.normalize();
       const speed = input.shift ? RUN_SPEED : WALK_SPEED;
-      data.position.addScaledVector(_moveDir, speed * delta * globalSpeed);
+      resolveAndApplyMovement(_moveDir.x * speed * delta * globalSpeed, _moveDir.z * speed * delta * globalSpeed);
       data.state = input.shift ? 'Corre' : 'Si muove';
       transitionToAnimation(input.shift ? animCatalog.run : animCatalog.walk, 0.15, true, input.shift ? 1.3 : 1.0);
     } else {
@@ -577,15 +728,24 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   });
 
   return (
-    <group ref={groupRef} name={entityName}>
-      <primitive object={clone} scale={1} rotation={[0, Math.PI, 0]} />
-      {!data.isDead && (
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
-          <ringGeometry args={[0.35, 0.45, 24]} />
-          <meshBasicMaterial color={PLAYER_COLOR} />
-        </mesh>
-      )}
-    </group>
+    <>
+      <group ref={groupRef} name={entityName}>
+        <primitive object={clone} scale={1} rotation={[0, Math.PI, 0]} />
+        {!data.isDead && (
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+            <ringGeometry args={[0.35, 0.45, 24]} />
+            <meshBasicMaterial color={PLAYER_COLOR} />
+          </mesh>
+        )}
+      </group>
+      {/* "fai riferimenti visivi per ragdoll e fisica dei solidi" -- world-
+          space wireframes of the 11 real solid colliders above, NOT nested
+          inside groupRef (which already has its own local transform
+          applied every frame via applyTransform -- these are driven
+          purely from the Rapier bodies' own live world translations, so
+          nesting them under groupRef would double the transform). */}
+      <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />
+    </>
   );
 };
 

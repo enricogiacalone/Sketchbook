@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
-import GUI from 'lil-gui';
 import { RUNWAY_CENTER, HELIPORT_CENTER } from '../Environment/Airport';
+import { acquireDebugGui, releaseDebugGui } from '../../lib/debugGui';
 
 // Debug-only teleport/test panel ("Scenari") built on the __teleportPlayer
 // hook Player.tsx already exposes on window for manual testing (see the
@@ -12,7 +12,10 @@ const ScenariosGUI: React.FC = () => {
   useEffect(() => {
     if (!import.meta.env.DEV) return;
 
-    const gui = new GUI({ title: 'Debug' });
+    // "le colonne devono essere retratte e nn accavallarsi" -- shared
+    // root panel (see lib/debugGui.ts's own big comment for why), this
+    // component only ever owns its OWN folder inside it.
+    const gui = acquireDebugGui();
     const scenari = gui.addFolder('Scenari');
 
     // A few meters off each vehicle's spawn point, not on top of it, so the
@@ -58,9 +61,16 @@ const ScenariosGUI: React.FC = () => {
     scenari.add(scenarios, 'Test guida: Macchina (pulito)');
     scenari.add(scenarios, 'Gara: Auto vs Polizia (3)');
     scenari.add(scenarios, 'Torna al mondo normale');
-    scenari.open();
+    // "le colonne devono essere retratte" -- lil-gui folders actually
+    // default to OPEN (verified live), so this needs an explicit
+    // .close() to start collapsed instead of always springing open the
+    // instant the game loads.
+    scenari.close();
 
-    return () => gui.destroy();
+    return () => {
+      scenari.destroy();
+      releaseDebugGui();
+    };
   }, []);
 
   return null;

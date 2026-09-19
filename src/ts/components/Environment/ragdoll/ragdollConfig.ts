@@ -49,7 +49,14 @@ export interface RagdollSegment {
 export const RAGDOLL_SEGMENTS: RagdollSegment[] = [
   { name: 'Hips', drivingBone: 'pelvis', parent: null, toBone: 'spine_01', radius: 0.15, lengthScale: 0.6 },
   { name: 'Torso', drivingBone: 'spine_01', parent: 'Hips', toBone: 'neck_01', radius: 0.18 },
-  { name: 'Head', drivingBone: 'neck_01', parent: 'Torso', toBone: 'head_leaf', radius: 0.13 },
+  // "la testa del solido e' troppo bassa rispetto a quella reale" --
+  // head_leaf sits close to the true top of the skull but the mesh's
+  // own hair/head volume still reads visibly taller than a capsule
+  // sized off the bare neck_01->head_leaf bone distance (radius 0.13
+  // alone gave a ~0.28m-tall near-sphere centered mid-skull) -- bumped
+  // radius and lengthScale so the covered volume clears the real
+  // rendered head, verified live against the debug wireframe.
+  { name: 'Head', drivingBone: 'neck_01', parent: 'Torso', toBone: 'head_leaf', radius: 0.15, lengthScale: 1.3 },
   { name: 'UpperArm_L', drivingBone: 'upperarm_l', parent: 'Torso', toBone: 'lowerarm_l', radius: 0.06 },
   { name: 'ForeArm_L', drivingBone: 'lowerarm_l', parent: 'UpperArm_L', toBone: 'hand_l', radius: 0.05 },
   { name: 'UpperArm_R', drivingBone: 'upperarm_r', parent: 'Torso', toBone: 'lowerarm_r', radius: 0.06 },
@@ -59,6 +66,44 @@ export const RAGDOLL_SEGMENTS: RagdollSegment[] = [
   { name: 'Thigh_R', drivingBone: 'thigh_r', parent: 'Hips', toBone: 'calf_r', radius: 0.095 },
   { name: 'Shin_R', drivingBone: 'calf_r', parent: 'Thigh_R', toBone: 'foot_r', radius: 0.07 },
 ];
+
+// "mani e piedi nn sn solidi" -- the 11 segments above deliberately
+// collapse each hand/foot into its forearm/shin (see this file's own
+// top comment, "real ragdolls in shipped games are rarely much finer
+// than this") -- a fine simplification for the transient hit-reaction/
+// death ragdoll's own joint-solver cost, but NOT what's wanted for the
+// permanent SOLID-BODY collision layer (useRagdoll.ts's ensureSolidBody/
+// syncSolidBody/resolveBodyMovement): a fist that's just the end of the
+// forearm capsule can't really connect with a punch, and a foot that's
+// just the end of the shin capsule can clip through the opponent/ground
+// at the ankle. So these 4 are declared SEPARATELY rather than folded
+// into RAGDOLL_SEGMENTS above -- solid-body code reads BOTH arrays
+// (SOLID_BODY_SEGMENTS below), the dynamic ragdoll (buildBodies) still
+// reads ONLY RAGDOLL_SEGMENTS and is completely unaffected, exactly as
+// asked (this is a collision-layer fix, not a ragdoll-physics one).
+//
+// toBone for each uses a real further-out bone rather than a guessed
+// fixed size: middle_01_l/r (the middle finger's own first knuckle) for
+// a hand -- close enough to the wrist that finger CURL at build time
+// (fist vs open hand) barely changes the measured length, unlike a
+// fingertip bone would -- and ball_l/r (the ball of the foot, already
+// used as Shin's own frozen pass-through bone) for a foot, giving a real
+// ankle-to-forefoot capsule instead of an arbitrary sphere.
+export const SOLID_BODY_EXTRA_SEGMENTS: RagdollSegment[] = [
+  { name: 'Hand_L', drivingBone: 'hand_l', parent: 'ForeArm_L', toBone: 'middle_01_l', radius: 0.045, lengthScale: 1.4 },
+  { name: 'Hand_R', drivingBone: 'hand_r', parent: 'ForeArm_R', toBone: 'middle_01_r', radius: 0.045, lengthScale: 1.4 },
+  { name: 'Foot_L', drivingBone: 'foot_l', parent: 'Shin_L', toBone: 'ball_l', radius: 0.075, lengthScale: 1.4 },
+  { name: 'Foot_R', drivingBone: 'foot_r', parent: 'Shin_R', toBone: 'ball_r', radius: 0.075, lengthScale: 1.4 },
+];
+
+// What the solid-body system (useRagdoll.ts) actually builds every
+// fighter out of: the 11 anatomical segments PLUS the 4 hand/foot ones
+// above -- 15 real colliders per fighter. Kept as one combined list here
+// (rather than having useRagdoll.ts concatenate the two arrays itself)
+// so there's a single source of truth for "how many solid parts does a
+// fighter have" that SolidBodyDebugView.tsx's own MAX_SOLID_SEGMENTS
+// pool size is checked against.
+export const SOLID_BODY_SEGMENTS: RagdollSegment[] = [...RAGDOLL_SEGMENTS, ...SOLID_BODY_EXTRA_SEGMENTS];
 
 // Which pass-through bones belong to each segment, frozen to an identity
 // local rotation while (and ONLY while) that segment is one of the

@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import CombatSoldier from './CombatSoldier';
 import PlayerCombatSoldier, { ATTACK_RANGE } from './PlayerCombatSoldier';
+import PunchingBag, { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
 import { FighterData } from './SquadArenaTypes';
+
 
 // "crea una sezione dedicata nel menu di avvio del gioco che mi fa entrare
 // in un'arena, siamo io che controllo un combat soldier contro un altro
@@ -23,6 +25,11 @@ export const DUEL_PLAYER_ID = 'duel-player';
 // standing here.
 const DUEL_CENTER: [number, number] = [0, 0];
 const DUEL_SEPARATION = 4; // starting distance between the two fighters
+// "crea un sacco su cui allenarmi nell'arena" -- fixed off to the side of
+// the face-off line (fighters run along X at z=0, see playerX/enemyX
+// below), close enough to the player's own spawn to walk to in a couple
+// of steps, far enough out that it's never in the way of the actual duel.
+const BAG_OFFSET: [number, number] = [-1, 3.5];
 const GLOBAL_SPEED = 1.0;
 // "fai durare le vite di piu" -- CombatSoldier.tsx/PlayerCombatSoldier.tsx's
 // own damage formulas are shared, byte-for-byte, with the 120-fighter
@@ -71,6 +78,7 @@ function facingToward(fromX: number, fromZ: number, toX: number, toZ: number): n
   return Math.atan2(toX - fromX, toZ - fromZ) + Math.PI;
 }
 
+
 function makeFighter(id: string, name: string, team: string, x: number, z: number, rotation: number): FighterData {
   return {
     id,
@@ -114,6 +122,36 @@ const DuelArena: React.FC = () => {
   );
   const allFighters = useMemo(() => [playerData, enemyData], [playerData, enemyData]);
 
+  // "nn voglio che usi distanze per fermarlo.. ogni parte del corpo deve
+  // essere un collider" -- the old single-capsule useDuelBodyCollider.tsx
+  // is gone: each fighter now resolves its OWN movement against real
+  // per-limb colliders (11 of them, see useRagdoll.ts's resolveBodyMovement)
+  // from INSIDE its own component (PlayerCombatSoldier.tsx/CombatSoldier.tsx),
+  // not as a DuelArena post-pass on a synthetic whole-body shape -- so
+  // there's nothing left to create or render here for that.
+
+  // "crea un sacco su cui allenarmi" -- fixed near the player's own spawn
+  // (see BAG_OFFSET above), a completely separate target from `enemyData`.
+  // The collider handle isn't known until PunchingBag.tsx's own Rapier
+  // collider actually exists (a frame or two after mount), hence the
+  // state rather than a plain useMemo -- PlayerCombatSoldier.tsx's
+  // checkAttackContact just skips the bag check entirely while this is
+  // still null (same "not created yet" handling the opponent's own
+  // hurtboxHandle already needs).
+  const bagPositionXZ = useMemo<[number, number]>(
+    () => [playerX + BAG_OFFSET[0], dz + BAG_OFFSET[1]],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  const bagRef = useRef<PunchingBagHandle>(null);
+  const [bagHurtboxHandle, setBagHurtboxHandle] = useState<number | null>(null);
+  // "se sbatto col sacco dovrei muoverlo" -- the bag's OTHER collider
+  // (the solid, non-sensor one a fighter's real body parts actually
+  // collide against -- see PunchingBag.tsx). Forwarded into both
+  // fighters below so their own resolveBodyMovement can recognize "the
+  // thing that just blocked me IS the bag" and push it for real.
+  const [bagSolidHandle, setBagSolidHandle] = useState<number | null>(null);
+
   // No medkits in a 1v1 duel -- keep it a fair, straightforward fight. A
   // pool of 0 makes CombatSoldier.tsx's own medkit-seeking branch a no-op
   // (it only runs when hp < 35 AND a nearby *active* item exists; there
@@ -140,6 +178,15 @@ const DuelArena: React.FC = () => {
   // bars + a win/lose banner without reaching into refs owned by the R3F
   // component tree.
   useFrame(() => {
+    // "ogni parte del corpo deve essere un collider.. se collide collide"
+    // -- each fighter now resolves its OWN real per-limb movement inside
+    // its OWN component's useFrame (PlayerCombatSoldier.tsx/
+    // CombatSoldier.tsx, via useRagdoll.ts's resolveBodyMovement) before
+    // this callback ever runs, so playerData.position/enemyData.position
+    // are already this frame's real, physics-corrected positions by the
+    // time the inRange/reticle logic below reads them -- nothing left to
+    // resolve here.
+
     // "metti un opzione in cui l'avversario si ferma e non combatte che
     // posso attivare a piacimento" -- mirrors the store's duelDummyMode
     // (flipped by DuelHUD's own toggle button, outside the R3F tree) onto
@@ -197,6 +244,38 @@ const DuelArena: React.FC = () => {
       reticleY = (1 - (_aimWorldPos.y * 0.5 + 0.5)) * 100;
     }
 
+    // "coglione testa su chrome" -- live-browser debug readout, so a
+    // javascript_tool script driving the REAL game (not the headless
+    // Rapier harness) can read exact fighter/bag gaps every frame without
+    // needing scene.getObjectByName lookups (the AI opponent's own visual
+    // group has no `name` set, unlike DUEL_PLAYER_ID's). Cheap plain-object
+    // writes, no allocation of note, safe to leave in as a standing debug
+    // hook (same spirit as window.__gameStore/__r3fState).
+    const bagLivePos =
+      bagRef.current && typeof bagRef.current.getWorldPosition === 'function'
+        ? bagRef.current.getWorldPosition()
+        : null;
+    (window as any).__duelDebug = {
+      playerX: playerData.position.x,
+      playerZ: playerData.position.z,
+      enemyX: enemyData.position.x,
+      enemyZ: enemyData.position.z,
+      bagX: bagPositionXZ[0],
+      bagZ: bagPositionXZ[1],
+      // TEMP debug (see PunchingBag.tsx's getWorldPosition comment) --
+      // the bag's REAL live swinging position, unlike bagX/bagZ above
+      // (a fixed spawn constant) -- bagSwingXZ is how far it's currently
+      // displaced horizontally from its own rest/spawn point, i.e. "is it
+      // actually swinging right now".
+      bagLiveX: bagLivePos ? bagLivePos.x : null,
+      bagLiveY: bagLivePos ? bagLivePos.y : null,
+      bagLiveZ: bagLivePos ? bagLivePos.z : null,
+      bagSwingXZ: bagLivePos ? Math.hypot(bagLivePos.x - bagPositionXZ[0], bagLivePos.z - bagPositionXZ[1]) : null,
+      playerEnemyGap: playerData.position.distanceTo(enemyData.position),
+      playerBagGap: Math.hypot(playerData.position.x - bagPositionXZ[0], playerData.position.z - bagPositionXZ[1]),
+      enemyBagGap: Math.hypot(enemyData.position.x - bagPositionXZ[0], enemyData.position.z - bagPositionXZ[1]),
+    };
+
     // Normalized to 0-100 here (not raw hp) so DuelHUD.tsx's bars stay a
     // simple width:`${hp}%` regardless of DUEL_MAX_HP.
     setDuelStatus(
@@ -211,7 +290,24 @@ const DuelArena: React.FC = () => {
 
   return (
     <group>
-      <PlayerCombatSoldier data={playerData} opponent={enemyData} entityName={DUEL_PLAYER_ID} globalSpeed={GLOBAL_SPEED} />
+      <PlayerCombatSoldier
+        data={playerData}
+        opponent={enemyData}
+        entityName={DUEL_PLAYER_ID}
+        globalSpeed={GLOBAL_SPEED}
+        bagHurtboxHandle={bagHurtboxHandle}
+        bagSolidHandle={bagSolidHandle}
+        bagRef={bagRef}
+      />
+      {/* "crea un sacco su cui allenarmi nell'arena.. mi serve per capire
+          la precisione delle collisioni" -- see PunchingBag.tsx. Static,
+          always there, completely independent of the fight above. */}
+      <PunchingBag
+        ref={bagRef}
+        positionXZ={bagPositionXZ}
+        onReady={setBagHurtboxHandle}
+        onSolidReady={setBagSolidHandle}
+      />
       {/* The AI opponent -- CombatSoldier.tsx itself is completely
           unmodified: passing the player's own FighterData inside
           allFightersData is all it takes for its existing, unmodified
@@ -219,7 +315,10 @@ const DuelArena: React.FC = () => {
           exactly as it would fight any other fighter in the city-wide
           arena. enableRagdoll=true unlike CombatArena.tsx's own instances
           -- see CombatSoldier.tsx's comment on that prop -- a 1v1 duel can
-          easily afford the one extra physics rig. */}
+          easily afford the one extra physics rig, and now (see
+          resolveBodyMovement/"ogni parte del corpo deve essere un
+          collider") also gets real per-limb solid-body collision, same
+          as the player, via that same flag. */}
       <CombatSoldier
         data={enemyData}
         allFightersData={allFighters}
@@ -231,6 +330,8 @@ const DuelArena: React.FC = () => {
         setMedkitPoolCount={noopSetMedkitPoolCount}
         globalSpeed={GLOBAL_SPEED}
         enableRagdoll
+        bagSolidHandle={bagSolidHandle}
+        bagRef={bagRef}
       />
     </group>
   );

@@ -173,6 +173,31 @@ interface GameState {
   // to that one fighter instance, never leaking into CombatArena.tsx's
   // own (unrelated) 120 AI fighters.
   duelDummyMode: boolean;
+  // "fai riferimenti visivi per ragdoll e fisica dei solidi" -- toggles
+  // live wireframe capsules over each fighter's real 11 solid-body
+  // colliders (useRagdoll.ts's resolveBodyMovement) AND the bag's own
+  // solid collider, so what's ACTUALLY colliding is visible, not just
+  // trusted from numbers -- read every frame by PlayerCombatSoldier.tsx/
+  // CombatSoldier.tsx/PunchingBag.tsx, flipped from CombatArenaGUI.tsx's
+  // debug panel (same bridge pattern as duelDummyMode just above).
+  showPhysicsDebug: boolean;
+  // "crea un sacco su cui allenarmi nell'arena.. mi serve per capire la
+  // precisione delle collisioni" -- a static practice target (see
+  // PunchingBag.tsx), completely separate from the AI opponent/dummy
+  // above. Bridged into the store the same way (PunchingBag.tsx calls
+  // registerBagHit directly, an imperative one-off event rather than a
+  // per-frame mirror, since a hit is a discrete moment, not continuous
+  // state) so DuelHUD.tsx (outside the R3F tree) can show a live readout.
+  // bagHitCount is a running total; bagLastHit* describe only the MOST
+  // RECENT hit, in meters, for reading exact collision precision:
+  // radialOffset = horizontal distance from the bag's own vertical
+  // centerline (0 = dead center, positive = off to either side, sign
+  // doesn't matter since it's a radius), heightOffset = signed vertical
+  // distance from the bag's own center height (positive = above center).
+  bagHitCount: number;
+  bagLastHitRadialOffset: number | null;
+  bagLastHitHeightOffset: number | null;
+  bagLastHitHand: 'hand_l' | 'hand_r' | null;
   entities: Map<string, EntityInfo>;
   setHealth: (health: number) => void;
   setMaxHealth: (maxHealth: number) => void;
@@ -219,6 +244,8 @@ interface GameState {
   setDuelStatus: (playerHp: number, enemyHp: number, result: 'none' | 'win' | 'lose', inRange: boolean, reticleX: number, reticleY: number) => void;
   toggleDuelDummyMode: () => void;
   setDuelDummyMode: (active: boolean) => void;
+  setShowPhysicsDebug: (active: boolean) => void;
+  registerBagHit: (radialOffset: number, heightOffset: number, hand: 'hand_l' | 'hand_r') => void;
   retryDuel: () => void;
   collectItem: () => void;
   updateEntity: (id: string, info: Partial<EntityInfo>) => void;
@@ -261,6 +288,11 @@ export const useStore = create<GameState>((set) => ({
   duelReticleY: 50,
   duelRound: 0,
   duelDummyMode: false,
+  showPhysicsDebug: false,
+  bagHitCount: 0,
+  bagLastHitRadialOffset: null,
+  bagLastHitHeightOffset: null,
+  bagLastHitHand: null,
   missionStage: 0,
   missionStatus: 'inactive',
   missionTitle: '',
@@ -314,6 +346,13 @@ export const useStore = create<GameState>((set) => ({
   setDuelStatus: (duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY) => set({ duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY }),
   toggleDuelDummyMode: () => set((state) => ({ duelDummyMode: !state.duelDummyMode })),
   setDuelDummyMode: (duelDummyMode) => set({ duelDummyMode }),
+  setShowPhysicsDebug: (showPhysicsDebug) => set({ showPhysicsDebug }),
+  registerBagHit: (radialOffset, heightOffset, hand) => set((state) => ({
+    bagHitCount: state.bagHitCount + 1,
+    bagLastHitRadialOffset: radialOffset,
+    bagLastHitHeightOffset: heightOffset,
+    bagLastHitHand: hand,
+  })),
   retryDuel: () => set((state) => ({
     duelRound: state.duelRound + 1,
     duelPlayerHp: 100,

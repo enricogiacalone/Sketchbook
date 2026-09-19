@@ -30,6 +30,9 @@ const PAD_TRIANGLE = ['△ Triangle']; // button 3
 // "con l2 usa il braccio sinistro" -- Square and L2 both throw the same
 // left-handed Jab (see useInput.ts's 'attackLeft' action).
 const PAD_JAB = ['□ Square', 'L2']; // button 2, or button 6
+// "guardare l'avversario se tengo premuto l1" -- held lock-on modifier
+// (see useInput.ts's 'lockOn' action).
+const PAD_LOCK_ON = ['L1']; // button 4
 
 const Controls: React.FC = () => {
   const currentControllable = useStore((state) => state.currentControllable);
@@ -78,6 +81,7 @@ const Controls: React.FC = () => {
           { keys: ['E'], pad: PAD_TRIANGLE, desc: 'Hook' },
           { keys: ['Right Click', '(hold)'], pad: PAD_SECONDARY, desc: 'Block' },
           { keys: ['Space'], pad: PAD_JUMP, desc: 'Dodge' },
+          { keys: ['Ctrl', '(hold)'], pad: PAD_LOCK_ON, desc: 'Lock-on Avversario' },
         ];
       case 'car':
         return [

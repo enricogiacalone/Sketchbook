@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
-import GUI from 'lil-gui';
 import { useStore } from '../../store';
 import type { GameMode } from '../Environment/SquadArenaTypes';
+import { acquireDebugGui, releaseDebugGui } from '../../lib/debugGui';
 
 // "fammi scegliere come su simulation citta le modalita di scontro dei
 // manichini che si combattono" -- simulation-citta's CombatArenaSimulation
@@ -31,16 +31,21 @@ const CombatArenaGUI: React.FC = () => {
   useEffect(() => {
     if (!import.meta.env.DEV) return;
 
-    const gui = new GUI({ title: 'Arena' });
-    const folder = gui.addFolder('Combattimento');
+    // "le colonne devono essere retratte e nn accavallarsi" -- shared
+    // root panel (see lib/debugGui.ts's own big comment for why), this
+    // component only ever owns its OWN folder inside it.
+    const gui = acquireDebugGui();
+    const folder = gui.addFolder('Arena');
 
     // lil-gui needs a plain object + property name to bind a control to;
     // this one's sole job is to forward onChange into the store (read back
     // via getState() so this effect doesn't need to re-subscribe/rebuild
     // the panel every time either value changes elsewhere).
-    const settings: { modalita: GameMode; combattenti: number } = {
+    const settings: { modalita: GameMode; combattenti: number; manichino: boolean; colliderFisici: boolean } = {
       modalita: useStore.getState().arenaGameMode,
       combattenti: useStore.getState().arenaFighterCount,
+      manichino: useStore.getState().duelDummyMode,
+      colliderFisici: useStore.getState().showPhysicsDebug,
     };
 
     folder
@@ -55,9 +60,35 @@ const CombatArenaGUI: React.FC = () => {
       .name('Combattenti (0-120)')
       .onChange((count: number) => useStore.getState().setArenaFighterCount(count));
 
-    folder.open();
+    // "il comando per rendere passivo l'avversario deve stare dentro la
+    // sezione arena" -- moved here from DuelHUD.tsx's own standalone
+    // floating button (same store field/effect, duelDummyMode -- see
+    // DuelArena.tsx's own mirror of it onto the AI fighter's
+    // isPassive -- just one control living in the debug panel instead of
+    // a second one duplicated as an HTML overlay button).
+    folder
+      .add(settings, 'manichino')
+      .name('Manichino (avversario passivo)')
+      .onChange((active: boolean) => useStore.getState().setDuelDummyMode(active));
 
-    return () => gui.destroy();
+    // "fai riferimenti visivi per ragdoll e fisica dei solidi" -- see
+    // store.ts's own showPhysicsDebug comment.
+    folder
+      .add(settings, 'colliderFisici')
+      .name('Mostra collider fisici')
+      .onChange((active: boolean) => useStore.getState().setShowPhysicsDebug(active));
+
+    // "le colonne devono essere retratte" -- lil-gui folders actually
+    // default to OPEN (verified live -- omitting .open() was NOT enough
+    // on its own), so this needs an explicit .close() to start
+    // collapsed, rather than taking up half the screen the instant the
+    // game loads.
+    folder.close();
+
+    return () => {
+      folder.destroy();
+      releaseDebugGui();
+    };
   }, []);
 
   return null;

@@ -16,6 +16,13 @@ const ACTION_NAMES = [
   // held button while flying would be a real conflict, unlike the
   // edge-triggered 'enter' reuse Square/Triangle already share).
   'attackLeft',
+  // "guardare l'avversario se tengo premuto l1" -- HELD lock-on
+  // modifier for PlayerCombatSoldier.tsx's leg/root facing (Ctrl
+  // sinistro on keyboard, L1 on gamepad -- see the gamepad section
+  // below). A brand-new action, not reused from anything else, since
+  // it needs to be read as a continuous held state (input.lockOn),
+  // not consumeJustPressed.
+  'lockOn',
 ] as const;
 type Action = (typeof ACTION_NAMES)[number];
 
@@ -39,6 +46,7 @@ const emptyActionMap = (): Record<Action, boolean> => ({
   pause: false,
   headlights: false,
   attackLeft: false,
+  lockOn: false,
 });
 
 export const useInput = () => {
@@ -93,6 +101,7 @@ export const useInput = () => {
     // gate on consumeJustPressed('headlights')).
     KeyL: 'headlights',
     Escape: 'pause',
+    ControlLeft: 'lockOn',
   };
 
   useEffect(() => {
@@ -251,6 +260,10 @@ export const useInput = () => {
     // checks this alongside 'yawLeft' (Q/Square), so all three fire the
     // same strike.
     g.attackLeft = !!pad.buttons[6]?.pressed; // L2
+    // "guardare l'avversario se tengo premuto l1" -- separate from
+    // everything above, L1 (button 4) has never driven anything in
+    // this app before now, so no reuse/overlap reasoning needed.
+    g.lockOn = !!pad.buttons[4]?.pressed; // L1
     // Back/Select: cycle the camera's 4 zoom presets (see ZOOM_LEVELS in
     // useThirdPersonCamera.ts). Reuses the 'camera' action, which already
     // existed with a keyboard binding (KeyC) but, like enter_passenger
