@@ -16,9 +16,16 @@ import {
 import {
   RAGDOLL_PULSE_NEARBY,
   RAGDOLL_SEGMENTS,
+  ACTIVE_RAGDOLL_SEGMENTS,
   RAGDOLL_SEGMENT_FROZEN_BONES,
   RAGDOLL_HINGE_LIMITS_DEG,
   RAGDOLL_CONE_LIMIT_DEG,
+  ACTIVE_RAGDOLL_CONE_LIMIT_DEG,
+  RAGDOLL_MOTOR_STIFFNESS,
+  RAGDOLL_MOTOR_DAMPING_RATIO,
+  RAGDOLL_MOTOR_STIFFNESS_BY_SEGMENT,
+  RAGDOLL_HIPS_POSITION_STIFFNESS,
+  RAGDOLL_HIPS_POSITION_DAMPING,
   RagdollSegment,
   // "ogni parte del corpo deve essere un collider" -- SOLID_BODY_SEGMENTS
   // (RAGDOLL_SEGMENTS + hand/foot) is what ensureSolidBody/syncSolidBody
@@ -205,7 +212,7 @@ export interface RagdollController {
     attackerX?: number,
     attackerZ?: number
   ) => void;
-  update: (delta: number) => void;
+  update: (delta: number, activeRagdollEnabled?: boolean) => void;
   deactivate: () => void;
   // "il colpo deve essere sferrato dove effettivamente le mesh collidono"
   // -- lets the combat code (PlayerCombatSoldier.tsx/CombatSoldier.tsx)
@@ -275,6 +282,26 @@ const _parentInverse = new THREE.Matrix4();
 const _unitScale = new THREE.Vector3(1, 1, 1);
 const _yAxis = new THREE.Vector3(0, 1, 0);
 const _xAxis = new THREE.Vector3(1, 0, 0);
+// Dedicated scratch objects for the always-on active-ragdoll PD layer
+// (syncActiveRagdollMotors/resyncActiveRagdollToBones below) -- kept
+// separate from _v1/_v2/_v3/_q1/_q2 above (the transient pulse/death
+// system's own scratch vars) purely so the two systems' per-frame math
+// can never accidentally stomp on each other if one day they DO need to
+// run in the same tick (they don't today -- see update()'s own
+// activeRagdollEnabled branch -- but this costs nothing and removes the
+// question entirely).
+const _activeTargetQuat = new THREE.Quaternion();
+const _activeCurQuat = new THREE.Quaternion();
+const _activeErrQuat = new THREE.Quaternion();
+const _activeTorqueAxis = new THREE.Vector3();
+const _activePosTarget = new THREE.Vector3();
+const _activePosError = new THREE.Vector3();
+// JOINT-SPACE (parent-relative) PD -- see syncActiveRagdollMotors's own
+// comment on why this replaced the first, WORLD-SPACE absolute version.
+const _activeParentTargetQuat = new THREE.Quaternion();
+const _activeParentCurQuat = new THREE.Quaternion();
+const _activeTargetRelQuat = new THREE.Quaternion();
+const _activeCurRelQuat = new THREE.Quaternion();
 // Split across both spine bones rather than piling the whole tilt onto
 // one joint -- reads as a smoother, more natural bend (same reasoning as
 // RAGDOLL_SEGMENT_FROZEN_BONES.Torso already grouping these two).
@@ -314,6 +341,39 @@ for (const key of Object.keys(RAGDOLL_CONE_LIMIT_DEG)) {
     RAGDOLL_CONE_LIMIT_DEG[key]
   );
 }
+
+// Layer PD sempre attivo -- vedi ACTIVE_RAGDOLL_CONE_LIMIT_DEG's own
+// comment in ragdollConfig.ts sul perche' e' una tabella SEPARATA da
+// quella sopra.
+const ACTIVE_RAGDOLL_CONE_LIMIT_RAD: Record<string, number> = {};
+for (const key of Object.keys(ACTIVE_RAGDOLL_CONE_LIMIT_DEG)) {
+  ACTIVE_RAGDOLL_CONE_LIMIT_RAD[key] = THREE.MathUtils.degToRad(
+    ACTIVE_RAGDOLL_CONE_LIMIT_DEG[key]
+  );
+}
+
+// SATURAZIONE dell'errore usato nella coppia PD (live-tuning, sessione
+// "clamp Torso + per-arto"): con un errore vicino/oltre i 90-180 gradi
+// (osservato dal vivo via window.__activeRagdollDebug su avambracci/
+// braccia dopo una caduta o un urto) stiffness*angle produce una coppia
+// enorme in un solo step -- vicino ai 180 gradi l'asse di rotazione
+// dell'errore (ex,ey,ez normalizzato) e' anche numericamente mal
+// condizionato (piccoli rumori numerici cambiano parecchio la direzione
+// frame per frame), quindi la coppia non solo e' grande ma puo' pure
+// "vibrare" di direzione -- osservato dal vivo come angVelMag che
+// esplode a 100-250+ rad/s invece di scendere, anche su giunti sferici
+// liberi (es. UpperArm_R) dove non c'e' nessun vincolo Rapier a
+// "spiegare" numeri cosi' alti. La teoria PD lineare/smorzamento
+// critico assume errori piccoli; qui saturiamo l'ANGOLO usato per
+// calcolare la coppia (non il valore vero, che resta nel debug readout)
+// cosi' anche una posa completamente ribaltata riceve al massimo la
+// stessa coppia di un errore da ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_DEG --
+// niente overshoot violento, il corpo semplicemente ci mette qualche
+// frame in piu' a recuperare invece di sparare.
+const ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_DEG = 45;
+const ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_RAD = THREE.MathUtils.degToRad(
+  ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_DEG
+);
 
 // "ogni parte del corpo deve essere un collider.. se collide collide..
 // se sbatto col sacco dovrei muoverlo" -- own dedicated scratch set for
@@ -408,6 +468,34 @@ export function useRagdoll(
   // queries -- separate instance from the transient ragdoll's own joints/
   // bodies above, lazily created alongside the first solid-body segment.
   const solidControllerRef = useRef<KinematicCharacterController | null>(null);
+
+  // "questo mi sembra piu' sostenibile" -- the ALWAYS-ON active-ragdoll
+  // layer (Step 2 promesso in questo file's own top comment -- vedi
+  // ragdollConfig.ts's RAGDOLL_MOTOR_STIFFNESS/RAGDOLL_HIPS_POSITION_
+  // STIFFNESS). Deliberately a SEPARATE set of 11 dynamic bodies/joints
+  // from bodiesRef/jointsRef above (the transient pulseHit/activateDeath
+  // rig) rather than reusing them -- that existing system is small,
+  // carefully tuned, and battle-tested (see its many "vola via
+  // velocissimo"/"si traslata in aria" fixes); keeping this new layer
+  // fully separate means it can NEVER regress that one, and the two are
+  // simply never active at the SAME time for the same fighter (see
+  // update()'s own s.active branch: while a real pulse/death is in
+  // control, this layer's bodies are just re-synced to whatever's being
+  // rendered, not driven -- see resyncActiveRagdollToBones). Only ever
+  // built for a fighter whose CALLER opts in via update()'s own
+  // `activeRagdollEnabled` argument (PlayerCombatSoldier.tsx always
+  // does; CombatSoldier.tsx only for its own enableRagdoll fighter, same
+  // gate as the solid-body layer) -- so the 120-fighter FFA arena
+  // allocates NONE of this, exactly like solidBodiesRef above.
+  const activeBodiesRef = useRef<Record<string, BodyEntry>>({});
+  const activeJointsRef = useRef<ImpulseJoint[]>([]);
+  // Same idea as frozenBoneRestQuatRef above, but for this SEPARATE
+  // always-on rig -- kept as its own ref (not reused) because
+  // restoreBonesToAnimation() (the transient system's own release path)
+  // unconditionally clears frozenBoneRestQuatRef entirely every time a
+  // pulse/death releases, which would silently wipe out this layer's own
+  // captured companion-bone quaternions if the two shared one ref.
+  const activeFrozenBoneRestQuatRef = useRef<Record<string, THREE.Quaternion>>({});
 
   // "metti un segnale su dove e' stato colpito" -- a single reusable
   // glowing marker per character, lazily created on the first hit that
@@ -1032,6 +1120,198 @@ export function useRagdoll(
     [rapier, world, resolveBones]
   );
 
+  // "layer sempre attivo full-body" -- Step 2's actual rig construction.
+  // Unlike buildBodies (the transient pulseHit/activateDeath system,
+  // which can build a PARTIAL subset jointed to kinematic anchors -- see
+  // its own comment), this always builds ALL 11 RAGDOLL_SEGMENTS (Hips
+  // included) unconditionally, with every joint linking two REAL dynamic
+  // bodies -- no anchor machinery needed at all, because RAGDOLL_SEGMENTS
+  // is declared in strict parent-before-child order (see
+  // ragdollConfig.ts), so by the time this loop reaches any child
+  // segment, its parent's own body already exists in `entries`.
+  // Idempotent (returns immediately once built) so it's safe to call
+  // every frame from update()'s own !s.active branch. Never builds
+  // anything for a fighter whose caller doesn't opt in via update()'s
+  // activeRagdollEnabled parameter -- see activeBodiesRef's own comment.
+  const ensureActiveRagdoll = useCallback((): boolean => {
+    if (Object.keys(activeBodiesRef.current).length > 0) return true;
+    const bones = resolveBones();
+    if (!bones) return false;
+
+    // Same "character's own left-right" world direction derivation as
+    // buildBodies above -- see its own comment for why this is computed
+    // from two bones' world positions rather than a guessed local axis.
+    const sideways = new THREE.Vector3(1, 0, 0);
+    const thighL = bones["thigh_l"];
+    const thighR = bones["thigh_r"];
+    if (thighL && thighR) {
+      thighL.getWorldPosition(_v1);
+      thighR.getWorldPosition(_v2);
+      sideways.subVectors(_v1, _v2);
+      if (sideways.lengthSq() > 0.0001) sideways.normalize();
+      else sideways.set(1, 0, 0);
+    }
+
+    const entries = activeBodiesRef.current;
+
+    // "estendere il controllo fisico anche a clavicole/spine_02/03" --
+    // il layer attivo (SOLO questo, non il sistema transitorio sotto)
+    // simula ACTIVE_RAGDOLL_SEGMENTS (15 corpi: gli 11 originali +
+    // SpineMid/SpineHigh/ClavicleL/ClavicleR) invece del RAGDOLL_SEGMENTS
+    // condiviso -- vedi ragdollConfig.ts's proprio commento sul perche'.
+    for (const segment of ACTIVE_RAGDOLL_SEGMENTS) {
+      const bone = bones[segment.drivingBone];
+      const toBone = bones[segment.toBone];
+      if (!bone || !toBone) continue;
+
+      bone.getWorldPosition(_v1);
+      bone.getWorldQuaternion(_q1);
+      toBone.getWorldPosition(_v2);
+
+      const length = Math.max(
+        0.05,
+        _v1.distanceTo(_v2) * (segment.lengthScale ?? 0.92)
+      );
+      const halfHeight = Math.max(0.01, length / 2 - segment.radius);
+
+      const bodyDesc = rapier.RigidBodyDesc.dynamic()
+        .setTranslation(_v1.x, _v1.y, _v1.z)
+        .setRotation({ x: _q1.x, y: _q1.y, z: _q1.z, w: _q1.w })
+        .setLinearDamping(0.5)
+        .setAngularDamping(0.9);
+      const body = world.createRigidBody(bodyDesc);
+
+      const localDir = _v3
+        .copy(_v2)
+        .sub(_v1)
+        .applyQuaternion(_q2.copy(_q1).invert());
+      const localLen = localDir.length() || 1;
+      localDir.normalize();
+      const capsuleRot = new THREE.Quaternion().setFromUnitVectors(
+        _yAxis,
+        localDir
+      );
+      const capsuleOffset = localDir
+        .clone()
+        .multiplyScalar(Math.min(localLen / 2, length / 2));
+
+      const colliderDesc = rapier.ColliderDesc.capsule(
+        halfHeight,
+        segment.radius
+      )
+        .setTranslation(capsuleOffset.x, capsuleOffset.y, capsuleOffset.z)
+        .setRotation({
+          x: capsuleRot.x,
+          y: capsuleRot.y,
+          z: capsuleRot.z,
+          w: capsuleRot.w,
+        })
+        // Same "si trasla in aria" exclusion as buildBodies/ensureSolidBody
+        // -- never push against this (or any) fighter's own movement
+        // collider, only against terrain/props. PIU' un'esclusione che il
+        // sistema transitorio NON ha: qui escludiamo anche il proprio
+        // gruppo Ragdoll (a differenza del commento su CollisionGroups.ts,
+        // che per il rig transitorio accetta un po' di autointersezione
+        // come semplificazione). Nel duello questo layer e' SEMPRE attivo
+        // su ENTRAMBI i lottatori insieme, a distanza di corpo a corpo
+        // (1-2m) -- due rig da 11 capsule ciascuno che possono
+        // compenetrarsi a vicenda (non solo con se stessi) sono il
+        // sospetto principale per l'esplosione numerica osservata dal
+        // vivo (window.__activeRagdollDebug arrivato a centinaia di
+        // milioni di rad/s in un singolo step, senza alcun errore di
+        // rete/joint dal lato nostro -- vedi checkActiveRagdollRunaway).
+        // Il sistema transitorio (buildBodies) resta INVARIATO: dura poco
+        // e non ha due rig completi a distanza ravvicinata come qui.
+        .setCollisionGroups(
+          groupsExcluding(
+            CollisionGroups.Ragdoll,
+            CollisionGroups.Characters,
+            CollisionGroups.Ragdoll
+          )
+        )
+        .setDensity(1.0);
+      world.createCollider(colliderDesc, body);
+
+      entries[segment.name] = {
+        segment,
+        body,
+        bone,
+        restLocalPos: bone.position.clone(),
+        restQuat: bone.quaternion.clone(),
+      };
+
+      const frozenNamesForThisSegment = RAGDOLL_SEGMENT_FROZEN_BONES[segment.name];
+      if (frozenNamesForThisSegment) {
+        for (const frozenName of frozenNamesForThisSegment) {
+          const frozenBone = bones[frozenName];
+          if (frozenBone) {
+            activeFrozenBoneRestQuatRef.current[frozenName] = frozenBone.quaternion.clone();
+          }
+        }
+      }
+
+      if (segment.parent) {
+        const parentEntry = entries[segment.parent];
+        if (parentEntry) {
+          const parentBody = parentEntry.body;
+          const parentBone = parentEntry.bone;
+          parentBone.getWorldPosition(_v1);
+          parentBone.getWorldQuaternion(_q1);
+          bone.getWorldPosition(_v2);
+          const anchor1 = _v2
+            .clone()
+            .sub(_v1)
+            .applyQuaternion(_q1.clone().invert());
+
+          const hingeLimitsDeg = RAGDOLL_HINGE_LIMITS_DEG[segment.name];
+          let jointData;
+          if (hingeLimitsDeg) {
+            const axisLocal = sideways
+              .clone()
+              .applyQuaternion(_q1.clone().invert());
+            jointData = rapier.JointData.revolute(
+              { x: anchor1.x, y: anchor1.y, z: anchor1.z },
+              { x: 0, y: 0, z: 0 },
+              { x: axisLocal.x, y: axisLocal.y, z: axisLocal.z }
+            );
+            jointData.limitsEnabled = true;
+            jointData.limits = [
+              THREE.MathUtils.degToRad(hingeLimitsDeg[0]),
+              THREE.MathUtils.degToRad(hingeLimitsDeg[1]),
+            ];
+          } else {
+            jointData = rapier.JointData.spherical(
+              { x: anchor1.x, y: anchor1.y, z: anchor1.z },
+              { x: 0, y: 0, z: 0 }
+            );
+            // "il personaggio viene scagliato in aria" (live-tuning) --
+            // turns out this rig needs the SAME anatomical cone clamp as
+            // the transient pulse/death rig after all (see
+            // clampActiveJointCones below): Rapier's spherical-joint
+            // solver has a documented instability with small/light
+            // capsule bodies (see HIT_MAX_LINVEL's own comment) that
+            // shows up here too, independently of how strong/weak this
+            // layer's own PD torque is -- confirmed live by lowering
+            // RAGDOLL_MOTOR_STIFFNESS 10x and seeing the same persistent
+            // multi-rad/s angular velocities. restRelativeQuat (this
+            // joint's neutral pose, captured NOW) is what
+            // clampActiveJointCones measures every frame's drift against.
+            bone.getWorldQuaternion(_q2);
+            entries[segment.name].restRelativeQuat = _q1
+              .clone()
+              .invert()
+              .multiply(_q2);
+          }
+
+          const joint = world.createImpulseJoint(jointData, parentBody, body, true);
+          activeJointsRef.current.push(joint);
+        }
+      }
+    }
+
+    return true;
+  }, [rapier, world, resolveBones]);
+
   // "il personaggio si trasla in aria quando prende un colpo" -- root
   // cause found empirically (a temporary debug log printed every live
   // body's world Y every frame): the spherical joints occasionally send
@@ -1066,6 +1346,463 @@ export function useRagdoll(
       }
     }
   }, []);
+
+  // "questo mi sembra piu' sostenibile" -- the PD-torque math itself, run
+  // every frame for every segment of the always-on rig.
+  //
+  // "il personaggio viene scagliato in aria" (live-tuning, after fixing
+  // BOTH the addTorque/addForce crash below AND a per-segment damping
+  // mismatch) -- the rig was STILL unstable (persistent multi-rad/s
+  // angular velocities, never settling) even after both fixes, and even
+  // with stiffness reduced 10x or Hips's own torque nearly zeroed out.
+  // Root cause: the FIRST version of this function drove every body
+  // independently toward its bone's ABSOLUTE WORLD orientation. For a
+  // standalone body that's fine, but for a body that's also joined to a
+  // PARENT via a physics joint, this is a textbook-unstable control
+  // scheme for a kinematic chain -- if the parent is even slightly off
+  // its own target (which it always transiently is, every real parent
+  // has its own PD error every frame), the child's absolute-world target
+  // and the parent's actual current orientation disagree, so the joint
+  // solver's own corrective forces and this function's torque fight each
+  // other continuously, compounding down the chain (torso -> arms/legs
+  // -> hands/feet) instead of canceling out. This is why Torso/Head
+  // (checked against Hips, few intermediate joints) looked calmer than
+  // Hips/UpperArm_L/Thigh_* (more of the chain's disagreement stacked on
+  // them) in earlier live tests.
+  //
+  // Fix: drive each JOINT in its own local (parent-relative) space
+  // instead -- exactly what a real joint motor would do, and the same
+  // relative-pose idea clampActiveJointCones already uses. For a segment
+  // with a parent: targetRelative = parentBoneWorld^-1 * childBoneWorld
+  // (this frame's animated bend at this joint), currentRelative =
+  // parentBodyWorld^-1 * childBodyWorld (this joint's actual live bend),
+  // error = targetRelative * currentRelative^-1, torque applied to the
+  // CHILD body only. This only cares whether THIS joint's bend matches
+  // the animation, never the parent's own absolute orientation error --
+  // so it can't accumulate/fight down the chain. Hips (no parent) is the
+  // one exception, still driven in absolute world space (nothing else it
+  // could be relative to), same as before.
+  //
+  // "recursive use of an object detected which would lead to unsafe
+  // aliasing in rust" -- separate root cause, found empirically by
+  // disabling this function piece by piece while watching the console:
+  // RigidBody's addTorque/addForce (the CONTINUOUS force-accumulator
+  // API, re-applied and cleared by Rapier every solver step) reliably
+  // corrupts this installed rapier3d-compat build's internal wasm state
+  // the moment it's called even ONCE -- the very next frame,
+  // @react-three/rapier's own per-frame forEachRigidBody sync (used to
+  // update every <RigidBody> component's transform, completely unrelated
+  // code) throws this exact panic and never recovers without a page
+  // reload. Every OTHER force/torque application already in this file
+  // (pulseHit's own applyTorqueImpulse/applyImpulse) uses the IMPULSE API
+  // instead, which doesn't touch this accumulator path at all --
+  // confirmed by the same piece-by-piece test that swapping addTorque for
+  // applyTorqueImpulse (an instantaneous velocity change, scaled by
+  // `delta` below to approximate the same continuous force) makes the
+  // crash disappear entirely. So: this PD layer applies every frame's
+  // torque/force as a small IMPULSE (this frame's force * delta) via
+  // applyTorqueImpulse/applyImpulse, never addTorque/addForce.
+  const syncActiveRagdollMotors = useCallback((delta: number) => {
+    const entries = activeBodiesRef.current;
+    if (typeof window !== "undefined") {
+      (window as any).__activeRagdollDebug = (window as any).__activeRagdollDebug || {};
+    }
+    for (const key of Object.keys(entries)) {
+      const entry = entries[key];
+      const { body, bone, segment } = entry;
+      const parentEntry = segment.parent ? entries[segment.parent] : undefined;
+
+      // TEMP debug -- "isolane uno e guarda come si deforma quando
+      // aggiungi il ragdoll" (richiesta utente): a differenza di
+      // angleDeg/angVelMag sotto (che riflettono SOLO l'errore di
+      // rotazione e nei test dal vivo restavano puliti anche quando la
+      // mesh appariva visibilmente deformata), questo registra la
+      // POSIZIONE vera del corpo fisico e quella del bone bersaglio,
+      // incondizionatamente ogni frame (non solo quando l'errore
+      // angolare supera la soglia sotto) per non perdere un frame
+      // "cattivo" che poi si autocorregge prima del prossimo campione.
+      if (typeof window !== "undefined") {
+        const t = body.translation();
+        bone.getWorldPosition(_activePosTarget);
+        (window as any).__activeRagdollDebug[key] = {
+          ...((window as any).__activeRagdollDebug[key] || {}),
+          bodyPos: { x: t.x, y: t.y, z: t.z },
+          targetPos: { x: _activePosTarget.x, y: _activePosTarget.y, z: _activePosTarget.z },
+          posErr: Math.hypot(
+            t.x - _activePosTarget.x,
+            t.y - _activePosTarget.y,
+            t.z - _activePosTarget.z
+          ),
+        };
+      }
+
+      let angVelX: number;
+      let angVelY: number;
+      let angVelZ: number;
+
+      if (parentEntry) {
+        // Joint-space error -- see this function's own comment above.
+        bone.getWorldQuaternion(_activeTargetQuat);
+        parentEntry.bone.getWorldQuaternion(_activeParentTargetQuat);
+        _activeTargetRelQuat
+          .copy(_activeParentTargetQuat)
+          .invert()
+          .multiply(_activeTargetQuat);
+
+        const r = body.rotation();
+        _activeCurQuat.set(r.x, r.y, r.z, r.w);
+        const pr = parentEntry.body.rotation();
+        _activeParentCurQuat.set(pr.x, pr.y, pr.z, pr.w);
+        _activeCurRelQuat
+          .copy(_activeParentCurQuat)
+          .invert()
+          .multiply(_activeCurQuat);
+
+        // targetRelative * currentRelative^-1 -- the LOCAL rotation that
+        // would take this joint's current bend to its animated bend.
+        _activeErrQuat.copy(_activeTargetRelQuat).multiply(_activeCurRelQuat.invert());
+
+        // Damping against the RELATIVE angular velocity (child minus
+        // parent) -- an absolute angVel damping term would fight the
+        // parent's own motion (e.g. a swinging arm on a walking torso),
+        // exactly the kind of chain-fighting this whole rewrite is
+        // meant to remove.
+        const cav = body.angvel();
+        const pav = parentEntry.body.angvel();
+        angVelX = cav.x - pav.x;
+        angVelY = cav.y - pav.y;
+        angVelZ = cav.z - pav.z;
+      } else {
+        // Hips: no parent, nothing to be relative to -- absolute world
+        // orientation, same as the original design.
+        bone.getWorldQuaternion(_activeTargetQuat);
+        const r = body.rotation();
+        _activeCurQuat.set(r.x, r.y, r.z, r.w);
+        _activeErrQuat.copy(_activeTargetQuat).multiply(_activeCurQuat.invert());
+        const av = body.angvel();
+        angVelX = av.x;
+        angVelY = av.y;
+        angVelZ = av.z;
+      }
+
+      let ew = _activeErrQuat.w;
+      let ex = _activeErrQuat.x;
+      let ey = _activeErrQuat.y;
+      let ez = _activeErrQuat.z;
+      if (ew < 0) {
+        // Shortest-path fix: a quaternion and its negation represent the
+        // SAME rotation, but acos(w) only returns the short way round when
+        // w>=0 -- without this flip, the torque would occasionally spin a
+        // limb the LONG way around toward its own target.
+        ew = -ew;
+        ex = -ex;
+        ey = -ey;
+        ez = -ez;
+      }
+      const angle = 2 * Math.acos(Math.min(1, Math.max(-1, ew)));
+      _activeTorqueAxis.set(ex, ey, ez);
+      const axisLen = _activeTorqueAxis.length();
+      if (axisLen > 1e-6 && angle > 1e-5) {
+        _activeTorqueAxis.divideScalar(axisLen);
+        const stiffness =
+          RAGDOLL_MOTOR_STIFFNESS_BY_SEGMENT[segment.name] ?? RAGDOLL_MOTOR_STIFFNESS;
+        // RAGDOLL_MOTOR_STIFFNESS/_DAMPING (via RAGDOLL_MOTOR_DAMPING_RATIO,
+        // see its own comment) are ANGULAR-ACCELERATION gains, NOT raw
+        // torques -- multiplying by this body's own actual principalInertia
+        // (tiny for a hand, much bigger for the torso) converts that into a
+        // real torque, so one pair of constants behaves consistently across
+        // differently-sized segments. Approximated as a single scalar
+        // (average of the 3 principal-axis components) rather than the full
+        // inertia tensor -- consistent with this file's other
+        // approximations (e.g. the cone-limit clamp's single total angle).
+        const inertia = body.principalInertia();
+        const inertiaScale = (inertia.x + inertia.y + inertia.z) / 3;
+        const damping = 2 * Math.sqrt(stiffness) * RAGDOLL_MOTOR_DAMPING_RATIO;
+        // Saturazione dell'errore (vedi ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_RAD
+        // sopra) -- usata SOLO per calcolare la coppia, non nel debug
+        // readout qui sotto, che resta l'angolo vero.
+        const motorAngle = Math.min(angle, ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_RAD);
+        body.applyTorqueImpulse(
+          {
+            x: (_activeTorqueAxis.x * motorAngle * stiffness - angVelX * damping) * inertiaScale * delta,
+            y: (_activeTorqueAxis.y * motorAngle * stiffness - angVelY * damping) * inertiaScale * delta,
+            z: (_activeTorqueAxis.z * motorAngle * stiffness - angVelZ * damping) * inertiaScale * delta,
+          },
+          true
+        );
+        if (typeof window !== "undefined") {
+          (window as any).__activeRagdollDebug[key] = {
+            angleDeg: (angle * 180) / Math.PI,
+            angVelMag: Math.sqrt(angVelX*angVelX+angVelY*angVelY+angVelZ*angVelZ),
+            inertiaScale,
+            mass: body.mass(),
+          };
+        }
+      }
+
+      if (segment.name === "Hips") {
+        bone.getWorldPosition(_activePosTarget);
+        const t = body.translation();
+        _activePosError.set(
+          _activePosTarget.x - t.x,
+          _activePosTarget.y - t.y,
+          _activePosTarget.z - t.z
+        );
+        const v = body.linvel();
+        const mass = body.mass();
+        body.applyImpulse(
+          {
+            x: (_activePosError.x * RAGDOLL_HIPS_POSITION_STIFFNESS - v.x * RAGDOLL_HIPS_POSITION_DAMPING) * mass * delta,
+            y: (_activePosError.y * RAGDOLL_HIPS_POSITION_STIFFNESS - v.y * RAGDOLL_HIPS_POSITION_DAMPING) * mass * delta,
+            z: (_activePosError.z * RAGDOLL_HIPS_POSITION_STIFFNESS - v.z * RAGDOLL_HIPS_POSITION_DAMPING) * mass * delta,
+          },
+          true
+        );
+      }
+    }
+  }, []);
+
+  // Same blunt safety net as clampBodyVelocities above (same documented
+  // Rapier joint-solver instability class), but for BOTH linear AND
+  // angular velocity -- this rig's joint solver runs continuously (every
+  // frame, forever, while a fighter has this layer on) rather than for a
+  // brief 0.44s pulse, so an intermittent solver hiccup has far more
+  // chances to occur and needs to be caught on both axes, not just linear.
+  // Mirrors clampJointCones above, for the always-on rig -- same
+  // documented Rapier spherical-joint instability with small/light
+  // capsules (see HIT_MAX_LINVEL's own comment), confirmed live to
+  // affect this layer too regardless of its own PD torque strength (see
+  // ensureActiveRagdoll's own comment on restRelativeQuat). Simpler than
+  // the transient version: every segment here that has a parent has a
+  // REAL parentEntry (no kinematic-anchor branching needed, see
+  // ensureActiveRagdoll's own comment on build order).
+  // "il personaggio viene scagliato in aria" -- Hips has no parent, so it
+  // can't be measured/clamped relative to anything the way every other
+  // segment now is (see syncActiveRagdollMotors's own comment on the
+  // joint-space rewrite): every child's OWN "current relative"
+  // measurement is computed against its PARENT's live body rotation, so
+  // an unstable parent corrupts every child's error measurement too,
+  // even though torque application no longer directly fights it. This
+  // hard-clamps a segment's own ABSOLUTE orientation straight back
+  // toward its bone's live target whenever it strays too far (same
+  // partial-slerp-correction technique as the per-joint cone clamp
+  // below, just measured in world space instead of parent-relative) --
+  // a firm anchor for the rest of the chain to hang off, on top of (not
+  // instead of) its own continuous PD torque/joint-cone clamp.
+  //
+  // Two anchors, not just one: Hips (root, no parent -- nothing else
+  // could stabilize it) AND Torso (parent of both arms, the head and,
+  // through Hips, both legs -- live testing showed the arms/legs still
+  // drifted far even after Hips alone got this treatment, because their
+  // OWN parent references -- Torso for the arms/head, Hips for the legs
+  // -- still wandered too much on their own). HIPS_ABSOLUTE_CLAMP_RAD is
+  // tighter than TORSO_ABSOLUTE_CLAMP_RAD: the root benefits from being
+  // held closer to its target since literally everything else is
+  // ultimately relative to it.
+  const HIPS_ABSOLUTE_CLAMP_RAD = THREE.MathUtils.degToRad(20);
+  const TORSO_ABSOLUTE_CLAMP_RAD = THREE.MathUtils.degToRad(25);
+  const clampActiveSegmentAbsolute = useCallback(
+    (segmentName: string, maxAngle: number) => {
+      const entry = activeBodiesRef.current[segmentName];
+      if (!entry) return;
+      entry.bone.getWorldQuaternion(_activeTargetQuat);
+      const r = entry.body.rotation();
+      _activeCurQuat.set(r.x, r.y, r.z, r.w);
+      _activeErrQuat.copy(_activeTargetQuat).multiply(_activeCurQuat.invert());
+      const w = THREE.MathUtils.clamp(Math.abs(_activeErrQuat.w), -1, 1);
+      const angle = 2 * Math.acos(w);
+      if (angle <= maxAngle || angle < 1e-5) return;
+      // Move `current` toward `target` along their own shortest arc until
+      // exactly maxAngle of the original error remains -- i.e. slerp
+      // fraction (angle - maxAngle) / angle of the way there.
+      const f = (angle - maxAngle) / angle;
+      _coneCorrectedWorld.copy(_activeCurQuat).slerp(_activeTargetQuat, f);
+      entry.body.setRotation(
+        {
+          x: _coneCorrectedWorld.x,
+          y: _coneCorrectedWorld.y,
+          z: _coneCorrectedWorld.z,
+          w: _coneCorrectedWorld.w,
+        },
+        true
+      );
+      // Same angular-velocity damping as clampActiveJointCones/
+      // clampJointCones -- without it the leftover momentum from before
+      // the snap just carries the body straight back past the limit next
+      // frame, turning this into a self-fighting buzz instead of a
+      // settling correction.
+      const av = entry.body.angvel();
+      entry.body.setAngvel({ x: av.x * 0.2, y: av.y * 0.2, z: av.z * 0.2 }, true);
+    },
+    []
+  );
+  const clampActiveHipsAbsolute = useCallback(() => {
+    clampActiveSegmentAbsolute("Hips", HIPS_ABSOLUTE_CLAMP_RAD);
+    clampActiveSegmentAbsolute("Torso", TORSO_ABSOLUTE_CLAMP_RAD);
+  }, [clampActiveSegmentAbsolute]);
+
+  const clampActiveJointCones = useCallback(() => {
+    const entries = activeBodiesRef.current;
+    for (const key of Object.keys(entries)) {
+      const entry = entries[key];
+      if (!entry.restRelativeQuat || !entry.segment.parent) continue;
+      const maxAngle = ACTIVE_RAGDOLL_CONE_LIMIT_RAD[entry.segment.name];
+      if (maxAngle === undefined) continue;
+
+      const parentEntry = entries[entry.segment.parent];
+      if (!parentEntry) continue;
+      const parentRot = parentEntry.body.rotation();
+
+      _coneParentQuat.set(parentRot.x, parentRot.y, parentRot.z, parentRot.w);
+      const childRot = entry.body.rotation();
+      _coneChildQuat.set(childRot.x, childRot.y, childRot.z, childRot.w);
+
+      _coneRelQuat.copy(_coneParentQuat).invert().multiply(_coneChildQuat);
+      _coneDeltaQuat
+        .copy(entry.restRelativeQuat)
+        .invert()
+        .multiply(_coneRelQuat);
+
+      const w = THREE.MathUtils.clamp(Math.abs(_coneDeltaQuat.w), -1, 1);
+      const angle = 2 * Math.acos(w);
+      if (angle <= maxAngle || angle < 1e-5) continue;
+
+      const t = maxAngle / angle;
+      _coneClampedDelta.copy(_identityQuat).slerp(_coneDeltaQuat, t);
+      _coneCorrectedRel.copy(entry.restRelativeQuat).multiply(_coneClampedDelta);
+      _coneCorrectedWorld.copy(_coneParentQuat).multiply(_coneCorrectedRel);
+      entry.body.setRotation(
+        {
+          x: _coneCorrectedWorld.x,
+          y: _coneCorrectedWorld.y,
+          z: _coneCorrectedWorld.z,
+          w: _coneCorrectedWorld.w,
+        },
+        true
+      );
+      // Same fix as clampJointCones above, missing here in an earlier
+      // pass and the actual root cause of a live-tested "buzz" (angVelMag
+      // in the TENS of rad/s, never settling) -- without damping the
+      // angular velocity too, the solver's own leftover momentum drives
+      // the body straight back past the limit next step, so this snap
+      // fights itself every single frame instead of settling.
+      const av = entry.body.angvel();
+      entry.body.setAngvel({ x: av.x * 0.2, y: av.y * 0.2, z: av.z * 0.2 }, true);
+    }
+  }, []);
+
+  const ACTIVE_RAGDOLL_MAX_LINVEL = 3; // m/s
+  const ACTIVE_RAGDOLL_MAX_ANGVEL = 8; // rad/s
+  const clampActiveRagdollVelocities = useCallback(() => {
+    const entries = activeBodiesRef.current;
+    for (const key of Object.keys(entries)) {
+      const { body } = entries[key];
+      const v = body.linvel();
+      const speedSq = v.x * v.x + v.y * v.y + v.z * v.z;
+      if (speedSq > ACTIVE_RAGDOLL_MAX_LINVEL * ACTIVE_RAGDOLL_MAX_LINVEL) {
+        const scale = ACTIVE_RAGDOLL_MAX_LINVEL / Math.sqrt(speedSq);
+        body.setLinvel({ x: v.x * scale, y: v.y * scale, z: v.z * scale }, true);
+      }
+      const w = body.angvel();
+      const angSpeedSq = w.x * w.x + w.y * w.y + w.z * w.z;
+      if (angSpeedSq > ACTIVE_RAGDOLL_MAX_ANGVEL * ACTIVE_RAGDOLL_MAX_ANGVEL) {
+        const scale = ACTIVE_RAGDOLL_MAX_ANGVEL / Math.sqrt(angSpeedSq);
+        body.setAngvel({ x: w.x * scale, y: w.y * scale, z: w.z * scale }, true);
+      }
+    }
+  }, []);
+
+  // Called every frame FROM update()'s own s.active branch -- i.e.
+  // whenever a transient pulse/death IS in control of the visible
+  // skeleton -- so this always-on rig never drifts away from (or falls
+  // behind) whatever's actually being rendered right then. A hard
+  // teleport, deliberately NOT a PD chase: if the springs instead tried
+  // to chase a body that's simultaneously being flung around by a real
+  // hit reaction, they'd either fight it (visible jitter) or lag behind
+  // it, producing a visible pop/snap the instant control returns to this
+  // layer once the pulse fully releases.
+  // Failsafe "airbag" (live-tuning, sessione "clamp Torso + per-arto"):
+  // dal vivo, partendo da una posa gia' molto lontana dal target (es. il
+  // manichino del duello che parte a terra/sbilanciato), la coppia PD +
+  // le collisioni contro il terreno possono innescare una vera fuga
+  // (angVelMag osservato fino a 250+ rad/s su piu' segmenti insieme,
+  // Hips compreso pur senza nessun giunto a "litigarci" -- quindi non
+  // solo un giunto che fa resistenza, la catena si autoalimenta) che i
+  // clamp per-segmento/il damping da soli non riportano indietro in
+  // tempi ragionevoli. Invece di continuare a inseguire un bersaglio
+  // mentre il corpo sta letteralmente girando su se stesso, se QUALSIASI
+  // segmento supera questa soglia (ben sopra ACTIVE_RAGDOLL_MAX_ANGVEL,
+  // che governa il regime normale) si fa un resync completo alla posa
+  // animata (stesso identico meccanismo gia' usato dal sistema
+  // transitorio per uscire pulito da un pulseHit) invece di provare a
+  // smorzare la fuga un frame alla volta.
+  const ACTIVE_RAGDOLL_RUNAWAY_ANGVEL = 30; // rad/s
+  const checkActiveRagdollRunaway = useCallback(() => {
+    const entries = activeBodiesRef.current;
+    const thresholdSq = ACTIVE_RAGDOLL_RUNAWAY_ANGVEL * ACTIVE_RAGDOLL_RUNAWAY_ANGVEL;
+    for (const key of Object.keys(entries)) {
+      const av = entries[key].body.angvel();
+      const magSq = av.x * av.x + av.y * av.y + av.z * av.z;
+      // "magSq > thresholdSq" da solo NON basta: osservato dal vivo un
+      // caso in cui una singola collisione con compenetrazione profonda
+      // (dopo un resync che non controlla se il corpo atterra dentro al
+      // pavimento/un altro segmento) fa esplodere Rapier stesso in UN
+      // solo step a valori enormi (miliardi di rad/s), che nel giro di
+      // pochi frame diventano non finiti -- e in JS un confronto con NaN
+      // e' SEMPRE false, quindi "magSq > thresholdSq" smette proprio di
+      // scattare proprio quando servirebbe di piu'. "!(magSq <= thresholdSq)"
+      // e' equivalente per numeri normali ma cattura anche NaN/Infinity.
+      if (!(magSq <= thresholdSq) || !Number.isFinite(magSq)) return true;
+      const lv = entries[key].body.linvel();
+      if (!Number.isFinite(lv.x) || !Number.isFinite(lv.y) || !Number.isFinite(lv.z)) {
+        return true;
+      }
+    }
+    return false;
+  }, []);
+
+  const resyncActiveRagdollToBones = useCallback(() => {
+    const entries = activeBodiesRef.current;
+    for (const key of Object.keys(entries)) {
+      const { body, bone } = entries[key];
+      bone.getWorldPosition(_v1);
+      bone.getWorldQuaternion(_q1);
+      body.setTranslation({ x: _v1.x, y: _v1.y, z: _v1.z }, true);
+      body.setRotation({ x: _q1.x, y: _q1.y, z: _q1.z, w: _q1.w }, true);
+      body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
+  }, []);
+
+  // Mirrors destroyBodies() above, for the always-on rig -- removes every
+  // joint then every body, then restores this layer's OWN frozen
+  // companion bones (see activeFrozenBoneRestQuatRef's own comment) from
+  // their captured rest quaternions, same reasoning as
+  // restoreBonesToAnimation: a bone whose current clip track holds a
+  // CONSTANT value never gets reclaimed by the AnimationMixer's own stale
+  // cache otherwise. Called whenever update()'s activeRagdollEnabled flag
+  // goes false while a rig is already built (the GUI checkbox toggled off
+  // live) -- see update()'s own !s.active branch.
+  const destroyActiveRagdoll = useCallback(() => {
+    for (const joint of activeJointsRef.current) {
+      world.removeImpulseJoint(joint, true);
+    }
+    activeJointsRef.current = [];
+    for (const key of Object.keys(activeBodiesRef.current)) {
+      world.removeRigidBody(activeBodiesRef.current[key].body);
+    }
+    activeBodiesRef.current = {};
+
+    const bones = resolveBones();
+    if (bones) {
+      const rest = activeFrozenBoneRestQuatRef.current;
+      for (const name of Object.keys(rest)) {
+        const bone = bones[name];
+        if (bone) bone.quaternion.copy(rest[name]);
+      }
+    }
+    activeFrozenBoneRestQuatRef.current = {};
+  }, [world, resolveBones]);
 
   // "le parti del corpo devono seguire sempre i constraint dell'anatomia
   // umana.. a meno di un colpo davvero forte (di cui parleremo in
@@ -1182,8 +1919,14 @@ export function useRagdoll(
   // not a lerped one (bone LENGTHS don't change, only rotations do, for a
   // normal skeletal animation -- blending position would visibly stretch
   // limbs).
-  const syncBonesFromPhysics = useCallback((weight: number) => {
-    const entries = bodiesRef.current;
+  // `entries` defaults to bodiesRef.current (the transient pulse/death
+  // rig) so every EXISTING call site keeps working unchanged; the new
+  // always-on active-ragdoll layer (see update()'s own !s.active branch)
+  // passes activeBodiesRef.current instead, at weight=1 (that layer has
+  // no blend-out of its own -- it's either fully driving the skeleton or
+  // fully torn down, see destroyActiveRagdoll).
+  const syncBonesFromPhysics = useCallback(
+    (weight: number, entries: Record<string, BodyEntry> = bodiesRef.current) => {
     for (const key of Object.keys(entries)) {
       const { body, bone, restLocalPos } = entries[key];
       if (!bone.parent) continue;
@@ -1196,6 +1939,25 @@ export function useRagdoll(
       _parentInverse.copy(bone.parent.matrixWorld).invert();
       _worldMatrix.premultiply(_parentInverse);
       _worldMatrix.decompose(_v2, _q2, _v3);
+
+      // TEMP debug -- "isolane uno e guarda come si deforma quando
+      // aggiungi il ragdoll": registra cosa scrive REALMENTE su questo
+      // bone (spazio locale) e la scala decomposta (_v3), scartata sotto
+      // e mai applicata a bone.scale -- se qui e' lontana da (1,1,1) la
+      // matrice mondo del genitore ha una scala/shear che questa
+      // conversione mondo->locale non gestisce, e sarebbe la causa reale
+      // (non un problema di stiffness/damping/collisioni).
+      if (typeof window !== "undefined" && entries === activeBodiesRef.current) {
+        (window as any).__boneSyncDebug = (window as any).__boneSyncDebug || {};
+        (window as any).__boneSyncDebug[key] = {
+          boneName: bone.name,
+          localPos: { x: _v2.x, y: _v2.y, z: _v2.z },
+          localQuat: { x: _q2.x, y: _q2.y, z: _q2.z, w: _q2.w },
+          decomposedScale: { x: _v3.x, y: _v3.y, z: _v3.z },
+          parentName: bone.parent ? bone.parent.name : null,
+          boneScale: { x: bone.scale.x, y: bone.scale.y, z: bone.scale.z },
+        };
+      }
 
       if (weight >= 1) {
         bone.position.copy(_v2);
@@ -1214,6 +1976,30 @@ export function useRagdoll(
         bone.position.lerpVectors(restLocalPos, _v2, weight);
         bone.quaternion.slerp(_q2, weight);
       }
+      // "il manichino e' tutto deforme" -- root cause of a real, live-
+      // reproduced bug (segnalato dall'utente, riprodotto anche a mani
+      // ferme senza nessun colpo): RAGDOLL_SEGMENTS/entries sono
+      // ordinati genitore-prima-del-figlio (Hips, Torso, Head, arti...),
+      // e questa funzione li processa in quell'ordine -- ma
+      // `bone.parent.matrixWorld`, usato per convertire mondo->locale
+      // qualche riga sopra, NON si aggiorna da solo quando si scrive
+      // position/quaternion di un bone: Three.js lo ricalcola solo al
+      // prossimo render (scene.updateMatrixWorld). Quindi quando si
+      // arriva a processare il FIGLIO (es. Torso) subito dopo aver
+      // appena scritto il GENITORE (Hips) in QUESTO stesso ciclo, la sua
+      // matrice mondo e' ancora quella VECCHIA (pre-fisica) -- e se
+      // l'Hips si e' appena spostato parecchio (la sua molla di
+      // posizione, RAGDOLL_HIPS_POSITION_STIFFNESS, e' un'ACCELERAZIONE
+      // continua, non c'entra col debug angleDeg/angVelMag che segue
+      // solo la rotazione ed era perfettamente convergente quando il
+      // bug si vedeva), ogni figlio processato in questo stesso giro si
+      // "aggancia" a un genitore fantasma rimasto indietro di un frame
+      // -- esattamente lo stiramento/deformazione visto dal vivo.
+      // Forzare l'aggiornamento SUBITO dopo aver scritto questo bone
+      // garantisce che il prossimo figlio nel ciclo (Object.keys(entries)
+      // segue lo stesso ordine genitore-poi-figlio di RAGDOLL_SEGMENTS)
+      // legga la matrice mondo GIA' aggiornata di questo frame.
+      bone.updateMatrixWorld(true);
     }
 
     // "1. crollo totale" (activateDeath) builds all 11 segments, so this
@@ -1223,10 +2009,31 @@ export function useRagdoll(
     // which would otherwise visibly stomp the still-animated torso pose.
     const bones = bonesRef.current;
     if (bones) {
+      // "estendere il controllo fisico anche a clavicole/spine_02/03" --
+      // col layer attivo che ora simula ACTIVE_RAGDOLL_SEGMENTS (include
+      // SpineMid/spine_02, SpineHigh/spine_03, ClavicleL/clavicle_l,
+      // ClavicleR/clavicle_r come corpi VERI, scritti poco sopra in questo
+      // stesso ciclo), il loop sotto stomperebbe SUBITO quelle scritture:
+      // 'Torso' in RAGDOLL_SEGMENT_FROZEN_BONES elenca ancora
+      // spine_02/spine_03 da congelare a identita', e 'UpperArm_L'/
+      // 'UpperArm_R' elencano ancora clavicle_l/clavicle_r -- entrambe le
+      // chiavi esistono ancora in `entries` (Torso/UpperArm_L/UpperArm_R
+      // restano segmenti reali anche nel set esteso). drivenBoneNames
+      // raccoglie il drivingBone di OGNI segmento presente in questo
+      // preciso `entries` (generico: per la chiamata transitoria,
+      // bodiesRef.current, non include mai spine_02/clavicle_*, quindi
+      // il comportamento li' resta identico a prima) e salta il freeze
+      // per qualunque bone che risulta gia' pilotato direttamente da un
+      // proprio corpo fisico.
+      const drivenBoneNames = new Set<string>();
+      for (const k of Object.keys(entries)) {
+        drivenBoneNames.add(entries[k].segment.drivingBone);
+      }
       for (const key of Object.keys(entries)) {
         const frozenNames = RAGDOLL_SEGMENT_FROZEN_BONES[key];
         if (!frozenNames) continue;
         for (const boneName of frozenNames) {
+          if (drivenBoneNames.has(boneName)) continue;
           const bone = bones[boneName];
           if (!bone) continue;
           if (weight >= 1) bone.quaternion.identity();
@@ -1234,7 +2041,9 @@ export function useRagdoll(
         }
       }
     }
-  }, []);
+    },
+    []
+  );
 
   const ensureMarker = useCallback((): THREE.Mesh | null => {
     if (markerRef.current) return markerRef.current;
@@ -1374,7 +2183,14 @@ export function useRagdoll(
   );
 
   const update = useCallback(
-    (delta: number) => {
+    // "layer sempre attivo full-body" -- activeRagdollEnabled is the
+    // CALLER's own explicit opt-in (see activeBodiesRef's own comment for
+    // why this can't just be an always-on internal default): defaults to
+    // false so every existing call site -- most importantly, all 120
+    // CombatSoldier.tsx instances in the FFA arena, whose update(delta)
+    // call is UNCONDITIONAL regardless of enableRagdoll -- keeps costing
+    // exactly zero extra physics unless a caller explicitly asks for it.
+    (delta: number, activeRagdollEnabled: boolean = false) => {
       // Hit-marker fade runs independently of ragdoll state -- it can
       // still be fading out slightly after the pulse itself has already
       // fully blended back to pure animation.
@@ -1396,7 +2212,27 @@ export function useRagdoll(
       syncSolidBody();
 
       const s = stateRef.current;
-      if (!s.active) return;
+      if (!s.active) {
+        // No transient pulse/death is in control right now -- either
+        // drive the always-on layer directly (built lazily, first call),
+        // or, if the caller just turned it off live (GUI checkbox) and a
+        // rig is still sitting there from before, tear it down cleanly.
+        if (activeRagdollEnabled) {
+          ensureActiveRagdoll();
+          if (checkActiveRagdollRunaway()) {
+            resyncActiveRagdollToBones();
+          } else {
+            syncActiveRagdollMotors(delta);
+            clampActiveRagdollVelocities();
+            clampActiveJointCones();
+            clampActiveHipsAbsolute();
+          }
+          syncBonesFromPhysics(1, activeBodiesRef.current);
+        } else if (Object.keys(activeBodiesRef.current).length > 0) {
+          destroyActiveRagdoll();
+        }
+        return;
+      }
 
       if (s.isDeath) {
         // Full 11-body collapse (no kinematic anchors involved -- see
@@ -1405,6 +2241,11 @@ export function useRagdoll(
         // not folding into a pretzel.
         clampJointCones();
         syncBonesFromPhysics(1);
+        // A real pulse/death is in control of the skeleton right now --
+        // keep the always-on rig's bodies pinned to it so there's no pop
+        // when control eventually returns (see resyncActiveRagdollToBones's
+        // own comment). No-op (empty loop) if this fighter never opted in.
+        if (activeRagdollEnabled) resyncActiveRagdollToBones();
         return;
       }
 
@@ -1416,6 +2257,7 @@ export function useRagdoll(
       s.pulseElapsed += delta;
       if (s.pulseElapsed < HIT_PULSE_DURATION) {
         syncBonesFromPhysics(1);
+        if (activeRagdollEnabled) resyncActiveRagdollToBones();
         return;
       }
 
@@ -1425,9 +2267,13 @@ export function useRagdoll(
         restoreBonesToAnimation();
         destroyBodies();
         stateRef.current = freshState();
+        if (activeRagdollEnabled) resyncActiveRagdollToBones();
         return;
       }
       syncBonesFromPhysics(weight);
+      // Resync insertion #4: the final fall-through (still mid blend-out,
+      // weight between 0 and 1) -- same reasoning as the 3 branches above.
+      if (activeRagdollEnabled) resyncActiveRagdollToBones();
     },
     [
       syncBonesFromPhysics,
@@ -1438,6 +2284,14 @@ export function useRagdoll(
       clampJointCones,
       syncHurtbox,
       syncSolidBody,
+      ensureActiveRagdoll,
+      checkActiveRagdollRunaway,
+      syncActiveRagdollMotors,
+      clampActiveRagdollVelocities,
+      clampActiveJointCones,
+      clampActiveHipsAbsolute,
+      resyncActiveRagdollToBones,
+      destroyActiveRagdoll,
     ]
   );
 
@@ -1602,6 +2456,20 @@ export function useRagdoll(
         world.removeCharacterController(solidControllerRef.current);
         solidControllerRef.current = null;
       }
+      // Same leak-on-unmount concern as the solid-body cleanup just
+      // above, for the always-on active-ragdoll layer's own bodies/
+      // joints (see activeBodiesRef's own comment) -- a fighter that
+      // never opted in has none of this to clean up (both refs stay
+      // empty), so this is a no-op for every FFA-arena CombatSoldier.
+      for (const joint of activeJointsRef.current) {
+        world.removeImpulseJoint(joint, true);
+      }
+      activeJointsRef.current = [];
+      for (const name of Object.keys(activeBodiesRef.current)) {
+        world.removeRigidBody(activeBodiesRef.current[name].body);
+      }
+      activeBodiesRef.current = {};
+      activeFrozenBoneRestQuatRef.current = {};
     },
     [world]
   );

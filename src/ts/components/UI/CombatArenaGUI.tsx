@@ -41,11 +41,12 @@ const CombatArenaGUI: React.FC = () => {
     // this one's sole job is to forward onChange into the store (read back
     // via getState() so this effect doesn't need to re-subscribe/rebuild
     // the panel every time either value changes elsewhere).
-    const settings: { modalita: GameMode; combattenti: number; manichino: boolean; colliderFisici: boolean } = {
+    const settings: { modalita: GameMode; combattenti: number; manichino: boolean; colliderFisici: boolean; ragdollAttivo: boolean } = {
       modalita: useStore.getState().arenaGameMode,
       combattenti: useStore.getState().arenaFighterCount,
       manichino: useStore.getState().duelDummyMode,
       colliderFisici: useStore.getState().showPhysicsDebug,
+      ragdollAttivo: useStore.getState().euphoriaRagdollEnabled,
     };
 
     folder
@@ -77,6 +78,15 @@ const CombatArenaGUI: React.FC = () => {
       .add(settings, 'colliderFisici')
       .name('Mostra collider fisici')
       .onChange((active: boolean) => useStore.getState().setShowPhysicsDebug(active));
+
+    // "questo mi sembra piu' sostenibile" -- toggle live del layer PD
+    // sempre attivo (ragdollConfig.ts's RAGDOLL_MOTOR_STIFFNESS/
+    // RAGDOLL_HIPS_POSITION_STIFFNESS), per poterlo tarare/confrontare
+    // A/B senza dover ricaricare la pagina ogni volta.
+    folder
+      .add(settings, 'ragdollAttivo')
+      .name('Ragdoll attivo (PD)')
+      .onChange((active: boolean) => useStore.getState().setEuphoriaRagdollEnabled(active));
 
     // "le colonne devono essere retratte" -- lil-gui folders actually
     // default to OPEN (verified live -- omitting .open() was NOT enough

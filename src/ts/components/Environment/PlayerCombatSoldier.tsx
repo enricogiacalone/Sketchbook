@@ -10,6 +10,7 @@ import SolidBodyDebugView from './SolidBodyDebugView';
 import { useInput } from '../../hooks/useInput';
 import { FighterData, AnimCatalog } from './SquadArenaTypes';
 import type { PunchingBagHandle } from './PunchingBag';
+import { useStore } from '../../store';
 
 const MODEL_URL = 'soldier-citizen.glb';
 const BASE_ANIMS_URL = 'soldier-citizen-base-animations.glb';
@@ -425,7 +426,11 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // reasoning as CombatSoldier.tsx: a hit-reaction pulse needs to keep
     // simulating/blending out even once the rest of the state machine has
     // moved on.
-    ragdoll.update(delta);
+    // "layer sempre attivo full-body" -- the human duel player always
+    // opts in to the PD active-ragdoll layer when the GUI toggle is on
+    // (there's no enableRagdoll-style gate for the player fighter -- this
+    // component only ever renders the one duel player).
+    ragdoll.update(delta, useStore.getState().euphoriaRagdollEnabled);
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
     // fighter (their own checkAttackContact reads it off `opponent`) --
     // see FighterData's comment.

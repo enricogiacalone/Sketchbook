@@ -67,6 +67,56 @@ export const RAGDOLL_SEGMENTS: RagdollSegment[] = [
   { name: 'Shin_R', drivingBone: 'calf_r', parent: 'Thigh_R', toBone: 'foot_r', radius: 0.07 },
 ];
 
+// "estendere il controllo fisico anche a clavicole/spine_02/03 (piu'
+// corpi, piu' complessita')" -- la scelta esplicita dell'utente dopo che
+// il manichino risultava ancora deforme a spalle/schiena col layer
+// attivo (root cause: spine_02/spine_03/clavicle_l/clavicle_r NON sono
+// simulati indipendentemente, solo "congelati" a rotazione identita' via
+// RAGDOLL_SEGMENT_FROZEN_BONES -- ma l'AnimationMixer continua a
+// scrivere posizione/rotazione/scala fresche su questi stessi bone ogni
+// frame per le clip di combattimento, e con deviazioni grandi e
+// sostenute di Torso/UpperArm -- tipiche del layer sempre attivo, mai
+// viste nel sistema transitorio breve -- il disallineamento si vede come
+// una cucitura/strizzatura alla spalla e sulla schiena).
+//
+// SOLO per il layer attivo (activeBodiesRef in useRagdoll.ts) -- NON
+// tocca RAGDOLL_SEGMENTS sopra, che resta condiviso col sistema
+// transitorio pulseHit/activateDeath, gia' rifinito e testato a fondo.
+export const ACTIVE_RAGDOLL_EXTRA_SEGMENTS: RagdollSegment[] = [
+  { name: 'SpineMid', drivingBone: 'spine_02', parent: 'Torso', toBone: 'spine_03', radius: 0.16 },
+  { name: 'SpineHigh', drivingBone: 'spine_03', parent: 'SpineMid', toBone: 'neck_01', radius: 0.15 },
+  { name: 'ClavicleL', drivingBone: 'clavicle_l', parent: 'SpineHigh', toBone: 'upperarm_l', radius: 0.05 },
+  { name: 'ClavicleR', drivingBone: 'clavicle_r', parent: 'SpineHigh', toBone: 'upperarm_r', radius: 0.05 },
+];
+
+// Set completo, esplicito e in ordine topologico (genitore sempre prima
+// del figlio -- ensureActiveRagdoll/syncBonesFromPhysics li processano in
+// quest'ordine) di TUTTI i segmenti del layer attivo: gli 11 originali
+// (stessi bone/raggio di RAGDOLL_SEGMENTS, MA con Head/UpperArm_L/
+// UpperArm_R riagganciati ai nuovi corpi intermedi invece che
+// direttamente al Torso) intervallati con i 4 nuovi sopra. Duplicato a
+// mano invece che costruito per lookup+override da RAGDOLL_SEGMENTS
+// apposta: resta leggibile a colpo d'occhio quale genitore usa ciascun
+// segmento, ed evita qualunque rischio di modificare per sbaglio
+// l'array condiviso.
+export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
+  { name: 'Hips', drivingBone: 'pelvis', parent: null, toBone: 'spine_01', radius: 0.15, lengthScale: 0.6 },
+  { name: 'Torso', drivingBone: 'spine_01', parent: 'Hips', toBone: 'neck_01', radius: 0.18 },
+  { name: 'SpineMid', drivingBone: 'spine_02', parent: 'Torso', toBone: 'spine_03', radius: 0.16 },
+  { name: 'SpineHigh', drivingBone: 'spine_03', parent: 'SpineMid', toBone: 'neck_01', radius: 0.15 },
+  { name: 'Head', drivingBone: 'neck_01', parent: 'SpineHigh', toBone: 'head_leaf', radius: 0.15, lengthScale: 1.3 },
+  { name: 'ClavicleL', drivingBone: 'clavicle_l', parent: 'SpineHigh', toBone: 'upperarm_l', radius: 0.05 },
+  { name: 'UpperArm_L', drivingBone: 'upperarm_l', parent: 'ClavicleL', toBone: 'lowerarm_l', radius: 0.06 },
+  { name: 'ForeArm_L', drivingBone: 'lowerarm_l', parent: 'UpperArm_L', toBone: 'hand_l', radius: 0.05 },
+  { name: 'ClavicleR', drivingBone: 'clavicle_r', parent: 'SpineHigh', toBone: 'upperarm_r', radius: 0.05 },
+  { name: 'UpperArm_R', drivingBone: 'upperarm_r', parent: 'ClavicleR', toBone: 'lowerarm_r', radius: 0.06 },
+  { name: 'ForeArm_R', drivingBone: 'lowerarm_r', parent: 'UpperArm_R', toBone: 'hand_r', radius: 0.05 },
+  { name: 'Thigh_L', drivingBone: 'thigh_l', parent: 'Hips', toBone: 'calf_l', radius: 0.095 },
+  { name: 'Shin_L', drivingBone: 'calf_l', parent: 'Thigh_L', toBone: 'foot_l', radius: 0.07 },
+  { name: 'Thigh_R', drivingBone: 'thigh_r', parent: 'Hips', toBone: 'calf_r', radius: 0.095 },
+  { name: 'Shin_R', drivingBone: 'calf_r', parent: 'Thigh_R', toBone: 'foot_r', radius: 0.07 },
+];
+
 // "mani e piedi nn sn solidi" -- the 11 segments above deliberately
 // collapse each hand/foot into its forearm/shin (see this file's own
 // top comment, "real ragdolls in shipped games are rarely much finer
@@ -160,6 +210,143 @@ export const RAGDOLL_CONE_LIMIT_DEG: Record<string, number> = {
   Thigh_L: 80, // hip, relative to Hips
   Thigh_R: 80,
 };
+
+// "stringere ulteriormente la stabilita'" -- SEPARATA da
+// RAGDOLL_CONE_LIMIT_DEG sopra apposta: quella tabella e' quella del
+// sistema transitorio (pulseHit/activateDeath), gia' rifinita e testata
+// a fondo in sessioni precedenti -- non va MAI toccata per tarare il
+// layer PD sempre attivo, che e' un sistema completamente separato (vedi
+// useRagdoll.ts's activeBodiesRef). Limiti piu' stretti qui perche' lo
+// scopo e' diverso: la' servono a impedire pose anatomicamente assurde
+// durante un contraccolpo forte; qui servono a tenere il rig vicino alla
+// posa animata durante il moto normale (camminata/idle), dove uno
+// scarto ampio si vede subito come "il personaggio balla" invece che
+// come una reazione fisica plausibile.
+export const ACTIVE_RAGDOLL_CONE_LIMIT_DEG: Record<string, number> = {
+  Torso: 20,
+  Head: 30,
+  UpperArm_L: 60,
+  UpperArm_R: 60,
+  Thigh_L: 45,
+  Thigh_R: 45,
+  // "estendere il controllo fisico anche a clavicole/spine_02/03" --
+  // limiti STRETTI apposta: SpineMid/SpineHigh sono suddivisioni interne
+  // dello stesso busto (che da solo aveva gia' Torso:20), quindi ciascuna
+  // non deve poter divergere quanto Torso stesso o la colonna si
+  // spezzerebbe in modo innaturale; le clavicole sono una cerniera piccola
+  // vicino alla spalla vera, non la spalla stessa (quella resta
+  // UpperArm_L/R:60), quindi un range ancora piu' piccolo.
+  SpineMid: 15,
+  SpineHigh: 15,
+  ClavicleL: 25,
+  ClavicleR: 25,
+  // ForeArm_L/R (gomito) e Shin_L/R (ginocchio) NON compaiono qui: sono
+  // giunti a cerniera reali (revolute), gia' vincolati rigidamente da
+  // Rapier stesso via RAGDOLL_HINGE_LIMITS_DEG -- un cono qui non
+  // servirebbe a nulla (e infatti clampActiveJointCones li salta, non
+  // catturano mai un restRelativeQuat).
+};
+
+// "riusciamo a Ricreare la fisica ragdoll attiva in stile Euphoria?" --
+// Step 2: Motori sui giunti (Joint Drives). Queste costanti definiscono
+// quanto i muscoli virtuali sono "forti" (stiffness) e quanto "frenano"
+// (damping) nel cercare di raggiungere la posa dell'animazione.
+// Valori piu' alti = personaggio piu' rigido e reattivo, quasi robotico.
+// Valori piu' bassi = personaggio piu' flaccido e "pesante", stile Euphoria.
+//
+// Espresse come ACCELERAZIONE ANGOLARE (rad/s^2 per radiante di errore
+// di orientamento / per rad/s di velocita' angolare residua), NON come
+// coppia pura -- useRagdoll.ts's syncActiveRagdollMotors moltiplica per
+// il principalInertia REALE di ogni singolo corpo (il suo momento
+// d'inerzia -- quanta coppia serve davvero per farlo ruotare, minuscolo
+// per una mano, molto piu' grande per il busto) prima di applicarla,
+// cosi' UNA sola coppia di costanti si comporta in modo coerente su
+// segmenti di dimensioni molto diverse, invece di richiedere una coppia
+// pura tarata a mano per ciascuno (stessa idea "acceleration-based" gia'
+// usata sotto per la molla di posizione dell'Hips). I valori originali
+// (1000/50, pensati come coppia pura) si sono rivelati IMPRATICABILI a
+// queste capsule leggerissime una volta risolto il bug che ne impediva
+// il test dal vivo (vedi syncActiveRagdollMotors -- addTorque/addForce
+// mandavano in crash il motore fisico, sostituiti con applyTorqueImpulse/
+// applyImpulse scalati per delta) -- il personaggio veniva scagliato in
+// aria all'istante. Questi valori piu' bassi sono il punto di partenza
+// live-tuned (vedi il proprio changelog per le sessioni di tuning
+// successive) per una posa stabile, non piu' un placeholder mai testato.
+export const RAGDOLL_MOTOR_STIFFNESS = 60; // rad/s^2 per radiante di errore
+// "il personaggio viene scagliato in aria" (live-tuning, dopo aver risolto
+// il crash addTorque/addForce) -- root cause del secondo bug, distinto dal
+// crash: con RAGDOLL_MOTOR_STIFFNESS_BY_SEGMENT che varia per segmento
+// (60/120/48) ma un singolo RAGDOLL_MOTOR_DAMPING fisso condiviso da TUTTI,
+// i segmenti con stiffness piu' alta (Torso/Hips a 120) erano SOTTOSMORZATI
+// (smorzamento critico = 2*sqrt(stiffness) ~= 22, ne avevano solo 14) --
+// oscillavano invece di stabilizzarsi, con l'energia della molla di
+// posizione dell'Hips ad alimentare l'oscillazione frame dopo frame senza
+// mai smorzarla (confermato dal vivo: angVelMag/angleDeg per segmento non
+// scendevano mai sotto qualche rad/s anche dopo diversi secondi fermo).
+// Fix: invece di un DAMPING assoluto, RAGDOLL_MOTOR_DAMPING_RATIO e' un
+// rapporto di smorzamento (1 = criticamente smorzato, quello che la fisica
+// chiama zeta) -- useRagdoll.ts calcola sempre il damping REALE come
+// 2*sqrt(stiffness)*RATIO per OGNI segmento, quindi resta coerente anche
+// quando RAGDOLL_MOTOR_STIFFNESS_BY_SEGMENT cambia la stiffness di un
+// singolo arto, invece di richiedere anche un damping-per-segmento
+// separato tarato a mano.
+export const RAGDOLL_MOTOR_DAMPING_RATIO = 1.0;
+// Alcune parti potrebbero aver bisogno di muscoli piu' forti (es. il busto)
+// o piu' deboli (es. le braccia) -- stessa proporzione dei vecchi valori
+// (2x per busto/bacino, 0.8x per la testa) applicata alla nuova scala.
+export const RAGDOLL_MOTOR_STIFFNESS_BY_SEGMENT: Record<string, number> = {
+  Torso: 120,
+  Hips: 120,
+  Head: 48,
+  // Braccia/gambe TENTATE a 150 (live-tuning, sessione "clamp Torso +
+  // per-arto") e SCARTATE: invece di convergere, window.__activeRagdollDebug
+  // mostrava una divergenza crescente nel tempo (Hips 29d->47d, Torso
+  // 29d->52d, Thigh_L angVelMag arrivato a 50+ rad/s dopo ~15s, non un
+  // transitorio) -- un braccio/gamba piu' "forte" del Torso che lo governa
+  // (120) finisce per strattonare il giunto invece di inseguire meglio la
+  // posa, specialmente su questi corpi cosi' leggeri (inertiaScale ~1e-5).
+  // Tornati alla base RAGDOLL_MOTOR_STIFFNESS=60 per questi segmenti finche'
+  // non si trova un valore intermedio verificato stabile su piu' run dal
+  // vivo (il baseline 60 non diverge, ma non chiude nemmeno l'errore delle
+  // braccia in pochi secondi -- vedi changelog per il prossimo tentativo).
+  //
+  // "estendere il controllo fisico anche a clavicole/spine_02/03" -- nuovi
+  // segmenti, partono VOLUTAMENTE conservativi (sotto il baseline 60):
+  // sono suddivisioni piccole e leggere di un busto/spalla gia' guidati da
+  // un genitore forte (Torso=120, e ora anche SpineMid/SpineHigh stessi si
+  // fanno da genitore l'un l'altro), quindi rischiano lo stesso tipo di
+  // "strattonamento" gia' visto e scartato sopra per braccia/gambe a 150 se
+  // partissero troppo rigidi. Se il live test mostra che non chiudono
+  // abbastanza l'errore, si alza gradualmente da qui -- MAI direttamente a
+  // un valore alto non testato.
+  SpineMid: 90,
+  SpineHigh: 70,
+  ClavicleL: 40,
+  ClavicleR: 40,
+};
+
+// "questo mi sembra piu' sostenibile" -- Step 2 realizzato: layer SEMPRE
+// attivo (non solo durante pulseHit), separato dal sistema esistente,
+// che guida in continuo tutti gli 11 segmenti verso la posa animata di
+// QUESTO frame con una coppia PD (RAGDOLL_MOTOR_STIFFNESS/_DAMPING sopra
+// = "muscoli"), invece di limitarsi a un impulso + rientro a tempo fisso.
+// Vedi useRagdoll.ts: ensureActiveRagdoll/syncActiveRagdollMotors.
+//
+// L'Hips (bacino, root del rig) e' l'unico segmento SENZA genitore --
+// niente giunto lo tiene ancorato al resto -- quindi oltre alla molla
+// rotazionale (RAGDOLL_MOTOR_STIFFNESS_BY_SEGMENT.Hips sopra) riceve
+// anche una molla di POSIZIONE che lo richiama verso dove
+// l'animazione/il movimento (WASD, sprint, schivata) dice che dovrebbe
+// essere in questo istante -- "bacino a molla": un urto abbastanza forte
+// PUO' farlo vacillare/scostarsi per un attimo, non e' incollato a
+// scatto come farebbe un corpo kinematico. Costanti espresse come
+// ACCELERAZIONE per metro/m/s di errore (moltiplicate per la massa reale
+// del corpo in useRagdoll.ts) anziche' come forza pura, cosi' restano
+// valide indipendentemente da quanto e' leggera la piccola capsula
+// dell'Hips (stessa capsula minuscola per cui pulseHit deve gia' scalare
+// il proprio impulso per massa -- vedi quel commento).
+export const RAGDOLL_HIPS_POSITION_STIFFNESS = 400; // (1/s^2) accelerazione per metro di errore di posizione
+export const RAGDOLL_HIPS_POSITION_DAMPING = 40; // (1/s) accelerazione per (m/s) di velocita' residua (~criticamente smorzato)
 
 export const RAGDOLL_SEGMENT_FROZEN_BONES: Record<string, string[]> = {
   Torso: ['spine_02', 'spine_03'],

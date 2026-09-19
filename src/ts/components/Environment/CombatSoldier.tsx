@@ -8,6 +8,7 @@ import { getRoadOffset } from './Road';
 import { useRagdoll } from './ragdoll/useRagdoll';
 import SolidBodyDebugView from './SolidBodyDebugView';
 import type { PunchingBagHandle } from './PunchingBag';
+import { useStore } from '../../store';
 import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode, AnimCatalog } from './SquadArenaTypes';
 
 const MODEL_URL = 'soldier-citizen.glb';
@@ -291,7 +292,12 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     // syncHurtbox) -- "il colpo deve avvenire dove le mesh collidono"
     // needs that hurtbox to exist for EVERY fighter, including the
     // city-wide arena's up-to-120, not just the 1v1 duel.
-    ragdoll.update(delta);
+    // "layer sempre attivo full-body" -- gated on BOTH enableRagdoll
+    // (only DuelArena.tsx's own AI opponent ever passes true -- see this
+    // file's own comment above) AND the GUI toggle, so the 120-fighter
+    // FFA arena (enableRagdoll always false there) never builds this rig
+    // regardless of the store flag's value.
+    ragdoll.update(delta, enableRagdoll && useStore.getState().euphoriaRagdollEnabled);
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
     // fighter (their own checkAttackContact reads it off `theTarget`).
     data.hurtboxHandle = ragdoll.getHurtboxHandle();

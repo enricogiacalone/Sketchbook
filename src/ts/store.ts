@@ -181,6 +181,8 @@ interface GameState {
   // CombatSoldier.tsx/PunchingBag.tsx, flipped from CombatArenaGUI.tsx's
   // debug panel (same bridge pattern as duelDummyMode just above).
   showPhysicsDebug: boolean;
+  // "questo mi sembra piu' sostenibile" -- layer PD sempre attivo (vedi ragdollConfig.ts's RAGDOLL_HIPS_POSITION_STIFFNESS) per i duellanti. Toggle live per il tuning (GUI "Ragdoll attivo (PD)") senza dover ricaricare la pagina ogni volta.
+  euphoriaRagdollEnabled: boolean;
   // "crea un sacco su cui allenarmi nell'arena.. mi serve per capire la
   // precisione delle collisioni" -- a static practice target (see
   // PunchingBag.tsx), completely separate from the AI opponent/dummy
@@ -245,6 +247,7 @@ interface GameState {
   toggleDuelDummyMode: () => void;
   setDuelDummyMode: (active: boolean) => void;
   setShowPhysicsDebug: (active: boolean) => void;
+  setEuphoriaRagdollEnabled: (active: boolean) => void;
   registerBagHit: (radialOffset: number, heightOffset: number, hand: 'hand_l' | 'hand_r') => void;
   retryDuel: () => void;
   collectItem: () => void;
@@ -289,6 +292,7 @@ export const useStore = create<GameState>((set) => ({
   duelRound: 0,
   duelDummyMode: false,
   showPhysicsDebug: false,
+  euphoriaRagdollEnabled: true,
   bagHitCount: 0,
   bagLastHitRadialOffset: null,
   bagLastHitHeightOffset: null,
@@ -347,6 +351,7 @@ export const useStore = create<GameState>((set) => ({
   toggleDuelDummyMode: () => set((state) => ({ duelDummyMode: !state.duelDummyMode })),
   setDuelDummyMode: (duelDummyMode) => set({ duelDummyMode }),
   setShowPhysicsDebug: (showPhysicsDebug) => set({ showPhysicsDebug }),
+  setEuphoriaRagdollEnabled: (euphoriaRagdollEnabled) => set({ euphoriaRagdollEnabled }),
   registerBagHit: (radialOffset, heightOffset, hand) => set((state) => ({
     bagHitCount: state.bagHitCount + 1,
     bagLastHitRadialOffset: radialOffset,

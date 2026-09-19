@@ -276,6 +276,31 @@ const DuelArena: React.FC = () => {
       enemyBagGap: Math.hypot(enemyData.position.x - bagPositionXZ[0], enemyData.position.z - bagPositionXZ[1]),
     };
 
+    // TEMP debug -- "fanne uno che cade vicino a noi in modalita' del
+    // tutto passiva": per capire se le braccia che non arrivano al
+    // target (vedi window.__activeRagdollDebug) sono colpa del layer
+    // ATTIVO che litiga con l'animazione ancora in corso, o sono un
+    // limite del rig/giunti stesso, serve un caso di confronto senza
+    // NESSUna delle due cose addosso -- morte reale (isDead=true) blocca
+    // subito sia l'animazione (CombatSoldier.tsx smette di leggere
+    // l'input/muoversi) sia il layer PD attivo (update()'s "if
+    // (!s.active)" branch viene saltato del tutto una volta che
+    // activateDeath() imposta s.active=true, isDeath=true -- resta solo
+    // clampJointCones + la fisica pura dei giunti, un crollo passivo
+    // vero). Teletrasporta il nemico proprio davanti al giocatore prima
+    // di ucciderlo, cosi' il crollo si vede da vicino senza dover
+    // rincorrerlo per l'arena.
+    (window as any).__killEnemyNearby = (distance: number = 1.2) => {
+      const dir = playerData.rotation ?? 0;
+      enemyData.position.set(
+        playerData.position.x + Math.sin(dir) * distance,
+        playerData.position.y,
+        playerData.position.z + Math.cos(dir) * distance
+      );
+      enemyData.hp = 0;
+      enemyData.isDead = true;
+    };
+
     // Normalized to 0-100 here (not raw hp) so DuelHUD.tsx's bars stay a
     // simple width:`${hp}%` regardless of DUEL_MAX_HP.
     setDuelStatus(
