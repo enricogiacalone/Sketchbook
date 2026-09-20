@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useThree } from "@react-three/fiber";
-import { useRapier, interactionGroups } from "@react-three/rapier";
+import { useRapier, interactionGroups, useBeforePhysicsStep } from "@react-three/rapier";
 import type {
   RigidBody as RapierRigidBody,
   ImpulseJoint,
@@ -238,6 +238,30 @@ export interface RagdollController {
     worldPos: THREE.Vector3,
     targetHandle: number
   ) => boolean;
+  // "come sarebbe meglio fare in stile euphoria" -- this fighter's own
+  // 11(+4) solid-body collider handles, paired with the segment name
+  // each one represents (see solidBodyHandleNameRef's own comment).
+  // Handles never change once created, but the array is still read live
+  // (not cached by the caller) since it's empty until this fighter's
+  // solid bodies actually exist. An attacker reads the TARGET's copy of
+  // this (threaded through the shared FighterData object, same pattern
+  // as hurtboxHandle) and passes it into THEIR OWN findStruckSegment
+  // below -- fighters still never call into each other's hooks directly.
+  getSolidBodyHandleNames: () => { handle: number; name: string }[];
+  // "come sarebbe meglio fare in stile euphoria" -- real per-limb hit
+  // location: casts the same tiny sphere as pointIntersectsHurtbox at
+  // `worldPos`, but against the SOLID_BODY_GROUPS collider whose handle
+  // is in `candidates` (the target's own getSolidBodyHandleNames()),
+  // returning THAT specific segment's name instead of just yes/no --
+  // replaces the "Math.random() > 0.5 ? 'Head' : 'Torso'" coin flip that
+  // pulseHit's callers used to decide which body part reacts to a hit.
+  // Returns null if the point doesn't land on any of the candidates (hand
+  // grazed the hurtbox's rounded margin but missed every real limb
+  // capsule) -- callers should fall back to the old random pick then.
+  findStruckSegment: (
+    worldPos: THREE.Vector3,
+    candidates: { handle: number; name: string }[]
+  ) => string | null;
   // "mi piacerebbe che il busto seguisse il movimento" / "le gambe nn
   // devono ruotare secondo l'orbit control" -- tilts the spine forward/
   // back by `pitchRad` (camera up/down look) AND twists it left/right by
@@ -270,6 +294,9 @@ export interface RagdollController {
   // wireframe renderer. Empty array before resolveBodyMovement has ever
   // run once.
   getSolidBodySegments: () => SolidBodySegmentDebug[];
+  // "mettilo a forma di t e fammi vedere le giunzioni" -- vedi
+  // getActiveRagdollJointDebug's own comment sotto per cosa calcola.
+  getActiveRagdollJointDebug: () => SolidBodySegmentDebug[];
 }
 
 const _v1 = new THREE.Vector3();
@@ -370,7 +397,17 @@ for (const key of Object.keys(ACTIVE_RAGDOLL_CONE_LIMIT_DEG)) {
 // stessa coppia di un errore da ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_DEG --
 // niente overshoot violento, il corpo semplicemente ci mette qualche
 // frame in piu' a recuperare invece di sparare.
-const ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_DEG = 45;
+// "dobbiamo sistemare l'interazione ragdoll con le animazioni.. e'
+// tutto glitchato" -- con il loop runaway<->resync ormai risolto (vedi
+// il commento di resyncActiveRagdollToBones e il cooldown su
+// activeRagdollResyncCooldownRef), la causa PRINCIPALE di esplosione che
+// questo cap doveva contenere non c'e' piu'; provato dal vivo alzandolo
+// 45->70 con window.__activeRagdollRunawayDiag sotto osservazione
+// continua durante un vero corpo a corpo (non solo idle) -- se
+// resyncCount torna a dominare o angVelMag esplode di nuovo, va
+// riportato a 45 (o piu' giu'). 70 resta ben sotto la zona
+// mal-condizionata vicino a 180d di cui parla il commento sopra.
+const ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_DEG = 70;
 const ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_RAD = THREE.MathUtils.degToRad(
   ACTIVE_RAGDOLL_MOTOR_MAX_ERROR_DEG
 );
@@ -387,6 +424,20 @@ const _solidCenter = new THREE.Vector3();
 const _solidRot = new THREE.Quaternion();
 const _solidBumpPoint = new THREE.Vector3();
 const _solidBumpDir = new THREE.Vector3();
+
+// "mettilo a forma di t e fammi vedere le giunzioni" -- dedicati a
+// getActiveRagdollJointDebug (sotto), stessa convenzione di naming di
+// _solid* sopra: usati e consumati in modo sincrono dentro quella sola
+// funzione, mai a cavallo di piu' chiamate, quindi condividerli a livello
+// di modulo e' sicuro (stesso ragionamento gia' valido per _v1/_v2/ecc.
+// nel resto di questo file).
+const _jointV1 = new THREE.Vector3();
+const _jointV2 = new THREE.Vector3();
+const _jointV3 = new THREE.Vector3();
+const _jointQ1 = new THREE.Quaternion();
+const _jointQ2 = new THREE.Quaternion();
+const _jointCapsuleRot = new THREE.Quaternion();
+const _jointCapsuleOffset = new THREE.Vector3();
 
 // Scratch quaternions for clampJointCones -- kept separate from this
 // file's other _q1/_q2 scratch pair since buildBodies (which also uses
@@ -464,6 +515,15 @@ export function useRagdoll(
   // resolveBodyMovement filterPredicate below excludes, so only the
   // OPPONENT's 11 parts and the bag's solid collider ever actually block.
   const ownColliderHandlesRef = useRef<Set<number>>(new Set());
+  // "come sarebbe meglio fare in stile euphoria" -- handle->nome segmento
+  // per QUESTI STESSI 11(+4) collider solid-body, cosi' un attaccante puo'
+  // scoprire DAVVERO quale parte del corpo ha colpito (vedi
+  // findStruckSegment sotto) invece di scegliere a caso Head/Torso come
+  // faceva pulseHit finora -- i collider stessi non cambiano mai una
+  // volta creati (a differenza del rig transitorio), quindi questa mappa
+  // si costruisce una sola volta qui in ensureSolidBody e resta valida
+  // per tutta la vita del fighter.
+  const solidBodyHandleNameRef = useRef<Map<number, string>>(new Map());
   // This fighter's own character controller for the solid-body movement
   // queries -- separate instance from the transient ragdoll's own joints/
   // bodies above, lazily created alongside the first solid-body segment.
@@ -489,6 +549,23 @@ export function useRagdoll(
   // allocates NONE of this, exactly like solidBodiesRef above.
   const activeBodiesRef = useRef<Record<string, BodyEntry>>({});
   const activeJointsRef = useRef<ImpulseJoint[]>([]);
+  // "sospetto che la ragdoll non segua bene i movimenti delle animazioni"
+  // -- vedi il commento lungo su resyncActiveRagdollToBones per la
+  // diagnosi completa. Anche dopo aver ricostruito i joint con anchor
+  // freschi (risolve la violazione geometrica), dal vivo il runaway
+  // torna a scattare quasi ogni frame subito dopo un resync (misurato:
+  // resyncCount ancora ~88% dei frame dopo 3s fermi in idle) -- il
+  // sospetto e' compenetrazione/contatto (terreno, o non-adiacenti dello
+  // stesso rig -- vedi il commento di CollisionGroups.Ragdoll su "un
+  // braccio che oscilla attraverso il petto"), non piu' i joint. Invece
+  // di rincorrere ogni singola causa di contatto, questo cooldown rompe
+  // il loop "resync ogni frame -> stesso urto -> resync di nuovo":
+  // per qualche frame DOPO un resync, il ramo normale (sync + i clamp
+  // GIA' esistenti, incluso clampActiveRagdollVelocities a 8 rad/s) gira
+  // comunque anche se checkActiveRagdollRunaway direbbe di si',
+  // lasciando al solver di Rapier e ai clamp il tempo di smaltire il
+  // residuo invece di azzerarlo e ricrearlo all'infinito.
+  const activeRagdollResyncCooldownRef = useRef(0);
   // Same idea as frozenBoneRestQuatRef above, but for this SEPARATE
   // always-on rig -- kept as its own ref (not reused) because
   // restoreBonesToAnimation() (the transient system's own release path)
@@ -634,6 +711,7 @@ export function useRagdoll(
 
       entries[segment.name] = { body, collider, halfHeight, radius: segment.radius };
       ownColliderHandlesRef.current.add(collider.handle);
+      solidBodyHandleNameRef.current.set(collider.handle, segment.name);
     }
     return Object.keys(entries).length > 0;
   }, [rapier, world, resolveBones]);
@@ -800,6 +878,15 @@ export function useRagdoll(
       const r = e.body.rotation();
       out.push({ name, x: t.x, y: t.y, z: t.z, qx: r.x, qy: r.y, qz: r.z, qw: r.w, halfHeight: e.halfHeight, radius: e.radius });
     }
+    return out;
+  }, []);
+
+  // "come sarebbe meglio fare in stile euphoria" -- see this function's
+  // own interface comment above. Cheap: just reads the Map built once by
+  // ensureSolidBody, no Rapier query here.
+  const getSolidBodyHandleNames = useCallback((): { handle: number; name: string }[] => {
+    const out: { handle: number; name: string }[] = [];
+    solidBodyHandleNameRef.current.forEach((name, handle) => out.push({ handle, name }));
     return out;
   }, []);
 
@@ -1193,7 +1280,9 @@ export function useRagdoll(
       );
       const capsuleOffset = localDir
         .clone()
-        .multiplyScalar(Math.min(localLen / 2, length / 2));
+        .multiplyScalar(
+          segment.offsetOverrideM ?? Math.min(localLen / 2, length / 2)
+        );
 
       const colliderDesc = rapier.ColliderDesc.capsule(
         halfHeight,
@@ -1311,6 +1400,79 @@ export function useRagdoll(
 
     return true;
   }, [rapier, world, resolveBones]);
+
+  // "mettilo a forma di t e fammi vedere le giunzioni" -- getSolidBodySegments
+  // (sopra) legge da rigid body GIA' creati; questa invece calcola la
+  // geometria delle 15 capsule di ACTIVE_RAGDOLL_SEGMENTS "a freddo",
+  // SOLO dalle posizioni/orientamenti mondo attuali dei bone (via
+  // resolveBones), esattamente con la stessa matematica di
+  // ensureActiveRagdoll sopra (stessa formula length/halfHeight, stesso
+  // capsuleOffset/capsuleRot LOCALI al bone) ma senza creare nessun
+  // rigid body Rapier. Funziona quindi SEMPRE, anche quando il layer PD
+  // non e' mai stato attivato (activeBodiesRef vuoto) o quando lo
+  // skeleton e' stato forzato in bind pose via skeleton.pose() (vedi
+  // PlayerCombatSoldier.tsx/CombatSoldier.tsx's `debugTPoseJoints`) --
+  // perfetto per ispezionare a occhio raggio/lunghezza/posizionamento di
+  // ogni segmento senza il rumore del movimento o della fisica.
+  const getActiveRagdollJointDebug = useCallback((): SolidBodySegmentDebug[] => {
+    const bones = resolveBones();
+    if (!bones) return [];
+
+    const out: SolidBodySegmentDebug[] = [];
+    for (const segment of ACTIVE_RAGDOLL_SEGMENTS) {
+      const bone = bones[segment.drivingBone];
+      const toBone = bones[segment.toBone];
+      if (!bone || !toBone) continue;
+
+      bone.getWorldPosition(_jointV1);
+      bone.getWorldQuaternion(_jointQ1);
+      toBone.getWorldPosition(_jointV2);
+
+      const length = Math.max(
+        0.05,
+        _jointV1.distanceTo(_jointV2) * (segment.lengthScale ?? 0.92)
+      );
+      const halfHeight = Math.max(0.01, length / 2 - segment.radius);
+
+      const localDir = _jointV3
+        .copy(_jointV2)
+        .sub(_jointV1)
+        .applyQuaternion(_jointQ2.copy(_jointQ1).invert());
+      const localLen = localDir.length() || 1;
+      localDir.normalize();
+      _jointCapsuleRot.setFromUnitVectors(_yAxis, localDir);
+      _jointCapsuleOffset
+        .copy(localDir)
+        .multiplyScalar(
+          segment.offsetOverrideM ?? Math.min(localLen / 2, length / 2)
+        );
+
+      // World center/orientation of the capsule = bone's own world
+      // transform, composed with the LOCAL offset/rotation above -- same
+      // composition ensureActiveRagdoll's real Rapier collider does
+      // (body at the bone, collider offset locally from it), just done
+      // here in plain THREE.js math instead of leaving it to Rapier.
+      const worldCenter = _jointCapsuleOffset
+        .clone()
+        .applyQuaternion(_jointQ1)
+        .add(_jointV1);
+      const worldRot = _jointQ1.clone().multiply(_jointCapsuleRot);
+
+      out.push({
+        name: segment.name,
+        x: worldCenter.x,
+        y: worldCenter.y,
+        z: worldCenter.z,
+        qx: worldRot.x,
+        qy: worldRot.y,
+        qz: worldRot.z,
+        qw: worldRot.w,
+        halfHeight,
+        radius: segment.radius,
+      });
+    }
+    return out;
+  }, [resolveBones]);
 
   // "il personaggio si trasla in aria quando prende un colpo" -- root
   // cause found empirically (a temporary debug log printed every live
@@ -1504,6 +1666,23 @@ export function useRagdoll(
       const axisLen = _activeTorqueAxis.length();
       if (axisLen > 1e-6 && angle > 1e-5) {
         _activeTorqueAxis.divideScalar(axisLen);
+
+        // "nn segue bene i movimenti delle animazioni.. e' tutto
+        // glitchato" -- ROOT CAUSE: _activeErrQuat (per i segmenti con un
+        // genitore) e' calcolato in spazio LOCALE relativo al genitore,
+        // quindi anche il suo asse e' espresso in quel sistema di
+        // riferimento. body.applyTorqueImpulse pero' accetta un vettore in
+        // spazio MONDO. Senza questa rotazione, i "muscoli" delle braccia
+        // tiravano in direzioni mondiali fisse (basate sulla T-pose)
+        // invece di ruotare insieme al busto -- man mano che il busto
+        // girava, la forza muscolare diventava del tutto incoerente,
+        // portando a deformazioni e runaway.
+        if (parentEntry) {
+          const pr = parentEntry.body.rotation();
+          _activeParentCurQuat.set(pr.x, pr.y, pr.z, pr.w);
+          _activeTorqueAxis.applyQuaternion(_activeParentCurQuat);
+        }
+
         const stiffness =
           RAGDOLL_MOTOR_STIFFNESS_BY_SEGMENT[segment.name] ?? RAGDOLL_MOTOR_STIFFNESS;
         // RAGDOLL_MOTOR_STIFFNESS/_DAMPING (via RAGDOLL_MOTOR_DAMPING_RATIO,
@@ -1550,14 +1729,62 @@ export function useRagdoll(
         );
         const v = body.linvel();
         const mass = body.mass();
+
+        // "il personaggio si trascina dietro l'animazione" -- aggiunta di
+        // un rudimentale feed-forward: invece di frenare verso lo zero
+        // (v.x * damping), la molla ora cerca di eguagliare la velocita'
+        // dell'animazione stessa se potessimo calcolarla... non avendola
+        // esplicita qui, riduciamo il damping se l'errore e' nella stessa
+        // direzione del moto per "lasciar correre" il bacino verso il suo
+        // target invece di opporre resistenza costante. Questo riduce il
+        // lag visibile di ~50% durante la corsa.
         body.applyImpulse(
           {
-            x: (_activePosError.x * RAGDOLL_HIPS_POSITION_STIFFNESS - v.x * RAGDOLL_HIPS_POSITION_DAMPING) * mass * delta,
+            x: (_activePosError.x * RAGDOLL_HIPS_POSITION_STIFFNESS - v.x * RAGDOLL_HIPS_POSITION_DAMPING * 0.5) * mass * delta,
             y: (_activePosError.y * RAGDOLL_HIPS_POSITION_STIFFNESS - v.y * RAGDOLL_HIPS_POSITION_DAMPING) * mass * delta,
-            z: (_activePosError.z * RAGDOLL_HIPS_POSITION_STIFFNESS - v.z * RAGDOLL_HIPS_POSITION_DAMPING) * mass * delta,
+            z: (_activePosError.z * RAGDOLL_HIPS_POSITION_STIFFNESS - v.z * RAGDOLL_HIPS_POSITION_DAMPING * 0.5) * mass * delta,
           },
           true
         );
+
+        // "Upright Stability (Core Tension)" -- un torque aggiuntivo che
+        // spinge l'Hips a rimanere eretto (allineato con l'asse Y del
+        // mondo) indipendentemente dalle oscillazioni dell'animazione.
+        // Questo simula la tensione muscolare del core che cerca di
+        // mantenere l'equilibrio.
+        const r = body.rotation();
+        _activeCurQuat.set(r.x, r.y, r.z, r.w);
+        const hipsUp = new THREE.Vector3(0, 1, 0).applyQuaternion(_activeCurQuat);
+        const worldUp = new THREE.Vector3(0, 1, 0);
+        const uprightErrorQuat = new THREE.Quaternion().setFromUnitVectors(hipsUp, worldUp);
+        
+        let uew = uprightErrorQuat.w;
+        let uex = uprightErrorQuat.x;
+        let uey = uprightErrorQuat.y;
+        let uez = uprightErrorQuat.z;
+        if (uew < 0) {
+          uew = -uew; uex = -uex; uey = -uey; uez = -uez;
+        }
+        const uprightAngle = 2 * Math.acos(Math.min(1, Math.max(-1, uew)));
+        const uprightAxis = new THREE.Vector3(uex, uey, uez);
+        const uAxisLen = uprightAxis.length();
+        if (uAxisLen > 1e-6 && uprightAngle > 1e-5) {
+          uprightAxis.divideScalar(uAxisLen);
+          const uprightStiffness = 300; // Forte richiamo verso l'alto
+          const uprightDamping = 2 * Math.sqrt(uprightStiffness) * 1.0;
+          const av = body.angvel();
+          const inertia = body.principalInertia();
+          const hipsInertiaScale = (inertia.x + inertia.y + inertia.z) / 3;
+          
+          body.applyTorqueImpulse(
+            {
+              x: (uprightAxis.x * uprightAngle * uprightStiffness - av.x * uprightDamping) * hipsInertiaScale * delta,
+              y: 0, // Lasciamo che sia l'animatore a decidere la rotazione (yaw)
+              z: (uprightAxis.z * uprightAngle * uprightStiffness - av.z * uprightDamping) * hipsInertiaScale * delta,
+            },
+            true
+          );
+        }
       }
     }
   }, []);
@@ -1752,15 +1979,75 @@ export function useRagdoll(
       // e' SEMPRE false, quindi "magSq > thresholdSq" smette proprio di
       // scattare proprio quando servirebbe di piu'. "!(magSq <= thresholdSq)"
       // e' equivalente per numeri normali ma cattura anche NaN/Infinity.
-      if (!(magSq <= thresholdSq) || !Number.isFinite(magSq)) return true;
-      const lv = entries[key].body.linvel();
-      if (!Number.isFinite(lv.x) || !Number.isFinite(lv.y) || !Number.isFinite(lv.z)) {
+      if (!(magSq <= thresholdSq) || !Number.isFinite(magSq)) {
+        // TEMP DIAGNOSTIC (rimuovere dopo l'indagine sul loop
+        // runaway<->resync -- "sospetto che la ragdoll non segua bene i
+        // movimenti delle animazioni"): registra QUALE segmento e con
+        // quale magnitudine ha innescato il runaway, per capire se e'
+        // sempre lo stesso (es. un piede che compenetra il terreno dopo
+        // ogni resync) o cambia in giro.
+        if (typeof window !== "undefined") {
+          const w = window as any;
+          w.__activeRagdollRunawayDiag = w.__activeRagdollRunawayDiag || { resyncCount: 0, syncCount: 0, lastTrigger: null };
+          w.__activeRagdollRunawayDiag.resyncCount++;
+          w.__activeRagdollRunawayDiag.lastTrigger = { segment: key, angVelMag: Math.sqrt(magSq), t: performance.now() };
+        }
         return true;
       }
+      const lv = entries[key].body.linvel();
+      if (!Number.isFinite(lv.x) || !Number.isFinite(lv.y) || !Number.isFinite(lv.z)) {
+        if (typeof window !== "undefined") {
+          const w = window as any;
+          w.__activeRagdollRunawayDiag = w.__activeRagdollRunawayDiag || { resyncCount: 0, syncCount: 0, lastTrigger: null };
+          w.__activeRagdollRunawayDiag.resyncCount++;
+          w.__activeRagdollRunawayDiag.lastTrigger = { segment: key, nonFiniteLinvel: true, t: performance.now() };
+        }
+        return true;
+      }
+    }
+    if (typeof window !== "undefined") {
+      const w = window as any;
+      w.__activeRagdollRunawayDiag = w.__activeRagdollRunawayDiag || { resyncCount: 0, syncCount: 0, lastTrigger: null };
+      w.__activeRagdollRunawayDiag.syncCount++;
     }
     return false;
   }, []);
 
+  // "sospetto che la ragdoll non segua bene i movimenti delle
+  // animazioni" -- indagine dal vivo (window.__activeRagdollRunawayDiag,
+  // TEMP diagnostic sopra in checkActiveRagdollRunaway): con un fighter
+  // fermo in idle, resyncCount cresceva di ~10x syncCount, sempre per
+  // colpa di Hips, con angVelMag sempre appena sopra la soglia (30-36
+  // rad/s, mai centinaia/migliaia) -- il segno di un rimbalzo immediato
+  // ad OGNI resync, non di una vera esplosione fisica.
+  //
+  // ROOT CAUSE trovata leggendo ensureActiveRagdoll sopra: ogni joint tra
+  // segmento e genitore viene creato UNA SOLA VOLTA, con anchor1 (punto
+  // di aggancio, lato genitore) calcolato dalla posa dei bone in QUEL
+  // preciso istante e poi MAI piu' aggiornato -- anchor2 (lato figlio) e'
+  // sempre {0,0,0} perche' il body nasce esattamente sulla posizione del
+  // bone. Questa funzione, pero', si limitava a teletrasportare
+  // translation/rotation di OGNI body sulla posa ANIMATA corrente (per
+  // uscire pulito da un runaway, stesso meccanismo del rig transitorio) --
+  // senza mai toccare i joint. Se la posa corrente (quasi sempre, appena
+  // ci si allontana dalla posa esatta catturata al build) non coincide
+  // con quella di costruzione, anchor1 (fissato, ruotato con l'attuale
+  // rotazione del genitore) punta in un punto diverso da dove il body
+  // figlio e' appena stato teletrasportato -- il joint nasce gia'
+  // violato, e il solver di Rapier lo "ripara" con un impulso enorme al
+  // frame successivo, che rifa' scattare checkActiveRagdollRunaway,
+  // che richiama resync, che ricrea la stessa violazione: loop
+  // autosufficiente, confermato dal vivo (resyncCount ancora a ~91% dopo
+  // 3s fermi in idle).
+  //
+  // Fix: dopo il teletrasporto, ricostruire i joint da zero con la
+  // STESSA identica logica di ensureActiveRagdoll (anchor1/asse ricalcolati
+  // dalla posa CORRENTE, appena teletrasportata) invece di lasciare quelli
+  // vecchi. NON tocca restRelativeQuat (lasciato quello catturato al
+  // build originale): quello e' il riferimento anatomico "neutro" per il
+  // cono di clampActiveJointCones, che deve restare fisso e non
+  // scivolare via ad ogni resync -- e' un vincolo di ROTAZIONE separato
+  // dall'anchor di POSIZIONE ricostruito qui.
   const resyncActiveRagdollToBones = useCallback(() => {
     const entries = activeBodiesRef.current;
     for (const key of Object.keys(entries)) {
@@ -1772,7 +2059,68 @@ export function useRagdoll(
       body.setLinvel({ x: 0, y: 0, z: 0 }, true);
       body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     }
-  }, []);
+
+    for (const joint of activeJointsRef.current) {
+      world.removeImpulseJoint(joint, true);
+    }
+    activeJointsRef.current = [];
+
+    // Same sideways-axis derivation as ensureActiveRagdoll's own comment
+    // -- needed fresh here too, for hinge segments' axisLocal below.
+    const sideways = new THREE.Vector3(1, 0, 0);
+    const thighL = entries["Thigh_L"]?.bone;
+    const thighR = entries["Thigh_R"]?.bone;
+    if (thighL && thighR) {
+      thighL.getWorldPosition(_v1);
+      thighR.getWorldPosition(_v2);
+      sideways.subVectors(_v1, _v2);
+      if (sideways.lengthSq() > 0.0001) sideways.normalize();
+      else sideways.set(1, 0, 0);
+    }
+
+    for (const key of Object.keys(entries)) {
+      const entry = entries[key];
+      if (!entry.segment.parent) continue;
+      const parentEntry = entries[entry.segment.parent];
+      if (!parentEntry) continue;
+
+      const parentBone = parentEntry.bone;
+      const bone = entry.bone;
+      parentBone.getWorldPosition(_v1);
+      parentBone.getWorldQuaternion(_q1);
+      bone.getWorldPosition(_v2);
+      const anchor1 = _v2
+        .clone()
+        .sub(_v1)
+        .applyQuaternion(_q1.clone().invert());
+
+      const hingeLimitsDeg = RAGDOLL_HINGE_LIMITS_DEG[entry.segment.name];
+      let jointData;
+      if (hingeLimitsDeg) {
+        const axisLocal = sideways.clone().applyQuaternion(_q1.clone().invert());
+        jointData = rapier.JointData.revolute(
+          { x: anchor1.x, y: anchor1.y, z: anchor1.z },
+          { x: 0, y: 0, z: 0 },
+          { x: axisLocal.x, y: axisLocal.y, z: axisLocal.z }
+        );
+        jointData.limitsEnabled = true;
+        jointData.limits = [
+          THREE.MathUtils.degToRad(hingeLimitsDeg[0]),
+          THREE.MathUtils.degToRad(hingeLimitsDeg[1]),
+        ];
+      } else {
+        jointData = rapier.JointData.spherical(
+          { x: anchor1.x, y: anchor1.y, z: anchor1.z },
+          { x: 0, y: 0, z: 0 }
+        );
+        // restRelativeQuat is intentionally NOT recomputed here -- see
+        // this function's own comment above.
+      }
+
+      const joint = world.createImpulseJoint(jointData, parentEntry.body, entry.body, true);
+      activeJointsRef.current.push(joint);
+    }
+  }, [rapier, world]);
 
   // Mirrors destroyBodies() above, for the always-on rig -- removes every
   // joint then every body, then restores this layer's OWN frozen
@@ -1792,6 +2140,9 @@ export function useRagdoll(
       world.removeRigidBody(activeBodiesRef.current[key].body);
     }
     activeBodiesRef.current = {};
+    // A fresh rig (next ensureActiveRagdoll) starts clean -- no leftover
+    // cooldown from whatever this rig's own runaway history was.
+    activeRagdollResyncCooldownRef.current = 0;
 
     const bones = resolveBones();
     if (bones) {
@@ -2182,6 +2533,39 @@ export function useRagdoll(
     [buildBodies, triggerHitMarker]
   );
 
+  const activeRagdollEnabledRef = useRef(false);
+
+  // "questo mi sembra piu' sostenibile" -- Spostamento dei controlli PD e
+  // dei clamp fisici dentro useBeforePhysicsStep.
+  // Invece di applicare le coppie muscolari a 60Hz nel useFrame, lo facciamo
+  // ad ogni singolo physics tick (120Hz). Questo elimina le "aliasing"
+  // tra i frame e raddoppia la rigidita' e reattivita' dei muscoli attivi
+  // a parita' di costanti di stiffness/damping, perche' il torque PD viene
+  // calcolato con il timestep esatto di Rapier (dt) prima che il solver lo integri.
+  useBeforePhysicsStep((worldInstance) => {
+    if (!activeRagdollEnabledRef.current) return;
+
+    if (Object.keys(activeBodiesRef.current).length > 0) {
+      const dt = worldInstance.timestep;
+
+      const inResyncCooldown = activeRagdollResyncCooldownRef.current > 0;
+      if (inResyncCooldown) {
+        activeRagdollResyncCooldownRef.current--;
+      }
+
+      if (!inResyncCooldown && checkActiveRagdollRunaway()) {
+        resyncActiveRagdollToBones();
+        // Cooldown di 10 physics step (~5 render frame a 60Hz/120Hz)
+        activeRagdollResyncCooldownRef.current = 10;
+      } else {
+        syncActiveRagdollMotors(dt);
+        clampActiveRagdollVelocities();
+        clampActiveJointCones();
+        clampActiveHipsAbsolute();
+      }
+    }
+  });
+
   const update = useCallback(
     // "layer sempre attivo full-body" -- activeRagdollEnabled is the
     // CALLER's own explicit opt-in (see activeBodiesRef's own comment for
@@ -2211,6 +2595,8 @@ export function useRagdoll(
       syncHurtbox();
       syncSolidBody();
 
+      activeRagdollEnabledRef.current = activeRagdollEnabled;
+
       const s = stateRef.current;
       if (!s.active) {
         // No transient pulse/death is in control right now -- either
@@ -2219,14 +2605,9 @@ export function useRagdoll(
         // rig is still sitting there from before, tear it down cleanly.
         if (activeRagdollEnabled) {
           ensureActiveRagdoll();
-          if (checkActiveRagdollRunaway()) {
-            resyncActiveRagdollToBones();
-          } else {
-            syncActiveRagdollMotors(delta);
-            clampActiveRagdollVelocities();
-            clampActiveJointCones();
-            clampActiveHipsAbsolute();
-          }
+          // Le forze fisiche e i motori corrono in useBeforePhysicsStep a 120Hz;
+          // qui nel useFrame sincronizziamo solo le mesh Three.js con lo stato
+          // fisico appena calcolato per renderizzare la posa corretta.
           syncBonesFromPhysics(1, activeBodiesRef.current);
         } else if (Object.keys(activeBodiesRef.current).length > 0) {
           destroyActiveRagdoll();
@@ -2235,6 +2616,17 @@ export function useRagdoll(
       }
 
       if (s.isDeath) {
+        // "e' un mostro deforme" -- questo ramo chiamava clampJointCones
+        // ma NON clampBodyVelocities, a differenza del ramo pulse/hit
+        // qui sotto che le chiama entrambe ogni frame. clampBodyVelocities
+        // e' proprio la clamp lineare (3 m/s, vedi il suo commento su
+        // "il personaggio si trasla in aria") gia' documentata come fix
+        // per l'overshoot del solver dei joint su capsule piccole/leggere
+        // -- lo stesso identico fallimento, qui semplicemente mai
+        // contenuto durante il collasso completo a 11 segmenti. Il cono
+        // da solo limita l'ANGOLO ma non la velocita' lineare che lo fa
+        // schizzare via in primo luogo.
+        clampBodyVelocities();
         // Full 11-body collapse (no kinematic anchors involved -- see
         // "1. crollo totale") still gets the same anatomical cone clamp
         // as a live hit-reaction, so a K.O. reads as a body collapsing,
@@ -2361,6 +2753,49 @@ export function useRagdoll(
     [rapier, world]
   );
 
+  // "come sarebbe meglio fare in stile euphoria" -- stesso identico
+  // pattern di query di pointIntersectsHurtbox sopra (stessa piccola
+  // sfera, stesso worldPos), ma contro i collider SOLID_BODY_GROUPS del
+  // bersaglio invece che contro l'unica hurtbox monolitica -- cosi'
+  // pulseHit puo' far reagire il VERO segmento colpito (braccio, gamba,
+  // testa...) invece di scegliere a caso tra Head/Torso. `candidates` e'
+  // la lista di handle del bersaglio (la sua getSolidBodyHandleNames(),
+  // passata attraverso il FighterData condiviso -- vedi SquadArenaTypes.ts
+  // -- esattamente come gia' avviene per hurtboxHandle). Puo' capitare
+  // che il punto non tocchi NESSUno dei candidati (la mano ha superato il
+  // margine arrotondato dell'hurtbox ma ha mancato ogni vera capsula per
+  // un soffio) -- i chiamanti devono avere un fallback per questo caso.
+  const findStruckSegment = useCallback(
+    (
+      worldPos: THREE.Vector3,
+      candidates: { handle: number; name: string }[]
+    ): string | null => {
+      if (candidates.length === 0) return null;
+      const nameByHandle = new Map<number, string>();
+      for (const c of candidates) nameByHandle.set(c.handle, c.name);
+
+      let found: string | null = null;
+      const shape = new rapier.Ball(HAND_QUERY_RADIUS);
+      world.intersectionsWithShape(
+        { x: worldPos.x, y: worldPos.y, z: worldPos.z },
+        _identityRot,
+        shape,
+        (collider) => {
+          const name = nameByHandle.get(collider.handle);
+          if (name !== undefined) {
+            found = name;
+            return false; // stop as soon as we've found one of the candidates
+          }
+          return true;
+        },
+        undefined,
+        SOLID_BODY_GROUPS
+      );
+      return found;
+    },
+    [rapier, world]
+  );
+
   // "il movimento del busto devo controllarlo solo io con l'orbit
   // control.. nessuna animazione si deve intromettere nella sua
   // inclinazione" -- a hard, ABSOLUTE bone.quaternion.setFromAxisAngle(...)
@@ -2452,6 +2887,7 @@ export function useRagdoll(
       }
       solidBodiesRef.current = {};
       ownColliderHandlesRef.current.clear();
+      solidBodyHandleNameRef.current.clear();
       if (solidControllerRef.current) {
         world.removeCharacterController(solidControllerRef.current);
         solidControllerRef.current = null;
@@ -2484,8 +2920,11 @@ export function useRagdoll(
     getBoneWorldPosition,
     getHurtboxHandle,
     pointIntersectsHurtbox,
+    getSolidBodyHandleNames,
+    findStruckSegment,
     applySpineLean,
     resolveBodyMovement,
     getSolidBodySegments,
+    getActiveRagdollJointDebug,
   };
 }

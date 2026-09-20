@@ -26,7 +26,16 @@ export const getTerrainHeight = (
   return Math.sin(x / 30) * Math.cos(z / 20) * maxHeight;
 };
 
-const Terrain: React.FC = () => {
+interface TerrainProps {
+  // "togli la mappa in modalita arena" -- nasconde SOLO la mesh
+  // visiva del terreno sotto, lasciando SEMPRE montati i due
+  // RigidBody (heightfield + muri di bordo) sotto -- altrimenti
+  // qualunque personaggio/veicolo sfonderebbe il pavimento o cadrebbe
+  // fuori dal mondo mentre il toggle debug e' attivo.
+  hideVisual?: boolean;
+}
+
+const Terrain: React.FC<TerrainProps> = ({ hideVisual = false }) => {
   const size = 600;
   const segments = 40;
   const maxHeight = 0; // flat -- see getTerrainHeight's own comment above
@@ -134,7 +143,7 @@ const Terrain: React.FC = () => {
           collisionGroups={groupsExcluding(CollisionGroups.Default)}
         />
       </RigidBody>
-      <mesh receiveShadow position={[0, 0, 0]}>
+      <mesh receiveShadow position={[0, 0, 0]} visible={!hideVisual}>
         <bufferGeometry>
           <bufferAttribute
             attach="attributes-position"

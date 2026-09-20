@@ -7,6 +7,7 @@ import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { useRagdoll } from './ragdoll/useRagdoll';
 import SolidBodyDebugView from './SolidBodyDebugView';
+import ActiveRagdollDebugView from './ActiveRagdollDebugView';
 import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
 import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode, AnimCatalog } from './SquadArenaTypes';
@@ -86,6 +87,15 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
 }) => {
   const groupRef = React.useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
+  // "togli l'altro avversario mentre e' in t pose cosi' si vede meglio"
+  // -- sottoscrizione REATTIVA (non solo useStore.getState() imperativo
+  // come nel resto del file) apposta: serve per condizionare il JSX
+  // sotto (che React valuta solo ai re-render, non ogni frame), non solo
+  // la logica dentro useFrame. Per QUESTO fighter enableRagdoll e' fisso
+  // per tutta la vita del componente, quindi finche' e' true questo
+  // flag equivale esattamente a "sono io l'avversario AI del duello e il
+  // T-pose e' attivo adesso".
+  const debugTPoseJointsGlobal = useStore((s) => s.debugTPoseJoints);
   // Points at the SkeletonUtils clone (set below, once it exists) so
   // useRagdoll can walk its bone hierarchy -- kept as its own ref rather
   // than reading `clone` directly since useRagdoll is a hook and must be
@@ -251,6 +261,11 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         // non piu' solo "il primo punto di contatto".
         theTarget.hitFromX = pending.pos.x;
         theTarget.hitFromZ = pending.pos.z;
+        // "come sarebbe meglio fare in stile euphoria" -- vedi lo stesso
+        // commento in PlayerCombatSoldier.tsx's finalizePendingHit: il VERO
+        // segmento colpito (o null, con fallback casuale al call site di
+        // pulseHit piu' sotto).
+        theTarget.hitSegment = ragdoll.findStruckSegment(pending.pos, theTarget.solidBodyHandles);
       }
     }
     return true;
@@ -280,7 +295,22 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
   };
 
   useFrame((_state, delta) => {
-    if (mixer) mixer.update(delta * globalSpeed);
+    // "mettilo a forma di t e fammi vedere le giunzioni" -- SOLO per il
+    // fighter con enableRagdoll=true (l'avversario AI del duello 1v1 --
+    // mai i 120 dell'arena FFA, stesso gate gia' usato per
+    // SolidBodyDebugView piu' sotto): quando il toggle e' attivo, ferma
+    // l'AnimationMixer e forza lo skeleton alla bind pose (T-pose) via
+    // skeleton.pose() invece di animare, cosi' le capsule di
+    // ActiveRagdollDebugView si vedono ferme e senza rumore di
+    // movimento -- vedi anche il ragdoll.update skippato piu' sotto.
+    const forceTPose = enableRagdoll && useStore.getState().debugTPoseJoints;
+    if (forceTPose) {
+      clone.traverse((child: any) => {
+        if (child.isSkinnedMesh) child.skeleton.pose();
+      });
+    } else if (mixer) {
+      mixer.update(delta * globalSpeed);
+    }
     // Runs every frame regardless of which branch below fires -- a hit-
     // reaction pulse (see the triggerHit branch) needs to keep simulating
     // and blending back out even once attackLock has expired and the rest
@@ -297,11 +327,31 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     // file's own comment above) AND the GUI toggle, so the 120-fighter
     // FFA arena (enableRagdoll always false there) never builds this rig
     // regardless of the store flag's value.
-    ragdoll.update(delta, enableRagdoll && useStore.getState().euphoriaRagdollEnabled);
+    if (!forceTPose) {
+      ragdoll.update(delta, enableRagdoll && useStore.getState().euphoriaRagdollEnabled);
+    }
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
     // fighter (their own checkAttackContact reads it off `theTarget`).
     data.hurtboxHandle = ragdoll.getHurtboxHandle();
+    // "come sarebbe meglio fare in stile euphoria" -- stessa idea di
+    // hurtboxHandle sopra, ma per i collider solid-body per-arto: chi ci
+    // colpisce legge queste handle da qui e le passa alla propria
+    // ragdoll.findStruckSegment per scoprire il VERO segmento colpito.
+    data.solidBodyHandles = ragdoll.getSolidBodyHandleNames();
     if (!groupRef.current) return;
+
+    // "togli l'altro avversario mentre e' in t pose cosi' si vede
+    // meglio" -- quando il toggle T-pose e' attivo per QUESTO fighter
+    // (solo l'avversario AI del duello puo' mai avere forceTPose=true --
+    // vedi il gate su enableRagdoll sopra), nascondi l'INTERO gruppo
+    // (mesh + anello sotto i piedi + label hover), cosi' resta visibile
+    // solo il duellante controllato dal giocatore (PlayerCombatSoldier,
+    // mai nascosto) mentre lo si ispeziona -- niente piu' due manichini
+    // sovrapposti/confusi nella stessa inquadratura. Basta la visibility
+    // del group: applyTransform sotto continua comunque a girare (la
+    // posizione non conta piu' finche' e' invisibile), e torna visibile
+    // da solo non appena il toggle si spegne.
+    groupRef.current.visible = !forceTPose;
 
     // "voglio estendere il loro ground a tutta la citta" -- fighters now
     // roam/duel across the whole city (see CombatArena.tsx), not one small
@@ -377,7 +427,11 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       // torso/head alternate so consecutive hits don't all look identical.
       if (enableRagdoll) {
         _hitImpulseDir.set(Math.sin(data.rotation), 0.35, Math.cos(data.rotation));
-        ragdoll.pulseHit(_hitImpulseDir, 0.3, Math.random() > 0.5 ? 'Head' : 'Torso', data.hitFromX, data.hitFromZ);
+        // "come sarebbe meglio fare in stile euphoria" -- data.hitSegment
+        // e' il vero segmento trovato da findStruckSegment al momento
+        // dell'impatto; il coin-flip resta solo come fallback (vedi
+        // PlayerCombatSoldier.tsx's stesso commento).
+        ragdoll.pulseHit(_hitImpulseDir, 0.3, data.hitSegment ?? (Math.random() > 0.5 ? 'Head' : 'Torso'), data.hitFromX, data.hitFromZ);
       }
     }
 
@@ -650,8 +704,16 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       {/* "fai riferimenti visivi per ragdoll e fisica dei solidi" -- only
           when this instance actually opted into the real solid-body
           system (see enableRagdoll/resolveAndApplyMovement above) -- the
-          120-fighter FFA arena never has any solid colliders to draw. */}
-      {enableRagdoll && <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />}
+          120-fighter FFA arena never has any solid colliders to draw.
+          "togli l'altro avversario mentre e' in t pose cosi' si vede
+          meglio" -- entrambe le view sotto restano montate SOLO quando
+          NON siamo in T-pose, altrimenti resterebbero comunque visibili
+          le capsule arancioni di questo fighter anche a mesh nascosta
+          (vedi groupRef.current.visible sopra), uno "scheletro fantasma"
+          proprio dove si voleva pulizia -- l'unico manichino visibile
+          durante l'ispezione T-pose resta quello del giocatore. */}
+      {enableRagdoll && !debugTPoseJointsGlobal && <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />}
+      {enableRagdoll && !debugTPoseJointsGlobal && <ActiveRagdollDebugView getSegments={ragdoll.getActiveRagdollJointDebug} />}
     </>
   );
 };

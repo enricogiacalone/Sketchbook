@@ -75,6 +75,23 @@ export interface FighterData {
   // object, same as every other field here. null until that fighter's
   // hurtbox has been created (its first update() call).
   hurtboxHandle: number | null;
+  // "come sarebbe meglio fare in stile euphoria" -- this fighter's own
+  // solid-body collider handles+names (see useRagdoll.ts's
+  // getSolidBodyHandleNames), refreshed every frame by its own component
+  // exactly like hurtboxHandle above. An attacker reads the TARGET's copy
+  // here and queries it via THEIR OWN ragdoll.findStruckSegment, so the
+  // hit-reaction can target the REAL body part that was struck instead of
+  // picking Head/Torso at random. Empty array until that fighter's solid
+  // bodies have been created.
+  solidBodyHandles: { handle: number; name: string }[];
+  // "come sarebbe meglio fare in stile euphoria" -- the REAL segment name
+  // (e.g. 'ForeArm_L', 'Thigh_R'...) that findStruckSegment identified for
+  // the hit that just set triggerHit/hitFromX/hitFromZ above, captured by
+  // the ATTACKER the same way/moment as those two fields. null when the
+  // query found no matching solid-body capsule (falls back to the old
+  // random Head/Torso pick at the pulseHit call site) or when no hit is
+  // currently pending.
+  hitSegment: string | null;
   // "metti un opzione in cui l'avversario si ferma e non combatte che
   // posso attivare a piacimento" -- when true, CombatSoldier.tsx (the AI)
   // stands down: no chasing, no attacking, no blocking, just idle -- but

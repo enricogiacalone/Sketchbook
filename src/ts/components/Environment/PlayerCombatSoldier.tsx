@@ -7,6 +7,7 @@ import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { useRagdoll } from './ragdoll/useRagdoll';
 import SolidBodyDebugView from './SolidBodyDebugView';
+import ActiveRagdollDebugView from './ActiveRagdollDebugView';
 import { useInput } from '../../hooks/useInput';
 import { FighterData, AnimCatalog } from './SquadArenaTypes';
 import type { PunchingBagHandle } from './PunchingBag';
@@ -20,6 +21,14 @@ const ADDON_ANIMS_URL = 'soldier-citizen-addon-animations.glb';
 // team palette, so the fighter YOU control always reads unambiguously at
 // a glance even though it's the exact same model/rig as the AI opponent.
 const PLAYER_COLOR = '#22c55e';
+// "rendi la mesh piu trasparente cosi si nota meglio la sovrapposizione
+// della ragdoll e la mesh" -- quanto diventa trasparente il personaggio
+// mentre debugTPoseJoints e' attivo (vedi useFrame sotto). Abbastanza
+// bassa da lasciar intravedere chiaramente le capsule arancioni di
+// ActiveRagdollDebugView anche dove sono INTERNE alla mesh (spalle/
+// spina), ma non cosi' bassa da perdere il profilo della mesh stessa
+// (serve ancora vedere ENTRAMBE per giudicare la sovrapposizione).
+const DEBUG_TPOSE_MESH_OPACITY = 0.35;
 
 const WALK_SPEED = 2.2; // units/sec
 const RUN_SPEED = 4.2; // units/sec
@@ -346,6 +355,15 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
           // non piu' solo "il primo punto di contatto".
           opponent.hitFromX = pending.pos.x;
           opponent.hitFromZ = pending.pos.z;
+          // "come sarebbe meglio fare in stile euphoria" -- stessa
+          // posizione/istante di hitFromX/Z sopra, ma interrogata contro i
+          // VERI collider solid-body del bersaglio (opponent.solidBodyHandles,
+          // rinfrescate ogni frame dal loro stesso componente) invece di
+          // lasciare che pulseHit scelga Head/Torso a caso. null se il
+          // punto non tocca nessuna capsula reale -- il chiamante del
+          // pulse (piu' sotto in questo stesso file) ha gia' il fallback
+          // casuale per quel caso.
+          opponent.hitSegment = ragdoll.findStruckSegment(pending.pos, opponent.solidBodyHandles);
         }
       }
     } else {
@@ -404,7 +422,32 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   };
 
   useFrame((_state, delta) => {
-    if (mixer) mixer.update(delta * globalSpeed);
+    // "mettilo a forma di t e fammi vedere le giunzioni" -- quando attivo,
+    // ferma l'AnimationMixer e forza lo skeleton alla bind pose (T-pose)
+    // del GLB via skeleton.pose() invece di lasciarlo animare, cosi' le
+    // capsule disegnate da ActiveRagdollDebugView sotto si vedono ferme e
+    // senza il rumore del movimento -- vedi anche il ragdoll.update
+    // skippato piu' sotto, stesso motivo.
+    const forceTPose = useStore.getState().debugTPoseJoints;
+    // "rendi la mesh piu trasparente cosi si nota meglio la
+    // sovrapposizione della ragdoll e la mesh" -- stesso traverse di
+    // skeleton.pose() sopra, esteso per (ri)sincronizzare anche
+    // opacity/transparent del materiale (gia' clonato per-istanza in
+    // useMemo sopra, quindi sicuro da toccare qui senza influenzare
+    // altri personaggi) a QUESTO frame's forceTPose -- cosi' torna
+    // opaca da sola nello stesso frame in cui il toggle si spegne,
+    // senza bisogno di un ref separato per rilevare la transizione.
+    clone.traverse((child: any) => {
+      if (!child.isSkinnedMesh) return;
+      if (forceTPose) child.skeleton.pose();
+      if (child.material) {
+        child.material.transparent = forceTPose;
+        child.material.opacity = forceTPose ? DEBUG_TPOSE_MESH_OPACITY : 1;
+      }
+    });
+    if (!forceTPose && mixer) {
+      mixer.update(delta * globalSpeed);
+    }
     // "coglione testa su chrome" -- temporary live-browser debug readout
     // for the duel-player fighter's own internal state (input/attackLock/
     // triggerHit), so a javascript_tool script driving the real game can
@@ -430,11 +473,18 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // opts in to the PD active-ragdoll layer when the GUI toggle is on
     // (there's no enableRagdoll-style gate for the player fighter -- this
     // component only ever renders the one duel player).
-    ragdoll.update(delta, useStore.getState().euphoriaRagdollEnabled);
+    if (!forceTPose) {
+      ragdoll.update(delta, useStore.getState().euphoriaRagdollEnabled);
+    }
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
     // fighter (their own checkAttackContact reads it off `opponent`) --
     // see FighterData's comment.
     data.hurtboxHandle = ragdoll.getHurtboxHandle();
+    // "come sarebbe meglio fare in stile euphoria" -- stessa idea di
+    // hurtboxHandle sopra, ma per i collider solid-body per-arto: chi ci
+    // colpisce legge queste handle da qui e le passa alla propria
+    // ragdoll.findStruckSegment per scoprire il VERO segmento colpito.
+    data.solidBodyHandles = ragdoll.getSolidBodyHandleNames();
 
     // "l'orbit nn controlla bene il busto.. volevo direzionare i pugni in
     // questo modo.. il colpo deve davvero atterrare dove miro" -- runs
@@ -540,7 +590,13 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       // the moment of impact, not just a hit-reaction animation. Same
       // hit-pulse technique as CombatSoldier.tsx -- see useRagdoll.ts.
       _hitImpulseDir.set(Math.sin(data.rotation), 0.35, Math.cos(data.rotation));
-      ragdoll.pulseHit(_hitImpulseDir, 0.3, Math.random() > 0.5 ? 'Head' : 'Torso', data.hitFromX, data.hitFromZ);
+      // "come sarebbe meglio fare in stile euphoria" -- data.hitSegment e'
+      // il VERO segmento identificato da findStruckSegment al momento
+      // dell'impatto (vedi finalizePendingHit sopra); il coin-flip
+      // Head/Torso resta solo come fallback per il raro caso in cui quella
+      // query non abbia trovato nessuna capsula (o per hit piu' vecchi/da
+      // altre fonti che non passano mai da hitSegment).
+      ragdoll.pulseHit(_hitImpulseDir, 0.3, data.hitSegment ?? (Math.random() > 0.5 ? 'Head' : 'Torso'), data.hitFromX, data.hitFromZ);
     }
 
     if (data.attackLock > 0) {
@@ -750,6 +806,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
           purely from the Rapier bodies' own live world translations, so
           nesting them under groupRef would double the transform). */}
       <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />
+      {/* "mettilo a forma di t e fammi vedere le giunzioni" -- le 15
+          capsule del layer ragdoll ATTIVO (ACTIVE_RAGDOLL_SEGMENTS),
+          stessa ragione di non-nesting sotto groupRef di sopra. */}
+      <ActiveRagdollDebugView getSegments={ragdoll.getActiveRagdollJointDebug} />
     </>
   );
 };

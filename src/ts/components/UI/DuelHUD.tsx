@@ -29,9 +29,11 @@ const DuelHUD: React.FC = () => {
     bagLastHitRadialOffset,
     bagLastHitHeightOffset,
     bagLastHitHand,
+    hideUiClean,
   } = useStore(
     useShallow((state) => ({
       testScene: state.testScene,
+      hideUiClean: state.hideUiClean,
       duelPlayerHp: state.duelPlayerHp,
       duelEnemyHp: state.duelEnemyHp,
       duelResult: state.duelResult,
@@ -112,6 +114,12 @@ const DuelHUD: React.FC = () => {
           );
         })()}
 
+      {/* "togli ... la vita ... per pulire la ui" -- store.ts's
+          hideUiClean, flippato da CombatArenaGUI.tsx ("Pulisci UI"). Solo
+          le barre HP qui sotto -- reticolo, pulsante "Esci dal Duello" e
+          banner vittoria/sconfitta restano SEMPRE visibili, non erano
+          nella richiesta. */}
+      {!hideUiClean && (
       <div
         style={{
           position: 'absolute',
@@ -157,6 +165,7 @@ const DuelHUD: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
 
       <button
         onClick={exitDuel}

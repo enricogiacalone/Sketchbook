@@ -34,15 +34,21 @@ import * as THREE from "three";
 const App: React.FC = () => {
   const [isJoined, setIsJoined] = useState(false);
   const [userName, setUserName] = useState("");
-  const { isLoading, setIsLoading, isPaused, setPaused, testScene } = useStore(
+  const { isLoading, setIsLoading, isPaused, setPaused, testScene, debugTPoseJoints, hideUiClean } = useStore(
     useShallow((state) => ({
       isLoading: state.isLoading,
       setIsLoading: state.setIsLoading,
       isPaused: state.isPaused,
       setPaused: state.setPaused,
       testScene: state.testScene,
+      debugTPoseJoints: state.debugTPoseJoints,
+      hideUiClean: state.hideUiClean,
     }))
   );
+  // "metti un comando su lilgui per togliere la mappa, la lista di
+  // comandi, la vita e la chat per pulire la ui" -- vedi store.ts's
+  // hideUiClean e Scene.tsx's stesso hideMap per il dettaglio.
+  const hideMap = debugTPoseJoints || hideUiClean;
 
   // TEMP DEBUG (Claude) turned permanent test convenience: joining used to
   // mean clicking through WelcomeScreen (type a name, click "Enter
@@ -165,10 +171,27 @@ const App: React.FC = () => {
       >
         {isJoined && (
           <Suspense fallback={null}>
-            <Sky />
-            <NightSky />
+            {/* "togli anche il cielo e il sole" -- store.ts's hideUiClean
+                (via hideMap sopra, che include anche debugTPoseJoints).
+                Sky.tsx/NightSky.tsx sono la cupola cielo GIORNO/NOTTE, il
+                "sole" (bagliore nello shader, guidato da getSunDirection)
+                e' gia' disegnato dentro Sky.tsx stesso -- non serve un
+                terzo toggle separato. SunLight.tsx (la luce VERA che
+                illumina davvero il personaggio, poco sotto) resta SEMPRE
+                montata apposta: senza di lei la scena resterebbe al buio
+                totale, e l'obiettivo qui e' solo pulire lo sfondo, non
+                spegnere l'illuminazione mentre si ispeziona la ragdoll. */}
+            {!hideMap && <Sky />}
+            {!hideMap && <NightSky />}
             <WorldFog />
-            <Ocean />
+            {/* "togli la mappa in modalita arena" -- questo e' l'Ocean
+                DI SFONDO, sempre montato qui a prescindere dalla scena
+                attiva (Scene.tsx ne ha un secondo, piu' locale, gia'
+                condizionato a parte) -- quello che riempiva l'inquadratura
+                di "acqua" nell'ispezione T-pose del duello, dato che senza
+                il piano scuro del Terrain sopra (nascosto da Scene.tsx)
+                non c'era piu' nulla a occluderlo. */}
+            {!hideMap && <Ocean />}
             {/* Real sun-linked directional light + hemisphere ambient --
                 "sistemiamo il cielo... sole vero collegato alla luce".
                 Replaces the old fixed pointLight + flat ambientLight(0.5),
@@ -270,12 +293,21 @@ const App: React.FC = () => {
             </h1>
             <div style={{ fontSize: 14 }}>Welcome, {userName}!</div>
           </div>
-          <Controls />
-          <StatusBars />
+          {/* "togli ... la lista di comandi, la vita e la chat per
+              pulire la ui" -- store.ts's hideUiClean. "per mappa intendo
+              la minimappa" -- e' QUESTA (Minimap.tsx, il cerchio in
+              basso a sinistra), non l'ambiente 3D (quella e' gia'
+              coperta da Scene.tsx/App.tsx's hideMap sopra, invariata).
+              Crosshair/CollectiblesCounter/MissionHUD non erano nella
+              richiesta (restano sempre visibili) -- le barre vita del
+              DUELLO (DuelHUD.tsx) sono un blocco separato, condizionato
+              dentro quel file stesso. */}
+          {!hideUiClean && <Controls />}
+          {!hideUiClean && <StatusBars />}
           <CollectiblesCounter />
           <MissionHUD />
-          <ChatInput />
-          <Minimap />
+          {!hideUiClean && <ChatInput />}
+          {!hideUiClean && <Minimap />}
           <Crosshair />
           <GamepadDebug />
           <ScenariosGUI />

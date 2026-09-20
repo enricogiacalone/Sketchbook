@@ -41,12 +41,14 @@ const CombatArenaGUI: React.FC = () => {
     // this one's sole job is to forward onChange into the store (read back
     // via getState() so this effect doesn't need to re-subscribe/rebuild
     // the panel every time either value changes elsewhere).
-    const settings: { modalita: GameMode; combattenti: number; manichino: boolean; colliderFisici: boolean; ragdollAttivo: boolean } = {
+    const settings: { modalita: GameMode; combattenti: number; manichino: boolean; colliderFisici: boolean; ragdollAttivo: boolean; tPoseGiunture: boolean; pulisciUI: boolean } = {
       modalita: useStore.getState().arenaGameMode,
       combattenti: useStore.getState().arenaFighterCount,
       manichino: useStore.getState().duelDummyMode,
       colliderFisici: useStore.getState().showPhysicsDebug,
       ragdollAttivo: useStore.getState().euphoriaRagdollEnabled,
+      tPoseGiunture: useStore.getState().debugTPoseJoints,
+      pulisciUI: useStore.getState().hideUiClean,
     };
 
     folder
@@ -87,6 +89,27 @@ const CombatArenaGUI: React.FC = () => {
       .add(settings, 'ragdollAttivo')
       .name('Ragdoll attivo (PD)')
       .onChange((active: boolean) => useStore.getState().setEuphoriaRagdollEnabled(active));
+
+    // "mettilo a forma di t e fammi vedere le giunzioni" -- ferma
+    // l'avversario AI del duello in bind pose (T-pose) e disegna le 15
+    // capsule del layer ragdoll attivo (ACTIVE_RAGDOLL_SEGMENTS, vedi
+    // ActiveRagdollDebugView.tsx) sopra di lui, per ispezionare
+    // raggio/lunghezza/posizionamento di ogni segmento senza il rumore
+    // del movimento -- SOLO il fighter con enableRagdoll (mai i 120
+    // dell'arena FFA), stesso gate di 'colliderFisici' sopra.
+    folder
+      .add(settings, 'tPoseGiunture')
+      .name('Forza T-Pose (giunture)')
+      .onChange((active: boolean) => useStore.getState().setDebugTPoseJoints(active));
+
+    // "metti un comando su lilgui per togliere la mappa, la lista di
+    // comandi, la vita e la chat per pulire la ui" -- store.ts's own
+    // hideUiClean comment per il dettaglio di cosa nasconde esattamente
+    // (ambiente + Controls.tsx + StatusBars.tsx/DuelHUD.tsx + ChatInput.tsx).
+    folder
+      .add(settings, 'pulisciUI')
+      .name('Pulisci UI (mappa/HUD/chat)')
+      .onChange((active: boolean) => useStore.getState().setHideUiClean(active));
 
     // "le colonne devono essere retratte" -- lil-gui folders actually
     // default to OPEN (verified live -- omitting .open() was NOT enough

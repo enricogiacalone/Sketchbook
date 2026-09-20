@@ -83,6 +83,25 @@ const Scene: React.FC = () => {
   // Road/etc. are already stripped for ANY testScene !== 'none' -- see
   // isCleanTest below); this just additionally mounts DuelArena.tsx.
   const isDuelTest = testScene === 'duel';
+  // "togli la mappa in modalita arena.. analizza la mesh e la ragdoll e
+  // vedi se combaciano bene" -- quando il toggle debug T-pose e' attivo
+  // (store.ts's debugTPoseJoints, vedi CombatArenaGUI.tsx), ripulisce
+  // ulteriormente la vista del duello per l'ispezione ragdoll: nasconde
+  // la PARTE VISIVA del Terrain (il piano scuro sempre presente, vedi
+  // Terrain.tsx's nuovo prop hideVisual -- i suoi collider/muri restano
+  // SEMPRE montati, altrimenti i personaggi cadrebbero nel vuoto) oltre
+  // a Ocean/Planets/Airport/Airplane/Helicopter sotto, tutti elementi
+  // che isCleanTest da solo non nascondeva perche' condivisi con le
+  // altre modalita' test (volo/macchina/gara).
+  const debugTPoseJoints = useStore((state) => state.debugTPoseJoints);
+  // "metti un comando su lilgui per togliere la mappa ... per pulire la
+  // ui" -- flag INDIPENDENTE da debugTPoseJoints sopra (vedi store.ts's
+  // proprio commento), ma con lo STESSO effetto sull'ambiente qui sotto:
+  // hideMap e' vero se l'uno o l'altro e' attivo, cosi' l'ambiente resta
+  // nascosto sia durante l'ispezione T-pose sia con "Pulisci UI" da solo
+  // (es. per uno screenshot/video puliti senza congelare nessuno).
+  const hideUiClean = useStore((state) => state.hideUiClean);
+  const hideMap = debugTPoseJoints || hideUiClean;
   // "aggiungi il tasto retry" -- read fresh each render so a change
   // (see store.ts's retryDuel) flows straight into the key below.
   const duelRound = useStore((state) => state.duelRound);
@@ -95,12 +114,12 @@ const Scene: React.FC = () => {
   const showSkyAtmosphere = !isCleanTest || isRaceTest;
   return (
     <>
-      <Terrain />
+      <Terrain hideVisual={hideMap} />
       {isRaceTest && <RaceTrack />}
       {!isCleanTest && <Road />}
       {!isCleanTest && <Clouds />}
-      <Ocean />
-      <Planets />
+      {!hideMap && <Ocean />}
+      {!hideMap && <Planets />}
       {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}
       {showSkyAtmosphere && <MeteoriteSpawner />}
       {!isCleanTest && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
@@ -153,7 +172,7 @@ const Scene: React.FC = () => {
             arbitrary in-city coordinates -- same drop height as before (a
             short fall onto a plain CuboidCollider, proven safe for both,
             unlike the raycast-suspension cars). */}
-        {!isCarTest && !isRaceTest && (isCleanTest || !DEBUG_DISABLE_CARS_AND_ENEMIES) && (
+        {!isCarTest && !isRaceTest && !hideMap && (isCleanTest || !DEBUG_DISABLE_CARS_AND_ENEMIES) && (
           <>
             <Airplane position={[RUNWAY_CENTER[0], 5, RUNWAY_CENTER[1]]} />
             <Helicopter position={[HELIPORT_CENTER[0], 20, HELIPORT_CENTER[1]]} />
@@ -198,7 +217,7 @@ const Scene: React.FC = () => {
           not a "distrazione". Everything else here (city, park, LEDs,
           collectibles, missions) is exactly the clutter the clean test
           scenarios are meant to remove. */}
-      <Airport />
+      {!hideMap && <Airport />}
       {!isCleanTest && (
         <Suspense fallback={null}>
           <City />

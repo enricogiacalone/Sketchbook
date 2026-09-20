@@ -183,6 +183,28 @@ interface GameState {
   showPhysicsDebug: boolean;
   // "questo mi sembra piu' sostenibile" -- layer PD sempre attivo (vedi ragdollConfig.ts's RAGDOLL_HIPS_POSITION_STIFFNESS) per i duellanti. Toggle live per il tuning (GUI "Ragdoll attivo (PD)") senza dover ricaricare la pagina ogni volta.
   euphoriaRagdollEnabled: boolean;
+  // "mettilo a forma di t e fammi vedere le giunzioni" -- toggle di sola
+  // ispezione: forza lo skeleton alla bind pose (T-pose) del GLB via
+  // skeleton.pose() e ferma sia l'AnimationMixer che ragdoll.update per
+  // quel personaggio, cosi' la geometria delle 15 capsule del layer
+  // attivo (ACTIVE_RAGDOLL_SEGMENTS) si vede ferma e senza rumore di
+  // movimento -- letto ogni frame da PlayerCombatSoldier.tsx/
+  // CombatSoldier.tsx, flippato da CombatArenaGUI.tsx (stesso ponte di
+  // showPhysicsDebug sopra). Quando attivo, ActiveRagdollDebugView (vedi
+  // quel file) disegna anche le capsule stesse.
+  debugTPoseJoints: boolean;
+  // "metti un comando su lilgui per togliere la mappa, la lista di
+  // comandi, la vita e la chat per pulire la ui" -- flag DEDICATO,
+  // separato da debugTPoseJoints sopra: quello forza la T-pose e ferma
+  // lo scheletro (un concetto indipendente -- si puo' voler pulire lo
+  // schermo per uno screenshot/video SENZA congelare nessuno in T-pose,
+  // o viceversa). Nasconde: l'ambiente (Terrain/Ocean/Planets/Airport/
+  // Airplane/Helicopter -- stesse condizioni di Scene.tsx/App.tsx, ora
+  // vere se QUALUNQUE dei due flag e' attivo), il pannello Controls.tsx,
+  // le barre vita di StatusBars.tsx e del duello (DuelHUD.tsx), e il
+  // widget ChatInput.tsx -- vedi ognuno di quei file per dove viene
+  // letto.
+  hideUiClean: boolean;
   // "crea un sacco su cui allenarmi nell'arena.. mi serve per capire la
   // precisione delle collisioni" -- a static practice target (see
   // PunchingBag.tsx), completely separate from the AI opponent/dummy
@@ -248,6 +270,8 @@ interface GameState {
   setDuelDummyMode: (active: boolean) => void;
   setShowPhysicsDebug: (active: boolean) => void;
   setEuphoriaRagdollEnabled: (active: boolean) => void;
+  setDebugTPoseJoints: (active: boolean) => void;
+  setHideUiClean: (active: boolean) => void;
   registerBagHit: (radialOffset: number, heightOffset: number, hand: 'hand_l' | 'hand_r') => void;
   retryDuel: () => void;
   collectItem: () => void;
@@ -293,6 +317,8 @@ export const useStore = create<GameState>((set) => ({
   duelDummyMode: false,
   showPhysicsDebug: false,
   euphoriaRagdollEnabled: true,
+  debugTPoseJoints: false,
+  hideUiClean: false,
   bagHitCount: 0,
   bagLastHitRadialOffset: null,
   bagLastHitHeightOffset: null,
@@ -352,6 +378,8 @@ export const useStore = create<GameState>((set) => ({
   setDuelDummyMode: (duelDummyMode) => set({ duelDummyMode }),
   setShowPhysicsDebug: (showPhysicsDebug) => set({ showPhysicsDebug }),
   setEuphoriaRagdollEnabled: (euphoriaRagdollEnabled) => set({ euphoriaRagdollEnabled }),
+  setDebugTPoseJoints: (debugTPoseJoints) => set({ debugTPoseJoints }),
+  setHideUiClean: (hideUiClean) => set({ hideUiClean }),
   registerBagHit: (radialOffset, heightOffset, hand) => set((state) => ({
     bagHitCount: state.bagHitCount + 1,
     bagLastHitRadialOffset: radialOffset,

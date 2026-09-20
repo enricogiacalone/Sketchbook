@@ -98,6 +98,8 @@ function makeFighter(id: string, name: string, team: string, x: number, z: numbe
     hitFromX: 0,
     hitFromZ: 0,
     hurtboxHandle: null,
+    solidBodyHandles: [],
+    hitSegment: null,
     isPassive: false,
   };
 }

@@ -150,6 +150,8 @@ function createFighters(count: number, mode: GameMode, center: [number, number],
       hitFromX: 0,
       hitFromZ: 0,
       hurtboxHandle: null,
+      solidBodyHandles: [],
+      hitSegment: null,
       isPassive: false,
     });
   }

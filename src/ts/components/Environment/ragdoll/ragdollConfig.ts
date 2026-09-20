@@ -44,6 +44,24 @@ export interface RagdollSegment {
   // capsules don't visibly overlap/z-fight at the joint (capsule caps are
   // already rounded, so a small margin reads better than none).
   lengthScale?: number;
+  // "deve coincidere con l'altezza massima e la punta del mento" -- SOLO
+  // per il layer attivo (ensureActiveRagdoll/getActiveRagdollJointDebug in
+  // useRagdoll.ts leggono questo campo; il layer transitorio/buildBodies
+  // NON lo legge, resta sul suo min(localLen/2, length/2) di sempre).
+  // Normalmente la capsula e' centrata a meta' strada verso toBone, ma
+  // quella meta' e' CAPPATA alla distanza reale drivingBone->toBone
+  // (min(localLen/2, length/2)) -- per la Testa, drivingBone='head' e
+  // toBone='head_leaf' distano solo ~0.07m, quindi quel cap tiene il
+  // centro della capsula incollato vicino alla base del cranio anche se
+  // la mesh vera (misurata dal vivo) sale molto piu' in alto e il bone
+  // 'head' di questo rig sta vicino alla base del cranio, non al centro
+  // -- nessun lengthScale puo' spingere il centro oltre quel cap (vedi
+  // il suo commento sotto). Questo campo, se presente, SOSTITUISCE quel
+  // calcolo con una distanza esplicita in metri lungo la stessa direzione
+  // (verso toBone) -- permette di piazzare il centro dove serve
+  // davvero (a meta' tra mento e sommita' del cranio) invece che dove la
+  // geometria ossea grezza lo limiterebbe.
+  offsetOverrideM?: number;
 }
 
 export const RAGDOLL_SEGMENTS: RagdollSegment[] = [
@@ -94,17 +112,103 @@ export const ACTIVE_RAGDOLL_EXTRA_SEGMENTS: RagdollSegment[] = [
 // quest'ordine) di TUTTI i segmenti del layer attivo: gli 11 originali
 // (stessi bone/raggio di RAGDOLL_SEGMENTS, MA con Head/UpperArm_L/
 // UpperArm_R riagganciati ai nuovi corpi intermedi invece che
-// direttamente al Torso) intervallati con i 4 nuovi sopra. Duplicato a
-// mano invece che costruito per lookup+override da RAGDOLL_SEGMENTS
-// apposta: resta leggibile a colpo d'occhio quale genitore usa ciascun
-// segmento, ed evita qualunque rischio di modificare per sbaglio
-// l'array condiviso.
+// direttamente al Torso) intervallati con i 4 di ACTIVE_RAGDOLL_EXTRA_SEGMENTS
+// sopra, PIU' il segmento Neck aggiunto separatamente (vedi il suo commento
+// dedicato sotto) -- 16 corpi in totale. Duplicato a mano invece che
+// costruito per lookup+override da RAGDOLL_SEGMENTS apposta: resta
+// leggibile a colpo d'occhio quale genitore usa ciascun segmento, ed
+// evita qualunque rischio di modificare per sbaglio l'array condiviso.
 export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
   { name: 'Hips', drivingBone: 'pelvis', parent: null, toBone: 'spine_01', radius: 0.15, lengthScale: 0.6 },
-  { name: 'Torso', drivingBone: 'spine_01', parent: 'Hips', toBone: 'neck_01', radius: 0.18 },
-  { name: 'SpineMid', drivingBone: 'spine_02', parent: 'Torso', toBone: 'spine_03', radius: 0.16 },
-  { name: 'SpineHigh', drivingBone: 'spine_03', parent: 'SpineMid', toBone: 'neck_01', radius: 0.15 },
-  { name: 'Head', drivingBone: 'neck_01', parent: 'SpineHigh', toBone: 'head_leaf', radius: 0.15, lengthScale: 1.3 },
+  // "mettilo a forma di t e fammi vedere le giunzioni" -- il toBone di
+  // Torso qui e' STATO CORRETTO da 'neck_01' (valore copiato senza
+  // pensarci dal RAGDOLL_SEGMENTS originale, dove Torso era l'UNICO
+  // corpo a coprire tutta la spina) a 'spine_02': confermato dal vivo con
+  // la vista giunture in T-pose che altrimenti la capsula del Torso
+  // restava lunga quanto l'intera spina (spine_01->neck_01) e finiva per
+  // sovrapporsi quasi per intero a SpineMid e SpineHigh sotto, invece di
+  // fermarsi dove inizia SpineMid come dovrebbe in una vera suddivisione.
+  // "analizza la mesh e la ragdoll e vedi se combaciano bene" -- raggi
+  // ricalibrati dal vivo con un raycast perpendicolare all'asse di ogni
+  // capsula (4 direzioni, contro la vera SkinnedMesh in T-pose): coi
+  // raggi originali (0.18/0.16/0.15, ereditati senza pensarci dal Torso
+  // unico di RAGDOLL_SEGMENTS) la mesh reale a questi 3 livelli misurava
+  // solo ~0.06-0.12m di spessore pulito (escludendo le letture che
+  // attraversavano tutto il busto fino al lato opposto), quindi le 3
+  // capsule sporgevano visibilmente FUORI dalla mesh. Peggio: dato che
+  // spine_01/02/03 distano solo ~0.13-0.15m l'uno dall'altro (misurato
+  // in T-pose), ogni singolo segmento ha lunghezza cosi' corta che
+  // halfHeight finisce quasi sempre clampato al minimo (0.01) --
+  // ognuno e' di fatto una SFERA, non una vera capsula -- quindi un
+  // raggio grande quanto (o piu' di) quella distanza produce sfere
+  // adiacenti che si compenetrano vistosamente vedute di schiena (le
+  // "anelli impilati" nello screenshot). Ridotti a valori piu' vicini
+  // allo spessore reale misurato (SpineHigh tenuto leggermente piu'
+  // grande, e' la zona di scapole/trapezio verso le clavicole).
+  { name: 'Torso', drivingBone: 'spine_01', parent: 'Hips', toBone: 'spine_02', radius: 0.12 },
+  { name: 'SpineMid', drivingBone: 'spine_02', parent: 'Torso', toBone: 'spine_03', radius: 0.11 },
+  { name: 'SpineHigh', drivingBone: 'spine_03', parent: 'SpineMid', toBone: 'neck_01', radius: 0.13 },
+  // "collo come segmento fisico proprio... cosi' il collo potrebbe
+  // flettersi in modo indipendente sotto impatti" -- prima il collo non
+  // esisteva come corpo a se': la capsula "Head" partiva gia' da
+  // neck_01 e arrivava fino a head_leaf con un raggio/lengthScale
+  // pensati per coprire la TESTA (0.15/1.3), quindi il collo vero
+  // (misurato dal vivo sui vertici pesati su neck_01: ~0.10 di raggio
+  // pulito) veniva incluso dentro la stessa capsula sovradimensionata,
+  // visibilmente a contatto/sovrapposta con SpineHigh sotto -- niente
+  // di simile a un giunto che potesse piegarsi per conto suo. Ora
+  // 'neck_01' guida il proprio corpo "Neck" (raggio ricalibrato sulla
+  // misura reale), e la testa e' riagganciata al bone 'head' (non piu'
+  // neck_01), quindi il vero corpo "Head" copre solo il cranio
+  // (head -> head_leaf) invece che collo+testa insieme.
+  // "ora sistema la testa" / "la testa nel ragdoll mi sembra piu' grande
+  // della mesh" / "piu' alta.. deve coincidere con l'altezza massima e la
+  // punta del mento" -- il bone 'head' di questo rig sta vicino alla BASE
+  // del cranio, non al centro, e dista solo ~0.07m da head_leaf: il
+  // normale calcolo dell'offset (meta' della distanza drivingBone->toBone,
+  // vedi RagdollSegment.offsetOverrideM sopra) tiene quindi il centro
+  // della capsula incollato li' vicino, MOLTO piu' in basso del vero
+  // centro verticale testa (sommita' reale misurata dal vivo: ~1.98m,
+  // contro gli ~1.70m raggiungibili col cap normale) -- nessun raggio
+  // "normale" puo' coprire sia la sommita' che il mento da un centro
+  // cosi' basso senza sporgere ai lati (i due tentativi precedenti,
+  // 0.19 e poi 0.14, erano entrambi compromessi su QUESTO stesso
+  // vincolo). offsetOverrideM sblocca il vincolo: piazza il centro a
+  // meta' strada tra mento e sommita' reali (stimati dal vivo, poi
+  // verificati/corretti a occhio con la vista T-pose), cosi' un raggio
+  // stretto (vicino alla vera larghezza della testa) piu' un
+  // lengthScale che allunga la capsula lungo l'asse head->head_leaf
+  // arrivano a coprire l'intera altezza reale senza gonfiare i lati.
+  // "testa e collo dovrebbero essere attaccate" / "la testa doveva andare
+  // dal collo, non il collo allungarsi verso la testa" -- primo tentativo
+  // sbagliato: avevo allungato Neck verso l'alto per chiudere il varco.
+  // Corretto: Neck resta con la sua geometria naturale (raggio reale ~0.10,
+  // nessun offset artificiale) ed e' invece Head che deve scendere fino al
+  // mento/base del collo -- vedi commento su Head qui sotto.
+  { name: 'Neck', drivingBone: 'neck_01', parent: 'SpineHigh', toBone: 'head', radius: 0.1 },
+  // "la testa doveva andare dal collo, non il collo allungarsi verso la
+  // testa" -- giusto: offsetOverrideM=0.235 centrava la capsula troppo in
+  // alto (misurato dal vivo: il fondo capsula finiva verso y~1.81, ~9cm
+  // SOPRA il bone 'head' stesso, quindi mento/mascella/gola restavano
+  // completamente scoperti -- il "varco nero" visto di lato tra collo e
+  // testa non era un problema del collo, era la testa che non scendeva
+  // abbastanza). Ricalibrato misurando dal vivo il profilo frontale della
+  // mesh con un raycast verticale (non i vertici, troppo contaminati dal
+  // busto vicino): sommita' cranio conferma ~1.975m (invariata), il punto
+  // dove il profilo si stacca dalla gola e comincia a sporgere in avanti
+  // verso mento/mascella e' ~1.70m -- offsetOverrideM e lengthScale qui
+  // piazzano il centro piu' in basso e allungano la capsula cosi' che
+  // copra DAVVERO dalla sommita' fino al mento, arrivando a toccare (anzi
+  // leggermente sovrapporsi a) la capsula Neck sottostante senza toccarla.
+  {
+    name: 'Head',
+    drivingBone: 'head',
+    parent: 'Neck',
+    toBone: 'head_leaf',
+    radius: 0.08,
+    lengthScale: 3.96,
+    offsetOverrideM: 0.12,
+  },
   { name: 'ClavicleL', drivingBone: 'clavicle_l', parent: 'SpineHigh', toBone: 'upperarm_l', radius: 0.05 },
   { name: 'UpperArm_L', drivingBone: 'upperarm_l', parent: 'ClavicleL', toBone: 'lowerarm_l', radius: 0.06 },
   { name: 'ForeArm_L', drivingBone: 'lowerarm_l', parent: 'UpperArm_L', toBone: 'hand_l', radius: 0.05 },
@@ -240,6 +344,15 @@ export const ACTIVE_RAGDOLL_CONE_LIMIT_DEG: Record<string, number> = {
   SpineHigh: 15,
   ClavicleL: 25,
   ClavicleR: 25,
+  // Neck (nuovo, "collo come segmento fisico proprio") -- un vero collo
+  // umano ha piu' liberta' di una vertebra dorsale, ma resta un corpo
+  // piccolo e leggero appeso a SpineHigh (che gia' guida tutta la parte
+  // alta della schiena) con la Testa stessa appesa SOPRA di lui: un cono
+  // troppo largo qui lascerebbe la testa "ballare" sul collo. Partito
+  // sopra SpineMid/SpineHigh (piu' liberta', e' un giunto vero non una
+  // suddivisione interna della spina) ma sotto Head/UpperArm (che restano
+  // le articolazioni piu' libere del rig).
+  Neck: 20,
   // ForeArm_L/R (gomito) e Shin_L/R (ginocchio) NON compaiono qui: sono
   // giunti a cerniera reali (revolute), gia' vincolati rigidamente da
   // Rapier stesso via RAGDOLL_HINGE_LIMITS_DEG -- un cono qui non
@@ -319,10 +432,30 @@ export const RAGDOLL_MOTOR_STIFFNESS_BY_SEGMENT: Record<string, number> = {
   // partissero troppo rigidi. Se il live test mostra che non chiudono
   // abbastanza l'errore, si alza gradualmente da qui -- MAI direttamente a
   // un valore alto non testato.
-  SpineMid: 90,
-  SpineHigh: 70,
-  ClavicleL: 40,
-  ClavicleR: 40,
+  // "la ragdoll non segue bene i movimenti delle animazioni" (bacino/
+  // spalle) -- misurato dal vivo con window.__activeRagdollDebug: da
+  // FERMO, prima di qualsiasi colpo, SpineMid era gia' a 28.6d e
+  // SpineHigh a 18.1d di errore (contro <1d di Hips/braccia/gambe) --
+  // proprio i due segmenti in mezzo alla catena bacino->spalle, quindi
+  // il loro errore si propaga a entrambe le estremita'. Alzati un
+  // passo, restando SEMPRE sotto il proprio genitore (mai ripetere
+  // l'errore braccia/gambe a 150 sopra Torso=120): SpineMid 90->100
+  // (< Torso 120), SpineHigh 70->85 (< SpineMid 100), Clavicole 40->55
+  // (< SpineHigh 85, avvicinandosi alla baseline 60 gia' stabile per
+  // braccia/gambe). Verificato dal vivo dopo il cambio: vedi il proprio
+  // changelog per i numeri prima/dopo.
+  SpineMid: 100,
+  SpineHigh: 85,
+  ClavicleL: 55,
+  ClavicleR: 55,
+  // Neck: stesso ragionamento conservativo delle clavicole -- corpo
+  // piccolo/leggero, ORA con la Testa (gia' a 48) appesa sopra di lui
+  // invece che appesa direttamente a SpineHigh, quindi se troppo rigido
+  // rischia lo stesso "strattonamento" scartato per le braccia a 150.
+  // Partito leggermente sotto la Testa stessa; da alzare gradualmente
+  // SOLO se il test dal vivo mostra errore residuo, mai spostare diretto
+  // a un valore alto non verificato (vedi commento sopra).
+  Neck: 45,
 };
 
 // "questo mi sembra piu' sostenibile" -- Step 2 realizzato: layer SEMPRE
