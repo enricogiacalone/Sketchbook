@@ -1,3 +1,17 @@
+import { interactionGroups } from "@react-three/rapier";
+import { CollisionGroups } from "../../../enums/CollisionGroups";
+
+export const HURTBOX_HEIGHT = 1.65; // feet to roughly head height
+export const HURTBOX_RADIUS = 0.33;
+
+// Member of AND only collides-with Hurtbox -- so a query using this same
+// group only ever matches another fighter's hurtbox, never terrain,
+// ragdoll pieces, or anything else sharing the physics world.
+export const HURTBOX_GROUPS = interactionGroups(
+  [CollisionGroups.Hurtbox],
+  [CollisionGroups.Hurtbox]
+);
+
 // Ragdoll rig definition for the soldier-citizen.glb skeleton (an
 // Epic/UE-mannequin-style bone naming convention -- pelvis/spine_0N/
 // clavicle_l/upperarm_l/lowerarm_l/hand_l/thigh_l/calf_l/foot_l etc.,
