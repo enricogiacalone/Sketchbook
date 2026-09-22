@@ -297,7 +297,11 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     // file's own comment above) AND the GUI toggle, so the 120-fighter
     // FFA arena (enableRagdoll always false there) never builds this rig
     // regardless of the store flag's value.
-    ragdoll.update(delta, enableRagdoll && useStore.getState().euphoriaRagdollEnabled);
+    ragdoll.update(
+      delta,
+      enableRagdoll && useStore.getState().euphoriaRagdollEnabled,
+      data.state === 'In guardia' || data.state === 'Manichino'
+    );
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
     // fighter (their own checkAttackContact reads it off `theTarget`).
     data.hurtboxHandle = ragdoll.getHurtboxHandle();

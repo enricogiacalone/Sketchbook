@@ -171,7 +171,7 @@ const PunchingBag = React.forwardRef<PunchingBagHandle, PunchingBagProps>(
     // strap, not its center), so the whole bag+strap assembly swings as
     // one rigid unit around that top point, exactly like a real chain
     // attached to a fixed hook.
-    useSphericalJoint(anchorBodyRef, bagBodyRef, [
+    useSphericalJoint(anchorBodyRef as React.RefObject<RapierRigidBody>, bagBodyRef as React.RefObject<RapierRigidBody>, [
       [0, 0, 0],
       [0, BAG_TOP_LOCAL_Y, 0],
     ]);

@@ -2,9 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
-import {
-  CollisionGroups,
-} from "../../../enums/CollisionGroups";
+import { CollisionGroups } from "../../../enums/CollisionGroups";
 import {
   RAGDOLL_PULSE_NEARBY,
   HURTBOX_HEIGHT,
@@ -14,11 +12,14 @@ import {
 
 import { useRagdollBones } from "./hooks/useRagdollBones";
 import { useRagdollHurtbox } from "./hooks/useRagdollHurtbox";
-import { useRagdollSolidBodies, type SolidBodySegmentDebug } from "./hooks/useRagdollSolidBodies";
-import { useRagdollTransient } from "./hooks/useRagdollTransient";
-import { useRagdollActive } from "./hooks/useRagdollActive";
+import {
+  useRagdollSolidBodies,
+  type SolidBodySegmentDebug,
+} from "./hooks/useRagdollSolidBodies";
 
 export type { SolidBodySegmentDebug };
+import { useRagdollTransient } from "./hooks/useRagdollTransient";
+import { useRagdollActive } from "./hooks/useRagdollActive";
 
 const HIT_PULSE_DURATION = 0.22;
 const HIT_BLEND_OUT_DURATION = 0.22;
@@ -38,17 +39,24 @@ export interface RagdollController {
     attackerX?: number,
     attackerZ?: number
   ) => void;
-  update: (delta: number, activeRagdollEnabled?: boolean) => void;
+  update: (delta: number, activeRagdollEnabled?: boolean, isIdle?: boolean) => void;
   deactivate: () => void;
   getBoneWorldPosition: (boneName: string, target: THREE.Vector3) => boolean;
   getHurtboxHandle: () => number | null;
-  pointIntersectsHurtbox: (worldPos: THREE.Vector3, targetHandle: number) => boolean;
+  pointIntersectsHurtbox: (
+    worldPos: THREE.Vector3,
+    targetHandle: number
+  ) => boolean;
   applySpineLean: (pitchRad: number, yawRad: number) => void;
   resolveBodyMovement: (
     desiredX: number,
     desiredZ: number,
     bagSolidHandle: number | null,
-    onBagBump?: (worldPoint: THREE.Vector3, worldDir: THREE.Vector3, blockedAmount: number) => void
+    onBagBump?: (
+      worldPoint: THREE.Vector3,
+      worldDir: THREE.Vector3,
+      blockedAmount: number
+    ) => void
   ) => { x: number; z: number };
   getSolidBodySegments: () => SolidBodySegmentDebug[];
 }
@@ -68,8 +76,10 @@ export function useRagdoll(
   const { scene } = useThree();
 
   const { resolveBones } = useRagdollBones(modelRootRef);
-  const { syncHurtbox, getHurtboxHandle: internalGetHurtboxHandle } = useRagdollHurtbox(modelRootRef);
-  const { syncSolidBody, resolveBodyMovement, getSolidBodySegments } = useRagdollSolidBodies(modelRootRef, resolveBones);
+  const { syncHurtbox, getHurtboxHandle: internalGetHurtboxHandle } =
+    useRagdollHurtbox(modelRootRef);
+  const { syncSolidBody, resolveBodyMovement, getSolidBodySegments } =
+    useRagdollSolidBodies(modelRootRef, resolveBones);
   const {
     buildBodies,
     destroyBodies,
@@ -91,6 +101,7 @@ export function useRagdoll(
     resyncActiveRagdollToBones,
     destroyActiveRagdoll,
     activeBodiesRef,
+    syncActiveBonesBlended,
   } = useRagdollActive(modelRootRef, resolveBones);
 
   const markerRef = useRef<THREE.Mesh | null>(null);
@@ -179,7 +190,10 @@ export function useRagdoll(
       const entry = bodiesRef.current[atSegment] ?? bodiesRef.current.Torso;
       if (entry && magnitude > 0) {
         const mass = entry.body.mass();
-        const dir = worldImpulseDir.clone().normalize().multiplyScalar(magnitude * mass);
+        const dir = worldImpulseDir
+          .clone()
+          .normalize()
+          .multiplyScalar(magnitude * mass);
         entry.body.applyImpulse({ x: dir.x, y: dir.y, z: dir.z }, true);
 
         const t = entry.body.translation();
@@ -199,7 +213,7 @@ export function useRagdoll(
   );
 
   const update = useCallback(
-    (delta: number, activeRagdollEnabled: boolean = false) => {
+    (delta: number, activeRagdollEnabled: boolean = false, isIdle: boolean = false) => {
       if (markerRef.current && markerRef.current.visible) {
         markerElapsedRef.current += delta;
         const t = Math.min(1, markerElapsedRef.current / HIT_MARKER_DURATION);
@@ -223,7 +237,7 @@ export function useRagdoll(
             clampActiveJointCones();
             clampActiveHipsAbsolute();
           }
-          syncBonesFromPhysics(1, activeBodiesRef.current);
+          syncActiveBonesBlended(delta, isIdle);
         } else if (Object.keys(activeBodiesRef.current).length > 0) {
           destroyActiveRagdoll();
         }
@@ -254,7 +268,13 @@ export function useRagdoll(
       if (weight <= 0) {
         restoreBonesToAnimation();
         destroyBodies();
-        stateRef.current = { active: false, isDeath: false, pulseElapsed: 0, blendElapsed: 0, chainElapsed: 0 };
+        stateRef.current = {
+          active: false,
+          isDeath: false,
+          pulseElapsed: 0,
+          blendElapsed: 0,
+          chainElapsed: 0,
+        };
         if (activeRagdollEnabled) resyncActiveRagdollToBones();
         return;
       }
@@ -283,7 +303,13 @@ export function useRagdoll(
 
   const deactivate = useCallback(() => {
     destroyBodies();
-    stateRef.current = { active: false, isDeath: false, pulseElapsed: 0, blendElapsed: 0, chainElapsed: 0 };
+    stateRef.current = {
+      active: false,
+      isDeath: false,
+      pulseElapsed: 0,
+      blendElapsed: 0,
+      chainElapsed: 0,
+    };
   }, [destroyBodies]);
 
   useEffect(
@@ -338,8 +364,16 @@ export function useRagdoll(
       if (stateRef.current.active) return;
       const bones = resolveBones();
       if (!bones) return;
-      const clampedPitch = THREE.MathUtils.clamp(pitchRad, -SPINE_LEAN_MAX_RAD, SPINE_LEAN_MAX_RAD);
-      const clampedYaw = THREE.MathUtils.clamp(yawRad, -SPINE_TWIST_MAX_RAD, SPINE_TWIST_MAX_RAD);
+      const clampedPitch = THREE.MathUtils.clamp(
+        pitchRad,
+        -SPINE_LEAN_MAX_RAD,
+        SPINE_LEAN_MAX_RAD
+      );
+      const clampedYaw = THREE.MathUtils.clamp(
+        yawRad,
+        -SPINE_TWIST_MAX_RAD,
+        SPINE_TWIST_MAX_RAD
+      );
       const perBonePitch = -clampedPitch / SPINE_LEAN_BONES.length;
       const perBoneYaw = clampedYaw / SPINE_LEAN_BONES.length;
       for (const boneName of SPINE_LEAN_BONES) {
@@ -347,9 +381,17 @@ export function useRagdoll(
         if (!bone) continue;
         const child = bones[SPINE_LEAN_CHILD_BONE[boneName]];
         if (child && child.position.lengthSq() > 1e-8) {
-          const twistAxis = new THREE.Vector3().copy(child.position).normalize();
-          const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), perBonePitch);
-          const twistQuat = new THREE.Quaternion().setFromAxisAngle(twistAxis, perBoneYaw);
+          const twistAxis = new THREE.Vector3()
+            .copy(child.position)
+            .normalize();
+          const pitchQuat = new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(1, 0, 0),
+            perBonePitch
+          );
+          const twistQuat = new THREE.Quaternion().setFromAxisAngle(
+            twistAxis,
+            perBoneYaw
+          );
           bone.quaternion.copy(twistQuat).multiply(pitchQuat);
         }
       }

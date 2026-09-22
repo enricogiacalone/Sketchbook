@@ -181,6 +181,13 @@ interface GameState {
   // CombatSoldier.tsx/PunchingBag.tsx, flipped from CombatArenaGUI.tsx's
   // debug panel (same bridge pattern as duelDummyMode just above).
   showPhysicsDebug: boolean;
+  // "togli tutta la merda ui in piu' che nn c'entra con questo test..
+  // mettila disabilitata di default ma abilitabile tramite checkbox in
+  // lil gui" -- Controls/StatusBars/MissionHUD/Minimap/il messaggio di
+  // benvenuto (App.tsx) sono pensati per l'open-world, non per isolare i
+  // test sul ragdoll nel duello: default OFF, riattivabile dal pannello
+  // Arena come showPhysicsDebug qui sopra.
+  showGameplayHud: boolean;
   // "questo mi sembra piu' sostenibile" -- layer PD sempre attivo (vedi ragdollConfig.ts's RAGDOLL_HIPS_POSITION_STIFFNESS) per i duellanti. Toggle live per il tuning (GUI "Ragdoll attivo (PD)") senza dover ricaricare la pagina ogni volta.
   euphoriaRagdollEnabled: boolean;
   // "crea un sacco su cui allenarmi nell'arena.. mi serve per capire la
@@ -247,6 +254,7 @@ interface GameState {
   toggleDuelDummyMode: () => void;
   setDuelDummyMode: (active: boolean) => void;
   setShowPhysicsDebug: (active: boolean) => void;
+  setShowGameplayHud: (active: boolean) => void;
   setEuphoriaRagdollEnabled: (active: boolean) => void;
   registerBagHit: (radialOffset: number, heightOffset: number, hand: 'hand_l' | 'hand_r') => void;
   retryDuel: () => void;
@@ -292,6 +300,7 @@ export const useStore = create<GameState>((set) => ({
   duelRound: 0,
   duelDummyMode: false,
   showPhysicsDebug: false,
+  showGameplayHud: false,
   euphoriaRagdollEnabled: true,
   bagHitCount: 0,
   bagLastHitRadialOffset: null,
@@ -351,6 +360,7 @@ export const useStore = create<GameState>((set) => ({
   toggleDuelDummyMode: () => set((state) => ({ duelDummyMode: !state.duelDummyMode })),
   setDuelDummyMode: (duelDummyMode) => set({ duelDummyMode }),
   setShowPhysicsDebug: (showPhysicsDebug) => set({ showPhysicsDebug }),
+  setShowGameplayHud: (showGameplayHud) => set({ showGameplayHud }),
   setEuphoriaRagdollEnabled: (euphoriaRagdollEnabled) => set({ euphoriaRagdollEnabled }),
   registerBagHit: (radialOffset, heightOffset, hand) => set((state) => ({
     bagHitCount: state.bagHitCount + 1,

@@ -430,7 +430,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // opts in to the PD active-ragdoll layer when the GUI toggle is on
     // (there's no enableRagdoll-style gate for the player fighter -- this
     // component only ever renders the one duel player).
-    ragdoll.update(delta, useStore.getState().euphoriaRagdollEnabled);
+    // "In guardia" e' lo stesso stato che il blocco movimento/attackLock
+    // qui sotto assegna quando il giocatore e' fermo e non sta colpendo --
+    // un frame di ritardo (leggiamo lo stato deciso l'ultimo frame, dato
+    // che ragdoll.update() gira PRIMA di quel blocco) e' impercettibile e
+    // lo stesso pattern che CombatSoldier.tsx usa per l'IA.
+    ragdoll.update(delta, useStore.getState().euphoriaRagdollEnabled, data.state === 'In guardia');
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
     // fighter (their own checkAttackContact reads it off `opponent`) --
     // see FighterData's comment.

@@ -15,6 +15,11 @@ import {
   ACTIVE_RAGDOLL_CONE_LIMIT_DEG,
   RAGDOLL_HINGE_LIMITS_DEG,
   RAGDOLL_SEGMENT_FROZEN_BONES,
+  CORE_TENSION_STIFFNESS,
+  CORE_TENSION_DAMPING_RATIO,
+  ACTIVE_RAGDOLL_WEIGHT_IDLE,
+  ACTIVE_RAGDOLL_WEIGHT_MOVING,
+  ACTIVE_RAGDOLL_WEIGHT_SMOOTH_RATE,
 } from "../ragdollConfig";
 import {
   groupsExcluding,
@@ -47,6 +52,11 @@ export function useRagdollActive(
   const activeBodiesRef = useRef<Record<string, BodyEntry>>({});
   const activeJointsRef = useRef<ImpulseJoint[]>([]);
   const activeFrozenBoneRestQuatRef = useRef<Record<string, THREE.Quaternion>>({});
+  // Current animazione<->fisica blend weight for the render pose (see
+  // ACTIVE_RAGDOLL_WEIGHT_IDLE/_MOVING's own comment in ragdollConfig.ts).
+  // Starts at the "moving" end so a fighter that spawns mid-action doesn't
+  // pop straight to full ragdoll on frame one.
+  const activeRagdollWeightRef = useRef(ACTIVE_RAGDOLL_WEIGHT_MOVING);
 
   // Scratch variables to avoid allocation in frames
   const _v1 = new THREE.Vector3();
@@ -64,6 +74,9 @@ export function useRagdollActive(
   const _activeTargetRelQuat = new THREE.Quaternion();
   const _activeCurRelQuat = new THREE.Quaternion();
   const _identityQuat = new THREE.Quaternion();
+  const _yAxis = new THREE.Vector3(0, 1, 0);
+  const _currentUp = new THREE.Vector3();
+  const _coreAxis = new THREE.Vector3();
 
   const _coneParentQuat = new THREE.Quaternion();
   const _coneChildQuat = new THREE.Quaternion();
@@ -72,6 +85,14 @@ export function useRagdollActive(
   const _coneClampedDelta = new THREE.Quaternion();
   const _coneCorrectedRel = new THREE.Quaternion();
   const _coneCorrectedWorld = new THREE.Quaternion();
+
+  // Scratch for syncActiveBonesBlended's world->parent-local decompose.
+  const _blendWorldMatrix = new THREE.Matrix4();
+  const _blendParentInverse = new THREE.Matrix4();
+  const _blendUnitScale = new THREE.Vector3(1, 1, 1);
+  const _blendLocalPos = new THREE.Vector3();
+  const _blendLocalQuat = new THREE.Quaternion();
+  const _blendLocalScale = new THREE.Vector3();
 
   const ensureActiveRagdoll = useCallback((): boolean => {
     if (Object.keys(activeBodiesRef.current).length > 0) return true;
@@ -268,6 +289,25 @@ export function useRagdollActive(
       }
 
       if (segment.name === "Hips") {
+        const inertia = body.principalInertia();
+        const inertiaScale = (inertia.x + inertia.y + inertia.z) / 3;
+
+        // --- CORE TENSION (UPRIGHT STABILITY) ---
+        // Alignment torque to keep the character upright (Hips local Y aligned with World Y)
+        _currentUp.copy(_yAxis).applyQuaternion(_activeCurQuat);
+        _coreAxis.crossVectors(_currentUp, _yAxis);
+        const coreAngle = Math.acos(THREE.MathUtils.clamp((_currentUp as THREE.Vector3).dot(_yAxis), -1, 1));
+        const coreStiffness = CORE_TENSION_STIFFNESS;
+        const coreDamping = 2 * Math.sqrt(coreStiffness) * CORE_TENSION_DAMPING_RATIO;
+        const av = body.angvel();
+        const angVelAlongAxis = av.x * _coreAxis.x + av.y * _coreAxis.y + av.z * _coreAxis.z;
+        const coreTorqueMag = (coreAngle * coreStiffness - angVelAlongAxis * coreDamping) * inertiaScale * delta;
+        body.applyTorqueImpulse({
+          x: _coreAxis.x * coreTorqueMag,
+          y: _coreAxis.y * coreTorqueMag,
+          z: _coreAxis.z * coreTorqueMag,
+        }, true);
+
         bone.getWorldPosition(_activePosTarget);
         const t = body.translation();
         _activePosError.set(_activePosTarget.x - t.x, _activePosTarget.y - t.y, _activePosTarget.z - t.z);
@@ -359,6 +399,53 @@ export function useRagdollActive(
     }
   }, []);
 
+  // "voglio un mix perfetto tra il ragdoll e l'animazione... quando il
+  // personaggio si ferma da piu' valore al ragdoll" -- finora il chiamante
+  // (useRagdoll.ts) sovrascriveva SEMPRE le ossa col risultato fisico al
+  // 100% (era un semplice syncBonesFromPhysics(1, ...)). Questa funzione
+  // fa lo stesso lavoro (world->parent-local del body fisico) ma sfuma
+  // (`weight`) tra quel risultato e la posa che il mixer di animazione ha
+  // GIA' scritto su bone.position/bone.quaternion questo stesso frame
+  // (syncActiveBonesBlended gira DOPO mixer.update() ma prima di
+  // toccare le ossa, quindi a weight=0 la posa e' ancora quella
+  // dell'animazione pura, intatta -- diverso da syncBonesFromPhysics's
+  // stesso weight<1, che sfuma verso restLocalPos, una posa di riposo
+  // FISSA congelata alla creazione del rig, adatta al blend-out di un
+  // impulso di colpo ma non a questo caso). `weight` stesso viene
+  // smussato frame per frame verso l'obiettivo (fermo/in movimento) cosi'
+  // il cambio e' una dissolvenza.
+  const syncActiveBonesBlended = useCallback((delta: number, isIdle: boolean) => {
+    const targetWeight = isIdle ? ACTIVE_RAGDOLL_WEIGHT_IDLE : ACTIVE_RAGDOLL_WEIGHT_MOVING;
+    const rate = Math.min(1, Math.max(0, delta) * ACTIVE_RAGDOLL_WEIGHT_SMOOTH_RATE);
+    activeRagdollWeightRef.current += (targetWeight - activeRagdollWeightRef.current) * rate;
+    const weight = activeRagdollWeightRef.current;
+
+    const entries = activeBodiesRef.current;
+    for (const key of Object.keys(entries)) {
+      const { body, bone } = entries[key];
+      if (!bone.parent) continue;
+      if (weight <= 0.001) continue; // lascia l'osso esattamente come l'ha lasciato il mixer
+
+      const t = body.translation();
+      const r = body.rotation();
+      _v1.set(t.x, t.y, t.z);
+      _q1.set(r.x, r.y, r.z, r.w);
+      _blendWorldMatrix.compose(_v1, _q1, _blendUnitScale);
+      _blendParentInverse.copy(bone.parent.matrixWorld).invert();
+      _blendWorldMatrix.premultiply(_blendParentInverse);
+      _blendWorldMatrix.decompose(_blendLocalPos, _blendLocalQuat, _blendLocalScale);
+
+      if (weight >= 0.999) {
+        bone.position.copy(_blendLocalPos);
+        bone.quaternion.copy(_blendLocalQuat);
+      } else {
+        bone.position.lerp(_blendLocalPos, weight);
+        bone.quaternion.slerp(_blendLocalQuat, weight);
+      }
+      bone.updateMatrixWorld(true);
+    }
+  }, []);
+
   const checkActiveRagdollRunaway = useCallback(() => {
     const ACTIVE_RAGDOLL_RUNAWAY_ANGVEL = 30;
     const entries = activeBodiesRef.current;
@@ -406,6 +493,7 @@ export function useRagdollActive(
       }
     }
     activeFrozenBoneRestQuatRef.current = {};
+    activeRagdollWeightRef.current = ACTIVE_RAGDOLL_WEIGHT_MOVING;
   }, [world, resolveBones]);
 
   useEffect(
@@ -433,5 +521,6 @@ export function useRagdollActive(
     resyncActiveRagdollToBones,
     destroyActiveRagdoll,
     activeBodiesRef,
+    syncActiveBonesBlended,
   };
 }

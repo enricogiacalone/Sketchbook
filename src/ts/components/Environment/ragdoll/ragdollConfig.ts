@@ -77,8 +77,10 @@ export const RAGDOLL_SEGMENTS: RagdollSegment[] = [
   { name: 'ForeArm_R', drivingBone: 'lowerarm_r', parent: 'UpperArm_R', toBone: 'hand_r', radius: 0.05 },
   { name: 'Thigh_L', drivingBone: 'thigh_l', parent: 'Hips', toBone: 'calf_l', radius: 0.095 },
   { name: 'Shin_L', drivingBone: 'calf_l', parent: 'Thigh_L', toBone: 'foot_l', radius: 0.07 },
+  { name: 'Foot_L', drivingBone: 'foot_l', parent: 'Shin_L', toBone: 'ball_l', radius: 0.075, lengthScale: 1.4 },
   { name: 'Thigh_R', drivingBone: 'thigh_r', parent: 'Hips', toBone: 'calf_r', radius: 0.095 },
   { name: 'Shin_R', drivingBone: 'calf_r', parent: 'Thigh_R', toBone: 'foot_r', radius: 0.07 },
+  { name: 'Foot_R', drivingBone: 'foot_r', parent: 'Shin_R', toBone: 'ball_r', radius: 0.075, lengthScale: 1.4 },
 ];
 
 // "estendere il controllo fisico anche a clavicole/spine_02/03 (piu'
@@ -127,8 +129,10 @@ export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
   { name: 'ForeArm_R', drivingBone: 'lowerarm_r', parent: 'UpperArm_R', toBone: 'hand_r', radius: 0.05 },
   { name: 'Thigh_L', drivingBone: 'thigh_l', parent: 'Hips', toBone: 'calf_l', radius: 0.095 },
   { name: 'Shin_L', drivingBone: 'calf_l', parent: 'Thigh_L', toBone: 'foot_l', radius: 0.07 },
+  { name: 'Foot_L', drivingBone: 'foot_l', parent: 'Shin_L', toBone: 'ball_l', radius: 0.075, lengthScale: 1.4 },
   { name: 'Thigh_R', drivingBone: 'thigh_r', parent: 'Hips', toBone: 'calf_r', radius: 0.095 },
   { name: 'Shin_R', drivingBone: 'calf_r', parent: 'Thigh_R', toBone: 'foot_r', radius: 0.07 },
+  { name: 'Foot_R', drivingBone: 'foot_r', parent: 'Shin_R', toBone: 'ball_r', radius: 0.075, lengthScale: 1.4 },
 ];
 
 // "mani e piedi nn sn solidi" -- the 11 segments above deliberately
@@ -223,6 +227,8 @@ export const RAGDOLL_CONE_LIMIT_DEG: Record<string, number> = {
   UpperArm_R: 100,
   Thigh_L: 80, // hip, relative to Hips
   Thigh_R: 80,
+  Foot_L: 40,
+  Foot_R: 40,
 };
 
 // "stringere ulteriormente la stabilita'" -- SEPARATA da
@@ -305,6 +311,30 @@ export const RAGDOLL_MOTOR_STIFFNESS = 60; // rad/s^2 per radiante di errore
 // singolo arto, invece di richiedere anche un damping-per-segmento
 // separato tarato a mano.
 export const RAGDOLL_MOTOR_DAMPING_RATIO = 1.0;
+export const CORE_TENSION_STIFFNESS = 60; // Core tension to keep the character upright
+export const CORE_TENSION_DAMPING_RATIO = 1.0;
+
+// "quando il personaggio si ferma da piu' valore al ragdoll, voglio un
+// mix perfetto tra il ragdoll e l'animazione, stile Euphoria" -- il
+// layer PD attivo gia' simula fisicamente OGNI frame (i motori in
+// useRagdollActive.ts inseguono la posa animata), ma finora il risultato
+// finale mostrato a schermo era SEMPRE il 100% fisica (peso 1, vedi
+// syncActiveBonesBlended in useRagdollActive.ts). Questi tre valori
+// controllano quanto quel risultato fisico prevale sulla posa animata
+// pura nel render finale, a seconda che il combattente sia fermo
+// ("In guardia"/"Manichino") o in movimento/attacco:
+// - da fermo: quasi tutta fisica (il corpo "vive" di suo, si nota il
+//   respiro/oscillazione/assestamento della simulazione -- l'effetto
+//   Euphoria che si vede quando un personaggio e' immobile in GTA IV).
+// - in movimento/attacco: soprattutto animazione (i movimenti restano
+//   puliti e leggibili, la fisica resta sotto come "rumore" secondario
+//   invece di deformare lo swing di un pugno).
+// Smussato frame a frame (ACTIVE_RAGDOLL_WEIGHT_SMOOTH_RATE) cosi' il
+// cambio e' una dissolvenza, non uno scatto secco a ogni In guardia<->
+// Si muove.
+export const ACTIVE_RAGDOLL_WEIGHT_IDLE = 0.85;
+export const ACTIVE_RAGDOLL_WEIGHT_MOVING = 0.35;
+export const ACTIVE_RAGDOLL_WEIGHT_SMOOTH_RATE = 6; // piu' alto = transizione piu' rapida
 // Alcune parti potrebbero aver bisogno di muscoli piu' forti (es. il busto)
 // o piu' deboli (es. le braccia) -- stessa proporzione dei vecchi valori
 // (2x per busto/bacino, 0.8x per la testa) applicata alla nuova scala.

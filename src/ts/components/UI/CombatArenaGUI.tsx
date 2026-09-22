@@ -41,12 +41,13 @@ const CombatArenaGUI: React.FC = () => {
     // this one's sole job is to forward onChange into the store (read back
     // via getState() so this effect doesn't need to re-subscribe/rebuild
     // the panel every time either value changes elsewhere).
-    const settings: { modalita: GameMode; combattenti: number; manichino: boolean; colliderFisici: boolean; ragdollAttivo: boolean } = {
+    const settings: { modalita: GameMode; combattenti: number; manichino: boolean; colliderFisici: boolean; ragdollAttivo: boolean; hudGioco: boolean } = {
       modalita: useStore.getState().arenaGameMode,
       combattenti: useStore.getState().arenaFighterCount,
       manichino: useStore.getState().duelDummyMode,
       colliderFisici: useStore.getState().showPhysicsDebug,
       ragdollAttivo: useStore.getState().euphoriaRagdollEnabled,
+      hudGioco: useStore.getState().showGameplayHud,
     };
 
     folder
@@ -87,6 +88,16 @@ const CombatArenaGUI: React.FC = () => {
       .add(settings, 'ragdollAttivo')
       .name('Ragdoll attivo (PD)')
       .onChange((active: boolean) => useStore.getState().setEuphoriaRagdollEnabled(active));
+
+    // "togli tutta la merda ui in piu' che nn c'entra con questo test..
+    // mettila disabilitata di default ma abilitabile tramite checkbox in
+    // lil gui" -- Controls/StatusBars/MissionHUD/Minimap/benvenuto
+    // (App.tsx) spenti di default durante i test del ragdoll, riaccendibili
+    // da qui.
+    folder
+      .add(settings, 'hudGioco')
+      .name('Mostra HUD di gioco')
+      .onChange((active: boolean) => useStore.getState().setShowGameplayHud(active));
 
     // "le colonne devono essere retratte" -- lil-gui folders actually
     // default to OPEN (verified live -- omitting .open() was NOT enough

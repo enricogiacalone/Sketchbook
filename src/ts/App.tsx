@@ -34,13 +34,14 @@ import * as THREE from "three";
 const App: React.FC = () => {
   const [isJoined, setIsJoined] = useState(false);
   const [userName, setUserName] = useState("");
-  const { isLoading, setIsLoading, isPaused, setPaused, testScene } = useStore(
+  const { isLoading, setIsLoading, isPaused, setPaused, testScene, showGameplayHud } = useStore(
     useShallow((state) => ({
       isLoading: state.isLoading,
       setIsLoading: state.setIsLoading,
       isPaused: state.isPaused,
       setPaused: state.setPaused,
       testScene: state.testScene,
+      showGameplayHud: state.showGameplayHud,
     }))
   );
 
@@ -256,26 +257,30 @@ const App: React.FC = () => {
             pointerEvents: "none",
           }}
         >
-          <div
-            style={{
-              pointerEvents: "auto",
-              position: "absolute",
-              top: 20,
-              left: 20,
-              color: "white",
-            }}
-          >
-            <h1 className="sb-font" style={{ fontSize: 32, margin: 0 }}>
-              Sketchbook
-            </h1>
-            <div style={{ fontSize: 14 }}>Welcome, {userName}!</div>
-          </div>
-          <Controls />
-          <StatusBars />
-          <CollectiblesCounter />
-          <MissionHUD />
+          {showGameplayHud && (
+            <>
+              <div
+                style={{
+                  pointerEvents: "auto",
+                  position: "absolute",
+                  top: 20,
+                  left: 20,
+                  color: "white",
+                }}
+              >
+                <h1 className="sb-font" style={{ fontSize: 32, margin: 0 }}>
+                  Sketchbook
+                </h1>
+                <div style={{ fontSize: 14 }}>Welcome, {userName}!</div>
+              </div>
+              <Controls />
+              <StatusBars />
+              <CollectiblesCounter />
+              <MissionHUD />
+              <Minimap />
+            </>
+          )}
           <ChatInput />
-          <Minimap />
           <Crosshair />
           <GamepadDebug />
           <ScenariosGUI />

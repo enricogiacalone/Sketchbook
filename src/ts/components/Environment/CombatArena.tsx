@@ -40,7 +40,7 @@ import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode } fro
 // CombatMedkit/CombatProp each sample their OWN real terrain height at
 // their OWN position instead (see those files).
 const ENABLE_TOWERS = true;
-const MEDKIT_LIMIT = 5; // -1 would mean unlimited, matching the original's dropdown
+const MEDKIT_LIMIT: number = 5; // -1 would mean unlimited, matching the original's dropdown
 const GLOBAL_SPEED = 1.0;
 // Same citywide radius Soldier.tsx/Pedestrian.tsx patrol within.
 const ARENA_SPAWN_RADIUS = 70;
