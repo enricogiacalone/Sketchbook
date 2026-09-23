@@ -117,9 +117,33 @@ export const ACTIVE_RAGDOLL_EXTRA_SEGMENTS: RagdollSegment[] = [
 // l'array condiviso.
 export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
   { name: 'Hips', drivingBone: 'pelvis', parent: null, toBone: 'spine_01', radius: 0.15, lengthScale: 0.6 },
-  { name: 'Torso', drivingBone: 'spine_01', parent: 'Hips', toBone: 'neck_01', radius: 0.18 },
-  { name: 'SpineMid', drivingBone: 'spine_02', parent: 'Torso', toBone: 'spine_03', radius: 0.16 },
-  { name: 'SpineHigh', drivingBone: 'spine_03', parent: 'SpineMid', toBone: 'neck_01', radius: 0.15 },
+  // "osserva bene questo collider ragdoll attivo.. mi pare nn
+  // corrispondere molto al personaggio" -- misurato dal vivo sullo
+  // scheletro reale (soldier-citizen.glb): spine_01->neck_01 e' 0.44m,
+  // ma spine_02->spine_03 e' solo 0.14m e spine_03->neck_01 solo 0.17m.
+  // Torso qui sotto teneva ANCORA il vecchio toBone: 'neck_01' ereditato
+  // dal design a 3 pezzi (RAGDOLL_SEGMENTS sopra, dove Torso e' l'UNICO
+  // corpo della schiena) -- quindi Torso copriva l'INTERO tronco da
+  // spine_01 a neck_01, esattamente sovrapposto per intero a
+  // SpineMid+SpineHigh sotto, che vivono nello stesso range. Tre corpi
+  // fisici indipendenti impilati sulla stessa porzione di spina, ognuno
+  // tirato dal proprio motore PD verso una MEDIA leggermente diversa
+  // della posa animata -- e' la causa principale del "grumo" visibile a
+  // schermo vicino a petto/spalla e dell'instabilita' che non si ferma
+  // mai nemmeno da fermi. Accorciato a spine_02 cosi' Torso copre SOLO
+  // la sua fetta (spine_01->spine_02), come SpineMid/SpineHigh coprono
+  // la propria.
+  { name: 'Torso', drivingBone: 'spine_01', parent: 'Hips', toBone: 'spine_02', radius: 0.13 },
+  // Raggio ridotto rispetto al vecchio 0.16/0.15 (pensati per un UNICO
+  // pezzo che faceva da tronco intero) -- ora che ognuno di questi copre
+  // solo 0.13-0.18m di spina invece di 0.44m, un raggio da "petto
+  // intero" li faceva sovrapporre pesantemente anche ai vicini non
+  // adiacenti (es. Hips-SpineHigh). Restano comunque piu' tozzi che
+  // allungati (halfHeight vicino al raggio o sotto), normale per
+  // segmenti di colonna cosi' corti -- l'obiettivo qui e' ridurre la
+  // sovrapposizione, non eliminarla del tutto.
+  { name: 'SpineMid', drivingBone: 'spine_02', parent: 'Torso', toBone: 'spine_03', radius: 0.12 },
+  { name: 'SpineHigh', drivingBone: 'spine_03', parent: 'SpineMid', toBone: 'neck_01', radius: 0.12 },
   { name: 'Head', drivingBone: 'neck_01', parent: 'SpineHigh', toBone: 'head_leaf', radius: 0.15, lengthScale: 1.3 },
   { name: 'ClavicleL', drivingBone: 'clavicle_l', parent: 'SpineHigh', toBone: 'upperarm_l', radius: 0.05 },
   { name: 'UpperArm_L', drivingBone: 'upperarm_l', parent: 'ClavicleL', toBone: 'lowerarm_l', radius: 0.06 },
@@ -134,6 +158,71 @@ export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
   { name: 'Shin_R', drivingBone: 'calf_r', parent: 'Thigh_R', toBone: 'foot_r', radius: 0.07 },
   { name: 'Foot_R', drivingBone: 'foot_r', parent: 'Shin_R', toBone: 'ball_r', radius: 0.075, lengthScale: 1.4 },
 ];
+
+// "porta quello che ci interessa di piu'" -- da epol1/trr: invece di dare
+// a ogni capsula la stessa densita' (setDensity(1.0), cioe' la massa di
+// ogni segmento dipende SOLO dal volume della sua capsula, non da quanto
+// dovrebbe pesare davvero), loro fissano un budget di massa TOTALE del
+// corpo e lo distribuiscono per segmento in base a un peso relativo
+// dichiarato -- un busto pesa di piu' delle braccia perche' glielo
+// diciamo esplicitamente, non perche' la sua capsula ha piu' volume.
+// Rilevante ora piu' che mai: solveJointCones/stabilizeActiveRelativeAngvel
+// (useRagdollActive.ts) pesano le correzioni con l'inerzia REALE di ogni
+// corpo (effectiveWorldInvInertia) -- masse relative piu' realistiche
+// rendono anche quelle correzioni piu' realistiche (un urto sul avambraccio
+// non dovrebbe far vacillare il bacino quanto uno sul busto).
+//
+// Pesi adattati dalla tabella antropometrica di Winter (frazione della
+// massa corporea totale per segmento -- dati biomeccanici consolidati:
+// avambraccio+mano 2.2%, braccio 2.8%, coscia 10%, gamba 4.65%, piede
+// 1.45%, testa+collo 8.1%, tronco 49.7% nel suo insieme). I nostri
+// segmenti del tronco (Hips/Torso/SpineMid/SpineHigh) non corrispondono
+// 1:1 ai confini di Winter (che tratta il tronco come un unico blocco),
+// quindi quel 49.7% e' suddiviso tra i 4 in una stima ragionevole (bacino
+// il piu' pesante, via via meno salendo verso lo sterno) piuttosto che da
+// una fonte biomeccanica diretta -- comunque molto piu' vicino alla
+// realta' di "qualunque volume abbia la capsula".
+export const ACTIVE_RAGDOLL_MASS_WEIGHT: Record<string, number> = {
+  Hips: 0.199,
+  Torso: 0.149,
+  SpineMid: 0.0895,
+  SpineHigh: 0.0596,
+  Head: 0.081,
+  // Non e' il vero 0.5% anatomico (una clavicola pesa pochissimo) --
+  // misurato dal vivo (scomposizione swing/twist sui bone dopo la
+  // sync 1:1 in modalita' passiva): con 0.005 la clavicola (massa
+  // ~0.4kg) doveva reggere via il giunto sferico un braccio intero
+  // appeso (upperarm+forearm ~3.75kg, rapporto 10:1) -- la coppia
+  // gravitazionale/di collisione trasmessa dal braccio la faceva
+  // accelerare troppo in fretta (bassa massa = bassa inerzia = alta
+  // accelerazione angolare a parita' di coppia) perche' solveJointCones
+  // riuscisse a correggerla entro i suoi limiti di velocita' per frame
+  // (torsione misurata fino a ~133 gradi contro un limite di 90) --
+  // il giunto restava sopraffatto invece di convergere. Alzata cosi'
+  // da restare comunque molto piu' leggera di torso/braccio ma senza
+  // il rapporto 10:1 che la rendeva dinamicamente instabile.
+  ClavicleL: 0.02,
+  ClavicleR: 0.02,
+  UpperArm_L: 0.028,
+  UpperArm_R: 0.028,
+  ForeArm_L: 0.022, // include la mano (non simulata a parte), come "forearm and hand" di Winter
+  ForeArm_R: 0.022,
+  Thigh_L: 0.10,
+  Thigh_R: 0.10,
+  Shin_L: 0.0465,
+  Shin_R: 0.0465,
+  Foot_L: 0.0145,
+  Foot_R: 0.0145,
+};
+// Peso di riserva per un segmento eventualmente assente dalla tabella
+// sopra (non dovrebbe succedere con la lista attuale, ma se ne aggiungo
+// uno domani e mi scordo di aggiornare la tabella, meglio una massa
+// piccola ma finita che una eccezione o un corpo a massa zero).
+export const ACTIVE_RAGDOLL_MASS_WEIGHT_FALLBACK = 0.02;
+// Massa totale del combattente (kg) -- un adulto atletico medio, non
+// misurata dal modello (le capsule non hanno un "peso reale" dichiarato
+// altrove nel progetto).
+export const ACTIVE_RAGDOLL_TOTAL_MASS_KG = 75;
 
 // "mani e piedi nn sn solidi" -- the 11 segments above deliberately
 // collapse each hand/foot into its forearm/shin (see this file's own
@@ -210,6 +299,32 @@ export const RAGDOLL_HINGE_LIMITS_DEG: Record<string, [number, number]> = {
   Shin_R: [-10, 150],
 };
 
+// "controlla gomiti e ginocchia" -> "ma le vedo un po deformate" (arto
+// stirato/allungato) -- misurato dal vivo: la distanza reale spalla-gomito/
+// gomito-mano/anca-ginocchio/ginocchio-piede resta identica (<1% di
+// scarto) tra in piedi e crollato, quindi il giunto NON si allunga
+// fisicamente -- l'ancoraggio tiene. Il problema e' lo SKINNING (linear
+// blend skinning classico): una piega vicina al limite di 150 gradi qui
+// sopra (misurato: braccio esterno arrivava a 41-54 gradi, cioe' quasi
+// tutta la flessione disponibile) e' un angolo che le clip di animazione
+// probabilmente non hanno mai davvero coperto, e a quell'estremo la
+// mesh si assottiglia/stira invece di deformarsi in modo pulito -- non
+// e' un bug di fisica, e' un limite della mesh a quell'angolo.
+// SOLO per la modalita' passiva (vedi useRagdoll.ts/useRagdollActive.ts's
+// applyPassiveHingeLimits/restoreActiveHingeLimits, che aggiornano il
+// limite del giunto Rapier gia' esistente al volo con setLimits invece di
+// ricostruirlo): il combattimento normale (motori PD) continua a usare
+// RAGDOLL_HINGE_LIMITS_DEG sopra invariato, quindi un pugno/un calcio non
+// perdono raggio di movimento. Valori "generosi" apposta (non troppo
+// stretti): il crollo deve restare naturale, solo senza arrivare
+// all'estremo che stira visibilmente la mesh.
+export const PASSIVE_RAGDOLL_HINGE_LIMITS_DEG: Record<string, [number, number]> = {
+  ForeArm_L: [-10, 100],
+  ForeArm_R: [-10, 100],
+  Shin_L: [-10, 100],
+  Shin_R: [-10, 100],
+};
+
 // Everything else (spine, neck, shoulders, hips) is genuinely multi-axis
 // in real anatomy -- shoulders in particular have a huge range of
 // motion -- so these stay real Rapier spherical joints (3 rotational
@@ -265,6 +380,44 @@ export const ACTIVE_RAGDOLL_CONE_LIMIT_DEG: Record<string, number> = {
   // Rapier stesso via RAGDOLL_HINGE_LIMITS_DEG -- un cono qui non
   // servirebbe a nulla (e infatti clampActiveJointCones li salta, non
   // catturano mai un restRelativeQuat).
+};
+
+// "il bacino secondo me e' ancora strano in ragdoll quando e' passivo
+// sembra spezzarsi" -- causa REALE (verificata misurando la velocita'
+// angolare vera dei body, non solo la posa a schermo): togliere del
+// tutto clampActiveJointCones dalla modalita' passiva (per il bug del
+// riferimento "in piedi" obsoleto, vedi il commento sul suo utilizzo in
+// useRagdoll.ts) ha tolto anche l'UNICA cosa che vincolava l'ORIENTAMENTO
+// relativo dei giunti sferici (busto-bacino, coscia-bacino, testa/
+// clavicole-colonna) -- un giunto sferico Rapier vincola solo la
+// POSIZIONE del suo punto di ancoraggio, MAI la rotazione: senza nessun
+// cono, il busto puo' assestarsi a QUALSIASI angolo relativo al bacino,
+// compresi angoli anatomicamente assurdi (torsione a 90-150+ gradi) che
+// sembrano proprio una rottura al punto vita, e la velocita' angolare
+// residua (piccola ma mai esattamente zero) continua a farlo scivolare
+// lentamente verso quegli angoli invece di fermarsi in una posa
+// plausibile.
+// Fix: un cono anche in modalita' passiva, ma DIVERSO da quello del
+// combattimento sopra -- qui il riferimento e' lo stesso (restRelativeQuat
+// catturato una volta da ensureActiveRagdoll, in piedi) ma il limite e'
+// VOLUTAMENTE largo, non stretto: lo scopo non e' "resta vicino alla
+// posa animata" (impossibile per un corpo a terra, ed e' esattamente il
+// bug gia' risolto altrove), ma solo "non torcerti in modo impossibile" --
+// un limite generoso interviene raramente (la maggior parte delle pose
+// da crollo naturale ci sta gia' dentro) invece di correggere ogni
+// frame, quindi non dovrebbe ricreare il tremolio perenne del vecchio
+// limite stretto.
+export const PASSIVE_RAGDOLL_CONE_LIMIT_DEG: Record<string, number> = {
+  Torso: 100,
+  Head: 100,
+  UpperArm_L: 130,
+  UpperArm_R: 130,
+  Thigh_L: 110,
+  Thigh_R: 110,
+  SpineMid: 70,
+  SpineHigh: 70,
+  ClavicleL: 90,
+  ClavicleR: 90,
 };
 
 // "riusciamo a Ricreare la fisica ragdoll attiva in stile Euphoria?" --
@@ -426,3 +579,99 @@ export const RAGDOLL_PULSE_NEARBY: Record<string, [string, string][]> = {
     ['Thigh_R', 'Shin_R'],
   ],
 };
+
+// ===========================================================================
+// Ragdoll attivo v2 (useRagdollActive.ts riscritto) -- vedi il commento in
+// cima ad activeRagdollFrames.ts.
+//
+// Limiti dei giunti in GRADI, per asse, rispetto alla POSA NEUTRA = il
+// primo fotogramma di "Fighting Idle" (la guardia, vedi captureClipPose in
+// activeRagdollFrames.ts -- NON la T-pose: con lo zero in T-pose il gancio
+// portava la spalla vicino ai 180 gradi e il braccio esplodeva), nel frame
+// del personaggio portato dal bacino: X = sinistra, Y = su, Z = avanti.
+// Regola della mano destra, rotazione del FIGLIO rispetto al GENITORE.
+// Un giunto non elencato usa +-ACTIVE_RAGDOLL_JOINT_LIMIT_FALLBACK_DEG.
+//
+// Valori = range MISURATO sulle clip di combattimento (pannello "Banco
+// ragdoll" -> "Misura range animazioni": Fighting Idle, Walk/
+// Walk_Backwards/Strafe, Sprint/Jog, Dodge_*, Defend, Victory, Punch_Jab/
+// Cross, Melee_Hook, Fighting Left/Right Jab, Hit_Chest/Head, Idle_A)
+// allargato di 20 gradi per lato (quanto un colpo puo' piegare oltre
+// l'animazione), minimo +-25. Nessuna animazione del gioco arriva mai a un
+// limite (altrimenti motore e limite si combatterebbero). Ginocchio verso
+// l'iperestensione e gomito verso l'iperestensione: solo +8.
+export const ACTIVE_RAGDOLL_JOINT_LIMIT_FALLBACK_DEG = 150;
+//
+// Valori: unione di (a) il range MISURATO sulle clip usate in combattimento
+// (Fighting Idle, Walk/Walk_Backwards/Strafe, Sprint/Jog, Dodge_*, Defend,
+// Victory, Punch_Jab/Cross, Melee_Hook, Fighting Left/Right Jab,
+// Hit_Chest/Head, Idle_A) allargato di 15 gradi per lato, e (b) un range
+// anatomico di base (quanto un colpo puo' piegare un giunto oltre quello
+// che fa l'animazione). Cosi' nessuna animazione del gioco finisce mai
+// contro un limite, e un colpo o un KO non producono pose disumane.
+// Ginocchia: iperestensione tenuta a -15.
+export const ACTIVE_RAGDOLL_JOINT_LIMITS_DEG: Record<
+  string,
+  { x: [number, number]; y: [number, number]; z: [number, number] }
+> = {
+  Torso: { x: [-31, 30], y: [-32, 33], z: [-25, 25] },
+  SpineMid: { x: [-35, 56], y: [-36, 44], z: [-26, 41] },
+  SpineHigh: { x: [-36, 39], y: [-44, 60], z: [-46, 32] },
+  Head: { x: [-55, 46], y: [-31, 77], z: [-39, 44] },
+  ClavicleL: { x: [-28, 29], y: [-55, 25], z: [-36, 25] },
+  ClavicleR: { x: [-36, 33], y: [-42, 54], z: [-43, 28] },
+  UpperArm_L: { x: [-56, 81], y: [-108, 110], z: [-26, 109] },
+  UpperArm_R: { x: [-79, 102], y: [-110, 95], z: [-132, 52] },
+  ForeArm_L: { x: [-52, 116], y: [-38, 88], z: [-77, 76] },
+  ForeArm_R: { x: [-88, 104], y: [-88, 39], z: [-80, 36] },
+  Thigh_L: { x: [-138, 49], y: [-86, 79], z: [-48, 109] },
+  Thigh_R: { x: [-81, 83], y: [-47, 93], z: [-104, 50] },
+  Shin_L: { x: [-22, 116], y: [-26, 55], z: [-53, 25] },
+  Shin_R: { x: [-42, 91], y: [-57, 26], z: [-42, 65] },
+  Foot_L: { x: [-62, 98], y: [-58, 49], z: [-44, 62] },
+  Foot_R: { x: [-61, 88], y: [-37, 68], z: [-52, 48] },
+};
+
+// Motori nativi Rapier dei giunti: pulsazione propria (rad/s) per
+// segmento. Misurato dal vivo su un giunto isolato: il modello
+// "acceleration based" di Rapier NON si comporta come una molla k in
+// rad/s^2 (con k=700 oscillava con periodo ~1.3s invece di 0.24s) -- si
+// usa il modello "force based" (unita' fisiche vere, N*m/rad) e la
+// rigidita' si calcola dall'inerzia reale di TUTTO cio' che il giunto
+// muove (il sotto-albero: la spalla muove braccio+avambraccio), cosi' la
+// risposta e' quella scritta qui a prescindere dalla massa: 25 rad/s,
+// smorzamento critico = ~0.15s per raggiungere il bersaglio senza
+// rimbalzi.
+export const ACTIVE_RAGDOLL_JOINT_FREQ_DEFAULT = 35;
+// Tarati dal vivo col banco (errore medio: idle 0.3 gradi, camminata ~1,
+// corsa ~5, pugni ~4, gancio ~9): piu' bassi il corpo resta indietro nei
+// movimenti veloci, piu' alti un colpo non lo piega quasi per niente
+// (anche se durante il colpo i motori vengono comunque indeboliti, vedi
+// applyActiveHit/staggerRef in useRagdollActive.ts).
+export const ACTIVE_RAGDOLL_JOINT_FREQ: Record<string, number> = {
+  Torso: 42,
+  SpineMid: 42,
+  SpineHigh: 42,
+  Head: 35,
+  ClavicleL: 42,
+  ClavicleR: 42,
+  UpperArm_L: 35,
+  UpperArm_R: 35,
+  ForeArm_L: 35,
+  ForeArm_R: 35,
+  Thigh_L: 42,
+  Thigh_R: 42,
+  Shin_L: 42,
+  Shin_R: 42,
+  Foot_L: 28,
+  Foot_R: 28,
+};
+// Attrito nei giunti quando i motori sono spenti (passivo/KO), in 1/s
+// (moltiplicato per l'inerzia del sotto-albero) -- evita che un corpo
+// molle oscilli all'infinito come un pendolo senza attrito.
+export const ACTIVE_RAGDOLL_PASSIVE_JOINT_FRICTION = 4;
+// Servo del bacino (1/s^2): posizione e orientamento mondo.
+export const ACTIVE_RAGDOLL_HIPS_POS_STIFFNESS = 400;
+export const ACTIVE_RAGDOLL_HIPS_ROT_STIFFNESS = 400;
+// Tempo (s) in cui un segmento colpito torna da "molle" a motore pieno.
+export const ACTIVE_RAGDOLL_HIT_RECOVERY_S = 0.8;

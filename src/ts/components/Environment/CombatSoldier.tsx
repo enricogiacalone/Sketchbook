@@ -7,6 +7,7 @@ import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { useRagdoll } from './ragdoll/useRagdoll';
 import SolidBodyDebugView from './SolidBodyDebugView';
+import ActiveRagdollDebugView from './ActiveRagdollDebugView';
 import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
 import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode, AnimCatalog } from './SquadArenaTypes';
@@ -182,6 +183,8 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
 
   React.useEffect(() => {
     modelRootRef.current = clone;
+    // Zero dei giunti del ragdoll attivo = la guardia (vedi captureClipPose).
+    ragdoll.setNeutralClip(clipsMap[animCatalog.idle] ?? null);
   }, [clone]);
 
   const transitionToAnimation = (animName: string, duration = 0.15, shouldLoop = true, timeScale = 1.0) => {
@@ -280,6 +283,9 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
   };
 
   useFrame((_state, delta) => {
+    // Posa animata rimessa nelle ossa prima del mixer (vedi
+    // restoreActiveAnimationPose in useRagdollActive.ts).
+    ragdoll.beginFrame();
     if (mixer) mixer.update(delta * globalSpeed);
     // Runs every frame regardless of which branch below fires -- a hit-
     // reaction pulse (see the triggerHit branch) needs to keep simulating
@@ -300,7 +306,8 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     ragdoll.update(
       delta,
       enableRagdoll && useStore.getState().euphoriaRagdollEnabled,
-      data.state === 'In guardia' || data.state === 'Manichino'
+      data.state === 'In guardia' || data.state === 'Manichino',
+      useStore.getState().ragdollPassive
     );
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
     // fighter (their own checkAttackContact reads it off `theTarget`).
@@ -656,6 +663,7 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
           system (see enableRagdoll/resolveAndApplyMovement above) -- the
           120-fighter FFA arena never has any solid colliders to draw. */}
       {enableRagdoll && <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />}
+      {enableRagdoll && <ActiveRagdollDebugView getSegments={ragdoll.getActiveRagdollDebugSegments} />}
     </>
   );
 };

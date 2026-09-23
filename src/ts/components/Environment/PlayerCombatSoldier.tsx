@@ -7,10 +7,15 @@ import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { useRagdoll } from './ragdoll/useRagdoll';
 import SolidBodyDebugView from './SolidBodyDebugView';
+import ActiveRagdollDebugView from './ActiveRagdollDebugView';
 import { useInput } from '../../hooks/useInput';
 import { FighterData, AnimCatalog } from './SquadArenaTypes';
 import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
+
+// Banco ragdoll: clip che si possono ripetere in loop senza salti (le
+// altre vengono riprodotte una volta e poi si torna in guardia).
+const BENCH_LOOPING_CLIP = /^(Walk|Run|Sprint|Jog|Strafe|Fighting Idle|Idle|Crouch|Defend)/i;
 
 const MODEL_URL = 'soldier-citizen.glb';
 const BASE_ANIMS_URL = 'soldier-citizen-base-animations.glb';
@@ -144,6 +149,16 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   // rather than reading `clone` directly (useRagdoll must be called
   // unconditionally, before `clone` exists on the very first render).
   const modelRootRef = useRef<THREE.Object3D | null>(null);
+  // "cazzo metti il personaggio a T osservalo" -- riferimento allo
+  // skeleton VERO (non solo la mappa di bone di resolveBones) cosi' il
+  // useFrame qui sotto puo' chiamare .pose() ogni frame per tenerlo in
+  // bind pose (T-pose) quando tPoseDebug e' attivo -- vedi
+  // CombatArenaGUI.tsx's checkbox "T-pose (ferma animazione)". Trovato
+  // una volta sola (il primo SkinnedMesh dentro clone, stesso schema
+  // gia' usato per clonedScene.traverse qui sopra), non ogni frame.
+  const skeletonRef = useRef<THREE.Skeleton | null>(null);
+  const lastBenchClipRef = useRef<string | null>(null);
+  const benchCycleRef = useRef<{ oneShot: boolean; phase: 'clip' | 'rest'; t: number }>({ oneShot: false, phase: 'clip', t: 0 });
   // Unlike CombatSoldier.tsx (opt-in via `enableRagdoll`, off for the
   // city-wide arena's up-to-120 fighters), the duel always has exactly
   // one player -- no perf reason to ever skip this here.
@@ -253,7 +268,48 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
 
   React.useEffect(() => {
     modelRootRef.current = clone;
+    // Zero dei giunti del ragdoll attivo = la guardia (vedi captureClipPose).
+    ragdoll.setNeutralClip(clipsMap[animCatalog.idle] ?? null);
+    skeletonRef.current = null;
+    clone.traverse((child: any) => {
+      if (!skeletonRef.current && child.isSkinnedMesh) {
+        skeletonRef.current = child.skeleton as THREE.Skeleton;
+      }
+    });
   }, [clone]);
+
+  // "sistema l'ambiente per fare i test come si deve" -- API del banco di
+  // prova del ragdoll attivo, usata dai pulsanti del pannello "Banco
+  // ragdoll" (CombatArenaGUI.tsx) e dagli script di verifica dal vivo.
+  React.useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const bench = {
+      clipNames: () => Object.keys(clipsMap).sort(),
+      report: () => ragdoll.getActiveRagdollDebugSegments(),
+      measureClips: (names?: string[]) => {
+        const list = (names && names.length ? names : Object.keys(clipsMap))
+          .map((n) => clipsMap[n])
+          .filter(Boolean);
+        return ragdoll.measureClipRanges(list);
+      },
+      // Colpo di prova che arriva dalla direzione della camera (spinge il
+      // segmento lontano dalla camera), cosi' chi guarda vede subito da
+      // che parte deve piegarsi.
+      hit: (segment: string, speed?: number) => {
+        const dir = new THREE.Vector3();
+        camera.getWorldDirection(dir);
+        dir.y = 0;
+        if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
+        dir.normalize();
+        dir.y = 0.1;
+        return ragdoll.testActiveHit(segment, dir, speed ?? useStore.getState().ragdollBench.testHitSpeed);
+      },
+    };
+    (window as any).__ragdollBench = bench;
+    return () => {
+      if ((window as any).__ragdollBench === bench) delete (window as any).__ragdollBench;
+    };
+  }, [clipsMap, ragdoll, camera]);
 
   const transitionToAnimation = (animName: string, duration = 0.15, shouldLoop = true, timeScale = 1.0) => {
     const target = actions[animName] ? animName : animCatalog.idle;
@@ -404,7 +460,60 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   };
 
   useFrame((_state, delta) => {
-    if (mixer) mixer.update(delta * globalSpeed);
+    // "cazzo metti il personaggio a T osservalo" -- quando attivo, NON
+    // avanza l'animazione (l'idle/qualunque clip in corso resterebbe
+    // comunque congelata al SUO frame corrente, non in T-pose) e forza
+    // invece lo skeleton alla bind pose ogni frame (skeleton.pose() --
+    // economico, sovrascrive solo le matrici delle ossa dai loro
+    // bindMatrix, la stessa tecnica gia' usata altrove in questo
+    // progetto per leggere una posa di riferimento "vera" senza toccare
+    // l'animazione).
+    // "metti il personaggio a T e sistema queste ossa della ragdoll
+    // attiva" -- il ragdoll attivo ora RESTA ACCESO in T-pose: la T-pose
+    // diventa semplicemente il BERSAGLIO dei motori (e' anche lo zero di
+    // tutti i giunti, vedi activeRagdollFrames.ts), cosi' si verifica a
+    // colpo d'occhio che i corpi fisici coincidano col personaggio.
+    // Banco "Animazione di prova": una clip scelta dal pannello gira in
+    // loop al posto della macchina a stati (vedi il return piu' sotto).
+    const benchState = useStore.getState();
+    const tPoseBench = benchState.tPoseDebug;
+    const benchClip = benchState.ragdollBench.benchClip;
+    // Rimette nelle ossa la posa ANIMATA prima del mixer (vedi
+    // restoreActiveAnimationPose): il bersaglio del ragdoll non deve mai
+    // diventare la fisica del frame prima.
+    ragdoll.beginFrame();
+    if (benchClip !== lastBenchClipRef.current) {
+      // Cambio di clip di prova: dissolvenza come nel gioco (un taglio
+      // secco teletrasporterebbe il bersaglio e falserebbe le misure).
+      const next = benchClip && actions[benchClip] ? benchClip : animCatalog.idle;
+      const loops = !benchClip || BENCH_LOOPING_CLIP.test(next);
+      transitionToAnimation(next, 0.2, loops);
+      lastBenchClipRef.current = benchClip;
+      benchCycleRef.current = { oneShot: !loops, phase: 'clip', t: 0 };
+    } else if (benchClip && benchCycleRef.current.oneShot && !tPoseBench) {
+      // Clip "una tantum" (pugni, schivate, colpi): in loop secco la posa
+      // salterebbe dall'ultimo al primo fotogramma ogni giro (misurato:
+      // il gancio dura 0.5s e ogni ripartenza teletrasportava il
+      // bersaglio di 30 cm) -- falsando tutte le misure. Qui si ripete
+      // come nel gioco: clip -> dissolvenza in guardia -> pausa -> clip.
+      const cyc = benchCycleRef.current;
+      cyc.t += delta * globalSpeed;
+      const dur = clipsMap[benchClip]?.duration ?? 1;
+      if (cyc.phase === 'clip' && cyc.t >= dur) {
+        transitionToAnimation(animCatalog.idle, 0.25, true);
+        cyc.phase = 'rest';
+        cyc.t = 0;
+      } else if (cyc.phase === 'rest' && cyc.t >= 0.8) {
+        transitionToAnimation(benchClip, 0.15, false);
+        cyc.phase = 'clip';
+        cyc.t = 0;
+      }
+    }
+    if (tPoseBench) {
+      skeletonRef.current?.pose();
+    } else if (mixer) {
+      mixer.update(delta * globalSpeed);
+    }
     // "coglione testa su chrome" -- temporary live-browser debug readout
     // for the duel-player fighter's own internal state (input/attackLock/
     // triggerHit), so a javascript_tool script driving the real game can
@@ -421,26 +530,20 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       posX: data.position.x,
       posZ: data.position.z,
       solidSegments: ragdoll.getSolidBodySegments(),
+      // "confronto layer per layer" -- richiesto dall'utente per
+      // analizzare "i vari scheletri ad uno ad uno" (solid-body vs
+      // active-ragdoll) dalla console live, senza dover accendere per
+      // forza la ActiveRagdollDebugView a schermo.
+      // getter: calcolato solo quando qualcuno lo legge (script di debug),
+      // non a ogni frame.
+      get activeSegments() {
+        return ragdoll.getActiveRagdollDebugSegments();
+      },
     };
-    // Runs every frame regardless of which branch below fires, same
-    // reasoning as CombatSoldier.tsx: a hit-reaction pulse needs to keep
-    // simulating/blending out even once the rest of the state machine has
-    // moved on.
-    // "layer sempre attivo full-body" -- the human duel player always
-    // opts in to the PD active-ragdoll layer when the GUI toggle is on
-    // (there's no enableRagdoll-style gate for the player fighter -- this
-    // component only ever renders the one duel player).
-    // "In guardia" e' lo stesso stato che il blocco movimento/attackLock
-    // qui sotto assegna quando il giocatore e' fermo e non sta colpendo --
-    // un frame di ritardo (leggiamo lo stato deciso l'ultimo frame, dato
-    // che ragdoll.update() gira PRIMA di quel blocco) e' impercettibile e
-    // lo stesso pattern che CombatSoldier.tsx usa per l'IA.
-    ragdoll.update(delta, useStore.getState().euphoriaRagdollEnabled, data.state === 'In guardia');
-    // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
-    // fighter (their own checkAttackContact reads it off `opponent`) --
-    // see FighterData's comment.
-    data.hurtboxHandle = ragdoll.getHurtboxHandle();
-
+    // Spostato PRIMA di ragdoll.update(): la torsione/inclinazione del
+    // busto fa parte della posa BERSAGLIO del ragdoll attivo (prima
+    // veniva scritta dopo, sopra la fisica, e il busto fisico non la
+    // seguiva mai). Saltata in T-pose / animazione di prova.
     // "l'orbit nn controlla bene il busto.. volevo direzionare i pugni in
     // questo modo.. il colpo deve davvero atterrare dove miro" -- runs
     // BEFORE any of the state branches below can return early, unlike
@@ -472,10 +575,39 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     const camYaw = Math.atan2(_camAimDir.x, _camAimDir.z) + Math.PI;
     let yawDiff = camYaw - data.rotation;
     yawDiff = Math.atan2(Math.sin(yawDiff), Math.cos(yawDiff));
-    ragdoll.applySpineLean(
+    if (!tPoseBench && !benchClip) ragdoll.applySpineLean(
       THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX),
       THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX)
     );
+
+    // Runs every frame regardless of which branch below fires, same
+    // reasoning as CombatSoldier.tsx: a hit-reaction pulse needs to keep
+    // simulating/blending out even once the rest of the state machine has
+    // moved on.
+    // "layer sempre attivo full-body" -- the human duel player always
+    // opts in to the PD active-ragdoll layer when the GUI toggle is on
+    // (there's no enableRagdoll-style gate for the player fighter -- this
+    // component only ever renders the one duel player).
+    // "In guardia" e' lo stesso stato che il blocco movimento/attackLock
+    // qui sotto assegna quando il giocatore e' fermo e non sta colpendo --
+    // un frame di ritardo (leggiamo lo stato deciso l'ultimo frame, dato
+    // che ragdoll.update() gira PRIMA di quel blocco) e' impercettibile e
+    // lo stesso pattern che CombatSoldier.tsx usa per l'IA.
+    ragdoll.update(
+      delta,
+      useStore.getState().euphoriaRagdollEnabled,
+      data.state === 'In guardia',
+      useStore.getState().ragdollPassive
+    );
+    // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
+    // fighter (their own checkAttackContact reads it off `opponent`) --
+    // see FighterData's comment.
+    data.hurtboxHandle = ragdoll.getHurtboxHandle();
+
+    // Banco di prova: in T-pose o con un'animazione di prova il
+    // personaggio sta fermo sul posto, niente macchina a stati/input.
+    if (tPoseBench || benchClip) return;
+
 
     if (!groupRef.current) return;
 
@@ -755,6 +887,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
           purely from the Rapier bodies' own live world translations, so
           nesting them under groupRef would double the transform). */}
       <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />
+      {/* "impostare la vista in modo da avere dei test empirici" --
+          rosso quando un giunto del layer attivo sta sforando il
+          proprio cono, vedi ActiveRagdollDebugView.tsx. */}
+      <ActiveRagdollDebugView getSegments={ragdoll.getActiveRagdollDebugSegments} />
     </>
   );
 };

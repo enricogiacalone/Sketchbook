@@ -41,13 +41,18 @@ const CombatArenaGUI: React.FC = () => {
     // this one's sole job is to forward onChange into the store (read back
     // via getState() so this effect doesn't need to re-subscribe/rebuild
     // the panel every time either value changes elsewhere).
-    const settings: { modalita: GameMode; combattenti: number; manichino: boolean; colliderFisici: boolean; ragdollAttivo: boolean; hudGioco: boolean } = {
+    const settings: { modalita: GameMode; combattenti: number; manichino: boolean; colliderFisici: boolean; colliderRagdollAttivo: boolean; ragdollAttivo: boolean; hudGioco: boolean; ragdollPassivo: boolean; fisicaInPausa: boolean; tPose: boolean; cameraOrtogonale: boolean } = {
       modalita: useStore.getState().arenaGameMode,
       combattenti: useStore.getState().arenaFighterCount,
       manichino: useStore.getState().duelDummyMode,
       colliderFisici: useStore.getState().showPhysicsDebug,
+      colliderRagdollAttivo: useStore.getState().showActiveRagdollDebug,
       ragdollAttivo: useStore.getState().euphoriaRagdollEnabled,
       hudGioco: useStore.getState().showGameplayHud,
+      ragdollPassivo: useStore.getState().ragdollPassive,
+      fisicaInPausa: useStore.getState().isPaused,
+      tPose: useStore.getState().tPoseDebug,
+      cameraOrtogonale: useStore.getState().debugOrthoCamera,
     };
 
     folder
@@ -73,12 +78,35 @@ const CombatArenaGUI: React.FC = () => {
       .name('Manichino (avversario passivo)')
       .onChange((active: boolean) => useStore.getState().setDuelDummyMode(active));
 
+    // "crea un tasto aggiungi nemico invece di aggiungerlo subito" --
+    // DuelArena.tsx non monta piu' l'avversario automaticamente
+    // all'ingresso nel duello (vedi store.ts's duelEnemySpawned): resta
+    // fuori dalla scena, niente secondo set di collider a complicare
+    // l'ispezione del solo giocatore, finche' non lo chiedi qui.
+    // Pulsante, non checkbox: non ha senso "rimuoverlo" a meta' -- una
+    // volta aggiunto resta (si esce e rientra dal duello per un reset
+    // pulito, come per tutto il resto della scena).
+    folder
+      .add({ aggiungiNemico: () => useStore.getState().setDuelEnemySpawned(true) }, 'aggiungiNemico')
+      .name('Aggiungi nemico');
+
     // "fai riferimenti visivi per ragdoll e fisica dei solidi" -- see
     // store.ts's own showPhysicsDebug comment.
     folder
       .add(settings, 'colliderFisici')
       .name('Mostra collider fisici')
       .onChange((active: boolean) => useStore.getState().setShowPhysicsDebug(active));
+
+    // "ma secondo me c sn doppi corpi solidi" -- flag separato da
+    // "Mostra collider fisici" sopra (quello e' il layer solid-body,
+    // questo e' il layer fisico ATTIVO -- 17 corpi, vedi
+    // ActiveRagdollDebugView.tsx) apposta cosi' si possono accendere UNO
+    // ALLA VOLTA e confrontare, invece di vederli sempre sovrapposti
+    // senza modo di distinguerli.
+    folder
+      .add(settings, 'colliderRagdollAttivo')
+      .name('Mostra collider ragdoll attivo')
+      .onChange((active: boolean) => useStore.getState().setShowActiveRagdollDebug(active));
 
     // "questo mi sembra piu' sostenibile" -- toggle live del layer PD
     // sempre attivo (ragdollConfig.ts's RAGDOLL_MOTOR_STIFFNESS/
@@ -98,6 +126,69 @@ const CombatArenaGUI: React.FC = () => {
       .add(settings, 'hudGioco')
       .name('Mostra HUD di gioco')
       .onChange((active: boolean) => useStore.getState().setShowGameplayHud(active));
+
+    // "fai un checkbox in cui il ragdoll diventa passivo e cade
+    // stramazzato" -- spegne i motori PD del layer attivo (vedi
+    // store.ts's own ragdollPassive comment): il corpo crolla a terra
+    // sorretto solo da gravita' e giunti, niente muscoli che lo
+    // riportano verso l'animazione.
+    folder
+      .add(settings, 'ragdollPassivo')
+      .name('Ragdoll passivo (cade stramazzato)')
+      .onChange((active: boolean) => useStore.getState().setRagdollPassive(active));
+
+    // "impostare la vista in modo da avere dei test empirici.. sia per
+    // te che per me.. cosi' almeno capiamo cosa nn va" -- un crollo vero
+    // dura meno di un secondo, troppo in fretta per seguirlo a occhio.
+    // Pausa la fisica (App.tsx's <Physics paused={isPaused}>) e poi
+    // avanza UN singolo tick alla volta (RagdollPhysicsDebugBridge.tsx's
+    // window.__physicsDebug.step, esposto solo in dev) -- vedi anche i
+    // collider colorati di ActiveRagdollDebugView.tsx (rosso = fuori dal
+    // cono) per capire A COLPO D'OCCHIO quale giunto sta sforando in
+    // quel preciso istante, invece di doverlo dedurre da numeri presi a
+    // campione ogni tot millisecondi.
+    folder
+      .add(settings, 'fisicaInPausa')
+      .name('Pausa fisica')
+      .onChange((active: boolean) => useStore.getState().setPaused(active));
+
+    folder
+      .add({ passoSingolo: () => (window as any).__physicsDebug?.step() }, 'passoSingolo')
+      .name('Passo singolo fisica (1/120s)');
+
+    // "cazzo metti il personaggio a T osservalo" -- ferma l'animazione e
+    // forza lo skeleton alla bind pose (PlayerCombatSoldier.tsx's
+    // useFrame) cosi' i collider si ispezionano contro una posa statica
+    // nota invece che contro un'animazione in movimento. Spegne ANCHE il
+    // layer PD sempre-attivo (altrimenti i motori continuerebbero a
+    // inseguire l'animazione normale e tirerebbero le ossa via dalla
+    // T-pose ogni frame, vanificandola) -- si puo' sempre riaccendere a
+    // mano dal checkbox sopra una volta finita l'ispezione statica.
+    folder
+      .add(settings, 'tPose')
+      .name('T-pose (ferma animazione)')
+      .onChange((active: boolean) => {
+        // Il ragdoll attivo NON viene piu' spento: la T-pose e' il suo
+        // bersaglio (vedi PlayerCombatSoldier.tsx / pannello "Banco
+        // ragdoll").
+        useStore.getState().setTPoseDebug(active);
+      });
+
+    // "aggiungi la possibilita' di attivare la vista ortogonale.. analizza
+    // i vari scheletri ad uno ad uno" -- vedi DebugOrthoCamera.tsx.
+    folder
+      .add(settings, 'cameraOrtogonale')
+      .name('Camera ortogonale (debug)')
+      .onChange((active: boolean) => useStore.getState().setDebugOrthoCamera(active));
+
+    folder
+      .add({
+        ruotaVista: () => {
+          const cur = useStore.getState().debugOrthoCameraAngleDeg;
+          useStore.getState().setDebugOrthoCameraAngleDeg((cur + 90) % 360);
+        },
+      }, 'ruotaVista')
+      .name("Ruota vista 90' (ortogonale)");
 
     // "le colonne devono essere retratte" -- lil-gui folders actually
     // default to OPEN (verified live -- omitting .open() was NOT enough

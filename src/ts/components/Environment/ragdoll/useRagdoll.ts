@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
 import { CollisionGroups } from "../../../enums/CollisionGroups";
+import { useStore } from "../../../store";
 import {
   RAGDOLL_PULSE_NEARBY,
   HURTBOX_HEIGHT,
@@ -19,7 +20,13 @@ import {
 
 export type { SolidBodySegmentDebug };
 import { useRagdollTransient } from "./hooks/useRagdollTransient";
-import { useRagdollActive } from "./hooks/useRagdollActive";
+import {
+  useRagdollActive,
+  type ActiveRagdollSegmentDebug,
+} from "./hooks/useRagdollActive";
+import type { JointRange } from "./activeRagdollFrames";
+
+export type { ActiveRagdollSegmentDebug };
 
 const HIT_PULSE_DURATION = 0.22;
 const HIT_BLEND_OUT_DURATION = 0.22;
@@ -39,7 +46,13 @@ export interface RagdollController {
     attackerX?: number,
     attackerZ?: number
   ) => void;
-  update: (delta: number, activeRagdollEnabled?: boolean, isIdle?: boolean) => void;
+  update: (delta: number, activeRagdollEnabled?: boolean, isIdle?: boolean, isPassive?: boolean) => void;
+  // Da chiamare a INIZIO useFrame, prima di mixer.update() (vedi
+  // restoreActiveAnimationPose in useRagdollActive.ts).
+  beginFrame: () => void;
+  // Clip la cui posa iniziale fa da "zero" dei giunti del ragdoll attivo
+  // (la guardia) -- vedi captureClipPose in activeRagdollFrames.ts.
+  setNeutralClip: (clip: THREE.AnimationClip | null) => void;
   deactivate: () => void;
   getBoneWorldPosition: (boneName: string, target: THREE.Vector3) => boolean;
   getHurtboxHandle: () => number | null;
@@ -59,7 +72,22 @@ export interface RagdollController {
     ) => void
   ) => { x: number; z: number };
   getSolidBodySegments: () => SolidBodySegmentDebug[];
+  // Vedi ActiveRagdollSegmentDebug in useRagdollActive.ts -- collider
+  // fisico e collider bersaglio (animazione) di ogni corpo del layer
+  // attivo, con errori e angoli dei giunti rispetto ai limiti.
+  getActiveRagdollDebugSegments: () => ActiveRagdollSegmentDebug[];
+  // Banco di prova: colpo di prova sul layer attivo e misura dei range
+  // dei giunti chiesti dalle clip di animazione.
+  testActiveHit: (segmentName: string, dirWorld: THREE.Vector3, speed: number) => boolean;
+  measureClipRanges: (
+    clips: THREE.AnimationClip[]
+  ) => { all: Record<string, JointRange>; perClip: Record<string, Record<string, JointRange>> } | null;
 }
+
+// Colpo sul layer attivo: pulseHit riceve una "magnitudo" pensata per il
+// sistema transitorio (variazione di velocita' ~0.3 m/s); qui diventa una
+// variazione di velocita' vera sul segmento colpito.
+const ACTIVE_HIT_SPEED_PER_MAGNITUDE = 40;
 
 const SPINE_LEAN_BONES = ["spine_02", "spine_03"];
 const SPINE_LEAN_CHILD_BONE: Record<string, string> = {
@@ -92,17 +120,25 @@ export function useRagdoll(
     bodiesRef,
   } = useRagdollTransient(modelRootRef, resolveBones);
   const {
-    ensureActiveRagdoll,
-    syncActiveRagdollMotors,
-    clampActiveRagdollVelocities,
-    clampActiveJointCones,
-    clampActiveHipsAbsolute,
-    checkActiveRagdollRunaway,
-    resyncActiveRagdollToBones,
-    destroyActiveRagdoll,
     activeBodiesRef,
+    ensureActiveRagdoll,
+    destroyActiveRagdoll,
+    rebuildIfRequested,
+    captureActiveTargets,
+    driveActiveRagdoll,
     syncActiveBonesBlended,
+    restoreActiveAnimationPose,
+    resyncActiveRagdollToBones,
+    checkActiveRagdollRunaway,
+    applyActiveHit,
+    getActiveRagdollDebugSegments,
+    measureClipRanges,
+    setNeutralClip,
   } = useRagdollActive(modelRootRef, resolveBones);
+  // KO del layer attivo (morte con ragdoll attivo acceso): motori spenti,
+  // gravita' piena, finche' il combattente non viene ricreato/deactivate.
+  const activeKnockedOutRef = useRef(false);
+  const hasActiveRig = () => Object.keys(activeBodiesRef.current).length > 0;
 
   const markerRef = useRef<THREE.Mesh | null>(null);
   const markerElapsedRef = useRef(0);
@@ -142,6 +178,13 @@ export function useRagdoll(
   );
 
   const activateDeath = useCallback(() => {
+    // Con il ragdoll attivo acceso la morte e' il layer attivo che va KO
+    // (motori spenti, gravita' piena) -- niente secondo rig transitorio
+    // sovrapposto.
+    if (hasActiveRig()) {
+      activeKnockedOutRef.current = true;
+      return;
+    }
     if (stateRef.current.active && stateRef.current.isDeath) return;
     destroyBodies();
     buildBodies();
@@ -163,6 +206,34 @@ export function useRagdoll(
       attackerZ?: number
     ) => {
       if (stateRef.current.isDeath) return;
+
+      // "ragdoll stile euphoria" -- con il layer attivo presente il colpo
+      // e' un impulso vero sul corpo attivo colpito (che si piega/incassa
+      // e poi i motori lo riportano in guardia), non un secondo rig
+      // transitorio sovrapposto.
+      if (hasActiveRig() && !activeKnockedOutRef.current) {
+        const entry = activeBodiesRef.current[atSegment] ?? activeBodiesRef.current.Torso;
+        if (entry) {
+          const t = entry.body.translation();
+          const dir = new THREE.Vector3();
+          if (attackerX !== undefined && attackerZ !== undefined) {
+            dir.set(t.x - attackerX, 0, t.z - attackerZ);
+            if (dir.lengthSq() < 1e-6) dir.copy(worldImpulseDir);
+            dir.normalize();
+            dir.y = 0.15;
+          } else {
+            dir.copy(worldImpulseDir);
+          }
+          const point = new THREE.Vector3(t.x, t.y, t.z);
+          if (attackerX !== undefined && attackerZ !== undefined) {
+            const off = new THREE.Vector3(attackerX - t.x, 0, attackerZ - t.z);
+            if (off.lengthSq() > 1e-6) point.add(off.normalize().multiplyScalar(entry.segment.radius));
+          }
+          applyActiveHit(entry.segment.name, dir, magnitude * ACTIVE_HIT_SPEED_PER_MAGNITUDE);
+          triggerHitMarker(point);
+          return;
+        }
+      }
 
       const nearbyOptions = RAGDOLL_PULSE_NEARBY[atSegment] ?? [];
       const nearby = nearbyOptions.length
@@ -209,11 +280,16 @@ export function useRagdoll(
         triggerHitMarker(worldPos);
       }
     },
-    [buildBodies, triggerHitMarker]
+    [buildBodies, triggerHitMarker, applyActiveHit, activeBodiesRef]
   );
 
   const update = useCallback(
-    (delta: number, activeRagdollEnabled: boolean = false, isIdle: boolean = false) => {
+    (
+      delta: number,
+      activeRagdollEnabled: boolean = false,
+      isIdle: boolean = false,
+      isPassive: boolean = false
+    ) => {
       if (markerRef.current && markerRef.current.visible) {
         markerElapsedRef.current += delta;
         const t = Math.min(1, markerElapsedRef.current / HIT_MARKER_DURATION);
@@ -229,15 +305,16 @@ export function useRagdoll(
       if (!s.active) {
         if (activeRagdollEnabled) {
           ensureActiveRagdoll();
-          if (checkActiveRagdollRunaway()) {
+          rebuildIfRequested();
+          const passive = isPassive || activeKnockedOutRef.current;
+          // Ordine: bersagli dall'animazione (gia' aggiornata da
+          // mixer.update / skeleton.pose) -> motori -> ossa dalla fisica.
+          captureActiveTargets(delta);
+          if (!passive && checkActiveRagdollRunaway()) {
             resyncActiveRagdollToBones();
-          } else {
-            syncActiveRagdollMotors(delta);
-            clampActiveRagdollVelocities();
-            clampActiveJointCones();
-            clampActiveHipsAbsolute();
           }
-          syncActiveBonesBlended(delta, isIdle);
+          driveActiveRagdoll(delta, passive);
+          syncActiveBonesBlended(delta, isIdle, passive ? 1 : undefined);
         } else if (Object.keys(activeBodiesRef.current).length > 0) {
           destroyActiveRagdoll();
         }
@@ -291,17 +368,18 @@ export function useRagdoll(
       syncHurtbox,
       syncSolidBody,
       ensureActiveRagdoll,
+      rebuildIfRequested,
+      captureActiveTargets,
       checkActiveRagdollRunaway,
-      syncActiveRagdollMotors,
-      clampActiveRagdollVelocities,
-      clampActiveJointCones,
-      clampActiveHipsAbsolute,
+      driveActiveRagdoll,
+      syncActiveBonesBlended,
       resyncActiveRagdollToBones,
       destroyActiveRagdoll,
     ]
   );
 
   const deactivate = useCallback(() => {
+    activeKnockedOutRef.current = false;
     destroyBodies();
     stateRef.current = {
       active: false,
@@ -399,12 +477,27 @@ export function useRagdoll(
     [resolveBones]
   );
 
+  const testActiveHit = useCallback(
+    (segmentName: string, dirWorld: THREE.Vector3, speed: number): boolean => {
+      const ok = applyActiveHit(segmentName, dirWorld, speed);
+      const e = activeBodiesRef.current[segmentName];
+      if (ok && e) {
+        const t = e.body.translation();
+        triggerHitMarker(new THREE.Vector3(t.x, t.y, t.z));
+      }
+      return ok;
+    },
+    [applyActiveHit, activeBodiesRef, triggerHitMarker]
+  );
+
   return {
     isActive: () => stateRef.current.active,
     isDeath: () => stateRef.current.isDeath,
     activateDeath,
     pulseHit,
     update,
+    beginFrame: restoreActiveAnimationPose,
+    setNeutralClip,
     deactivate,
     getBoneWorldPosition,
     getHurtboxHandle: internalGetHurtboxHandle,
@@ -412,5 +505,8 @@ export function useRagdoll(
     applySpineLean,
     resolveBodyMovement,
     getSolidBodySegments,
+    getActiveRagdollDebugSegments,
+    testActiveHit,
+    measureClipRanges,
   };
 }

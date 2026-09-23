@@ -210,6 +210,14 @@ export const useThirdPersonCamera = () => {
   }, [gl]);
 
   useFrame((_state, delta) => {
+    // "aggiungi la possibilita' di attivare la vista ortogonale" --
+    // quando il debug ortho cam e' attivo (DebugOrthoCamera.tsx, che
+    // diventa lui stesso state.camera via makeDefault) questo hook
+    // smette del tutto di muoverlo -- altrimenti i due si contenderebbero
+    // la stessa camera ogni frame (questo hook la insegue in terza
+    // persona, l'altro la vuole ferma e ortogonale sul personaggio), e
+    // vincerebbe uno a caso in base all'ordine di useFrame.
+    if (useStore.getState().debugOrthoCamera) return;
     // Pause toggle (Start / Escape) and zoom-preset cycle (Select / C) --
     // both global, one-shot actions, handled here for the reason in the
     // comment above `input = useInput()`.

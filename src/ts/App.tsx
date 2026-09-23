@@ -2,6 +2,7 @@ import React, { Suspense, useState, useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Physics } from "@react-three/rapier";
 import Scene from "./Scene";
+import RagdollPhysicsDebugBridge from "./components/Environment/RagdollPhysicsDebugBridge";
 import Sky from "./components/Environment/Sky";
 import SunLight from "./components/Environment/SunLight";
 import WorldFog from "./components/Environment/WorldFog";
@@ -21,6 +22,8 @@ import Crosshair from "./components/UI/Crosshair";
 import GamepadDebug from "./components/UI/GamepadDebug";
 import ScenariosGUI from "./components/UI/ScenariosGUI";
 import CombatArenaGUI from "./components/UI/CombatArenaGUI";
+import RagdollBenchGUI from "./components/UI/RagdollBenchGUI";
+import RagdollBenchOverlay from "./components/UI/RagdollBenchOverlay";
 import DuelHUD from "./components/UI/DuelHUD";
 import { DUEL_PLAYER_ID } from "./components/Environment/DuelArena";
 import Loader from "./components/UI/Loader"; // Helper to track loading
@@ -212,6 +215,10 @@ const App: React.FC = () => {
               // explicit pause check on top of this.
               paused={isPaused}
             >
+              {/* "impostare la vista in modo da avere dei test empirici" --
+                  espone world/rapier/step su window per il pausa+passo-
+                  singolo dei test del ragdoll, vedi il file stesso. */}
+              <RagdollPhysicsDebugBridge />
               {/* Scene contains the world environment */}
               <Scene />
               {/* "togli boxman e il drone dalla scena del duello" -- the
@@ -285,6 +292,8 @@ const App: React.FC = () => {
           <GamepadDebug />
           <ScenariosGUI />
           <CombatArenaGUI />
+          <RagdollBenchGUI />
+          <RagdollBenchOverlay />
           <DuelHUD />
           {isPaused && (
             <div

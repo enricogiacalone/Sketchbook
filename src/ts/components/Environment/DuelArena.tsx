@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import CombatSoldier from './CombatSoldier';
 import PlayerCombatSoldier, { ATTACK_RANGE } from './PlayerCombatSoldier';
 import PunchingBag, { PunchingBagHandle } from './PunchingBag';
+import DebugOrthoCamera from './DebugOrthoCamera';
 import { useStore } from '../../store';
 import { FighterData } from './SquadArenaTypes';
 
@@ -160,6 +161,10 @@ const DuelArena: React.FC = () => {
   const noopSetMedkitPoolCount = () => {};
 
   const setDuelStatus = useStore((state) => state.setDuelStatus);
+  // "crea un tasto aggiungi nemico invece di aggiungerlo subito" --
+  // vedi store.ts's duelEnemySpawned e CombatArenaGUI.tsx's pulsante
+  // "Aggiungi nemico".
+  const duelEnemySpawned = useStore((state) => state.duelEnemySpawned);
   const { camera, scene } = useThree();
 
   // Hands control of the duel-player fighter over to the player the
@@ -315,6 +320,11 @@ const DuelArena: React.FC = () => {
 
   return (
     <group>
+      {/* "aggiungi la possibilita' di attivare la vista ortogonale" --
+          non disegna nulla di suo, prende il controllo della camera
+          SOLO quando store.ts's debugOrthoCamera e' true (vedi il file
+          stesso). */}
+      <DebugOrthoCamera />
       <PlayerCombatSoldier
         data={playerData}
         opponent={enemyData}
@@ -343,21 +353,29 @@ const DuelArena: React.FC = () => {
           easily afford the one extra physics rig, and now (see
           resolveBodyMovement/"ogni parte del corpo deve essere un
           collider") also gets real per-limb solid-body collision, same
-          as the player, via that same flag. */}
-      <CombatSoldier
-        data={enemyData}
-        allFightersData={allFighters}
-        healingItems={[]}
-        towers={[]}
-        sceneProps={[]}
-        gameMode="FFA"
-        medkitPoolRef={emptyMedkitPool}
-        setMedkitPoolCount={noopSetMedkitPoolCount}
-        globalSpeed={GLOBAL_SPEED}
-        enableRagdoll
-        bagSolidHandle={bagSolidHandle}
-        bagRef={bagRef}
-      />
+          as the player, via that same flag.
+          "crea un tasto aggiungi nemico invece di aggiungerlo subito" --
+          NON piu' montato automaticamente all'ingresso nel duello, solo
+          quando duelEnemySpawned diventa true (CombatArenaGUI.tsx's
+          "Aggiungi nemico") -- cosi' un'ispezione a schermo del solo
+          giocatore (T-pose, collider di debug) non ha un secondo intero
+          set di collider a complicare la vista fin da subito. */}
+      {duelEnemySpawned && (
+        <CombatSoldier
+          data={enemyData}
+          allFightersData={allFighters}
+          healingItems={[]}
+          towers={[]}
+          sceneProps={[]}
+          gameMode="FFA"
+          medkitPoolRef={emptyMedkitPool}
+          setMedkitPoolCount={noopSetMedkitPoolCount}
+          globalSpeed={GLOBAL_SPEED}
+          enableRagdoll
+          bagSolidHandle={bagSolidHandle}
+          bagRef={bagRef}
+        />
+      )}
     </group>
   );
 };

@@ -1,3 +1,4 @@
+import { DEFAULT_RAGDOLL_BENCH, type RagdollBenchSettings } from "./components/Environment/ragdoll/ragdollBench";
 import { create } from 'zustand';
 import type { GameMode } from './components/Environment/SquadArenaTypes';
 
@@ -181,6 +182,45 @@ interface GameState {
   // CombatSoldier.tsx/PunchingBag.tsx, flipped from CombatArenaGUI.tsx's
   // debug panel (same bridge pattern as duelDummyMode just above).
   showPhysicsDebug: boolean;
+  // "ma secondo me c sn doppi corpi solidi" -- showPhysicsDebug sopra
+  // pilotava GIA' SolidBodyDebugView.tsx (il layer solid-body, 15
+  // capsule) E ActiveRagdollDebugView.tsx (il layer fisico attivo, 17
+  // capsule -- vedi useRagdollActive.ts) insieme, sovrapposti sullo
+  // stesso personaggio senza modo di isolarli: impossibile capire se
+  // quello che sembra un "corpo doppio" fosse solo i due layer disegnati
+  // uno sopra l'altro o un bug vero. Flag separato apposta, cosi' si
+  // possono accendere uno alla volta dal pannello Arena e confrontare.
+  showActiveRagdollDebug: boolean;
+  // "cazzo metti il personaggio a T osservalo" -- ferma l'AnimationMixer
+  // e forza lo skeleton alla bind pose (T-pose) ogni frame invece
+  // dell'animazione normale, cosi' i collider di debug si possono
+  // ispezionare contro una posa statica e nota invece che contro
+  // un'animazione in movimento. Letto da PlayerCombatSoldier.tsx.
+  tPoseDebug: boolean;
+  // "crea un tasto aggiungi nemico invece di aggiungerlo subito" --
+  // DuelArena.tsx montava SEMPRE il CombatSoldier avversario appena si
+  // entrava nel duello, aggiungendo un secondo intero set di collider
+  // alla scena e complicando l'ispezione del solo giocatore. Default
+  // false (nessun avversario finche' non lo chiedi esplicitamente dal
+  // pannello Arena, pulsante "Aggiungi nemico").
+  duelEnemySpawned: boolean;
+  // "aggiungi la possibilita' di attivare la vista ortogonale" -- vedi
+  // DebugOrthoCamera.tsx. Quando true prende il controllo della camera
+  // del Canvas (drei's makeDefault) al posto della terza persona
+  // normale -- utile per ispezionare un personaggio fermo (T-pose) senza
+  // la distorsione prospettica, che rende difficile giudicare ad occhio
+  // se un collider e' davvero allineato o solo sembra esserlo per via
+  // dell'angolazione.
+  debugOrthoCamera: boolean;
+  // Angolo (gradi) attorno al personaggio da cui la vista ortogonale
+  // guarda -- 0 = frontale, 90/180/270 = laterale/retro/laterale
+  // opposto. Cambiato dal pulsante "Ruota vista 90'" del pannello Arena,
+  // cosi' si puo' girare attorno al personaggio un lato alla volta senza
+  // dover trascinare/orbitare manualmente una camera vera.
+  debugOrthoCameraAngleDeg: number;
+  // "sistema l'ambiente per fare i test come si deve" -- tutti i
+  // parametri del banco di prova del ragdoll attivo, vedi ragdollBench.ts.
+  ragdollBench: RagdollBenchSettings;
   // "togli tutta la merda ui in piu' che nn c'entra con questo test..
   // mettila disabilitata di default ma abilitabile tramite checkbox in
   // lil gui" -- Controls/StatusBars/MissionHUD/Minimap/il messaggio di
@@ -188,6 +228,14 @@ interface GameState {
   // test sul ragdoll nel duello: default OFF, riattivabile dal pannello
   // Arena come showPhysicsDebug qui sopra.
   showGameplayHud: boolean;
+  // "fai un checkbox in cui il ragdoll diventa passivo e cade
+  // stramazzato" -- spegne di netto i motori PD del layer ragdoll attivo
+  // (nessuna coppia/molla che insegue l'animazione) cosi' il corpo resta
+  // in piedi solo per gravita'+giunti, esattamente come il rig di
+  // morte/hit-pulse ma per il layer sempre-attivo -- utile per verificare
+  // a occhio che collider/giunti da soli reggano un corpo credibile,
+  // isolato da qualunque bug di tuning dei motori.
+  ragdollPassive: boolean;
   // "questo mi sembra piu' sostenibile" -- layer PD sempre attivo (vedi ragdollConfig.ts's RAGDOLL_HIPS_POSITION_STIFFNESS) per i duellanti. Toggle live per il tuning (GUI "Ragdoll attivo (PD)") senza dover ricaricare la pagina ogni volta.
   euphoriaRagdollEnabled: boolean;
   // "crea un sacco su cui allenarmi nell'arena.. mi serve per capire la
@@ -254,7 +302,14 @@ interface GameState {
   toggleDuelDummyMode: () => void;
   setDuelDummyMode: (active: boolean) => void;
   setShowPhysicsDebug: (active: boolean) => void;
+  setShowActiveRagdollDebug: (active: boolean) => void;
+  setTPoseDebug: (active: boolean) => void;
+  setDuelEnemySpawned: (active: boolean) => void;
+  setDebugOrthoCamera: (active: boolean) => void;
+  setDebugOrthoCameraAngleDeg: (deg: number) => void;
+  setRagdollBench: (partial: Partial<RagdollBenchSettings>) => void;
   setShowGameplayHud: (active: boolean) => void;
+  setRagdollPassive: (active: boolean) => void;
   setEuphoriaRagdollEnabled: (active: boolean) => void;
   registerBagHit: (radialOffset: number, heightOffset: number, hand: 'hand_l' | 'hand_r') => void;
   retryDuel: () => void;
@@ -300,7 +355,14 @@ export const useStore = create<GameState>((set) => ({
   duelRound: 0,
   duelDummyMode: false,
   showPhysicsDebug: false,
+  showActiveRagdollDebug: false,
+  tPoseDebug: false,
+  duelEnemySpawned: false,
+  debugOrthoCamera: false,
+  debugOrthoCameraAngleDeg: 0,
+  ragdollBench: { ...DEFAULT_RAGDOLL_BENCH },
   showGameplayHud: false,
+  ragdollPassive: false,
   euphoriaRagdollEnabled: true,
   bagHitCount: 0,
   bagLastHitRadialOffset: null,
@@ -360,7 +422,14 @@ export const useStore = create<GameState>((set) => ({
   toggleDuelDummyMode: () => set((state) => ({ duelDummyMode: !state.duelDummyMode })),
   setDuelDummyMode: (duelDummyMode) => set({ duelDummyMode }),
   setShowPhysicsDebug: (showPhysicsDebug) => set({ showPhysicsDebug }),
+  setShowActiveRagdollDebug: (showActiveRagdollDebug) => set({ showActiveRagdollDebug }),
+  setTPoseDebug: (tPoseDebug) => set({ tPoseDebug }),
+  setDuelEnemySpawned: (duelEnemySpawned) => set({ duelEnemySpawned }),
+  setDebugOrthoCamera: (debugOrthoCamera) => set({ debugOrthoCamera }),
+  setDebugOrthoCameraAngleDeg: (debugOrthoCameraAngleDeg) => set({ debugOrthoCameraAngleDeg }),
+  setRagdollBench: (partial) => set((state) => ({ ragdollBench: { ...state.ragdollBench, ...partial } })),
   setShowGameplayHud: (showGameplayHud) => set({ showGameplayHud }),
+  setRagdollPassive: (ragdollPassive) => set({ ragdollPassive }),
   setEuphoriaRagdollEnabled: (euphoriaRagdollEnabled) => set({ euphoriaRagdollEnabled }),
   registerBagHit: (radialOffset, heightOffset, hand) => set((state) => ({
     bagHitCount: state.bagHitCount + 1,
