@@ -7,6 +7,7 @@ import CombatSoldier from './CombatSoldier';
 import PlayerCombatSoldier, { ATTACK_RANGE } from './PlayerCombatSoldier';
 import PunchingBag, { PunchingBagHandle } from './PunchingBag';
 import DebugOrthoCamera from './DebugOrthoCamera';
+import ArenaObstacles from './ArenaObstacles';
 import { useStore } from '../../store';
 import { FighterData } from './SquadArenaTypes';
 
@@ -427,6 +428,8 @@ const DuelArena: React.FC = () => {
         onReady={setBagHurtboxHandle}
         onSolidReady={setBagSolidHandle}
       />
+      {/* Percorso ad ostacoli nell'arena (ostacoli oscillanti, pugni a molla e pale rotanti) */}
+      <ArenaObstacles />
       {/* The AI opponent -- CombatSoldier.tsx itself is completely
           unmodified: passing the player's own FighterData inside
           allFightersData is all it takes for its existing, unmodified

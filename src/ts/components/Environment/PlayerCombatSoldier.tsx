@@ -21,6 +21,7 @@ import {
   PISTOL_MAG_SIZE,
   PISTOL_FIRE_INTERVAL_S,
   PISTOL_RELOAD_FALLBACK_S,
+  PISTOL_RELOAD_S,
   PISTOL_RANGE_M,
   PISTOL_SPREAD_HIP_DEG,
   PISTOL_SPREAD_AIM_DEG,
@@ -567,6 +568,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     raiseLeftRef.current = 0;
     aimingRef.current = false;
     pistol.setReloadProgress(null);
+    pistol.stopReload();
     // Se il personaggio e' libero, passa subito alla clip di riposo giusta
     // (altrimenti ci pensa la fine dell'attackLock).
     if (data.attackLock <= 0 && !data.isDead) transitionToAnimation(idleName(), 0.2, true);
@@ -618,9 +620,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
 
   const startReload = () => {
     if (reloadLeftRef.current > 0 || ammoRef.current >= PISTOL_MAG_SIZE) return;
-    reloadDurRef.current = clipsMap['Pistol_Reload']?.duration ?? PISTOL_RELOAD_FALLBACK_S;
+    // dura quanto il suono di ricarica (la clip Pistol_Reload viene
+    // riscalata su questa durata in setUpperLayer)
+    reloadDurRef.current = clipsMap['Pistol_Reload'] ? PISTOL_RELOAD_S : PISTOL_RELOAD_FALLBACK_S;
     reloadLeftRef.current = reloadDurRef.current;
     aimingRef.current = false;
+    pistol.playReload();
   };
 
   // Sparo hitscan in terza persona (schema TPS classico): 1) raggio dalla
@@ -707,6 +712,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     }
     emitShotFx({ from: _muzzle, to: hit.point, normal: hit.normal, surface, decal });
     pistol.kick();
+    pistol.playShot();
     ammoRef.current -= 1;
     fireCooldownRef.current = PISTOL_FIRE_INTERVAL_S;
     raiseLeftRef.current = PISTOL_RAISE_AFTER_SHOT_S;
@@ -787,6 +793,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         }
       }
       if (weaponRef.current !== 'pistol' || data.isDead) aimingRef.current = false;
+      if (data.isDead && reloadLeftRef.current > 0) {
+        // morto a meta' ricarica: niente rumori di caricatore dal cadavere
+        reloadLeftRef.current = 0;
+        pistol.setReloadProgress(null);
+        pistol.stopReload();
+      }
       updateUpperLayer(benchMode);
       pistol.setVisible(weaponRef.current === 'pistol' && !benchMode);
       pistol.update(dtW);

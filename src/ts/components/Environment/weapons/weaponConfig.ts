@@ -30,6 +30,26 @@ export const PISTOL_MAG_SIZE = 12;
 // Semi-automatica: un colpo per pressione, al massimo uno ogni...
 export const PISTOL_FIRE_INTERVAL_S = 0.16;
 export const PISTOL_RELOAD_FALLBACK_S = 1.8; // se manca la clip Pistol_Reload
+
+// Suoni (public/weapon-sounds, vedi PROVENIENZA.txt la' dentro).
+export const PISTOL_SHOT_SOUND_URL = '/weapon-sounds/gun_shoot.mp3';
+export const PISTOL_RELOAD_SOUND_URL = '/weapon-sounds/aksu_74_reload.mp3';
+// aksu_74_reload.mp3 (2.66 s) misurato con silencedetect: 0.46 s di
+// silenzio iniziale, poi tre rumori -- sgancio caricatore 0.46-0.53 s,
+// inserimento 1.28-1.43 s, otturatore 2.10-2.39 s. Si salta l'inizio
+// muto e la ricarica dura quanto il resto del suono, cosi' i rumori
+// cadono sui movimenti del caricatore/carrello (vedi usePistolModel).
+export const PISTOL_RELOAD_SOUND_OFFSET_S = 0.3;
+export const PISTOL_RELOAD_S = 2.36;
+// fasi della ricarica (frazione 0..1 di PISTOL_RELOAD_S), dai tempi sopra
+export const RELOAD_MAG_OUT_END = 0.1; // caricatore fuori (click a ~0.07)
+export const RELOAD_MAG_IN_START = 0.36; // rientra...
+export const RELOAD_MAG_IN_END = 0.43; // ...click a ~0.42
+export const RELOAD_SLIDE_START = 0.76; // carrello tirato (click a ~0.77)
+export const RELOAD_SLIDE_END = 0.88;
+export const PISTOL_SOUND_REF_DISTANCE = 3;
+export const PISTOL_SHOT_VOLUME = 0.7;
+export const PISTOL_RELOAD_VOLUME = 0.9;
 export const PISTOL_RANGE_M = 150;
 // Dispersione (cono, gradi): dall'anca molto meno precisa che in mira.
 export const PISTOL_SPREAD_HIP_DEG = 2.5;

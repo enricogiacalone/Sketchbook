@@ -8,6 +8,7 @@ import { getPlaylist, type SpeakerId, type Track } from './musicLibrary';
 import { setFlatGroundOverride } from '../Road';
 import { useInput } from '../../../hooks/useInput';
 import { acquireDebugGui, releaseDebugGui } from '../../../lib/debugGui';
+import { acquireAudioListener, releaseAudioListener } from '../../../lib/sharedAudioListener';
 import { CollisionGroups, groupsExcluding } from '../../../enums/CollisionGroups';
 
 // "Immersive 3D Audio and Visualization" -- porting nel duello della demo di
@@ -312,8 +313,7 @@ const AudioArena: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const listener = new THREE.AudioListener();
-    camera.add(listener);
+    const listener = acquireAudioListener(camera);
     const ctx = listener.context;
     const make = (id: SpeakerId, fft: number, parent: THREE.Object3D | null): SpeakerAudio => {
       const el = new Audio();
@@ -322,6 +322,7 @@ const AudioArena: React.FC = () => {
       pa.setMediaElementSource(el);
       pa.setRefDistance(settingsRef.current.attenuazione);
       pa.setRolloffFactor(1);
+      pa.setVolume(settingsRef.current.volume);
       parent?.add(pa);
       // FFT sul segnale della sorgente (prima dell'attenuazione con la distanza)
       const analyser = ctx.createAnalyser();
@@ -372,7 +373,7 @@ const AudioArena: React.FC = () => {
         sp.analyser.disconnect();
         sp.pa.parent?.remove(sp.pa);
       }
-      camera.remove(listener);
+      releaseAudioListener();
       audioRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -446,7 +447,11 @@ const AudioArena: React.FC = () => {
     folder.add({ f: () => next('cubi') }, 'f').name('Cassa cubi: brano successivo');
     folder.add(s, 'suona schermo').name('Cassa schermo: suona (K)').listen().onChange((v: boolean) => toggleSpeaker('schermo', v));
     folder.add({ f: () => next('schermo') }, 'f').name('Cassa schermo: brano successivo');
-    folder.add(s, 'volume', 0, 2, 0.05).name('Volume').onChange((v: number) => audioRef.current?.listener.setMasterVolume(v));
+    // solo la musica (l'ascoltatore e' condiviso anche con la pistola)
+    folder.add(s, 'volume', 0, 2, 0.05).name('Volume musica').onChange((v: number) => {
+      const a = audioRef.current;
+      if (a) for (const sp of Object.values(a.speakers)) sp.pa.setVolume(v);
+    });
     folder
       .add(s, 'attenuazione', 1, 30, 0.5)
       .name('Distanza piena (m)')

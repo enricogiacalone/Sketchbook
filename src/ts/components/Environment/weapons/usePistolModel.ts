@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useGLTF } from '@react-three/drei';
+import { useThree } from '@react-three/fiber';
+import { acquireAudioListener, releaseAudioListener } from '../../../lib/sharedAudioListener';
 import { SkeletonUtils } from 'three-stdlib';
 import {
   PISTOL_MODEL_URL,
@@ -10,6 +12,17 @@ import {
   PISTOL_BORE_FROM_TOP,
   PISTOL_SLIDE_KICK_M,
   PISTOL_SLIDE_RETURN_S,
+  PISTOL_SHOT_SOUND_URL,
+  PISTOL_RELOAD_SOUND_URL,
+  PISTOL_RELOAD_SOUND_OFFSET_S,
+  PISTOL_SOUND_REF_DISTANCE,
+  PISTOL_SHOT_VOLUME,
+  PISTOL_RELOAD_VOLUME,
+  RELOAD_MAG_OUT_END,
+  RELOAD_MAG_IN_START,
+  RELOAD_MAG_IN_END,
+  RELOAD_SLIDE_START,
+  RELOAD_SLIDE_END,
 } from './weaponConfig';
 
 // Come la pistola sta nella mano destra (osso hand_r): posizione (m) e
@@ -34,6 +47,10 @@ export interface PistolModelApi {
   kick: () => void;
   // 0..1 durante la ricarica (caricatore giu' e su), null altrimenti
   setReloadProgress: (p: number | null) => void;
+  // suoni posizionali 3D (dalla canna / dall'arma)
+  playShot: () => void;
+  playReload: () => void;
+  stopReload: () => void;
   update: (delta: number) => void;
 }
 
@@ -102,6 +119,51 @@ export function usePistolModel(
   }, [scene]);
 
   const slideOffsetRef = useRef(0); // m, verso il retro
+
+  // --- suoni -------------------------------------------------------------
+  // 4 voci per lo sparo (colpi ravvicinati si sovrappongono invece di
+  // tagliarsi), 1 per la ricarica. Buffer caricati una volta; se i file
+  // mancano (non sono in git, vedi public/weapon-sounds/PROVENIENZA.txt)
+  // l'arma resta semplicemente muta.
+  const { camera } = useThree();
+  const soundRef = useRef<{ shots: THREE.PositionalAudio[]; next: number; reload: THREE.PositionalAudio } | null>(null);
+  useEffect(() => {
+    const listener = acquireAudioListener(camera);
+    const mk = (parent: THREE.Object3D, vol: number) => {
+      const a = new THREE.PositionalAudio(listener);
+      a.setRefDistance(PISTOL_SOUND_REF_DISTANCE);
+      a.setRolloffFactor(1);
+      a.setVolume(vol);
+      parent.add(a);
+      return a;
+    };
+    const shots = [0, 1, 2, 3].map(() => mk(parts.muzzle, PISTOL_SHOT_VOLUME));
+    const reload = mk(parts.gunFrame, PISTOL_RELOAD_VOLUME);
+    soundRef.current = { shots, next: 0, reload };
+    let alive = true;
+    const loader = new THREE.AudioLoader();
+    loader.load(
+      PISTOL_SHOT_SOUND_URL,
+      (buf) => alive && shots.forEach((a) => a.setBuffer(buf)),
+      undefined,
+      () => console.warn('[pistola] suono di sparo non trovato:', PISTOL_SHOT_SOUND_URL)
+    );
+    loader.load(
+      PISTOL_RELOAD_SOUND_URL,
+      (buf) => alive && reload.setBuffer(buf),
+      undefined,
+      () => console.warn('[pistola] suono di ricarica non trovato:', PISTOL_RELOAD_SOUND_URL)
+    );
+    return () => {
+      alive = false;
+      for (const a of [...shots, reload]) {
+        if (a.isPlaying) a.stop();
+        a.parent?.remove(a);
+      }
+      soundRef.current = null;
+      releaseAudioListener();
+    };
+  }, [camera, parts]);
   const reloadRef = useRef<number | null>(null);
 
   // Aggancio all'osso della mano (appena il modello del personaggio c'e').
@@ -158,6 +220,29 @@ export function usePistolModel(
       setReloadProgress: (p) => {
         reloadRef.current = p;
       },
+      playShot: () => {
+        const snd = soundRef.current;
+        if (!snd) return;
+        const a = snd.shots[snd.next];
+        snd.next = (snd.next + 1) % snd.shots.length;
+        if (!a.buffer) return;
+        if (a.context.state !== 'running') a.context.resume().catch(() => {});
+        if (a.isPlaying) a.stop();
+        // piccola variazione di tono a ogni colpo
+        a.setDetune((Math.random() * 2 - 1) * 60);
+        a.play();
+      },
+      playReload: () => {
+        const a = soundRef.current?.reload;
+        if (!a || !a.buffer) return;
+        if (a.isPlaying) a.stop();
+        a.offset = PISTOL_RELOAD_SOUND_OFFSET_S;
+        a.play();
+      },
+      stopReload: () => {
+        const a = soundRef.current?.reload;
+        if (a?.isPlaying) a.stop();
+      },
       update: (delta) => {
         const t = pistolHoldTuning;
         parts.holder.position.set(t.px, t.py, t.pz);
@@ -168,15 +253,21 @@ export function usePistolModel(
         );
         if (!parts.holder.visible) return;
         slideOffsetRef.current = Math.max(0, slideOffsetRef.current - (PISTOL_SLIDE_KICK_M / PISTOL_SLIDE_RETURN_S) * delta);
-        if (parts.slide) offsetAlongGunAxis(parts.slide, parts.slideRest, BACK, slideOffsetRef.current);
+        const p = reloadRef.current;
+        // ricarica a tempo col suono (fasi in weaponConfig): caricatore
+        // fuori -> dentro, poi carrello tirato indietro e rilasciato
+        let rack = 0;
+        if (p !== null && p >= RELOAD_SLIDE_START && p < RELOAD_SLIDE_END) {
+          const k = (p - RELOAD_SLIDE_START) / (RELOAD_SLIDE_END - RELOAD_SLIDE_START);
+          rack = (k < 0.6 ? k / 0.6 : 1 - (k - 0.6) / 0.4) * PISTOL_SLIDE_KICK_M * 1.5;
+        }
+        if (parts.slide) offsetAlongGunAxis(parts.slide, parts.slideRest, BACK, Math.max(slideOffsetRef.current, rack));
         if (parts.mag) {
-          const p = reloadRef.current;
-          // caricatore: esce nel primo 35%, fuori fino al 60%, rientra entro l'85%
           let drop = 0;
           if (p !== null) {
-            if (p < 0.35) drop = p / 0.35;
-            else if (p < 0.6) drop = 1;
-            else if (p < 0.85) drop = 1 - (p - 0.6) / 0.25;
+            if (p < RELOAD_MAG_OUT_END) drop = p / RELOAD_MAG_OUT_END;
+            else if (p < RELOAD_MAG_IN_START) drop = 1;
+            else if (p < RELOAD_MAG_IN_END) drop = 1 - (p - RELOAD_MAG_IN_START) / (RELOAD_MAG_IN_END - RELOAD_MAG_IN_START);
           }
           offsetAlongGunAxis(parts.mag, parts.magRest, DOWN, drop * 0.14);
         }

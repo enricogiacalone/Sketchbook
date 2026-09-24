@@ -98,7 +98,8 @@ const Scene: React.FC = () => {
       <Terrain />
       {isRaceTest && <RaceTrack />}
       {!isCleanTest && <Road />}
-      {!isCleanTest && <Clouds />}
+      {/* nuvole anche nel duello: la sala delle casse e' a cielo aperto */}
+      {(!isCleanTest || isDuelTest) && <Clouds />}
       <Ocean />
       <Planets />
       {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}

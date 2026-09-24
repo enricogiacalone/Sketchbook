@@ -1,0 +1,5 @@
+cloud.png -- da https://github.com/chasergit/gear (textures/sprite/cloud.png), commit f9bb104
+ATTENZIONE: quel repo NON ha nessuna licenza -> la texture non e' liberamente
+redistribuibile. Va bene in locale; prima di pubblicare va sostituita.
+Esclusa da git (vedi .gitignore qui accanto): se manca, Clouds.tsx usa il
+vecchio sprite sfumato generato nel codice.
