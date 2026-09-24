@@ -15,6 +15,7 @@ import MissionHUD from "./components/UI/MissionHUD";
 import Controls from "./components/UI/Controls";
 import GithubCorner from "./components/UI/GithubCorner";
 import WelcomeScreen from "./components/UI/WelcomeScreen";
+const FlyLab = React.lazy(() => import("./flyLab/FlyLab"));
 import LoadingScreen from "./components/UI/LoadingScreen";
 import ChatInput from "./components/UI/ChatInput";
 import Minimap from "./components/UI/Minimap";
@@ -36,6 +37,8 @@ import * as THREE from "three";
 
 const App: React.FC = () => {
   const [isJoined, setIsJoined] = useState(false);
+  // "Laboratorio cervello mosca" (WelcomeScreen): scena a parte, vedi src/ts/flyLab
+  const [labMode, setLabMode] = useState(false);
   const [userName, setUserName] = useState("");
   const { isLoading, setIsLoading, isPaused, setPaused, testScene, showGameplayHud } = useStore(
     useShallow((state) => ({
@@ -66,7 +69,13 @@ const App: React.FC = () => {
     return params.get("autojoin") || "Claude";
   }, []);
 
-  const handleJoin = (name: string, controlMethod: string, mode: 'world' | 'duel' = 'world') => {
+  const handleJoin = (name: string, controlMethod: string, mode: 'world' | 'duel' | 'flylab' = 'world') => {
+    if (mode === 'flylab') {
+      // laboratorio: niente mondo di gioco, niente caricamento del gioco
+      setUserName(name);
+      setLabMode(true);
+      return;
+    }
     setUserName(name);
     setIsJoined(true);
     setIsLoading(true); // Start showing loader while Suspense does its thing
@@ -141,6 +150,14 @@ const App: React.FC = () => {
     return () =>
       document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [setPaused]);
+
+  if (labMode) {
+    return (
+      <Suspense fallback={<div style={{ color: "#aaa", padding: 20 }}>carico il laboratorio...</div>}>
+        <FlyLab onExit={() => setLabMode(false)} />
+      </Suspense>
+    );
+  }
 
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#111" }}>

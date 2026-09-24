@@ -22,7 +22,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "prettier --check .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "mosca:train": "node --experimental-strip-types --import ./training/fly-brain/register.mjs training/fly-brain/train.ts",
+    "mosca:eval": "node --experimental-strip-types --import ./training/fly-brain/register.mjs training/fly-brain/evaluate.ts",
+    "mosca:test": "node --experimental-strip-types --import ./training/fly-brain/register.mjs training/fly-brain/quicktest.ts"
   },
   "repository": {
     "type": "git",

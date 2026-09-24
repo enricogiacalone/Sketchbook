@@ -12,6 +12,7 @@ import { useInput } from '../../hooks/useInput';
 import { FighterData, AnimCatalog } from './SquadArenaTypes';
 import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
+import { locomotionTuning as LT, RUN_CLIP, timeScaleFor, speedFor, strafeClipFor } from './locomotion';
 import { useRapier } from '@react-three/rapier';
 import { usePistolModel } from './weapons/usePistolModel';
 import { castShot, spreadDirection } from './weapons/hitscan';
@@ -50,7 +51,16 @@ function splitClip(clip: THREE.AnimationClip, part: 'legs' | 'upper'): THREE.Ani
 }
 const PISTOL_BASE_CLIPS = ['Pistol_Idle', 'Walk', 'Walk_Backwards', 'Strafe_left', 'Strafe_right', 'Sprint', 'Jog'];
 const PISTOL_UPPER_CLIPS = ['Pistol_Idle', 'Pistol_Aim_Neutral', 'Pistol_Shoot', 'Pistol_Reload'];
-const AIM_WALK_SPEED = 1.5; // units/sec, camminata in mira
+// timeScale delle clip di camminata direzionali (Walk / Walk_Backwards /
+// Strafe_*): la velocita' viene dalla clip (locomotion.ts), cosi' avanti,
+// indietro e di lato hanno ognuno la sua velocita' senza pattinare.
+// indietro e di lato vanno piu' piano che in avanti (stessa cadenza, passi
+// piu' corti: Walk_Backwards 0.82x, Strafe 0.68x la velocita' in avanti)
+const dirWalkTs = () => timeScaleFor('Walk', LT.walkSpeed);
+const aimWalkTs = () => timeScaleFor('Walk', LT.aimWalkSpeed);
+// "sta in posizione di combattimento solo quando aggancio un nemico, per il
+// resto in idle normale": idle rilassato del rig (il primo che esiste)
+const RELAXED_IDLE_CLIPS = ['Idle_A', 'Idle_Subtle', 'Idle'];
 const PISTOL_FACE_TURN_RATE = 0.3;
 const PISTOL_SHOOT_ANIM_S = 0.22;
 const _shotCamDir = new THREE.Vector3();
@@ -75,8 +85,7 @@ const ADDON_ANIMS_URL = 'soldier-citizen-addon-animations.glb';
 // a glance even though it's the exact same model/rig as the AI opponent.
 const PLAYER_COLOR = '#22c55e';
 
-const WALK_SPEED = 2.2; // units/sec
-const RUN_SPEED = 4.2; // units/sec
+// WALK_SPEED / RUN_SPEED ora vengono da locomotion.ts (misurate sulle clip)
 // A little more forgiving than the AI's own 1.4 melee-range check
 // (CombatSoldier.tsx) -- the AI measures distance itself every frame and
 // only swings when already in range, but a human mashing the attack
@@ -301,7 +310,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
 
     const catalog: AnimCatalog = {
       idle: pickAnim(['Fighting Idle', 'Idle']),
-      run: pickAnim(['Run', 'Sprint', 'Walk']),
+      run: pickAnim([RUN_CLIP, 'Run', 'Sprint', 'Walk']),
       walk: pickAnim(['Walk', 'Run']),
       dodge: pickAnim(['Roll_Forward', 'Roll_Back', 'Dodge_back', 'Dodge_Left']),
       block: pickAnim(['Block', 'Defend', 'Fighting Idle']),
@@ -554,11 +563,37 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     return false;
   };
 
+  // Clip di locomozione per la direzione di _moveDir RISPETTO al corpo
+  // (avanti / indietro / destra / sinistra), a un timeScale dato; la
+  // velocita' e' quella misurata della clip (locomotion.ts). Corsa solo in
+  // avanti. suffix '__legs' = solo gambe (pistola), '' = corpo intero.
+  const pickDirectionalLoco = (run: boolean, ts: number, suffix: '' | '__legs') => {
+    _bodyFwd.set(-Math.sin(data.rotation), 0, -Math.cos(data.rotation));
+    _bodyRight.crossVectors(_bodyFwd, _worldUp);
+    const f = _moveDir.dot(_bodyFwd);
+    const r = _moveDir.dot(_bodyRight);
+    if (run && f > 0.5 && actions[RUN_CLIP + suffix]) {
+      return { clip: RUN_CLIP + suffix, speed: LT.runSpeed, ts: timeScaleFor(RUN_CLIP, LT.runSpeed), running: true };
+    }
+    let base: string;
+    if (Math.abs(f) >= Math.abs(r)) base = f >= 0 ? 'Walk' : 'Walk_Backwards';
+    else base = strafeClipFor(r > 0);
+    if (!actions[base + suffix]) base = 'Walk';
+    return { clip: base + suffix, speed: speedFor(base, ts), ts, running: false };
+  };
+
   // --- Pistola -------------------------------------------------------
   // Clip "gambe" di riposo: con la pistola le gambe stanno ferme mentre il
   // busto tiene la posa Pistol_* sul layer alto.
-  const idleName = () =>
-    weaponRef.current === 'pistol' && actions['Pistol_Idle__legs'] ? 'Pistol_Idle__legs' : animCatalog.idle;
+  // Guardia (Fighting Idle) solo col lock-on su un nemico vivo; altrimenti
+  // idle normale. Con la pistola le gambe stanno nella posa Pistol_Idle.
+  const relaxedIdle = RELAXED_IDLE_CLIPS.find((n) => actions[n]) ?? animCatalog.idle;
+  const isEngaged = () => !!input.lockOn && opponents.some((o) => !o.isDead);
+  const idleName = () => {
+    if (weaponRef.current === 'pistol' && actions['Pistol_Idle__legs']) return 'Pistol_Idle__legs';
+    return isEngaged() ? animCatalog.idle : relaxedIdle;
+  };
+  const idleState = () => (weaponRef.current === 'fists' && !isEngaged() ? 'Riposo' : 'In guardia');
 
   const equipWeapon = (w: 'fists' | 'pistol') => {
     if (weaponRef.current === w) return;
@@ -904,7 +939,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     ragdoll.update(
       delta,
       useStore.getState().euphoriaRagdollEnabled,
-      data.state === 'In guardia',
+      data.state === 'In guardia' || data.state === 'Riposo',
       useStore.getState().ragdollPassive
     );
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
@@ -1013,7 +1048,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
           if (finalizePendingHit()) attackHasLandedRef.current = true;
         }
         transitionToAnimation(idleName(), 0.2, true);
-        data.state = 'In guardia';
+        data.state = idleState();
         isDodgingRef.current = false;
         isAttackingRef.current = false;
       }
@@ -1135,23 +1170,13 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       if (_moveDir.lengthSq() > 0.0001) {
         _moveDir.normalize();
         const sprint = input.shift && !aimingRef.current && reloadLeftRef.current <= 0;
-        const speed = aimingRef.current ? AIM_WALK_SPEED : sprint ? RUN_SPEED : WALK_SPEED;
-        resolveAndApplyMovement(_moveDir.x * speed * delta * globalSpeed, _moveDir.z * speed * delta * globalSpeed);
-        _bodyFwd.set(-Math.sin(data.rotation), 0, -Math.cos(data.rotation));
-        _bodyRight.crossVectors(_bodyFwd, _worldUp);
-        const f = _moveDir.dot(_bodyFwd);
-        const r = _moveDir.dot(_bodyRight);
-        let legs: string;
-        if (sprint && f > 0.5) legs = 'Sprint__legs';
-        else if (Math.abs(f) >= Math.abs(r)) legs = f >= 0 ? 'Walk__legs' : 'Walk_Backwards__legs';
-        else legs = r > 0 ? 'Strafe_right__legs' : 'Strafe_left__legs';
-        if (!actions[legs]) legs = 'Walk__legs';
-        const ts = aimingRef.current ? 0.75 : 1.0;
-        transitionToAnimation(legs, 0.2, true, ts);
-        data.state = sprint ? 'Corre' : 'Si muove';
+        const loco = pickDirectionalLoco(sprint, aimingRef.current ? aimWalkTs() : dirWalkTs(), '__legs');
+        resolveAndApplyMovement(_moveDir.x * loco.speed * delta * globalSpeed, _moveDir.z * loco.speed * delta * globalSpeed);
+        transitionToAnimation(loco.clip, 0.2, true, loco.ts);
+        data.state = loco.running ? 'Corre' : 'Si muove';
       } else {
         transitionToAnimation(idleName(), 0.2, true);
-        data.state = 'In guardia';
+        data.state = idleState();
       }
       applyTransform();
       return;
@@ -1228,13 +1253,23 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // block needs them too).
     if (_moveDir.lengthSq() > 0.0001) {
       _moveDir.normalize();
-      const speed = input.shift ? RUN_SPEED : WALK_SPEED;
-      resolveAndApplyMovement(_moveDir.x * speed * delta * globalSpeed, _moveDir.z * speed * delta * globalSpeed);
-      data.state = input.shift ? 'Corre' : 'Si muove';
-      transitionToAnimation(input.shift ? animCatalog.run : animCatalog.walk, 0.15, true, input.shift ? 1.3 : 1.0);
+      // a mani nude il corpo gira verso dove cammina, quindi clip in avanti;
+      // col lock-on (Ctrl) guarda il nemico e le gambe usano la clip della
+      // direzione (indietro / di lato) -- velocita' sempre quella della clip
+      let loco: { clip: string; speed: number; ts: number; running: boolean };
+      if (input.lockOn && _toOpponent.lengthSq() > 0.0001) {
+        loco = pickDirectionalLoco(input.shift, dirWalkTs(), '');
+      } else if (input.shift) {
+        loco = { clip: animCatalog.run, speed: LT.runSpeed, ts: timeScaleFor(animCatalog.run, LT.runSpeed), running: true };
+      } else {
+        loco = { clip: animCatalog.walk, speed: LT.walkSpeed, ts: timeScaleFor(animCatalog.walk, LT.walkSpeed), running: false };
+      }
+      resolveAndApplyMovement(_moveDir.x * loco.speed * delta * globalSpeed, _moveDir.z * loco.speed * delta * globalSpeed);
+      data.state = loco.running ? 'Corre' : 'Si muove';
+      transitionToAnimation(loco.clip, 0.15, true, loco.ts);
     } else {
-      data.state = 'In guardia';
-      transitionToAnimation(animCatalog.idle, 0.15, true);
+      data.state = idleState();
+      transitionToAnimation(idleName(), 0.2, true);
     }
 
     applyTransform();

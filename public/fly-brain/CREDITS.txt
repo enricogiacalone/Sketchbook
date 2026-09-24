@@ -1,0 +1,21 @@
+Cervello della mosca -- sottografo del connettoma di Drosophila melanogaster
+(FlyWire FAFB v783), usato come struttura della rete che comanda il personaggio.
+
+Dati: FlyWire Consortium -- Dorkenwald et al. 2024 (Nature 634:124), Schlegel et al.
+2024 (Nature 634:139). Licenza dati FlyWire: CC BY-NC 4.0 (uso non commerciale,
+citare la fonte). https://codex.flywire.ai
+Connettivita' con segni: Connectivity_783.parquet da Shiu et al. 2024 (Nature 634:210),
+https://github.com/philshiu/Drosophila_brain_model (GABA e glutammato = inibitori).
+Annotazioni (super_class, cell_type): https://github.com/flyconnectome/flywire_annotations
+
+Selezione (script in training/fly-brain/build_subgraph.py):
+ - afferenti = neuroni ascendenti (ascending + sensory_ascending): 2362
+   -> ricevono lo stato del corpo "umano" (propriocezione)
+ - efferenti = neuroni discendenti (descending): 1303 -> comandi motori
+ - intermedi = 1500 neuroni centrali che collegano AN -> DN (punteggio
+   sqrt(sinapsi da AN * sinapsi verso DN))
+ - sinapsi con >= 5 contatti; peso = conteggio con segno
+ - 5165 neuroni, 108081 connessioni
+
+fly-brain.json: neuroni (id FlyWire, ruolo 0/1/2, tipo, classe, lato, neurotrasmettitore)
+fly-brain-edges.bin: 'FLYE' + uint32 n + int32 pre[n] + int32 post[n] + int16 w[n] (little endian), ordinati per post

@@ -11,6 +11,16 @@ import ActiveRagdollDebugView from './ActiveRagdollDebugView';
 import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
 import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode, AnimCatalog } from './SquadArenaTypes';
+import { locomotionTuning as LT, RUN_CLIP, timeScaleFor } from './locomotion';
+
+// Velocita' dell'IA in m/s (prima erano spostamenti per FRAME: andavano al
+// doppio su uno schermo a 120 Hz). La corsa ora usa la clip Sprint e la
+// camminata verso la torre la Walk quasi a velocita' naturale (WALK_SPEED);
+// le clip ora girano al timeScale che le fa avanzare proprio a quella
+// velocita' (locomotion.ts), quindi niente piedi che pattinano.
+// corsa = Sprint (RUN_CLIP): sotto ~4 m/s la clip sembrerebbe al rallentatore
+// (carica e camminata dal pannello "Locomozione", vedi locomotion.ts)
+const AI_DODGE_BACK_SPEED = 2.4;
 
 const MODEL_URL = 'soldier-citizen.glb';
 const BASE_ANIMS_URL = 'soldier-citizen-base-animations.glb';
@@ -138,7 +148,7 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
 
     const catalog: AnimCatalog = {
       idle: pickAnim(['Fighting Idle', 'Idle']),
-      run: pickAnim(['Run', 'Sprint', 'Walk']),
+      run: pickAnim([RUN_CLIP, 'Run', 'Sprint', 'Walk']),
       walk: pickAnim(['Walk', 'Run']),
       dodge: pickAnim(['Roll_Forward', 'Roll_Back', 'Dodge_back', 'Dodge_Left']),
       block: pickAnim(['Block', 'Defend', 'Fighting Idle']),
@@ -476,8 +486,10 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         }
       } else {
         data.state = 'Corro al medkit!';
-        transitionToAnimation(animCatalog.run, 0.1, true, 1.8);
-        data.position.addScaledVector(toMedkit, 0.075 * globalSpeed);
+        // era 0.075 per FRAME (4.5 m/s a 60 fps, il doppio a 120 Hz);
+        // ora per secondo, e la clip gira alla velocita' giusta
+        transitionToAnimation(animCatalog.run, 0.1, true, timeScaleFor(animCatalog.run, LT.runSpeed));
+        data.position.addScaledVector(toMedkit, LT.runSpeed * delta * globalSpeed);
       }
 
       applyTransform();
@@ -534,8 +546,8 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
 
       if (distTower > tower.radius - 0.5) {
         data.state = 'Conquista torre';
-        transitionToAnimation(animCatalog.walk, 0.15, true, 1.2);
-        data.position.addScaledVector(toTower, 0.04 * globalSpeed);
+        transitionToAnimation(animCatalog.walk, 0.15, true, timeScaleFor(animCatalog.walk, LT.walkSpeed));
+        data.position.addScaledVector(toTower, LT.walkSpeed * delta * globalSpeed);
       } else {
         data.state = 'Provocazione!';
         transitionToAnimation(animCatalog.taunt, 0.2, true);
@@ -593,8 +605,8 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     if (data.isAttacking) {
       if (distance > 1.4) {
         data.state = 'Carica';
-        transitionToAnimation(animCatalog.run, 0.15, true, 1.3);
-        resolveAndApplyMovement(toTarget.x * 0.05 * globalSpeed, toTarget.z * 0.05 * globalSpeed);
+        transitionToAnimation(animCatalog.run, 0.15, true, timeScaleFor(animCatalog.run, LT.aiChargeSpeed));
+        resolveAndApplyMovement(toTarget.x * LT.aiChargeSpeed * delta * globalSpeed, toTarget.z * LT.aiChargeSpeed * delta * globalSpeed);
       } else {
         const chosenAttack = animCatalog.attacks[Math.floor(Math.random() * animCatalog.attacks.length)];
         data.state = `Attacco (${chosenAttack})`;
@@ -613,7 +625,7 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         if (Math.random() > 0.5) {
           data.state = 'Capriola';
           transitionToAnimation(animCatalog.dodge, 0.1, false);
-          resolveAndApplyMovement(toTarget.x * -0.04 * globalSpeed, toTarget.z * -0.04 * globalSpeed);
+          resolveAndApplyMovement(toTarget.x * -AI_DODGE_BACK_SPEED * delta * globalSpeed, toTarget.z * -AI_DODGE_BACK_SPEED * delta * globalSpeed);
         } else {
           data.state = 'Parata';
           transitionToAnimation(animCatalog.block, 0.15, true);

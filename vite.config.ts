@@ -1,10 +1,53 @@
 import { defineConfig } from "vite";
 import path from "path";
 import react from "@vitejs/plugin-react";
+import fs from "fs";
+import type { Plugin } from "vite";
+
+// Laboratorio "cervello mosca" (src/ts/flyLab): il browser addestra e
+// salva i pesi in public/fly-brain/ tramite questa rotta del server di
+// sviluppo (solo `npm run dev`, non esiste nella build).
+function flyBrainSave(): Plugin {
+  return {
+    name: "fly-brain-save",
+    configureServer(server) {
+      server.middlewares.use("/__flybrain/save", (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end();
+          return;
+        }
+        const url = new URL(req.url ?? "/", "http://localhost");
+        const task = url.searchParams.get("task") ?? "";
+        if (!/^(stand|walk|getup)$/.test(task)) {
+          res.statusCode = 400;
+          res.end("compito non valido");
+          return;
+        }
+        const name = url.searchParams.get("best") ? `weights-${task}-best.json` : `weights-${task}.json`;
+        const chunks: Buffer[] = [];
+        req.on("data", (c) => chunks.push(c));
+        req.on("end", () => {
+          try {
+            const body = Buffer.concat(chunks).toString("utf8");
+            JSON.parse(body);
+            const dir = path.resolve(__dirname, "public/fly-brain");
+            fs.writeFileSync(path.join(dir, name + ".tmp"), body);
+            fs.renameSync(path.join(dir, name + ".tmp"), path.join(dir, name));
+            res.end("ok");
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(String(e));
+          }
+        });
+      });
+    },
+  };
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), flyBrainSave()],
   publicDir: "public",
   server: {
     open: true,
@@ -14,6 +57,9 @@ export default defineConfig({
     // once this is on (requires restarting `npm run dev`, not just HMR --
     // this is server bind config, not app code).
     host: true,
+    // i pesi della mosca cambiano ogni pochi secondi durante l'addestramento:
+    // non devono ricaricare la pagina
+    watch: { ignored: ["**/public/fly-brain/weights-*", "**/training/**"] },
   },
   build: {
     outDir: "build",

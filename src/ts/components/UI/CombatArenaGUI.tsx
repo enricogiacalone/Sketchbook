@@ -3,6 +3,8 @@ import { useStore } from '../../store';
 import type { GameMode } from '../Environment/SquadArenaTypes';
 import { acquireDebugGui, releaseDebugGui } from '../../lib/debugGui';
 import { pistolHoldTuning } from '../Environment/weapons/usePistolModel';
+import { locomotionTuning, CLIP_GROUND_SPEED } from '../Environment/locomotion';
+import { flyBrainSettings } from '../../flyBrain/flyBrainSettings';
 
 // "fammi scegliere come su simulation citta le modalita di scontro dei
 // manichini che si combattono" -- simulation-citta's CombatArenaSimulation
@@ -200,6 +202,30 @@ const CombatArenaGUI: React.FC = () => {
 
     // Presa della pistola nella mano destra (vedi usePistolModel.ts):
     // letta ogni frame, quindi i cursori agiscono dal vivo.
+    // "la mosca si crede un umano" (FlyBrainFighter.tsx)
+    const flyFolder = gui.addFolder('Cervello mosca');
+    flyFolder.add(flyBrainSettings, 'show').name('Mostra la mosca-umano');
+    flyFolder
+      .add(flyBrainSettings, 'task', { 'Stare in piedi': 'stand', Camminare: 'walk', 'Alzarsi da terra': 'getup' })
+      .name('Compito');
+    flyFolder.add(flyBrainSettings, 'brainOff').name('Cervello spento (confronto)');
+    flyFolder.add({ f: () => flyBrainSettings.resetNonce++ }, 'f').name('Riparti');
+    flyFolder.add({ f: () => flyBrainSettings.reloadNonce++ }, 'f').name('Ricarica pesi addestrati');
+    flyFolder.add(flyBrainSettings, 'info').name('Stato').listen().disable();
+
+    // Velocita' di camminata/corsa: la clip si adatta da sola (locomotion.ts)
+    const locoFolder = gui.addFolder('Locomozione');
+    locoFolder.add(locomotionTuning, 'walkSpeed', 0.5, 3, 0.05).name('Camminata (m/s)');
+    locoFolder.add(locomotionTuning, 'runSpeed', 2.5, 8, 0.1).name('Corsa Shift (m/s)');
+    locoFolder.add(locomotionTuning, 'aimWalkSpeed', 0.4, 2, 0.05).name('Camminata in mira (m/s)');
+    locoFolder.add(locomotionTuning, 'aiChargeSpeed', 1, 8, 0.1).name('Carica nemici (m/s)');
+    locoFolder.add({
+      info: () =>
+        console.log(
+          `[locomozione] Walk x${(locomotionTuning.walkSpeed / CLIP_GROUND_SPEED.Walk).toFixed(2)}, Sprint x${(locomotionTuning.runSpeed / CLIP_GROUND_SPEED.Sprint).toFixed(2)}`
+        ),
+    }, 'info').name('Scrivi timeScale in console');
+
     const pistolFolder = gui.addFolder('Pistola (presa)');
     pistolFolder.add(pistolHoldTuning, 'px', -0.2, 0.2, 0.005).name('pos X');
     pistolFolder.add(pistolHoldTuning, 'py', -0.2, 0.3, 0.005).name('pos Y');
@@ -211,6 +237,8 @@ const CombatArenaGUI: React.FC = () => {
 
     return () => {
       pistolFolder.destroy();
+      locoFolder.destroy();
+      flyFolder.destroy();
       folder.destroy();
       releaseDebugGui();
     };

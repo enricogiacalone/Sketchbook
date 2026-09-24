@@ -1,5 +1,6 @@
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import AudioArena from './audioArena/AudioArena';
+import FlyBrainFighter from './FlyBrainFighter';
 import WeaponEffects from './weapons/WeaponEffects';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -409,6 +410,11 @@ const DuelArena: React.FC = () => {
           il duello. */}
       <Suspense fallback={null}>
         <AudioArena />
+      </Suspense>
+      {/* "la mosca si crede un umano": personaggio comandato dal cervello-
+          connettoma (pannello "Cervello mosca", vedi FlyBrainFighter.tsx) */}
+      <Suspense fallback={null}>
+        <FlyBrainFighter />
       </Suspense>
       <PlayerCombatSoldier
         data={playerData}
