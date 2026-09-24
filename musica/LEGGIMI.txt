@@ -1,0 +1,20 @@
+MUSICA DELLE CASSE DELL'ARENA (duello)
+
+Metti qui i tuoi file audio: mp3, ogg, wav, m4a, aac, flac, opus.
+
+  musica/cassa-cubi/     -> cassa a OVEST, quella col muro di cubi (spettrogramma)
+  musica/cassa-schermo/  -> cassa a EST, quella con lo schermo a barre circolari
+
+Ogni cassa suona i SUOI file in ordine alfabetico, uno dopo l'altro, e
+ricomincia dal primo alla fine. Se una cartella e' vuota quella cassa
+suona il brano di prova (public/audio-arena/music-demo).
+
+Con `npm run dev` acceso basta copiare i file qui: la pagina si aggiorna
+da sola e le casse ripartono coi nuovi brani.
+
+I file audio in queste cartelle NON finiscono in git (vedi .gitignore qui
+accanto), quindi puoi metterci anche musica tua senza pubblicarla.
+
+Comandi nel gioco: M = play/pausa di tutte e due, J = solo cassa cubi,
+K = solo cassa schermo; pannello debug "Musica" per brano
+successivo, volume e distanza di attenuazione.

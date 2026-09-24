@@ -203,7 +203,25 @@ interface GameState {
   // alla scena e complicando l'ispezione del solo giocatore. Default
   // false (nessun avversario finche' non lo chiedi esplicitamente dal
   // pannello Arena, pulsante "Aggiungi nemico").
-  duelEnemySpawned: boolean;
+  // "il bottone aggiungi nemico deve aggiungere un nemico nuovo tutte le
+  // volte che lo premo" -- da booleano a CONTATORE: ogni pressione ne
+  // aggiunge uno (DuelArena.tsx crea un FighterData nuovo per ciascuno),
+  // "Rimuovi nemici" lo riporta a 0. Sopravvive al retry (Scene.tsx
+  // rimonta DuelArena, che ricrea lo stesso numero di nemici).
+  duelEnemyCount: number;
+  // "estrai la pistola e la logica di sparo e mirata. aggiungilo al nostro
+  // personaggio" -- stato dell'arma del giocatore del duello, letto dalla
+  // camera (mira sopra la spalla, useThirdPersonCamera.ts), dal mirino e
+  // dal contatore colpi (WeaponHUD.tsx). Scritto da PlayerCombatSoldier.tsx.
+  playerWeapon: 'fists' | 'pistol';
+  playerAiming: boolean;
+  pistolAmmo: number;
+  pistolReloading: boolean;
+  // "hit marker" del mirino: istante (performance.now) dell'ultimo colpo a
+  // segno su un combattente, e se era un colpo mortale / alla testa.
+  pistolHitAt: number;
+  pistolHitKill: boolean;
+  pistolHitHead: boolean;
   // "aggiungi la possibilita' di attivare la vista ortogonale" -- vedi
   // DebugOrthoCamera.tsx. Quando true prende il controllo della camera
   // del Canvas (drei's makeDefault) al posto della terza persona
@@ -304,7 +322,9 @@ interface GameState {
   setShowPhysicsDebug: (active: boolean) => void;
   setShowActiveRagdollDebug: (active: boolean) => void;
   setTPoseDebug: (active: boolean) => void;
-  setDuelEnemySpawned: (active: boolean) => void;
+  addDuelEnemy: () => void;
+  setPlayerWeaponState: (partial: Partial<Pick<GameState, 'playerWeapon' | 'playerAiming' | 'pistolAmmo' | 'pistolReloading' | 'pistolHitAt' | 'pistolHitKill' | 'pistolHitHead'>>) => void;
+  clearDuelEnemies: () => void;
   setDebugOrthoCamera: (active: boolean) => void;
   setDebugOrthoCameraAngleDeg: (deg: number) => void;
   setRagdollBench: (partial: Partial<RagdollBenchSettings>) => void;
@@ -357,7 +377,14 @@ export const useStore = create<GameState>((set) => ({
   showPhysicsDebug: false,
   showActiveRagdollDebug: false,
   tPoseDebug: false,
-  duelEnemySpawned: false,
+  duelEnemyCount: 0,
+  playerWeapon: 'fists',
+  playerAiming: false,
+  pistolAmmo: 12,
+  pistolReloading: false,
+  pistolHitAt: 0,
+  pistolHitKill: false,
+  pistolHitHead: false,
   debugOrthoCamera: false,
   debugOrthoCameraAngleDeg: 0,
   ragdollBench: { ...DEFAULT_RAGDOLL_BENCH },
@@ -424,7 +451,9 @@ export const useStore = create<GameState>((set) => ({
   setShowPhysicsDebug: (showPhysicsDebug) => set({ showPhysicsDebug }),
   setShowActiveRagdollDebug: (showActiveRagdollDebug) => set({ showActiveRagdollDebug }),
   setTPoseDebug: (tPoseDebug) => set({ tPoseDebug }),
-  setDuelEnemySpawned: (duelEnemySpawned) => set({ duelEnemySpawned }),
+  addDuelEnemy: () => set((state) => ({ duelEnemyCount: state.duelEnemyCount + 1 })),
+  setPlayerWeaponState: (partial) => set(partial),
+  clearDuelEnemies: () => set({ duelEnemyCount: 0 }),
   setDebugOrthoCamera: (debugOrthoCamera) => set({ debugOrthoCamera }),
   setDebugOrthoCameraAngleDeg: (debugOrthoCameraAngleDeg) => set({ debugOrthoCameraAngleDeg }),
   setRagdollBench: (partial) => set((state) => ({ ragdollBench: { ...state.ragdollBench, ...partial } })),

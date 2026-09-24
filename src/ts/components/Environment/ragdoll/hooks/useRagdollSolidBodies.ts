@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useRapier } from "@react-three/rapier";
+import { registerShootableCollider, unregisterShootableCollider } from "../../weapons/shootableRegistry";
 import type {
   RigidBody as RapierRigidBody,
   Collider,
@@ -35,7 +36,9 @@ export interface SolidBodySegmentDebug {
 
 export function useRagdollSolidBodies(
   modelRootRef: React.RefObject<THREE.Object3D | null>,
-  resolveBones: () => Record<string, THREE.Bone> | null
+  resolveBones: () => Record<string, THREE.Bone> | null,
+  // Proprietario dei collider per i proiettili (vedi shootableRegistry.ts)
+  ownerId?: string
 ) {
   const { world, rapier } = useRapier();
   const solidBodiesRef = useRef<Record<string, SolidBodyEntry>>({});
@@ -90,9 +93,10 @@ export function useRagdollSolidBodies(
 
       entries[segment.name] = { body, collider, halfHeight, radius: segment.radius };
       ownColliderHandlesRef.current.add(collider.handle);
+      if (ownerId) registerShootableCollider(collider.handle, { ownerId, segment: segment.name });
     }
     return Object.keys(entries).length > 0;
-  }, [rapier, world, resolveBones]);
+  }, [rapier, world, resolveBones, ownerId]);
 
   const syncSolidBody = useCallback(() => {
     const entries = solidBodiesRef.current;
@@ -202,6 +206,7 @@ export function useRagdollSolidBodies(
   useEffect(
     () => () => {
       for (const name of Object.keys(solidBodiesRef.current)) {
+        unregisterShootableCollider(solidBodiesRef.current[name].collider.handle);
         world.removeRigidBody(solidBodiesRef.current[name].body);
       }
       solidBodiesRef.current = {};

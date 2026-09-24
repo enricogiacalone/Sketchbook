@@ -33,9 +33,17 @@ const PAD_JAB = ['□ Square', 'L2']; // button 2, or button 6
 // "guardare l'avversario se tengo premuto l1" -- held lock-on modifier
 // (see useInput.ts's 'lockOn' action).
 const PAD_LOCK_ON = ['L1']; // button 4
+// Armi del duello (useInput.ts: 'weapon1' / 'weapon2' / 'reload'):
+// D-pad sinistra = pugni, destra = pistola, giu' = ricarica.
+const PAD_WEAPON_FISTS = ['D-pad ←']; // button 14
+const PAD_WEAPON_PISTOL = ['D-pad →']; // button 15
+const PAD_RELOAD = ['D-pad ↓']; // button 13
 
 const Controls: React.FC = () => {
   const currentControllable = useStore((state) => state.currentControllable);
+  // I comandi del combattente cambiano con l'arma in mano (vedi
+  // PlayerCombatSoldier.tsx): a mani nude i pugni, con la pistola lo sparo.
+  const playerWeapon = useStore((state) => state.playerWeapon);
 
   // "se ho un gamepad fammi vedere i tasti corrispondenti" -- only show
   // gamepad button pills once a pad is actually detected, so keyboard-only
@@ -73,7 +81,24 @@ const Controls: React.FC = () => {
   const getControls = (): ControlRow[] => {
     switch (currentControllable) {
       case 'combatSoldier':
+        if (playerWeapon === 'pistol') {
+          return [
+            { keys: ['1'], pad: PAD_WEAPON_FISTS, desc: 'Pugni' },
+            { keys: ['2'], pad: PAD_WEAPON_PISTOL, desc: 'Pistola (in mano)' },
+            { keys: ['W', 'A', 'S', 'D'], pad: PAD_LEFT_STICK, desc: 'Move / Strafe' },
+            { keys: ['Shift'], pad: PAD_SHIFT, desc: 'Sprint (non in mira)' },
+            { keys: ['Mouse'], desc: 'Punta il mirino' },
+            { keys: ['Right Click', '(hold)'], pad: PAD_SECONDARY, desc: 'Mira (zoom, più preciso)' },
+            { keys: ['Left Click'], pad: PAD_PRIMARY, desc: 'Spara' },
+            { keys: ['R'], pad: PAD_RELOAD, desc: 'Ricarica (12 colpi)' },
+            { keys: ['Space'], pad: PAD_JUMP, desc: 'Dodge' },
+            { keys: ['M'], desc: 'Musica play / pausa (tutte)' },
+          { keys: ['J', 'K'], desc: 'Play / pausa cassa cubi / schermo' },
+          ];
+        }
         return [
+          { keys: ['1'], pad: PAD_WEAPON_FISTS, desc: 'Pugni (in mano)' },
+          { keys: ['2'], pad: PAD_WEAPON_PISTOL, desc: 'Pistola' },
           { keys: ['W', 'A', 'S', 'D'], pad: PAD_LEFT_STICK, desc: 'Move' },
           { keys: ['Shift'], pad: PAD_SHIFT, desc: 'Sprint' },
           { keys: ['Left Click'], pad: PAD_PRIMARY, desc: 'Cross (R)' },
@@ -82,6 +107,8 @@ const Controls: React.FC = () => {
           { keys: ['Right Click', '(hold)'], pad: PAD_SECONDARY, desc: 'Block' },
           { keys: ['Space'], pad: PAD_JUMP, desc: 'Dodge' },
           { keys: ['Ctrl', '(hold)'], pad: PAD_LOCK_ON, desc: 'Lock-on Avversario' },
+          { keys: ['M'], desc: 'Musica play / pausa (tutte)' },
+          { keys: ['J', 'K'], desc: 'Play / pausa cassa cubi / schermo' },
         ];
       case 'car':
         return [

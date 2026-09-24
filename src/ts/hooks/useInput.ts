@@ -23,6 +23,17 @@ const ACTION_NAMES = [
   // it needs to be read as a continuous held state (input.lockOn),
   // not consumeJustPressed.
   'lockOn',
+  // "estrai la pistola..." -- cambio arma nel duello (1 = pugni, 2 =
+  // pistola; croce direzionale sinistra/destra sul pad) e ricarica sul pad
+  // (croce giu'; da tastiera la ricarica e' R, che e' gia' 'respawn' --
+  // PlayerCombatSoldier.tsx legge entrambe).
+  'weapon1',
+  'weapon2',
+  'reload',
+  'music',
+  // play/pausa di una sola cassa: J = cassa cubi, K = cassa schermo
+  'musicCubi',
+  'musicSchermo',
 ] as const;
 type Action = (typeof ACTION_NAMES)[number];
 
@@ -47,6 +58,12 @@ const emptyActionMap = (): Record<Action, boolean> => ({
   headlights: false,
   attackLeft: false,
   lockOn: false,
+  weapon1: false,
+  weapon2: false,
+  reload: false,
+  music: false,
+  musicCubi: false,
+  musicSchermo: false,
 });
 
 export const useInput = () => {
@@ -102,6 +119,12 @@ export const useInput = () => {
     KeyL: 'headlights',
     Escape: 'pause',
     ControlLeft: 'lockOn',
+    Digit1: 'weapon1',
+    Digit2: 'weapon2',
+    // casse audio dell'arena (AudioArena.tsx): play/pausa
+    KeyM: 'music',
+    KeyJ: 'musicCubi',
+    KeyK: 'musicSchermo',
   };
 
   useEffect(() => {
@@ -264,6 +287,9 @@ export const useInput = () => {
     // everything above, L1 (button 4) has never driven anything in
     // this app before now, so no reuse/overlap reasoning needed.
     g.lockOn = !!pad.buttons[4]?.pressed; // L1
+    g.weapon1 = !!pad.buttons[14]?.pressed; // croce sinistra: pugni
+    g.weapon2 = !!pad.buttons[15]?.pressed; // croce destra: pistola
+    g.reload = !!pad.buttons[13]?.pressed; // croce giu': ricarica
     // Back/Select: cycle the camera's 4 zoom presets (see ZOOM_LEVELS in
     // useThirdPersonCamera.ts). Reuses the 'camera' action, which already
     // existed with a keyboard binding (KeyC) but, like enter_passenger

@@ -85,6 +85,10 @@ export interface FighterData {
   // store.ts's own comment on that field for why the bridge runs through
   // the store instead of a prop).
   isPassive: boolean;
+  // Il colpo che ha impostato triggerHit ha GIA' dato la sua spinta fisica
+  // al ragdoll (proiettile: impulso nel punto esatto, vedi
+  // PlayerCombatSoldier.tsx) -- il ricevente non deve aggiungerne un'altra.
+  hitReactionHandled?: boolean;
 }
 
 export interface TowerData {

@@ -25,6 +25,7 @@ import {
   type ActiveRagdollSegmentDebug,
 } from "./hooks/useRagdollActive";
 import type { JointRange } from "./activeRagdollFrames";
+import { registerFighterHitHandler } from "../weapons/shootableRegistry";
 
 export type { ActiveRagdollSegmentDebug };
 
@@ -98,7 +99,10 @@ const SPINE_LEAN_MAX_RAD = THREE.MathUtils.degToRad(40);
 const SPINE_TWIST_MAX_RAD = THREE.MathUtils.degToRad(80);
 
 export function useRagdoll(
-  modelRootRef: React.RefObject<THREE.Object3D | null>
+  modelRootRef: React.RefObject<THREE.Object3D | null>,
+  // id del combattente (FighterData.id): i suoi collider vengono
+  // registrati per i proiettili (weapons/shootableRegistry.ts)
+  ownerId?: string
 ): RagdollController {
   const { world, rapier } = useRapier();
   const { scene } = useThree();
@@ -107,7 +111,7 @@ export function useRagdoll(
   const { syncHurtbox, getHurtboxHandle: internalGetHurtboxHandle } =
     useRagdollHurtbox(modelRootRef);
   const { syncSolidBody, resolveBodyMovement, getSolidBodySegments } =
-    useRagdollSolidBodies(modelRootRef, resolveBones);
+    useRagdollSolidBodies(modelRootRef, resolveBones, ownerId);
   const {
     buildBodies,
     destroyBodies,
@@ -134,7 +138,7 @@ export function useRagdoll(
     getActiveRagdollDebugSegments,
     measureClipRanges,
     setNeutralClip,
-  } = useRagdollActive(modelRootRef, resolveBones);
+  } = useRagdollActive(modelRootRef, resolveBones, ownerId);
   // KO del layer attivo (morte con ragdoll attivo acceso): motori spenti,
   // gravita' piena, finche' il combattente non viene ricreato/deactivate.
   const activeKnockedOutRef = useRef(false);
@@ -489,6 +493,25 @@ export function useRagdoll(
     },
     [applyActiveHit, activeBodiesRef, triggerHitMarker]
   );
+
+  // "estrai la pistola e la logica di sparo" -- reazione fisica a un
+  // proiettile: impulso sul segmento colpito del ragdoll attivo nel punto
+  // esatto d'impatto (stile Euphoria: il corpo incassa e poi i motori lo
+  // riportano in posa). Senza layer attivo si ripiega sul colpo
+  // transitorio, sul segmento equivalente piu' vicino.
+  const shotReactionRef = useRef<(segment: string, dir: THREE.Vector3, speed: number, point: THREE.Vector3) => void>(() => {});
+  shotReactionRef.current = (segment, dir, speed, point) => {
+    if (hasActiveRig()) {
+      applyActiveHit(segment, dir, speed, point);
+      return;
+    }
+    const fallback: Record<string, string> = { SpineMid: 'Torso', SpineHigh: 'Torso', ClavicleL: 'UpperArm_L', ClavicleR: 'UpperArm_R', Hand_L: 'ForeArm_L', Hand_R: 'ForeArm_R' };
+    pulseHit(dir, speed / ACTIVE_HIT_SPEED_PER_MAGNITUDE, fallback[segment] ?? segment);
+  };
+  useEffect(() => {
+    if (!ownerId) return;
+    return registerFighterHitHandler(ownerId, (segment, dir, speed, point) => shotReactionRef.current(segment, dir, speed, point));
+  }, [ownerId]);
 
   return {
     isActive: () => stateRef.current.active,

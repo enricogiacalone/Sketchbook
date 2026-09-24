@@ -52,6 +52,15 @@ const FOOT_TARGET_Y_OFFSET = 1.3;
 const DUEL_START_RADIUS = 2.6;
 const DUEL_START_PHI = 10; // degrees
 
+// Pistola (PlayerCombatSoldier.tsx): camera sopra la spalla destra, che in
+// mira (tasto destro) si avvicina e stringe il campo visivo.
+const SHOULDER_OFFSET_HIP = 0.45;
+const SHOULDER_OFFSET_AIM = 0.55;
+const SHOULDER_UP = 0.12;
+const AIM_RADIUS_FACTOR = 0.5;
+const AIM_FOV = 40;
+const _shoulderOffset = new THREE.Vector3();
+
 // Right-stick camera look. useInput.ts's poller only ever reads the LEFT
 // stick (axes[0]/[1], for movement) -- despite a comment further down in
 // this file claiming the right stick was "handled separately" here, nothing
@@ -126,6 +135,10 @@ export const useThirdPersonCamera = () => {
   const zoomIndex = useRef(0);
 
   const prevControllable = useRef<string | null>(null);
+  // 0 = niente pistola, 1 = pistola in mano; aimBlend 0..1 = mira
+  const shoulderBlend = useRef(0);
+  const aimBlend = useRef(0);
+  const baseFov = useRef<number | null>(null);
 
   // TEMP DEBUG (Claude): pointer lock never actually engages in the
   // automated browser pane used to test this (verified: document.
@@ -345,10 +358,36 @@ export const useThirdPersonCamera = () => {
     const thetaRad = (theta.current * Math.PI) / 180;
     const phiRad = (phi.current * Math.PI) / 180;
 
+    // Spalla/mira: blend esponenziale indipendente dal framerate.
+    const ws = useStore.getState();
+    const pistolOn = currentControllable === 'combatSoldier' && ws.playerWeapon === 'pistol';
+    const k = 1 - Math.exp(-delta * 12);
+    shoulderBlend.current += ((pistolOn ? 1 : 0) - shoulderBlend.current) * k;
+    aimBlend.current += ((pistolOn && ws.playerAiming ? 1 : 0) - aimBlend.current) * k;
+    const sb = shoulderBlend.current;
+    const ab = aimBlend.current;
+    const camRadius = radius.current * (1 - (1 - AIM_RADIUS_FACTOR) * ab);
+    if (sb > 0.001) {
+      const side = THREE.MathUtils.lerp(SHOULDER_OFFSET_HIP, SHOULDER_OFFSET_AIM, ab) * sb;
+      // destra dello schermo = (cos t, 0, -sin t) per una camera che guarda
+      // verso -(sin t, *, cos t)
+      _shoulderOffset.set(Math.cos(thetaRad) * side, SHOULDER_UP * sb, -Math.sin(thetaRad) * side);
+      target.current.add(_shoulderOffset);
+    }
+    if ((camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
+      const pc = camera as THREE.PerspectiveCamera;
+      if (baseFov.current === null) baseFov.current = pc.fov;
+      const fov = THREE.MathUtils.lerp(baseFov.current, AIM_FOV, ab);
+      if (Math.abs(pc.fov - fov) > 0.01) {
+        pc.fov = fov;
+        pc.updateProjectionMatrix();
+      }
+    }
+
     camera.position.set(
-      target.current.x + radius.current * Math.sin(thetaRad) * Math.cos(phiRad),
-      target.current.y + radius.current * Math.sin(phiRad),
-      target.current.z + radius.current * Math.cos(thetaRad) * Math.cos(phiRad)
+      target.current.x + camRadius * Math.sin(thetaRad) * Math.cos(phiRad),
+      target.current.y + camRadius * Math.sin(phiRad),
+      target.current.z + camRadius * Math.cos(thetaRad) * Math.cos(phiRad)
     );
     camera.lookAt(target.current);
   });

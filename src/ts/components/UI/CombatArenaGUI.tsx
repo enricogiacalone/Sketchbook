@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useStore } from '../../store';
 import type { GameMode } from '../Environment/SquadArenaTypes';
 import { acquireDebugGui, releaseDebugGui } from '../../lib/debugGui';
+import { pistolHoldTuning } from '../Environment/weapons/usePistolModel';
 
 // "fammi scegliere come su simulation citta le modalita di scontro dei
 // manichini che si combattono" -- simulation-citta's CombatArenaSimulation
@@ -78,17 +79,17 @@ const CombatArenaGUI: React.FC = () => {
       .name('Manichino (avversario passivo)')
       .onChange((active: boolean) => useStore.getState().setDuelDummyMode(active));
 
-    // "crea un tasto aggiungi nemico invece di aggiungerlo subito" --
-    // DuelArena.tsx non monta piu' l'avversario automaticamente
-    // all'ingresso nel duello (vedi store.ts's duelEnemySpawned): resta
-    // fuori dalla scena, niente secondo set di collider a complicare
-    // l'ispezione del solo giocatore, finche' non lo chiedi qui.
-    // Pulsante, non checkbox: non ha senso "rimuoverlo" a meta' -- una
-    // volta aggiunto resta (si esce e rientra dal duello per un reset
-    // pulito, come per tutto il resto della scena).
+    // "crea un tasto aggiungi nemico invece di aggiungerlo subito" -- il
+    // duello parte senza avversari. "il bottone aggiungi nemico deve
+    // aggiungere un nemico nuovo tutte le volte che lo premo" -- ogni
+    // pressione ne aggiunge UNO in piu' (store.ts's duelEnemyCount, vedi
+    // DuelArena.tsx); "Rimuovi nemici" li toglie tutti.
     folder
-      .add({ aggiungiNemico: () => useStore.getState().setDuelEnemySpawned(true) }, 'aggiungiNemico')
+      .add({ aggiungiNemico: () => useStore.getState().addDuelEnemy() }, 'aggiungiNemico')
       .name('Aggiungi nemico');
+    folder
+      .add({ rimuoviNemici: () => useStore.getState().clearDuelEnemies() }, 'rimuoviNemici')
+      .name('Rimuovi nemici');
 
     // "fai riferimenti visivi per ragdoll e fisica dei solidi" -- see
     // store.ts's own showPhysicsDebug comment.
@@ -197,7 +198,19 @@ const CombatArenaGUI: React.FC = () => {
     // game loads.
     folder.close();
 
+    // Presa della pistola nella mano destra (vedi usePistolModel.ts):
+    // letta ogni frame, quindi i cursori agiscono dal vivo.
+    const pistolFolder = gui.addFolder('Pistola (presa)');
+    pistolFolder.add(pistolHoldTuning, 'px', -0.2, 0.2, 0.005).name('pos X');
+    pistolFolder.add(pistolHoldTuning, 'py', -0.2, 0.3, 0.005).name('pos Y');
+    pistolFolder.add(pistolHoldTuning, 'pz', -0.2, 0.2, 0.005).name('pos Z');
+    pistolFolder.add(pistolHoldTuning, 'rx', -180, 180, 1).name('rot X');
+    pistolFolder.add(pistolHoldTuning, 'ry', -180, 180, 1).name('rot Y');
+    pistolFolder.add(pistolHoldTuning, 'rz', -180, 180, 1).name('rot Z');
+    pistolFolder.close();
+
     return () => {
+      pistolFolder.destroy();
       folder.destroy();
       releaseDebugGui();
     };

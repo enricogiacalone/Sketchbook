@@ -1,0 +1,9 @@
+Casse audio 3D dell'arena -- risorse prese da
+https://github.com/simondevyoutube/ThreeJS_Tutorial_3DSound (MIT, (c) 2022 simondevyoutube)
+video: "Immersive 3D Audio and Visualization (three.js & javascript)" -- SimonDev
+
+textures/  -- freepbr.com, opera di Emil Persson (Humus), http://www.humus.name
+              licenza Creative Commons Attribution 3.0 Unported
+              (ridimensionate a 1024 px e convertite in JPG)
+music-demo/ -- "Ectoplasm" e "Acoustic Rock", musica di Jason Shaw, https://audionautix.com/
+              licenza Creative Commons Attribution (CC BY) -- citare l'autore

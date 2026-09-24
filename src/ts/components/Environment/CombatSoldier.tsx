@@ -92,7 +92,7 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
   // than reading `clone` directly since useRagdoll is a hook and must be
   // called unconditionally every render regardless of `enableRagdoll`.
   const modelRootRef = React.useRef<THREE.Object3D | null>(null);
-  const ragdoll = useRagdoll(modelRootRef);
+  const ragdoll = useRagdoll(modelRootRef, data.id);
   // "il colpo deve essere sferrato dove effettivamente le mesh collidono"
   // -- which FighterData this fighter's CURRENT swing is aimed at (the
   // AI's own target-finding logic only re-runs once attackLock drops back
@@ -386,10 +386,11 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       // its own position through, so this is a reasonable stand-in for
       // "away from whoever just hit you"), not just an animation. The
       // torso/head alternate so consecutive hits don't all look identical.
-      if (enableRagdoll) {
+      if (enableRagdoll && !data.hitReactionHandled) {
         _hitImpulseDir.set(Math.sin(data.rotation), 0.35, Math.cos(data.rotation));
         ragdoll.pulseHit(_hitImpulseDir, 0.3, Math.random() > 0.5 ? 'Head' : 'Torso', data.hitFromX, data.hitFromZ);
       }
+      data.hitReactionHandled = false;
     }
 
     if (data.attackLock > 0) {

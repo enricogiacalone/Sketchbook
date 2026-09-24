@@ -22,6 +22,7 @@ import {
 } from "../ragdollConfig";
 import { groupsExcluding, CollisionGroups } from "../../../../enums/CollisionGroups";
 import { useStore } from "../../../../store";
+import { registerShootableCollider, unregisterShootableCollider } from "../../weapons/shootableRegistry";
 import {
   captureBindPose,
   captureClipPose,
@@ -204,7 +205,9 @@ function toLimitsRad(name: string): LimitsRad {
 
 export function useRagdollActive(
   modelRootRef: React.RefObject<THREE.Object3D | null>,
-  resolveBones: () => Record<string, THREE.Bone> | null
+  resolveBones: () => Record<string, THREE.Bone> | null,
+  // Proprietario dei collider per i proiettili (vedi shootableRegistry.ts)
+  ownerId?: string
 ) {
   const { world, rapier } = useRapier();
   const activeBodiesRef = useRef<Record<string, BodyEntry>>({});
@@ -315,7 +318,7 @@ export function useRagdollActive(
           .setLinearDamping(ALIVE_LINEAR_DAMPING)
           .setAngularDamping(ALIVE_ANGULAR_DAMPING)
       );
-      world.createCollider(
+      const activeCollider = world.createCollider(
         rapier.ColliderDesc.capsule(halfHeight, seg.radius)
           .setTranslation(capsuleOffset.x, capsuleOffset.y, capsuleOffset.z)
           .setRotation({ x: capsuleRot.x, y: capsuleRot.y, z: capsuleRot.z, w: capsuleRot.w })
@@ -324,6 +327,7 @@ export function useRagdollActive(
           .setMass(ACTIVE_RAGDOLL_MASS_KG[seg.name] ?? 1),
         body
       );
+      if (ownerId) registerShootableCollider(activeCollider.handle, { ownerId, segment: seg.name });
 
       entries[seg.name] = {
         segment: seg,
@@ -456,7 +460,7 @@ export function useRagdollActive(
     gravityScaleRef.current = null;
     builtNonceRef.current = useStore.getState().ragdollBench.rebuildNonce;
     return true;
-  }, [rapier, world, resolveBones, modelRootRef, s]);
+  }, [rapier, world, resolveBones, modelRootRef, s, ownerId]);
 
   const destroyActiveRagdoll = useCallback(() => {
     for (const joint of activeJointsRef.current) {
@@ -469,7 +473,9 @@ export function useRagdollActive(
     activeJointsRef.current = [];
     for (const key of Object.keys(activeBodiesRef.current)) {
       try {
-        world.removeRigidBody(activeBodiesRef.current[key].body);
+        const b = activeBodiesRef.current[key].body;
+        for (let i = 0; i < b.numColliders(); i++) unregisterShootableCollider(b.collider(i).handle);
+        world.removeRigidBody(b);
       } catch {
         /* mondo gia' distrutto */
       }
@@ -774,7 +780,8 @@ export function useRagdollActive(
     (segmentName: string, dirWorld: THREE.Vector3, speed: number, pointWorld?: THREE.Vector3): boolean => {
       const entries = activeBodiesRef.current;
       const e = entries[segmentName] ?? entries.Torso;
-      if (!e || passiveRef.current) return false;
+      // anche da passivo/KO: un proiettile su un corpo a terra lo sposta
+      if (!e) return false;
       const dir = s.v3.copy(dirWorld);
       if (dir.lengthSq() < 1e-8) return false;
       dir.normalize().multiplyScalar(speed * e.body.mass());

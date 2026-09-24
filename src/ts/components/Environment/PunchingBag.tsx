@@ -64,6 +64,8 @@ const BAG_ANGULAR_DAMPING = 1.4;
 // until a clean Jab reads as a real, visible swing-and-settle rather
 // than an imperceptible twitch or a wild spin.
 const BAG_HIT_IMPULSE = 16;
+// Un colpo di pistola sposta il sacco meno di un pugno pieno.
+const BAG_SHOT_IMPULSE = 6;
 
 // Same interactionGroups useRagdoll.ts's own per-fighter hurtbox capsules
 // use (member AND filter = Hurtbox only) -- this is exactly what lets
@@ -115,6 +117,10 @@ export interface PunchingBagHandle {
   // spawn useMemo, not the live swinging body. Returns null before the
   // dynamic body's first collider exists.
   getWorldPosition: () => { x: number; y: number; z: number } | null;
+  // Proiettile della pistola (PlayerCombatSoldier.tsx): marker nel punto
+  // d'impatto + spinta lungo la direzione del colpo. Non conta come pugno
+  // (niente registerBagHit / statistiche di precisione dei pugni).
+  registerShot: (worldPoint: THREE.Vector3, worldDir: THREE.Vector3) => void;
 }
 
 interface PunchingBagProps {
@@ -281,6 +287,25 @@ const PunchingBag = React.forwardRef<PunchingBagHandle, PunchingBagProps>(
           _impulseDir.y = 0;
           if (_impulseDir.lengthSq() < 1e-6) return;
           _impulseDir.normalize().multiplyScalar(mag);
+          body.applyImpulseAtPoint(
+            { x: _impulseDir.x, y: _impulseDir.y, z: _impulseDir.z },
+            { x: worldPoint.x, y: worldPoint.y, z: worldPoint.z },
+            true
+          );
+        },
+        registerShot: (worldPoint: THREE.Vector3, worldDir: THREE.Vector3) => {
+          const body = bagBodyRef.current;
+          if (!body) return;
+          const t = body.translation();
+          const r = body.rotation();
+          _bodyPos.set(t.x, t.y, t.z);
+          _bodyQuat.set(r.x, r.y, r.z, r.w);
+          _localPoint.copy(worldPoint).sub(_bodyPos).applyQuaternion(_bodyQuat.clone().invert());
+          markerLocalPos.current.copy(_localPoint);
+          markerElapsedRef.current = 0;
+          _impulseDir.copy(worldDir);
+          if (_impulseDir.lengthSq() < 1e-6) return;
+          _impulseDir.normalize().multiplyScalar(BAG_SHOT_IMPULSE);
           body.applyImpulseAtPoint(
             { x: _impulseDir.x, y: _impulseDir.y, z: _impulseDir.z },
             { x: worldPoint.x, y: worldPoint.y, z: worldPoint.z },

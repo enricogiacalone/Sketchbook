@@ -1,6 +1,7 @@
 import React from 'react';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
+import WeaponHUD from './WeaponHUD';
 
 // "fai che... il combattimento sembri vero" -- the 1v1 duel's own HUD:
 // two facing HP bars (yours on the left, the AI's on the right, same
@@ -29,6 +30,7 @@ const DuelHUD: React.FC = () => {
     bagLastHitRadialOffset,
     bagLastHitHeightOffset,
     bagLastHitHand,
+    playerWeapon,
   } = useStore(
     useShallow((state) => ({
       testScene: state.testScene,
@@ -42,6 +44,7 @@ const DuelHUD: React.FC = () => {
       bagLastHitRadialOffset: state.bagLastHitRadialOffset,
       bagLastHitHeightOffset: state.bagLastHitHeightOffset,
       bagLastHitHand: state.bagLastHitHand,
+      playerWeapon: state.playerWeapon,
     }))
   );
 
@@ -70,7 +73,9 @@ const DuelHUD: React.FC = () => {
           land. Hidden once the fight ends (duelResult !== 'none'), same
           as the HP bars/exit button below would read as pointless
           clutter over the win/lose banner. */}
-      {duelResult === 'none' &&
+      {duelResult === 'none' && <WeaponHUD />}
+      {/* con la pistola il mirino e' quello di WeaponHUD, al centro */}
+      {duelResult === 'none' && playerWeapon !== 'pistol' &&
         (() => {
           const color = duelInRange ? '#22c55e' : 'rgba(255,255,255,0.7)';
           const glow = duelInRange ? '0 0 6px 1px rgba(34,197,94,0.8)' : 'none';

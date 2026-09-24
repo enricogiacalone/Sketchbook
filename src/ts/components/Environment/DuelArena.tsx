@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import AudioArena from './audioArena/AudioArena';
+import WeaponEffects from './weapons/WeaponEffects';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import CombatSoldier from './CombatSoldier';
@@ -103,6 +105,41 @@ function makeFighter(id: string, name: string, team: string, x: number, z: numbe
   };
 }
 
+// "il bottone aggiungi nemico deve aggiungere un nemico nuovo tutte le
+// volte che lo premo" -- dove far comparire il nemico numero `index`: a
+// ventaglio DAVANTI al giocatore (dove sta guardando in quel momento),
+// alternando destra/sinistra e allargando il raggio ogni 7 nemici, cosi'
+// nessuno nasce sopra un altro o addosso al giocatore.
+const ENEMY_SPAWN_RADIUS = 4;
+const ENEMY_SPAWN_ANGLE_STEP = 0.6; // rad tra un nemico e il successivo sullo stesso anello
+const ENEMIES_PER_RING = 7;
+function enemySpawnPoint(index: number, player: FighterData): [number, number] {
+  // Stessa convenzione di facing del resto del duello: rotation =
+  // atan2(dx, dz) + PI, quindi "avanti" e' (-sin, -cos).
+  const forward = player.rotation - Math.PI;
+  const ring = Math.floor(index / ENEMIES_PER_RING);
+  const slot = index % ENEMIES_PER_RING;
+  const side = slot % 2 === 1 ? 1 : -1;
+  const angle = forward + side * Math.ceil(slot / 2) * ENEMY_SPAWN_ANGLE_STEP;
+  const radius = ENEMY_SPAWN_RADIUS + ring * 1.5;
+  return [player.position.x + Math.sin(angle) * radius, player.position.z + Math.cos(angle) * radius];
+}
+
+// Nemico "corrente" per HUD/mirino: il piu' vicino ancora vivo.
+function nearestLivingEnemy(player: FighterData, enemies: FighterData[]): FighterData | null {
+  let best: FighterData | null = null;
+  let bestD = Infinity;
+  for (const e of enemies) {
+    if (e.isDead) continue;
+    const d = player.position.distanceTo(e.position);
+    if (d < bestD) {
+      bestD = d;
+      best = e;
+    }
+  }
+  return best;
+}
+
 const DuelArena: React.FC = () => {
   const playerX = DUEL_CENTER[0] - DUEL_SEPARATION / 2;
   const enemyX = DUEL_CENTER[0] + DUEL_SEPARATION / 2;
@@ -116,12 +153,38 @@ const DuelArena: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
-  const enemyData = useMemo(
-    () => makeFighter('duel-ai', 'Avversario', 'AI_ENEMY', enemyX, dz, facingToward(enemyX, dz, playerX, dz)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
-  const allFighters = useMemo(() => [playerData, enemyData], [playerData, enemyData]);
+  // "il bottone aggiungi nemico deve aggiungere un nemico nuovo tutte le
+  // volte che lo premo" -- non piu' UN avversario fisso ma una lista:
+  // store.ts's duelEnemyCount dice quanti ne vogliamo, qui se ne crea uno
+  // nuovo (FighterData con id proprio) per ogni pressione mancante. Tutti
+  // nella stessa squadra AI_ENEMY: CombatSoldier.tsx non attacca mai un
+  // compagno di squadra, quindi se la prendono solo col giocatore.
+  const duelEnemyCount = useStore((state) => state.duelEnemyCount);
+  const [enemies, setEnemies] = useState<FighterData[]>([]);
+  const enemySerialRef = useRef(0);
+  useEffect(() => {
+    setEnemies((prev) => {
+      if (duelEnemyCount <= 0) return prev.length ? [] : prev;
+      if (duelEnemyCount <= prev.length) return prev;
+      const next = [...prev];
+      for (let i = prev.length; i < duelEnemyCount; i++) {
+        const [x, z] = enemySpawnPoint(i, playerData);
+        enemySerialRef.current += 1;
+        next.push(
+          makeFighter(
+            `duel-ai-${enemySerialRef.current}`,
+            `Avversario ${enemySerialRef.current}`,
+            'AI_ENEMY',
+            x,
+            z,
+            facingToward(x, z, playerData.position.x, playerData.position.z)
+          )
+        );
+      }
+      return next;
+    });
+  }, [duelEnemyCount, playerData]);
+  const allFighters = useMemo(() => [playerData, ...enemies], [playerData, enemies]);
 
   // "nn voglio che usi distanze per fermarlo.. ogni parte del corpo deve
   // essere un collider" -- the old single-capsule useDuelBodyCollider.tsx
@@ -161,10 +224,6 @@ const DuelArena: React.FC = () => {
   const noopSetMedkitPoolCount = () => {};
 
   const setDuelStatus = useStore((state) => state.setDuelStatus);
-  // "crea un tasto aggiungi nemico invece di aggiungerlo subito" --
-  // vedi store.ts's duelEnemySpawned e CombatArenaGUI.tsx's pulsante
-  // "Aggiungi nemico".
-  const duelEnemySpawned = useStore((state) => state.duelEnemySpawned);
   const { camera, scene } = useThree();
 
   // Hands control of the duel-player fighter over to the player the
@@ -198,15 +257,19 @@ const DuelArena: React.FC = () => {
     // the one FighterData CombatSoldier.tsx actually reads every frame;
     // see FighterData.isPassive's own comment for why this indirection
     // exists at all rather than CombatSoldier reading the store directly.
-    enemyData.isPassive = useStore.getState().duelDummyMode;
+    const dummy = useStore.getState().duelDummyMode;
+    for (const e of enemies) e.isPassive = dummy;
+    const target = nearestLivingEnemy(playerData, enemies);
 
-    const result: 'none' | 'win' | 'lose' = enemyData.isDead ? 'win' : playerData.isDead ? 'lose' : 'none';
+    // Vittoria solo quando c'e' almeno un nemico e sono TUTTI a terra.
+    const allEnemiesDead = enemies.length > 0 && target === null;
+    const result: 'none' | 'win' | 'lose' = playerData.isDead ? 'lose' : allEnemiesDead ? 'win' : 'none';
     // "metti un mirino cosi' so dove sto per colpire" -- same range check
     // PlayerCombatSoldier.tsx's own attack branch uses, just read here too
     // so the crosshair can tell the player whether a swing would actually
     // land BEFORE they throw it, rather than only after (see ATTACK_RANGE's
     // export there).
-    const inRange = playerData.position.distanceTo(enemyData.position) <= ATTACK_RANGE;
+    const inRange = target !== null && playerData.position.distanceTo(target.position) <= ATTACK_RANGE;
 
     // "il mirino e' ai piedi del giocatore.. controlla come si fa un
     // mirino per sparare" -- the correct technique (how a real 3rd-person
@@ -263,8 +326,10 @@ const DuelArena: React.FC = () => {
     (window as any).__duelDebug = {
       playerX: playerData.position.x,
       playerZ: playerData.position.z,
-      enemyX: enemyData.position.x,
-      enemyZ: enemyData.position.z,
+      enemyCount: enemies.length,
+      enemiesAlive: enemies.filter((e) => !e.isDead).length,
+      enemyX: target ? target.position.x : null,
+      enemyZ: target ? target.position.z : null,
       bagX: bagPositionXZ[0],
       bagZ: bagPositionXZ[1],
       // TEMP debug (see PunchingBag.tsx's getWorldPosition comment) --
@@ -276,9 +341,9 @@ const DuelArena: React.FC = () => {
       bagLiveY: bagLivePos ? bagLivePos.y : null,
       bagLiveZ: bagLivePos ? bagLivePos.z : null,
       bagSwingXZ: bagLivePos ? Math.hypot(bagLivePos.x - bagPositionXZ[0], bagLivePos.z - bagPositionXZ[1]) : null,
-      playerEnemyGap: playerData.position.distanceTo(enemyData.position),
+      playerEnemyGap: target ? playerData.position.distanceTo(target.position) : null,
       playerBagGap: Math.hypot(playerData.position.x - bagPositionXZ[0], playerData.position.z - bagPositionXZ[1]),
-      enemyBagGap: Math.hypot(enemyData.position.x - bagPositionXZ[0], enemyData.position.z - bagPositionXZ[1]),
+      enemyBagGap: target ? Math.hypot(target.position.x - bagPositionXZ[0], target.position.z - bagPositionXZ[1]) : null,
     };
 
     // TEMP debug -- "fanne uno che cade vicino a noi in modalita' del
@@ -296,6 +361,8 @@ const DuelArena: React.FC = () => {
     // di ucciderlo, cosi' il crollo si vede da vicino senza dover
     // rincorrerlo per l'arena.
     (window as any).__killEnemyNearby = (distance: number = 1.2) => {
+      const enemyData = nearestLivingEnemy(playerData, enemies);
+      if (!enemyData) return;
       const dir = playerData.rotation ?? 0;
       enemyData.position.set(
         playerData.position.x + Math.sin(dir) * distance,
@@ -308,9 +375,17 @@ const DuelArena: React.FC = () => {
 
     // Normalized to 0-100 here (not raw hp) so DuelHUD.tsx's bars stay a
     // simple width:`${hp}%` regardless of DUEL_MAX_HP.
+    // Barra avversario = il nemico piu' vicino ancora in piedi (quello che
+    // stai combattendo); 0 se sono tutti a terra, piena se non ce n'e'
+    // nessuno.
+    const enemyHpPct = target
+      ? (Math.max(0, target.hp) / DUEL_MAX_HP) * 100
+      : enemies.length > 0
+        ? 0
+        : 100;
     setDuelStatus(
       (Math.max(0, playerData.hp) / DUEL_MAX_HP) * 100,
-      (Math.max(0, enemyData.hp) / DUEL_MAX_HP) * 100,
+      enemyHpPct,
       result,
       inRange,
       reticleX,
@@ -325,9 +400,18 @@ const DuelArena: React.FC = () => {
           SOLO quando store.ts's debugOrthoCamera e' true (vedi il file
           stesso). */}
       <DebugOrthoCamera />
+      {/* traccianti, lampi, scintille e fori della pistola */}
+      <WeaponEffects />
+      {/* "Immersive 3D Audio and Visualization" -- sala con le due casse
+          audio posizionali di SimonDev (vedi audioArena/AudioArena.tsx);
+          Suspense propria cosi' il caricamento delle texture non blocca
+          il duello. */}
+      <Suspense fallback={null}>
+        <AudioArena />
+      </Suspense>
       <PlayerCombatSoldier
         data={playerData}
-        opponent={enemyData}
+        opponents={enemies}
         entityName={DUEL_PLAYER_ID}
         globalSpeed={GLOBAL_SPEED}
         bagHurtboxHandle={bagHurtboxHandle}
@@ -356,13 +440,14 @@ const DuelArena: React.FC = () => {
           as the player, via that same flag.
           "crea un tasto aggiungi nemico invece di aggiungerlo subito" --
           NON piu' montato automaticamente all'ingresso nel duello, solo
-          quando duelEnemySpawned diventa true (CombatArenaGUI.tsx's
+          uno per ogni pressione (store.ts's duelEnemyCount, CombatArenaGUI.tsx's
           "Aggiungi nemico") -- cosi' un'ispezione a schermo del solo
           giocatore (T-pose, collider di debug) non ha un secondo intero
           set di collider a complicare la vista fin da subito. */}
-      {duelEnemySpawned && (
+      {enemies.map((enemy) => (
         <CombatSoldier
-          data={enemyData}
+          key={enemy.id}
+          data={enemy}
           allFightersData={allFighters}
           healingItems={[]}
           towers={[]}
@@ -375,7 +460,7 @@ const DuelArena: React.FC = () => {
           bagSolidHandle={bagSolidHandle}
           bagRef={bagRef}
         />
-      )}
+      ))}
     </group>
   );
 };

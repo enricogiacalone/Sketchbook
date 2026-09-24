@@ -1,0 +1,8 @@
+# i brani dell'utente restano locali
+*.mp3
+*.ogg
+*.wav
+*.m4a
+*.aac
+*.flac
+*.opus

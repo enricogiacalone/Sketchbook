@@ -74,7 +74,18 @@ export const STREET_LIGHT_POSITIONS: Array<{ x: number; z: number }> = (() => {
 // snaps its own Y purely from this function, so any patch of ground this
 // misses is a patch the character will sink into or hover above instead of
 // standing on properly.
+// Pavimento piatto che sostituisce strade/marciapiedi dentro un
+// rettangolo (la sala delle casse del duello, AudioArena.tsx): li' la
+// strada non viene disegnata e il pavimento e' un'unica lastra ad
+// altezza costante, quindi chiunque ci cammini deve stare a quella quota.
+let flatGroundOverride: { minX: number; maxX: number; minZ: number; maxZ: number; y: number } | null = null;
+export const setFlatGroundOverride = (o: typeof flatGroundOverride) => {
+  flatGroundOverride = o;
+};
+
 export const getRoadOffset = (x: number, z: number): number => {
+  const fo = flatGroundOverride;
+  if (fo && x >= fo.minX && x <= fo.maxX && z >= fo.minZ && z <= fo.maxZ) return fo.y;
   const half = ROAD_WIDTH / 2;
   const sidewalkOuter = half + SIDEWALK_WIDTH;
 
