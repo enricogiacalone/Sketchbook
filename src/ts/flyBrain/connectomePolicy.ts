@@ -67,6 +67,49 @@ export function parseFlyGraph(json: { neurons: { role: number; type: string }[] 
   return { N, nAff, nInt, nEff, roles, types, rowStart, pre, w };
 }
 
+// Il gruppo di CONTROLLO: stesso connettoma "rimescolato". Si scambiano a
+// caso i neuroni presinaptici tra tutte le sinapsi (permutazione globale
+// dell'array pre, seme fisso): ogni neurone conserva esattamente quante
+// sinapsi riceve e quante ne manda, con gli stessi pesi e segni, e i ruoli
+// (ascendenti / centrali / discendenti) restano gli stessi. Sparisce solo
+// CHI e' collegato a CHI -- cioe' proprio il cablaggio prodotto
+// dall'evoluzione. Se la mosca vera impara meglio del rimescolato, e'
+// quel cablaggio a fare la differenza.
+// Piu' rimescolamenti diversi (semi fissi): un solo controllo e' un solo
+// campione, per un confronto serio servono 3-5 cervelli di controllo.
+export type BrainVariant = 'real' | 'shuffled' | 'shuffled2' | 'shuffled3' | 'shuffled4' | 'shuffled5';
+export const SHUFFLE_SEEDS: Record<string, number> = {
+  shuffled: 0xf1e5,
+  shuffled2: 0x2b1d,
+  shuffled3: 0x7c03,
+  shuffled4: 0x51a9,
+  shuffled5: 0x9e37,
+};
+export const ALL_BRAINS: BrainVariant[] = ['real', 'shuffled', 'shuffled2', 'shuffled3', 'shuffled4', 'shuffled5'];
+export const isBrainVariant = (s: string): s is BrainVariant => (ALL_BRAINS as string[]).includes(s);
+// suffisso dei file dei pesi: '' per il vero, '-shuffled', '-shuffled2', ...
+export const brainFileSuffix = (b: BrainVariant) => (b === 'real' ? '' : '-' + b);
+export function shuffleGraph(g: FlyGraph, seed = 0xf1e5): FlyGraph {
+  const pre = Int32Array.from(g.pre);
+  let st = seed | 0;
+  const rnd = () => {
+    st = (st + 0x6d2b79f5) | 0;
+    let t = Math.imul(st ^ (st >>> 15), 1 | st);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  for (let i = pre.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    const tmp = pre[i];
+    pre[i] = pre[j];
+    pre[j] = tmp;
+  }
+  return { ...g, pre };
+}
+export function graphForVariant(g: FlyGraph, v: BrainVariant): FlyGraph {
+  return v === 'real' ? g : shuffleGraph(g, SHUFFLE_SEEDS[v]);
+}
+
 export interface PolicyLayout {
   nIn: number; // canali d'ingresso (osservazioni + comando)
   nOut: number; // azioni
@@ -181,6 +224,9 @@ const DECODER_GAIN = 5;
 // Pesi addestrati: JSON con i parametri in base64 (Float32 little endian)
 export interface FlyWeightsFile {
   task: string;
+  // variante del cervello e versione del corpo su cui e' stato addestrato
+  brain?: BrainVariant;
+  bodyVersion?: number;
   nIn: number;
   nOut: number;
   fanIn: number;

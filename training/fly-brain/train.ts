@@ -17,10 +17,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadAssets, FlyEnv, type Task } from './env';
 import { EsOptimizer, generationSeeds, perturbed } from '../../src/ts/flyBrain/es';
-import { initialParams, encodeParams, decodeParams, type FlyWeightsFile } from '../../src/ts/flyBrain/connectomePolicy';
+import { initialParams, encodeParams, decodeParams, isBrainVariant, brainFileSuffix, type FlyWeightsFile, type BrainVariant } from '../../src/ts/flyBrain/connectomePolicy';
+import { FLY_BODY_VERSION } from '../../src/ts/flyBrain/flyBody';
 
 if (!isMainThread) {
-  const A = await loadAssets();
+  const A = await loadAssets((workerData?.brain ?? 'real') as BrainVariant);
   const env = new FlyEnv(A);
   const eps = new Float32Array(A.layout.nParams);
   const theta = new Float32Array(A.layout.nParams);
@@ -30,7 +31,7 @@ if (!isMainThread) {
     for (const job of msg.jobs as { seed: number; sign: number }[]) {
       perturbed(base, job.seed, job.sign, msg.sigma, eps, theta);
       let s = 0;
-      for (const ep of msg.episodes as number[]) s += env.runEpisode(theta, msg.task as Task, ep, msg.seconds).score;
+      for (const ep of msg.episodes as number[]) s += env.runEpisode(theta, msg.task as Task, ep, msg.seconds, undefined, msg.push ?? 0).score;
       results.push(s / msg.episodes.length);
     }
     parentPort!.postMessage(results);
@@ -43,16 +44,22 @@ if (!isMainThread) {
     return i >= 0 ? args[i + 1] : d;
   };
   const task = opt('task', 'stand') as Task;
+  // --brain shuffled = gruppo di controllo col connettoma rimescolato
+  const brainArg = opt('brain', 'real');
+  const brain: BrainVariant = isBrainVariant(brainArg) ? brainArg : 'real';
+  const suffix = brainFileSuffix(brain);
   const gens = +opt('gens', '300');
   const pop = Math.max(4, Math.floor(+opt('pop', '96') / 2) * 2);
   const sigma = +opt('sigma', '0.01');
   const lr = +opt('lr', '0.003');
   const seconds = +opt('seconds', task === 'getup' ? '6' : '6');
+  // --push 30 = spinte casuali da ~30 N*s durante gli episodi
+  const push = +opt('push', '0');
   const nWorkers = +opt('workers', String(Math.max(1, (os.availableParallelism?.() ?? os.cpus().length) - 1)));
   const root = path.resolve(import.meta.dirname, '../..');
-  const outFile = path.join(root, 'public/fly-brain', `weights-${task}.json`);
-  const logFile = path.join(import.meta.dirname, `log-${task}.csv`);
-  const A = await loadAssets();
+  const outFile = path.join(root, 'public/fly-brain', `weights-${task}${suffix}.json`);
+  const logFile = path.join(import.meta.dirname, `log-${task}${suffix}.csv`);
+  const A = await loadAssets(brain);
   const P = A.layout.nParams;
   let theta = initialParams(A.layout);
   let gen0 = 0;
@@ -60,20 +67,21 @@ if (!isMainThread) {
   if (from) {
     const w = JSON.parse(fs.readFileSync(from, 'utf8')) as FlyWeightsFile;
     const p = decodeParams(w.params);
-    if (p.length === P) {
+    if (p.length === P && w.bodyVersion === FLY_BODY_VERSION && (w.brain ?? 'real') === brain) {
       theta = p;
       gen0 = w.task === task ? w.generation : 0;
       console.log(`riparto da ${path.basename(from)} (gen ${w.generation}, punteggio ${w.score.toFixed(3)})`);
-    } else console.log('pesi di partenza con dimensioni diverse, ignorati');
+    } else console.log('pesi di partenza per un altro corpo/cervello, ignorati: si parte da zero');
   }
   console.log(`cervello: ${A.graph.N} neuroni (${A.graph.nAff} ascendenti, ${A.graph.nInt} intermedi, ${A.graph.nEff} discendenti), ${P} parametri`);
+  console.log(`cervello: ${brain === 'real' ? 'connettoma vero' : `connettoma RIMESCOLATO (controllo ${brain})`}`);
   console.log(`compito ${task}, popolazione ${pop}, sigma ${sigma}, lr ${lr}, worker ${nWorkers}`);
 
   const here = fileURLToPath(import.meta.url);
   const workers = await Promise.all(
     Array.from({ length: nWorkers }, () =>
       new Promise<Worker>((res) => {
-        const w = new Worker(here, { execArgv: ['--import', path.join(import.meta.dirname, 'register.mjs')] });
+        const w = new Worker(here, { workerData: { brain }, execArgv: ['--import', path.join(import.meta.dirname, 'register.mjs')] });
         w.once('message', () => res(w));
       })
     )
@@ -87,7 +95,7 @@ if (!isMainThread) {
           new Promise<number[]>((resolve) => {
             if (!chunks[wi].length) return resolve([]);
             w.once('message', resolve);
-            w.postMessage({ theta: th.buffer.slice(0), jobs: chunks[wi], sigma, task, episodes, seconds });
+            w.postMessage({ theta: th.buffer.slice(0), jobs: chunks[wi], sigma, task, episodes, seconds, push });
           })
       )
     );
@@ -115,7 +123,7 @@ if (!isMainThread) {
     fs.appendFileSync(logFile, `${g},${mean.toFixed(4)},${top.toFixed(4)},${centre.toFixed(4)},,${sec.toFixed(1)}\n`);
     console.log(`gen ${g}  media ${mean.toFixed(3)}  migliore ${top.toFixed(3)}  centro ${centre.toFixed(3)}  ${sec.toFixed(1)}s`);
     if (g % 5 === 0 || g === gen0 + gens) {
-      const file: FlyWeightsFile = { task, nIn: A.layout.nIn, nOut: A.layout.nOut, fanIn: A.layout.fanIn, passes: A.layout.passes, generation: g, score: centre, params: encodeParams(theta) };
+      const file: FlyWeightsFile = { task, brain, bodyVersion: FLY_BODY_VERSION, nIn: A.layout.nIn, nOut: A.layout.nOut, fanIn: A.layout.fanIn, passes: A.layout.passes, generation: g, score: centre, params: encodeParams(theta) };
       fs.writeFileSync(outFile, JSON.stringify(file));
       if (centre > best) {
         best = centre;

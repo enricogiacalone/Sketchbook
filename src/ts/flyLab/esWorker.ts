@@ -4,6 +4,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { buildAssets, FlyEnv, type Task } from '../flyBrain/flyEnv';
 import { perturbed } from '../flyBrain/es';
+import { isBrainVariant, type BrainVariant } from '../flyBrain/connectomePolicy';
 
 let env: FlyEnv | null = null;
 let eps: Float32Array | null = null;
@@ -14,7 +15,7 @@ const fetchBuf = (u: string) => fetch(u).then((r) => {
   return r.arrayBuffer();
 });
 
-async function init() {
+async function init(variant: BrainVariant) {
   await RAPIER.init();
   const [model, a1, a2, graphJson, edges] = await Promise.all([
     fetchBuf('/soldier-citizen.glb'),
@@ -23,7 +24,7 @@ async function init() {
     fetch('/fly-brain/fly-brain.json').then((r) => r.json()),
     fetchBuf('/fly-brain/fly-brain-edges.bin'),
   ]);
-  const A = buildAssets(RAPIER, { model, anims: [a1, a2], graphJson, edges });
+  const A = buildAssets(RAPIER, { model, anims: [a1, a2], graphJson, edges }, variant);
   env = new FlyEnv(A);
   eps = new Float32Array(A.layout.nParams);
   theta = new Float32Array(A.layout.nParams);
@@ -34,7 +35,7 @@ self.onmessage = async (ev: MessageEvent) => {
   const msg = ev.data;
   try {
     if (msg.type === 'init') {
-      const info = await init();
+      const info = await init(isBrainVariant(msg.brain) ? msg.brain : 'real');
       (self as any).postMessage({ type: 'ready', info });
       return;
     }
@@ -46,7 +47,7 @@ self.onmessage = async (ev: MessageEvent) => {
         perturbed(base, job.seed, job.sign, msg.sigma, eps, theta);
         let s = 0;
         for (const ep of msg.episodes as number[]) {
-          const r = env.runEpisode(theta, msg.task as Task, ep, msg.seconds);
+          const r = env.runEpisode(theta, msg.task as Task, ep, msg.seconds, undefined, msg.push ?? 0);
           s += r.score;
           steps += r.steps;
         }

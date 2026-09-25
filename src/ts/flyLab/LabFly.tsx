@@ -7,6 +7,7 @@ import { SkeletonUtils } from 'three-stdlib';
 import { createFlyBody, destroyFlyBody, writeBodiesToBones, type FlyBody } from '../flyBrain/flyBody';
 import { makeLayout, ConnectomeBrain, initialParams, type FlyGraph } from '../flyBrain/connectomePolicy';
 import { FlyController, CONTROL_HZ, N_CMD, type FlyTask } from '../flyBrain/flyController';
+import { applyPush } from '../flyBrain/flyEnv';
 
 // Una mosca-umano del laboratorio: corpo fisico + cervello con i parametri
 // dati (null = cervello "spento": insegue solo l'animazione). Riparte da sola
@@ -41,9 +42,13 @@ interface Props {
   restartNonce: number;
   status: React.MutableRefObject<LabFlyStatus>;
   paused: boolean;
+  // spinta manuale: ogni volta che cambia, un colpo in direzione casuale
+  pushNonce: number;
+  // spinte casuali automatiche in scena (N*s, 0 = niente), come in addestramento
+  autoPush: number;
 }
 
-const LabFly: React.FC<Props> = ({ graph, params, paramsVersion, task, x, color, ghost, episodeSeconds, restartNonce, status, paused }) => {
+const LabFly: React.FC<Props> = ({ graph, params, paramsVersion, task, x, color, ghost, episodeSeconds, restartNonce, status, paused, pushNonce, autoPush }) => {
   const { world, rapier } = useRapier();
   const { scene } = useGLTF(MODEL_URL);
   const { animations: baseAnims } = useGLTF(BASE_ANIMS_URL);
@@ -115,6 +120,8 @@ const LabFly: React.FC<Props> = ({ graph, params, paramsVersion, task, x, color,
     wantCreateRef.current = true;
   }, [task, restartNonce, graph]);
   useEffect(() => () => destroySim(), []);
+  const lastPushRef = useRef(pushNonce);
+  const nextAutoRef = useRef(2);
   // pesi nuovi: si applicano al prossimo episodio (non a meta')
   const pendingRef = useRef(false);
   useEffect(() => {
@@ -129,6 +136,17 @@ const LabFly: React.FC<Props> = ({ graph, params, paramsVersion, task, x, color,
     const sim = simRef.current;
     if (!sim || paused) return;
     const dt = Math.min(delta, 0.1);
+    if (pushNonce !== lastPushRef.current) {
+      lastPushRef.current = pushNonce;
+      applyPush(sim.fb, 35, Math.random() * Math.PI * 2);
+    }
+    if (autoPush > 0 && task !== 'getup') {
+      nextAutoRef.current -= dt;
+      if (nextAutoRef.current <= 0) {
+        applyPush(sim.fb, autoPush * (0.6 + 0.4 * Math.random()), Math.random() * Math.PI * 2);
+        nextAutoRef.current = 1.2 + Math.random() * 1.8;
+      }
+    }
     sim.acc += dt;
     sim.age += dt;
     while (sim.acc >= 1 / CONTROL_HZ) {

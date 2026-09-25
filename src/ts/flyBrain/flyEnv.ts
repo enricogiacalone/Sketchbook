@@ -8,7 +8,7 @@ import { parseSkinnedModel, parseClips, type LoadedModel } from './glbParse';
 import {
   createFlyBody, jointAnglesFromBones, jointAnglesFromBodies, headingOf, destroyFlyBody, type FlyBody,
 } from './flyBody';
-import { parseFlyGraph, makeLayout, ConnectomeBrain, type FlyGraph, type PolicyLayout } from './connectomePolicy';
+import { parseFlyGraph, makeLayout, ConnectomeBrain, graphForVariant, type FlyGraph, type PolicyLayout, type BrainVariant } from './connectomePolicy';
 import { FlyController, CONTROL_HZ, N_CMD, type FlyTask } from './flyController';
 
 export const SUBSTEPS = 4; // fisica a 120 Hz come nel gioco
@@ -35,11 +35,11 @@ export interface AssetBuffers {
 }
 
 // R deve essere gia' inizializzato (await RAPIER.init())
-export function buildAssets(R: Rapier, b: AssetBuffers): Assets {
+export function buildAssets(R: Rapier, b: AssetBuffers, variant: BrainVariant = 'real'): Assets {
   const model = parseSkinnedModel(b.model);
   const clips: Record<string, THREE.AnimationClip> = {};
   for (const buf of b.anims) for (const c of parseClips(buf)) clips[c.name] = c;
-  const graph = parseFlyGraph(b.graphJson, b.edges);
+  const graph = graphForVariant(parseFlyGraph(b.graphJson, b.edges), variant);
   // dimensioni: si costruisce un corpo di prova una volta
   const world = new R.World({ x: 0, y: -9.81, z: 0 });
   const fb = createFlyBody(R, world, model.root, model.bones, clips['Fighting Idle']);
@@ -89,6 +89,12 @@ function eeFromBones(fb: FlyBody, out: Float32Array) {
   }
 }
 
+// Spinta orizzontale (impulso in N*s) sul busto, direzione `angle` (rad)
+export function applyPush(fb: FlyBody, impulse: number, angle: number) {
+  const b = (fb.bySeg['SpineMid'] ?? fb.segs[0]).body;
+  b.applyImpulse({ x: Math.sin(angle) * impulse, y: 0, z: Math.cos(angle) * impulse }, true);
+}
+
 export interface EpisodeResult { score: number; steps: number; fell: boolean; meanPose: number; headEnd: number; dist: number }
 
 export class FlyEnv {
@@ -108,7 +114,10 @@ export class FlyEnv {
     this.A.model.root.updateMatrixWorld(true);
   }
 
-  runEpisode(params: Float32Array, task: Task, epSeed: number, seconds = 6, record?: (fb: FlyBody, t: number) => void): EpisodeResult {
+  // push = forza delle spinte casuali (N*s, 0 = niente): ogni 1.2-3 s un
+  // impulso orizzontale in direzione casuale sul busto, uguale per tutti gli
+  // individui dello stesso episodio (stesso seme) -> confronto equo
+  runEpisode(params: Float32Array, task: Task, epSeed: number, seconds = 6, record?: (fb: FlyBody, t: number) => void, push = 0): EpisodeResult {
     const A = this.A;
     const R = rng(epSeed);
     const world = new A.R.World({ x: 0, y: -9.81, z: 0 });
@@ -130,7 +139,13 @@ export class FlyEnv {
     let total = 0, poseSum = 0, fell = false, n = 0;
     const start = fb.segs[0].body.translation();
     const sx = start.x, sz = start.z;
+    const PR = rng(epSeed * 7 + 13);
+    let nextPush = Math.round((1 + PR() * 1.5) * CONTROL_HZ);
     for (let step = 0; step < steps; step++) {
+      if (push > 0 && task !== 'getup' && step === nextPush) {
+        applyPush(fb, push * (0.6 + 0.4 * PR()), PR() * Math.PI * 2);
+        nextPush += Math.round((1.2 + PR() * 1.8) * CONTROL_HZ);
+      }
       ctl.control();
       for (let s = 0; s < SUBSTEPS; s++) world.step();
       // ricompensa: corpo dopo il passo contro il riferimento del passo dopo

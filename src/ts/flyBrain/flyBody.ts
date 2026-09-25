@@ -38,6 +38,12 @@ const LIMIT_MARGIN = THREE.MathUtils.degToRad(1);
 // gruppo Ragdoll (5), collide con tutto tranne Ragdoll e Characters (1):
 // pavimento/muri si', i propri pezzi e le capsule "solide" dei
 // combattenti no. = interactionGroups([5], tutti tranne [1, 5])
+// Versione del corpo: cambia quando cambiano osservazioni o fisica, cosi'
+// i pesi addestrati su un corpo diverso vengono ignorati invece di usarli
+// su un corpo che non conoscono. 2 = piedi a scatola, muscoli PD, sensori
+// di contatto dei piedi.
+export const FLY_BODY_VERSION = 2;
+
 export const FLY_COLLISION_GROUPS = ((1 << 5) << 16) | (0xffff & ~((1 << 1) | (1 << 5)));
 const LIN_DAMPING = 0.05;
 const ANG_DAMPING = 0.3;
@@ -298,7 +304,7 @@ export function createFlyBody(
 export function flyDims(): { nObs: number; nAct: number } {
   const n = ACTIVE_RAGDOLL_SEGMENTS.length;
   const withParent = ACTIVE_RAGDOLL_SEGMENTS.filter((s) => s.parent).length;
-  return { nObs: n * 15 + 1, nAct: withParent * 3 };
+  return { nObs: n * 15 + 1 + FOOT_SENSORS, nAct: withParent * 3 };
 }
 
 // Angoli articolari (frame dei giunti Rapier, rad) della posa ATTUALE delle
@@ -444,12 +450,45 @@ export function headingOf(fb: FlyBody, out: THREE.Quaternion): THREE.Quaternion 
   return out.setFromAxisAngle(_v2.set(0, 1, 0), Math.atan2(_v1.x, _v1.z));
 }
 
+// Sensori dei piedi: per ogni piede (sinistro, destro) 1 se tocca qualcosa
+// che non e' il proprio corpo, e la forza d'appoggio in "pesi corporei"
+// (1 = regge tutto il corpo). Nella mosca vera molti neuroni ascendenti
+// portano proprio carico e contatto delle zampe.
+const FOOT_SENSORS = 4;
+const _others: any[] = [];
+function footSensors(fb: FlyBody, o: Float32Array, k: number): number {
+  const weightN = ACTIVE_RAGDOLL_TOTAL_MASS_KG * 9.81;
+  const dt = (fb.world as any).timestep || 1 / 120;
+  for (const name of ['Foot_L', 'Foot_R']) {
+    const s = fb.bySeg[name];
+    const col = s.body.collider(0);
+    _others.length = 0;
+    // prima si raccolgono i contatti, poi si leggono (niente chiamate al
+    // mondo annidate dentro una callback del mondo: Rapier va in errore)
+    fb.world.contactPairsWith(col, (other: any) => {
+      if (other.parent()?.handle !== s.body.handle) _others.push(other);
+    });
+    let impulse = 0;
+    let touching = 0;
+    for (const other of _others) {
+      fb.world.contactPair(col, other, (m: any) => {
+        const n = m.numContacts();
+        if (n > 0) touching = 1;
+        for (let i = 0; i < n; i++) impulse += m.contactImpulse(i);
+      });
+    }
+    o[k++] = touching;
+    o[k++] = Math.min(3, impulse / dt / weightN);
+  }
+  return k;
+}
+
 // Osservazioni ("propriocezione" che arriva ai neuroni ascendenti): per
 // ogni corpo, posizione relativa al bacino, orientamento (2 assi = 6
 // numeri), velocita' lineare e angolare, tutto nel frame di direzione del
 // bacino; piu' l'altezza del bacino. out=null -> alloca (per contare).
 export function observe(fb: FlyBody, out: Float32Array | null): Float32Array {
-  const n = fb.segs.length * 15 + 1;
+  const n = fb.segs.length * 15 + 1 + FOOT_SENSORS;
   const o = out ?? new Float32Array(n);
   headingOf(fb, _heading);
   _headingInv.copy(_heading).invert();
@@ -473,6 +512,7 @@ export function observe(fb: FlyBody, out: Float32Array | null): Float32Array {
     _v1.set(av.x, av.y, av.z).applyQuaternion(_headingInv);
     o[k++] = _v1.x * 0.1; o[k++] = _v1.y * 0.1; o[k++] = _v1.z * 0.1;
   }
+  footSensors(fb, o, k);
   return o;
 }
 

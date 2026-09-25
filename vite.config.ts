@@ -11,6 +11,29 @@ function flyBrainSave(): Plugin {
   return {
     name: "fly-brain-save",
     configureServer(server) {
+      // lettura diretta dal disco: i file dei pesi sono esclusi dal watcher
+      // (vedi server.watch.ignored), quindi quelli creati DOPO l'avvio del
+      // server non comparirebbero tra i file pubblici serviti da Vite
+      server.middlewares.use("/__flybrain/load", (req, res) => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        const task = url.searchParams.get("task") ?? "";
+        if (!/^(stand|walk|getup)$/.test(task)) {
+          res.statusCode = 400;
+          res.end("compito non valido");
+          return;
+        }
+        const b = url.searchParams.get("brain") ?? "";
+        const brain = /^shuffled[2-5]?$/.test(b) ? "-" + b : "";
+        const file = path.resolve(__dirname, "public/fly-brain", `weights-${task}${brain}.json`);
+        if (!fs.existsSync(file)) {
+          res.statusCode = 404;
+          res.end();
+          return;
+        }
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Cache-Control", "no-store");
+        res.end(fs.readFileSync(file));
+      });
       server.middlewares.use("/__flybrain/save", (req, res) => {
         if (req.method !== "POST") {
           res.statusCode = 405;
@@ -24,7 +47,9 @@ function flyBrainSave(): Plugin {
           res.end("compito non valido");
           return;
         }
-        const name = url.searchParams.get("best") ? `weights-${task}-best.json` : `weights-${task}.json`;
+        const b = url.searchParams.get("brain") ?? "";
+        const brain = /^shuffled[2-5]?$/.test(b) ? "-" + b : "";
+        const name = `weights-${task}${brain}${url.searchParams.get("best") ? "-best" : ""}.json`;
         const chunks: Buffer[] = [];
         req.on("data", (c) => chunks.push(c));
         req.on("end", () => {

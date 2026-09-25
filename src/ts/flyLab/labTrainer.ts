@@ -1,10 +1,12 @@
 // Regista dell'addestramento nel browser: pool di worker + ottimizzatore ES.
 import { EsOptimizer, generationSeeds } from '../flyBrain/es';
-import { encodeParams, type FlyWeightsFile } from '../flyBrain/connectomePolicy';
+import { encodeParams, type FlyWeightsFile, type BrainVariant } from '../flyBrain/connectomePolicy';
+import { FLY_BODY_VERSION } from '../flyBrain/flyBody';
 import type { FlyTask } from '../flyBrain/flyController';
 
 export interface GenStats {
   gen: number;
+  push?: number;
   mean: number;
   best: number;
   centre: number | null;
@@ -14,6 +16,9 @@ export interface GenStats {
 
 export interface LabConfig {
   task: FlyTask;
+  brain: BrainVariant;
+  // spinte casuali durante gli episodi (N*s, 0 = niente)
+  push: number;
   pop: number;
   sigma: number;
   lr: number;
@@ -52,10 +57,17 @@ export class LabTrainer {
             } else if (ev.data.type === 'error') reject(new Error(ev.data.message));
           };
           w.onerror = (e) => reject(new Error(e.message));
-          w.postMessage({ type: 'init' });
+          w.postMessage({ type: 'init', brain: this.cfg.brain });
         })
       )
     );
+  }
+
+  // punteggio del corpo SENZA cervello (parametri iniziali = uscite a zero)
+  // sugli stessi episodi usati per il "centro": la riga di riferimento
+  async baseline(theta0: Float32Array): Promise<number> {
+    const r = await this.evalJobs(theta0, [{ seed: 0, sign: 1 }], [1005, 2005, 3005]);
+    return r.scores[0];
   }
 
   setParams(theta: Float32Array, gen: number, history: GenStats[]) {
@@ -86,7 +98,7 @@ export class LabTrainer {
               }
             };
             w.addEventListener('message', handler);
-            w.postMessage({ type: 'eval', id, theta: theta.buffer.slice(0), jobs: chunks[wi], sigma: this.cfg.sigma, task: this.cfg.task, episodes, seconds: this.cfg.seconds });
+            w.postMessage({ type: 'eval', id, theta: theta.buffer.slice(0), jobs: chunks[wi], sigma: this.cfg.sigma, task: this.cfg.task, episodes, seconds: this.cfg.seconds, push: this.cfg.push });
           })
       )
     ).then((res) => {
@@ -118,6 +130,7 @@ export class LabTrainer {
     const sec = (performance.now() - t0) / 1000;
     const st: GenStats = {
       gen: g,
+      push: this.cfg.push,
       mean: scores.reduce((a, b) => a + b, 0) / scores.length,
       best: Math.max(...scores),
       centre,
@@ -155,6 +168,8 @@ export class LabTrainer {
   weightsFile(score: number): FlyWeightsFile & { history: GenStats[] } {
     return {
       task: this.cfg.task,
+      brain: this.cfg.brain,
+      bodyVersion: FLY_BODY_VERSION,
       nIn: 0,
       nOut: 0,
       fanIn: 16,

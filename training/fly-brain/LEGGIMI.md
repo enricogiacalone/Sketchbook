@@ -16,6 +16,7 @@ articolazioni, comandati dai neuroni discendenti, spingono bene sul pavimento.
 | `src/ts/flyBrain/flyController.ts` | riferimento animato + ingressi + correzioni ai motori (uguale in gioco e in addestramento) |
 | `training/fly-brain/train.ts` | addestramento con Evolution Strategies su tutti i core |
 | `src/ts/components/Environment/FlyBrainFighter.tsx` | la mosca-umano nell'arena (pannello debug → "Cervello mosca") |
+| `src/ts/flyLab/` | il laboratorio (terza voce del menu): addestramento nel browser, vero vs rimescolato |
 
 ## Addestrare sul Mac
 
@@ -28,6 +29,17 @@ npm run mosca:train -- --task walk  --from public/fly-brain/weights-stand.json
 ```
 
 Opzioni: `--gens 1000 --pop 96 --sigma 0.01 --lr 0.003 --workers N`.
+
+**Esperimento di controllo** (connettoma rimescolato: stessi neuroni, stessi pesi,
+stesso numero di sinapsi per neurone, ma collegamenti casuali):
+
+```
+npm run mosca:train -- --task stand --brain shuffled
+```
+
+scrive `public/fly-brain/weights-<compito>-shuffled.json` e `log-<compito>-shuffled.csv`.
+Più comodo: il **Laboratorio cervello mosca** (menu iniziale) addestra i due cervelli
+in contemporanea e li mostra affiancati, con le due curve sullo stesso grafico.
 Riparte da `public/fly-brain/weights-<compito>.json` se esiste. Il log è in
 `training/fly-brain/log-<compito>.csv` (colonna "centro" = punteggio 0..1 dei pesi attuali).
 

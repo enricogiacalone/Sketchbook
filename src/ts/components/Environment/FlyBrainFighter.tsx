@@ -4,7 +4,7 @@ import { useGLTF } from '@react-three/drei';
 import { useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
-import { createFlyBody, destroyFlyBody, writeBodiesToBones, type FlyBody } from '../../flyBrain/flyBody';
+import { createFlyBody, destroyFlyBody, writeBodiesToBones, FLY_BODY_VERSION, type FlyBody } from '../../flyBrain/flyBody';
 import {
   parseFlyGraph, makeLayout, ConnectomeBrain, initialParams, decodeParams, type FlyGraph, type FlyWeightsFile,
 } from '../../flyBrain/connectomePolicy';
@@ -92,11 +92,14 @@ const FlyBrainFighter: React.FC = () => {
       let params: Float32Array | null = null;
       let info = `${task}: non ancora addestrato (solo animazione)`;
       try {
-        const r = await fetch(`/fly-brain/weights-${task}.json?t=${Date.now()}`);
+        let r = await fetch(`/__flybrain/load?task=${task}`);
+        if (!r.ok || !(r.headers.get('content-type') ?? '').includes('json')) r = await fetch(`/fly-brain/weights-${task}.json?t=${Date.now()}`);
         if (r.ok) {
           const w = (await r.json()) as FlyWeightsFile;
-          params = decodeParams(w.params);
-          info = `${task}: generazione ${w.generation}, punteggio ${w.score.toFixed(3)}`;
+          if (w.bodyVersion === FLY_BODY_VERSION && (w.brain ?? 'real') === 'real') {
+            params = decodeParams(w.params);
+            info = `${task}: generazione ${w.generation}, punteggio ${w.score.toFixed(3)}`;
+          } else info = `${task}: pesi di un corpo vecchio, ignorati`;
         }
       } catch {
         /* nessun peso */
