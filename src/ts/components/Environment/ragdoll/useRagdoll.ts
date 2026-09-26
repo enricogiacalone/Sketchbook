@@ -41,6 +41,17 @@ export interface RagdollController {
   isActive: () => boolean;
   isDeath: () => boolean;
   activateDeath: () => void;
+  // "vorrei si comportasse piu' da ragdoll se il colpo e' forte" -- colpo
+  // forte: il corpo attivo va KO (motori spenti, gravita' piena) e vola con
+  // la spinta; poi chi chiama lo rimette in piedi (standUp) quando si e'
+  // fermato. false se non c'e' il layer attivo.
+  knockDown: (dir: THREE.Vector3, speed: number) => boolean;
+  standUp: () => void;
+  isKnockedDown: () => boolean;
+  // stato del corpo a terra: fermo? a pancia in su? bacino e direzione della testa
+  getLyingState: () => LyingState | null;
+  // si gira sulla schiena (se e' caduto a pancia in giu')
+  rollOver: () => void;
   pulseHit: (
     worldImpulseDir: THREE.Vector3,
     magnitude: number,
@@ -75,7 +86,7 @@ export interface RagdollController {
   ) => { x: number; z: number };
   // ostacoli dell'arena: esce dalle compenetrazioni e dice chi lo sta
   // spingendo (vedi useRagdollSolidBodies.resolveObstacleContacts)
-  resolveObstacleContacts: (skipHandle: number | null) => ObstacleContact;
+  resolveObstacleContacts: (skipHandle: number | null, dt: number) => ObstacleContact;
   getSolidBodySegments: () => SolidBodySegmentDebug[];
   // Vedi ActiveRagdollSegmentDebug in useRagdollActive.ts -- collider
   // fisico e collider bersaglio (animazione) di ogni corpo del layer
@@ -114,7 +125,7 @@ export function useRagdoll(
   const { resolveBones } = useRagdollBones(modelRootRef);
   const { syncHurtbox, getHurtboxHandle: internalGetHurtboxHandle } =
     useRagdollHurtbox(modelRootRef);
-  const { syncSolidBody, resolveBodyMovement, resolveObstacleContacts, getSolidBodySegments } =
+  const { syncSolidBody, setRagdollBlocker, resolveBodyMovement, resolveObstacleContacts, getSolidBodySegments } =
     useRagdollSolidBodies(modelRootRef, resolveBones, ownerId);
   const {
     buildBodies,
@@ -205,6 +216,79 @@ export function useRagdoll(
     };
   }, [buildBodies, destroyBodies]);
 
+  const knockDown = useCallback((dir: THREE.Vector3, speed: number): boolean => {
+    if (!hasActiveRig() || stateRef.current.isDeath) return false;
+    activeKnockedOutRef.current = true;
+    const entries = activeBodiesRef.current;
+    const upper = /^(Head|Spine|Torso|Clavicle|UpperArm|ForeArm)/;
+    for (const key of Object.keys(entries)) {
+      const b = entries[key].body;
+      const v = b.linvel();
+      // parte alta spinta di piu' della bassa: il corpo si ribalta
+      const k = upper.test(key) ? 1 : key === 'Hips' ? 0.8 : 0.55;
+      b.setLinvel({ x: v.x + dir.x * speed * k, y: v.y + Math.max(0, dir.y) * speed * k + 0.15 * speed, z: v.z + dir.z * speed * k }, true);
+    }
+    const head = entries.Head?.body.translation();
+    if (head) triggerHitMarker(new THREE.Vector3(head.x, head.y, head.z));
+    return true;
+  }, [triggerHitMarker]);
+
+  const standUp = useCallback(() => {
+    if (stateRef.current.isDeath) return;
+    activeKnockedOutRef.current = false;
+  }, []);
+
+  const isKnockedDown = useCallback(() => activeKnockedOutRef.current, []);
+
+  // DEV: KO a comando dal browser (misure di compenetrazione)
+  useEffect(() => {
+    if (!import.meta.env.DEV || !ownerId) return;
+    const reg = ((window as any).__ragdollApi ??= {});
+    reg[ownerId] = { knockDown, standUp, isKnockedDown };
+    return () => { delete reg[ownerId]; };
+  }, [ownerId, knockDown, standUp, isKnockedDown]);
+
+  const _ly = useRef({ h: new THREE.Vector3(), s: new THREE.Vector3(), n: new THREE.Vector3() });
+  const getLyingState = useCallback((): LyingState | null => {
+    const e = activeBodiesRef.current;
+    if (!e.Hips || !e.Head || !e.UpperArm_L || !e.UpperArm_R) return null;
+    const hp = e.Hips.body.translation(), hd = e.Head.body.translation();
+    const l = e.UpperArm_L.body.translation(), r = e.UpperArm_R.body.translation();
+    const { h, s: sh, n } = _ly.current;
+    h.set(hd.x - hp.x, hd.y - hp.y, hd.z - hp.z);
+    sh.set(r.x - l.x, r.y - l.y, r.z - l.z);
+    // davanti del corpo = testa x spalle (in piedi guarda +Z del modello)
+    n.crossVectors(h, sh).normalize();
+    let maxV = 0;
+    for (const key of Object.keys(e)) {
+      const v = e[key].body.linvel();
+      maxV = Math.max(maxV, Math.hypot(v.x, v.y, v.z));
+    }
+    return {
+      settled: maxV < 0.5,
+      maxSpeed: maxV,
+      faceUp: n.y > 0,
+      pelvis: new THREE.Vector3(hp.x, hp.y, hp.z),
+      headDir: new THREE.Vector3(h.x, 0, h.z).normalize(),
+    };
+  }, []);
+
+  const rollOver = useCallback(() => {
+    const e = activeBodiesRef.current;
+    if (!e.Hips || !e.Head) return;
+    const hp = e.Hips.body.translation(), hd = e.Head.body.translation();
+    // rotazione attorno all'asse bacino->testa: mezzo giro in ~0.4 s
+    const ax = new THREE.Vector3(hd.x - hp.x, 0, hd.z - hp.z).normalize().multiplyScalar(8);
+    for (const key of Object.keys(e)) {
+      const b = e[key].body;
+      const t = b.translation();
+      const r = new THREE.Vector3(t.x - hp.x, t.y - hp.y, t.z - hp.z);
+      const v = new THREE.Vector3().crossVectors(ax, r);
+      b.setLinvel({ x: v.x, y: v.y + 1.2, z: v.z }, true);
+      b.setAngvel({ x: ax.x, y: ax.y, z: ax.z }, true);
+    }
+  }, []);
+
   const pulseHit = useCallback(
     (
       worldImpulseDir: THREE.Vector3,
@@ -214,6 +298,8 @@ export function useRagdoll(
       attackerZ?: number
     ) => {
       if (stateRef.current.isDeath) return;
+      // a terra (KO da colpo forte): il corpo e' gia' tutto fisica
+      if (activeKnockedOutRef.current && hasActiveRig()) return;
 
       // "ragdoll stile euphoria" -- con il layer attivo presente il colpo
       // e' un impulso vero sul corpo attivo colpito (che si piega/incassa
@@ -315,6 +401,9 @@ export function useRagdoll(
           ensureActiveRagdoll();
           rebuildIfRequested();
           const passive = isPassive || activeKnockedOutRef.current;
+          // a terra: le proprie capsule solide non devono spingere il
+          // proprio ragdoll (vedi CollisionGroups.RagdollBody)
+          setRagdollBlocker(!passive);
           // Ordine: bersagli dall'animazione (gia' aggiornata da
           // mixer.update / skeleton.pose) -> motori -> ossa dalla fisica.
           captureActiveTargets(delta);
@@ -375,6 +464,7 @@ export function useRagdoll(
       clampJointCones,
       syncHurtbox,
       syncSolidBody,
+      setRagdollBlocker,
       ensureActiveRagdoll,
       rebuildIfRequested,
       captureActiveTargets,
@@ -521,6 +611,11 @@ export function useRagdoll(
     isActive: () => stateRef.current.active,
     isDeath: () => stateRef.current.isDeath,
     activateDeath,
+    knockDown,
+    standUp,
+    isKnockedDown,
+    getLyingState,
+    rollOver,
     pulseHit,
     update,
     beginFrame: restoreActiveAnimationPose,
@@ -537,4 +632,12 @@ export function useRagdoll(
     testActiveHit,
     measureClipRanges,
   };
+}
+
+export interface LyingState {
+  settled: boolean;
+  maxSpeed: number;
+  faceUp: boolean;
+  pelvis: THREE.Vector3;
+  headDir: THREE.Vector3; // orizzontale, dal bacino verso la testa
 }

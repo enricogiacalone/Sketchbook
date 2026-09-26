@@ -27,7 +27,10 @@ let refCount = 0;
 
 export function acquireDebugGui(): GUI {
   if (!sharedGui) {
-    sharedGui = new GUI({ title: 'Debug' });
+    // "fai partire l'arena con le gui tutte chiuse": pannello chiuso e
+    // cartelle chiuse di default (si aprono cliccando il titolo)
+    sharedGui = new GUI({ title: 'Debug', closeFolders: true });
+    sharedGui.close();
   }
   refCount += 1;
   return sharedGui;

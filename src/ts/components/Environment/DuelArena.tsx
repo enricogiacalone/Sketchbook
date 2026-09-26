@@ -5,6 +5,7 @@ import WeaponEffects from './weapons/WeaponEffects';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import CombatSoldier from './CombatSoldier';
+import EnemyHealthBar from './EnemyHealthBar';
 import PlayerCombatSoldier, { ATTACK_RANGE } from './PlayerCombatSoldier';
 import PunchingBag, { PunchingBagHandle } from './PunchingBag';
 import DebugOrthoCamera from './DebugOrthoCamera';
@@ -265,7 +266,11 @@ const DuelArena: React.FC = () => {
 
     // Vittoria solo quando c'e' almeno un nemico e sono TUTTI a terra.
     const allEnemiesDead = enemies.length > 0 && target === null;
-    const result: 'none' | 'win' | 'lose' = playerData.isDead ? 'lose' : allEnemiesDead ? 'win' : 'none';
+    // "se li uccido tutti nn voglio vittoria o sconfitta.. semplicemente
+    // continuo a giocare": niente esito, niente cartello (il giocatore
+    // morto si rialza da solo, vedi PlayerCombatSoldier)
+    void allEnemiesDead;
+    const result: 'none' | 'win' | 'lose' = 'none';
     // "metti un mirino cosi' so dove sto per colpire" -- same range check
     // PlayerCombatSoldier.tsx's own attack branch uses, just read here too
     // so the crosshair can tell the player whether a swing would actually
@@ -453,6 +458,10 @@ const DuelArena: React.FC = () => {
           "Aggiungi nemico") -- cosi' un'ispezione a schermo del solo
           giocatore (T-pose, collider di debug) non ha un secondo intero
           set di collider a complicare la vista fin da subito. */}
+      {/* "ogni nemico ha la vita sopra di lui" */}
+      {enemies.map((enemy) => (
+        <EnemyHealthBar key={`hp-${enemy.id}`} data={enemy} maxHp={DUEL_MAX_HP} />
+      ))}
       {enemies.map((enemy) => (
         <CombatSoldier
           key={enemy.id}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import * as THREE from "three";
-import { interactionGroups, useBeforePhysicsStep, useRapier } from "@react-three/rapier";
+import { interactionGroups, useBeforePhysicsStep, useFilterContactPair, useRapier } from "@react-three/rapier";
 import type { ImpulseJoint, RigidBody as RapierRigidBody } from "@dimforge/rapier3d-compat";
 import {
   ACTIVE_RAGDOLL_SEGMENTS,
@@ -86,8 +86,55 @@ const RUNAWAY_DISTANCE_M = 1.5;
 // crollava. Finche' e' vivo e' l'animazione a decidere dove stanno i
 // piedi (i colpi arrivano come impulsi, vedi applyActiveHit). PASSIVO/KO:
 // collide con il mondo (terreno, edifici, ...), come prima.
-const ALIVE_COLLISION_GROUPS = interactionGroups([CollisionGroups.Ragdoll], []);
-const PASSIVE_COLLISION_GROUPS = groupsExcluding(CollisionGroups.Ragdoll, CollisionGroups.Characters, CollisionGroups.Ragdoll);
+//
+// "migliora la fisica della ragdoll -- compenetrazioni" (stile GTA ma non
+// finto):
+//  - VIVO: tocca comunque muri/casse/ostacoli (CollisionGroups.RagdollWorld,
+//    non il pavimento): un braccio che si muove contro un muro si ferma
+//    sul muro invece di attraversarlo;
+//  - PASSIVO/KO: in piu' tocca gli ostacoli dell'arena, le capsule solide
+//    degli ALTRI combattenti e il sacco (RagdollBody), gli altri ragdoll a
+//    terra E SE STESSO (segmenti non vicini: braccio contro petto, gamba
+//    contro gamba) -- prima passava attraverso tutto tranne il terreno.
+const ALIVE_COLLISION_GROUPS = interactionGroups([CollisionGroups.Ragdoll], [CollisionGroups.RagdollWorld]);
+const PASSIVE_COLLISION_GROUPS = groupsExcluding(CollisionGroups.Ragdoll, CollisionGroups.Characters);
+
+// Auto-collisione da KO: coppie SEMPRE escluse = segmenti a 1-2 passi
+// nell'albero (collegati da un giunto, fratelli, nonno-nipote): capsule
+// corte e tozze della colonna, clavicole, attacchi di anche/spalle si
+// sovrappongono per costruzione e si spingerebbero a vicenda. Eccezione:
+// le due cosce (fratelle) -- ginocchia che si attraversano sono proprio
+// la compenetrazione da evitare; le si lascia alla regola dinamica sotto.
+// Coppie gia' compenetrate nell'istante in cui il corpo va KO (es. mano
+// sul viso in guardia) restano escluse finche' non si separano di
+// SELF_RELEASE_M: riattivarle subito le farebbe esplodere via.
+const SELF_OVERLAP_M = 0.005;
+const SELF_RELEASE_M = 0.02;
+const SELF_ALWAYS_COLLIDE = new Set(["Thigh_L|Thigh_R", "Thigh_R|Thigh_L"]);
+const SEGMENT_INDEX: Record<string, number> = {};
+ACTIVE_RAGDOLL_SEGMENTS.forEach((seg, i) => { SEGMENT_INDEX[seg.name] = i; });
+const pairKey = (a: number, b: number) => (a < b ? a * 64 + b : b * 64 + a);
+const SELF_STATIC_EXCLUDED: Set<number> = (() => {
+  const out = new Set<number>();
+  const parentOf = (n: string) => ACTIVE_RAGDOLL_SEGMENTS.find((x) => x.name === n)?.parent ?? null;
+  const segs = ACTIVE_RAGDOLL_SEGMENTS;
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 1; j < segs.length; j++) {
+      const a = segs[i].name, b = segs[j].name;
+      if (SELF_ALWAYS_COLLIDE.has(`${a}|${b}`)) continue;
+      const pa = parentOf(a), pb = parentOf(b);
+      const near =
+        pa === b || pb === a || // giunto
+        (pa !== null && pa === pb) || // fratelli
+        (pa !== null && parentOf(pa) === b) || (pb !== null && parentOf(pb) === a); // nonno
+      if (near) out.add(pairKey(i, j));
+    }
+  }
+  return out;
+})();
+// CCD da KO: un avambraccio (r 5 cm) lanciato a 10+ m/s fa 8 cm per passo
+// a 120 Hz -- abbastanza per attraversare uno spigolo o un altro corpo.
+const PASSIVE_CCD = true;
 
 const ALIVE_LINEAR_DAMPING = 0.2;
 const ALIVE_ANGULAR_DAMPING = 1.0;
@@ -219,6 +266,11 @@ export function useRagdollActive(
   const neutralClipRef = useRef<THREE.AnimationClip | null>(null);
   const jointFrameRef = useRef<JointFrameMap | null>(null);
   const passiveRef = useRef(false);
+  // handle del collider -> indice del segmento (solo i NOSTRI collider)
+  const colliderIndexRef = useRef<Map<number, number>>(new Map());
+  // coppie proprie escluse ora (statiche + compenetrate all'inizio del KO)
+  const selfExcludedRef = useRef<Set<number>>(new Set());
+  const selfPendingRef = useRef<Array<[number, number]>>([]);
   const hipsPinnedRef = useRef(false);
   const gravityScaleRef = useRef<number | null>(null);
   const activeRagdollWeightRef = useRef(ACTIVE_RAGDOLL_WEIGHT_MOVING);
@@ -328,6 +380,7 @@ export function useRagdollActive(
         body
       );
       if (ownerId) registerShootableCollider(activeCollider.handle, { ownerId, segment: seg.name });
+      colliderIndexRef.current.set(activeCollider.handle, SEGMENT_INDEX[seg.name]);
 
       entries[seg.name] = {
         segment: seg,
@@ -415,6 +468,8 @@ export function useRagdollActive(
       );
       if (!data) continue;
       const joint = world.createImpulseJoint(data, p.body, e.body, true);
+      // genitore/figlio si toccano per costruzione al perno: mai contatti
+      joint.setContactsEnabled(false);
       e.joint = joint;
       created.push(e);
       activeJointsRef.current.push(joint);
@@ -471,6 +526,9 @@ export function useRagdollActive(
       }
     }
     activeJointsRef.current = [];
+    colliderIndexRef.current.clear();
+    selfPendingRef.current = [];
+    passiveRef.current = false;
     for (const key of Object.keys(activeBodiesRef.current)) {
       try {
         const b = activeBodiesRef.current[key].body;
@@ -522,6 +580,79 @@ export function useRagdollActive(
     }
   }, [s]);
 
+  // ------------------------------------------------- auto-collisione da KO
+  // Inizio KO: esclusioni statiche + coppie che in questo istante si
+  // compenetrano gia' (verranno riattivate quando si separano).
+  const beginSelfCollision = () => {
+    const entries = activeBodiesRef.current;
+    const excluded = selfExcludedRef.current;
+    excluded.clear();
+    for (const k of SELF_STATIC_EXCLUDED) excluded.add(k);
+    const pending: Array<[number, number]> = [];
+    const list = Object.values(entries).filter((e) => e.body.numColliders() > 0);
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = SEGMENT_INDEX[list[i].segment.name], b = SEGMENT_INDEX[list[j].segment.name];
+        const key = pairKey(a, b);
+        if (excluded.has(key)) continue;
+        const c = list[i].body.collider(0).contactCollider(list[j].body.collider(0), SELF_OVERLAP_M);
+        if (c && c.distance < SELF_OVERLAP_M) {
+          excluded.add(key);
+          pending.push([a, b]);
+        }
+      }
+    }
+    selfPendingRef.current = pending;
+  };
+
+  // Durante il KO: le coppie escluse all'inizio tornano a collidere appena
+  // si sono separate.
+  const updateSelfCollision = () => {
+    const pending = selfPendingRef.current;
+    if (!pending.length) return;
+    const entries = activeBodiesRef.current;
+    const segs = ACTIVE_RAGDOLL_SEGMENTS;
+    for (let i = pending.length - 1; i >= 0; i--) {
+      const [a, b] = pending[i];
+      const ea = entries[segs[a].name], eb = entries[segs[b].name];
+      if (!ea || !eb) continue;
+      const c = ea.body.collider(0).contactCollider(eb.body.collider(0), SELF_RELEASE_M);
+      if (!c) {
+        selfExcludedRef.current.delete(pairKey(a, b));
+        pending.splice(i, 1);
+      }
+    }
+  };
+
+  // DEV: misure di compenetrazione dal browser (window.__activeRagdolls)
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const reg = ((window as any).__activeRagdolls ??= {});
+    const key = ownerId ?? `rig${Math.random().toString(36).slice(2, 7)}`;
+    reg[key] = {
+      world,
+      rapier,
+      entries: () => activeBodiesRef.current,
+      passive: () => passiveRef.current,
+      excluded: () => selfExcludedRef.current,
+      pending: () => selfPendingRef.current,
+      index: SEGMENT_INDEX,
+      pairKey,
+    };
+    return () => { delete reg[key]; };
+  }, [world, rapier, ownerId]);
+
+  useFilterContactPair((c1, c2) => {
+    const own = colliderIndexRef.current;
+    const a = own.get(c1);
+    const b = own.get(c2);
+    if (a === undefined && b === undefined) return null; // non e' nostro
+    if (a !== undefined && b !== undefined && selfExcludedRef.current.has(pairKey(a, b))) {
+      return rapier.SolverFlags.EMPTY;
+    }
+    return rapier.SolverFlags.COMPUTE_IMPULSE;
+  });
+
   // ------------------------------------------------------ modalita' e motori
   const setMode = useCallback((passive: boolean, pinHips: boolean, aliveGravity: number) => {
     const entries = activeBodiesRef.current;
@@ -537,8 +668,12 @@ export function useRagdollActive(
           const col = b.collider(0);
           col.setFriction(passive ? PASSIVE_FRICTION : ALIVE_FRICTION);
           col.setCollisionGroups(passive ? PASSIVE_COLLISION_GROUPS : ALIVE_COLLISION_GROUPS);
+          // filtro coppie (auto-collisione, vedi useFilterContactPair sotto)
+          col.setActiveHooks(passive ? rapier.ActiveHooks.FILTER_CONTACT_PAIRS : 0);
         }
+        if (PASSIVE_CCD) b.enableCcd(passive);
       }
+      if (modeChanged && passive) beginSelfCollision();
       gravityScaleRef.current = gravity;
       passiveRef.current = passive;
     }
@@ -560,6 +695,7 @@ export function useRagdollActive(
     const entries = activeBodiesRef.current;
     const bench = useStore.getState().ragdollBench;
     setMode(passive, bench.pinHips, bench.aliveGravityScale);
+    if (passive) updateSelfCollision();
     const decay = delta / Math.max(0.05, ACTIVE_RAGDOLL_HIT_RECOVERY_S);
     staggerRef.current = Math.max(0, staggerRef.current - delta / Math.max(0.05, ACTIVE_RAGDOLL_HIT_RECOVERY_S * 1.25));
 

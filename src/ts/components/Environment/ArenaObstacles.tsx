@@ -1,11 +1,11 @@
 import React, { useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { RigidBody, RapierRigidBody, CuboidCollider, CylinderCollider, BallCollider, interactionGroups } from '@react-three/rapier';
-import { CollisionGroups } from '../../enums/CollisionGroups';
+import { RigidBody, RapierRigidBody, useBeforePhysicsStep, RoundCuboidCollider, CuboidCollider, CylinderCollider, BallCollider } from '@react-three/rapier';
+import { SOLID_OBSTACLE_GROUPS } from '../../enums/CollisionGroups';
 import { getTerrainHeight } from './Terrain';
 
-const SOLID_BODY_GROUPS = interactionGroups([CollisionGroups.Characters], [CollisionGroups.Characters]);
+// bloccano combattenti e ragdoll (vivo o KO) -- vedi CollisionGroups.ts
+const SOLID_BODY_GROUPS = SOLID_OBSTACLE_GROUPS;
 
 export const ArenaObstacles: React.FC = () => {
   const pendulum1Ref = useRef<RapierRigidBody>(null);
@@ -16,7 +16,13 @@ export const ArenaObstacles: React.FC = () => {
 
   const timeRef = useRef(0);
 
-  useFrame((state, delta) => {
+  // Mossi a OGNI passo di fisica (1/120 s), non a ogni frame: con
+  // setNextKinematic* in useFrame (60 Hz) un passo su due l'ostacolo
+  // saltava di due passi e quello dopo restava fermo (velocita' 0) --
+  // a scatti, e contro un corpo a terra le spinte arrivavano doppie
+  // (misurato: stinco del ragdoll dentro il rotore di 33 cm).
+  useBeforePhysicsStep((world) => {
+    const delta = world.timestep;
     timeRef.current += delta;
     const t = timeRef.current;
 
@@ -97,8 +103,18 @@ export const ArenaObstacles: React.FC = () => {
         </RigidBody>
       </group>
 
-      {/* --- Pale Rotanti (Spinner a croce sul terreno) --- */}
-      <group position={[0, 0.6, 5]}>
+      {/* --- Pale Rotanti (Spinner a croce sul terreno) ---
+          Pale con spigoli arrotondati (stesse misure esterne): un corpo a
+          terra e' alto quasi quanto lo spazio sotto la pala (20 cm) --
+          con lo spigolo vivo il contatto finiva per spingerlo DENTRO il
+          pavimento (misurato: 6-20 cm di compenetrazione, schiacciato);
+          con lo spigolo tondo la spinta resta di lato e lo trascina.
+          Alzate di 25 cm (0.6 -> 0.85): prima sotto la pala restavano
+          20 cm, un corpo a terra ne e' alto 30-40 -- ad ogni giro la pala
+          ci passava sopra schiacciandolo nel pavimento (misurato: testa
+          10-22 cm dentro). Ora ci passa sopra senza toccarlo; chi e' in
+          piedi la prende comunque a meta' coscia. */}
+      <group position={[0, 0.85, 5]}>
         <RigidBody ref={spinnerRef} type="kinematicPosition" colliders={false} collisionGroups={SOLID_BODY_GROUPS}>
           <mesh position={[0, 0, 0]}>
             <cylinderGeometry args={[0.6, 0.6, 1.2, 16]} />
@@ -109,12 +125,12 @@ export const ArenaObstacles: React.FC = () => {
             <boxGeometry args={[4.5, 0.5, 0.8]} />
             <meshStandardMaterial color="#f97316" metalness={0.8} roughness={0.2} />
           </mesh>
-          <CuboidCollider args={[2.25, 0.25, 0.4]} position={[2.5, 0, 0]} />
+          <RoundCuboidCollider args={[2.15, 0.15, 0.3, 0.1]} position={[2.5, 0, 0]} />
           <mesh position={[-2.5, 0, 0]}>
             <boxGeometry args={[4.5, 0.5, 0.8]} />
             <meshStandardMaterial color="#f97316" metalness={0.8} roughness={0.2} />
           </mesh>
-          <CuboidCollider args={[2.25, 0.25, 0.4]} position={[-2.5, 0, 0]} />
+          <RoundCuboidCollider args={[2.15, 0.15, 0.3, 0.1]} position={[-2.5, 0, 0]} />
         </RigidBody>
       </group>
 

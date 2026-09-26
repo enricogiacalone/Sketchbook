@@ -17,6 +17,7 @@ import { useRapier } from '@react-three/rapier';
 import { usePistolModel, useGunModel, RIFLE_SPEC, type GunModelApi } from './weapons/usePistolModel';
 import { useKnifeModel } from './weapons/useKnifeModel';
 import { solveTwoBoneIK } from './weapons/twoBoneIK';
+import { GETUP_CLIP, measureLyingPose, newKnockdown, stepKnockdown, getUpPlacement } from './ragdoll/knockdown';
 import { castShot, spreadDirection } from './weapons/hitscan';
 import { getShootableCollider, applyFighterHit } from './weapons/shootableRegistry';
 import { emitShotFx, type ShotSurface } from './weapons/weaponFx';
@@ -94,6 +95,11 @@ const OBSTACLE_HIT_MIN_SPEED = 1.2;
 const OBSTACLE_KNOCK_MAX_SPEED = 6;
 const OBSTACLE_KNOCK_DECAY = 5; // 1/s
 const OBSTACLE_HIT_COOLDOWN_S = 0.6;
+// sopra questa velocita' l'ostacolo non fa solo barcollare: KO fisico
+const OBSTACLE_KNOCKDOWN_SPEED = 3.5;
+const KNIFE_HEAVY_KNOCKDOWN_SPEED = 4.5;
+// morto: dopo quanti secondi ci si rialza (niente schermata di sconfitta)
+const PLAYER_REVIVE_S = 4;
 const KNIFE_LUNGE_SPEED = 1.5; // m/s -> ~45 cm di passo
 const _support = new THREE.Vector3();
 
@@ -311,6 +317,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   // e pausa tra un colpo e l'altro dello stesso ostacolo
   const knockVelRef = useRef(new THREE.Vector3());
   const obstacleHitCooldownRef = useRef(0);
+  const kdRef = useRef(newKnockdown());
+  const deadForRef = useRef(0);
+  const maxHpRef = useRef(data.hp);
+  const isDown = () => kdRef.current.active || data.state === 'Si rialza';
   type Arm = { upper: THREE.Object3D; lower: THREE.Object3D; hand: THREE.Object3D };
   const armBonesRef = useRef<{ l: Arm; r: Arm } | null>(null);
   const rifleRaiseRef = useRef(0);
@@ -438,6 +448,22 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     return { clone: clonedScene, mixer: animMixer, actions: actMap, clipsMap: cMap, animCatalog: catalog };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, animations, data]);
+
+  const lyingPose = useMemo(() => measureLyingPose(scene, clipsMap[GETUP_CLIP]), [scene, clipsMap]);
+  // colpo forte: KO fisico (vedi ragdoll/knockdown.ts)
+  const startKnockdown = (dirX: number, dirZ: number, speed: number, up = 0.3) => {
+    if (kdRef.current.active || data.isDead) return;
+    const dir = new THREE.Vector3(dirX, up, dirZ).normalize();
+    if (!ragdoll.knockDown(dir, speed)) return;
+    kdRef.current = { ...newKnockdown(), active: true };
+    data.state = 'A terra';
+    data.attackLock = 0;
+    isAttackingRef.current = false;
+    isDodgingRef.current = false;
+    pendingHitRef.current = null;
+    knockVelRef.current.set(0, 0, 0);
+    aimingRef.current = false;
+  };
 
   React.useEffect(() => {
     modelRootRef.current = clone;
@@ -570,6 +596,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         opponent.state = 'Danno parato!';
       } else {
         opponent.hp -= meleeDamageRef.current;
+        // affondo pesante col coltello: colpo forte -> KO fisico
+        if (withKnife && meleeDamageRef.current >= KNIFE_DAMAGE_HEAVY && opponent.hp > 0) {
+          const dx = opponent.position.x - data.position.x, dz = opponent.position.z - data.position.z;
+          const l = Math.hypot(dx, dz) || 1;
+          opponent.knockdown = { dirX: dx / l, dirZ: dz / l, speed: KNIFE_HEAVY_KNOCKDOWN_SPEED };
+        }
         if (opponent.hp <= 0) {
           opponent.hp = 0;
           opponent.isDead = true;
@@ -745,6 +777,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       !tPose &&
       isGun() &&
       !data.isDead &&
+      !isDown() &&
       data.state !== 'Vittoria!' &&
       !isDodgingRef.current
     ) {
@@ -1072,7 +1105,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // Dopo la torsione del busto, prima del ragdoll: fa parte della posa
     // bersaglio.
     const rifleIK = () => {
-      if (tPoseBench || benchClip || weaponRef.current !== 'rifle' || data.isDead || isDodgingRef.current) return;
+      if (tPoseBench || benchClip || weaponRef.current !== 'rifle' || data.isDead || isDodgingRef.current || isDown()) return;
       if (!armBonesRef.current) {
         const get = (n: string) => clone.getObjectByName(n);
         const l = [get('upperarm_l'), get('lowerarm_l'), get('hand_l')];
@@ -1172,20 +1205,60 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       if (data.currentAnim !== animCatalog.death) {
         transitionToAnimation(animCatalog.death, 0.2, false);
         data.state = 'K.O.';
+        deadForRef.current = 0;
       }
       ragdoll.activateDeath();
+      // "nn voglio vittoria o sconfitta.. continuo a giocare": dopo qualche
+      // secondo a terra ci si rialza da dove si e' caduti, con la vita piena
+      deadForRef.current += delta * globalSpeed;
+      if (deadForRef.current >= PLAYER_REVIVE_S) {
+        const ly = ragdoll.getLyingState();
+        data.isDead = false;
+        data.hp = maxHpRef.current;
+        data.triggerHit = null;
+        ragdoll.deactivate();
+        if (ly && lyingPose && ly.pelvis.y < 1.2) {
+          const place = getUpPlacement(ly, lyingPose);
+          data.position.x = place.x;
+          data.position.z = place.z;
+          data.rotation = place.rotation;
+          data.attackLock = transitionToAnimation(GETUP_CLIP, 0.05, false);
+          data.state = 'Si rialza';
+        } else {
+          data.attackLock = 0;
+          data.state = idleState();
+          transitionToAnimation(idleName(), 0.2, true);
+        }
+      }
       applyTransform();
       return;
     }
+    // (niente piu' "Vittoria!" quando i nemici sono tutti a terra: si
+    // continua a giocare, se ne possono aggiungere altri)
 
-    // A small flourish once the AI is down and you're still standing --
-    // CombatSoldier.tsx's own AI already does the mirror image of this
-    // (its "if (!target)" branch plays victory/'Sopravvissuto' once its
-    // only living opponent -- you -- is excluded from targeting).
-    if (opponents.length > 0 && opponents.every((o) => o.isDead)) {
-      if (data.currentAnim !== animCatalog.victory) {
-        transitionToAnimation(animCatalog.victory, 0.3, true);
-        data.state = 'Vittoria!';
+    // A terra dopo un colpo forte: niente comandi, il corpo e' fisica pura;
+    // quando si e' fermato (e girato sulla schiena) si rialza da dov'e'.
+    if (data.knockdown) {
+      startKnockdown(data.knockdown.dirX, data.knockdown.dirZ, data.knockdown.speed);
+      data.knockdown = null;
+    }
+    if (kdRef.current.active) {
+      data.triggerHit = null;
+      const place = stepKnockdown(kdRef.current, delta * globalSpeed, ragdoll, lyingPose);
+      if (import.meta.env.DEV && !kdRef.current.active) {
+        const ly = ragdoll.getLyingState();
+        (window as any).__kdDebug = { t: kdRef.current.t, rolls: kdRef.current.rolls, place, lyPelvis: ly?.pelvis.toArray(), lyHead: ly?.headDir.toArray(), faceUp: ly?.faceUp, rootBefore: [data.position.x, data.position.z], pose: lyingPose };
+      }
+      if (!kdRef.current.active) {
+        if (place) {
+          data.position.x = place.x;
+          data.position.z = place.z;
+          data.rotation = place.rotation;
+          data.attackLock = transitionToAnimation(GETUP_CLIP, 0.05, false);
+          data.state = 'Si rialza';
+        } else {
+          data.state = idleState();
+        }
       }
       applyTransform();
       return;
@@ -1195,11 +1268,13 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // compenetrazioni e, se l'ostacolo si muove, viene spinto e colpito.
     {
       const dtO = delta * globalSpeed;
-      const ob = ragdoll.resolveObstacleContacts(bagSolidHandle ?? null);
+      const ob = ragdoll.resolveObstacleContacts(bagSolidHandle ?? null, dtO);
       data.position.x += ob.pushX;
       data.position.z += ob.pushZ;
       if (obstacleHitCooldownRef.current > 0) obstacleHitCooldownRef.current -= dtO;
-      if (ob.hitSpeed > OBSTACLE_HIT_MIN_SPEED) {
+      if (ob.hitSpeed >= OBSTACLE_KNOCKDOWN_SPEED && data.state !== 'Si rialza') {
+        startKnockdown(ob.hitVX, ob.hitVZ, Math.min(ob.hitSpeed, 8));
+      } else if (ob.hitSpeed > OBSTACLE_HIT_MIN_SPEED) {
         // la spinta segue l'ostacolo (tetto per non volare via)
         const k = Math.min(1, OBSTACLE_KNOCK_MAX_SPEED / ob.hitSpeed);
         knockVelRef.current.set(ob.hitVX * k, 0, ob.hitVZ * k);

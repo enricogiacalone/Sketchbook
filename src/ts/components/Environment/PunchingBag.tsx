@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { RigidBody, CapsuleCollider, RapierRigidBody, interactionGroups, useSphericalJoint } from '@react-three/rapier';
 import type { Collider } from '@dimforge/rapier3d-compat';
 import { CollisionGroups } from '../../enums/CollisionGroups';
-import { SOLID_BODY_GROUPS } from '../../enums/CollisionGroups';
+import { SOLID_BODY_RAGDOLL_GROUPS } from '../../enums/CollisionGroups';
 import { getTerrainHeight } from './Terrain';
 import { useStore } from '../../store';
 
@@ -382,8 +382,8 @@ const PunchingBag = React.forwardRef<PunchingBagHandle, PunchingBagProps>(
             args={[halfHeight, BAG_RADIUS]}
             position={[0, BAG_CENTER_Y, 0]}
             mass={0}
-            collisionGroups={SOLID_BODY_GROUPS}
-            solverGroups={SOLID_BODY_GROUPS}
+            collisionGroups={SOLID_BODY_RAGDOLL_GROUPS}
+            solverGroups={SOLID_BODY_RAGDOLL_GROUPS}
           />
 
           {/* "fai riferimenti visivi per ragdoll e fisica dei solidi" --

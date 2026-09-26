@@ -29,6 +29,16 @@ export enum CollisionGroups {
   // hurtboxes -- never terrain, ragdoll pieces, or anything else sharing
   // the world.
   Hurtbox = 6,
+  // "migliora la fisica della ragdoll -- compenetrazioni": ostacoli del
+  // mondo che il ragdoll attivo deve toccare SEMPRE, anche da vivo
+  // (muri, casse, ostacoli mobili dell'arena) -- NON il pavimento, che da
+  // vivo resta escluso (vedi ALIVE_COLLISION_GROUPS in useRagdollActive).
+  RagdollWorld = 7,
+  // Corpi che solo il ragdoll A TERRA/KO deve toccare: le capsule solide
+  // degli altri combattenti e il sacco. Da vivo le mani li attraversano
+  // (i colpi sono gestiti dalle hurtbox); da KO un corpo che cade addosso
+  // a un altro ci sbatte invece di passarci dentro.
+  RagdollBody = 8,
 }
 
 // "ogni parte del corpo deve essere un collider.. se collide collide"
@@ -47,6 +57,22 @@ export enum CollisionGroups {
 export const SOLID_BODY_GROUPS = interactionGroups(
   [CollisionGroups.Characters],
   [CollisionGroups.Characters]
+);
+
+// Capsule solide di un combattente IN PIEDI e sacco: come SOLID_BODY_GROUPS
+// + visibili al ragdoll KO (di un ALTRO combattente -- le proprie capsule
+// tornano a SOLID_BODY_GROUPS finche' il proprio ragdoll e' a terra, vedi
+// useRagdollSolidBodies.setRagdollBlocker).
+export const SOLID_BODY_RAGDOLL_GROUPS = interactionGroups(
+  [CollisionGroups.Characters, CollisionGroups.RagdollBody],
+  [CollisionGroups.Characters, CollisionGroups.Ragdoll]
+);
+
+// Ostacoli dell'arena (pendoli, pistoni, rotore): bloccano i combattenti
+// (Characters) E il ragdoll, vivo o KO.
+export const SOLID_OBSTACLE_GROUPS = interactionGroups(
+  [CollisionGroups.Characters, CollisionGroups.RagdollWorld],
+  [CollisionGroups.Characters, CollisionGroups.Ragdoll]
 );
 
 const ALL_GROUP_INDICES = Array.from({ length: 16 }, (_, i) => i);

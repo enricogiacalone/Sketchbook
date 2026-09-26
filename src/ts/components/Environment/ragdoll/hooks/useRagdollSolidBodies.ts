@@ -12,6 +12,7 @@ import {
 } from "../ragdollConfig";
 import {
   SOLID_BODY_GROUPS,
+  SOLID_BODY_RAGDOLL_GROUPS,
 } from "../../../../enums/CollisionGroups";
 
 interface SolidBodyEntry {
@@ -44,6 +45,10 @@ export function useRagdollSolidBodies(
   const solidBodiesRef = useRef<Record<string, SolidBodyEntry>>({});
   const ownColliderHandlesRef = useRef<Set<number>>(new Set());
   const solidControllerRef = useRef<KinematicCharacterController | null>(null);
+  // Le capsule solide sono visibili ai ragdoll KO (CollisionGroups.RagdollBody)
+  // -- tranne quando il ragdoll a terra e' il NOSTRO: le capsule seguono le
+  // sue stesse ossa e lo spingerebbero da dentro.
+  const ragdollBlockerRef = useRef(true);
 
   const _solidV1 = new THREE.Vector3();
   const _solidV2 = new THREE.Vector3();
@@ -87,8 +92,8 @@ export function useRagdollSolidBodies(
         .setRotation({ x: rot.x, y: rot.y, z: rot.z, w: rot.w });
       const body = world.createRigidBody(bodyDesc);
       const colliderDesc = rapier.ColliderDesc.capsule(halfHeight, segment.radius)
-        .setCollisionGroups(SOLID_BODY_GROUPS)
-        .setSolverGroups(SOLID_BODY_GROUPS);
+        .setCollisionGroups(ragdollBlockerRef.current ? SOLID_BODY_RAGDOLL_GROUPS : SOLID_BODY_GROUPS)
+        .setSolverGroups(ragdollBlockerRef.current ? SOLID_BODY_RAGDOLL_GROUPS : SOLID_BODY_GROUPS);
       const collider = world.createCollider(colliderDesc, body);
 
       entries[segment.name] = { body, collider, halfHeight, radius: segment.radius };
@@ -229,8 +234,14 @@ export function useRagdollSolidBodies(
   //    (solo in orizzontale), cosi' non resta mai incastrato;
   //  - si restituisce la velocita' dell'ostacolo nel punto di contatto, per
   //    la spinta/colpo (lo gestisce chi chiama: PlayerCombatSoldier/CombatSoldier).
+  // Velocita' degli ostacoli: i corpi cinematici mossi con
+  // setNextKinematic* in Rapier JS riportano linvel/angvel = 0, quindi la
+  // velocita' del punto di contatto si calcola qui dalla posa del corpo al
+  // frame prima (registrata per tutti gli ostacoli entro 3 m).
+  const prevPosesRef = useRef(new Map<number, { t: THREE.Vector3; q: THREE.Quaternion }>());
+  const _pq = useRef({ q: new THREE.Quaternion(), qi: new THREE.Quaternion(), v: new THREE.Vector3(), w: new THREE.Vector3() });
   const resolveObstacleContacts = useCallback(
-    (skipHandle: number | null): ObstacleContact => {
+    (skipHandle: number | null, dt: number): ObstacleContact => {
       const out: ObstacleContact = { pushX: 0, pushZ: 0, hitSpeed: 0, hitVX: 0, hitVZ: 0, hitX: 0, hitY: 0, hitZ: 0, segment: null };
       if (!ensureSolidBody()) return out;
       const entries = solidBodiesRef.current;
@@ -266,13 +277,21 @@ export function useRagdollSolidBodies(
             out.pushZ = pz;
           }
           const body = other.parent();
-          if (body && !body.isFixed()) {
-            const v = body.velocityAtPoint(c.point2);
-            const sp = Math.hypot(v.x, v.z);
+          const prev = body ? prevPosesRef.current.get(body.handle) : undefined;
+          if (body && !body.isFixed() && prev && dt > 1e-4) {
+            // punto di contatto nel frame dell'ostacolo, riportato alla posa di prima
+            const { q, qi, v, w } = _pq.current;
+            const bt = body.translation(), br = body.rotation();
+            q.set(br.x, br.y, br.z, br.w);
+            qi.copy(q).invert();
+            v.set(c.point2.x - bt.x, c.point2.y - bt.y, c.point2.z - bt.z).applyQuaternion(qi);
+            w.copy(v).applyQuaternion(prev.q).add(prev.t);
+            const vx = (c.point2.x - w.x) / dt, vz = (c.point2.z - w.z) / dt;
+            const sp = Math.hypot(vx, vz);
             if (sp > out.hitSpeed) {
               out.hitSpeed = sp;
-              out.hitVX = v.x;
-              out.hitVZ = v.z;
+              out.hitVX = vx;
+              out.hitVZ = vz;
               out.hitX = c.point1.x;
               out.hitY = c.point1.y;
               out.hitZ = c.point1.z;
@@ -280,6 +299,36 @@ export function useRagdollSolidBodies(
             }
           }
         }
+      }
+      // pose degli ostacoli vicini, per la velocita' del prossimo frame
+      const hips = entries.Hips ?? entries[Object.keys(entries)[0]];
+      if (hips) {
+        const seen = new Set<number>();
+        const ht = hips.body.translation();
+        world.intersectionsWithShape(
+          ht,
+          { x: 0, y: 0, z: 0, w: 1 },
+          new rapier.Ball(3),
+          (c) => {
+            const b = c.parent();
+            if (b && b.isKinematic() && !seen.has(b.handle)) {
+              seen.add(b.handle);
+              const t = b.translation(), r = b.rotation();
+              const e = prevPosesRef.current.get(b.handle);
+              if (e) {
+                e.t.set(t.x, t.y, t.z);
+                e.q.set(r.x, r.y, r.z, r.w);
+              } else prevPosesRef.current.set(b.handle, { t: new THREE.Vector3(t.x, t.y, t.z), q: new THREE.Quaternion(r.x, r.y, r.z, r.w) });
+            }
+            return true;
+          },
+          undefined,
+          SOLID_BODY_GROUPS,
+          undefined,
+          undefined,
+          (c: Collider) => !ownHandles.has(c.handle)
+        );
+        for (const k of prevPosesRef.current.keys()) if (!seen.has(k)) prevPosesRef.current.delete(k);
       }
       // limite per frame: esce in pochi frame senza teletrasporti
       const len = Math.hypot(out.pushX, out.pushZ);
@@ -296,7 +345,7 @@ export function useRagdollSolidBodies(
       }
       return out;
     },
-    [ensureSolidBody, world]
+    [ensureSolidBody, world, rapier]
   );
 
   const getSolidBodySegments = useCallback((): SolidBodySegmentDebug[] => {
@@ -327,8 +376,19 @@ export function useRagdollSolidBodies(
     [world]
   );
 
+  const setRagdollBlocker = useCallback((enabled: boolean) => {
+    if (ragdollBlockerRef.current === enabled) return;
+    ragdollBlockerRef.current = enabled;
+    const g = enabled ? SOLID_BODY_RAGDOLL_GROUPS : SOLID_BODY_GROUPS;
+    for (const e of Object.values(solidBodiesRef.current)) {
+      e.collider.setCollisionGroups(g);
+      e.collider.setSolverGroups(g);
+    }
+  }, []);
+
   return {
     syncSolidBody,
+    setRagdollBlocker,
     resolveBodyMovement,
     resolveObstacleContacts,
     getSolidBodySegments,

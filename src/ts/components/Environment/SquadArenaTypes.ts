@@ -89,6 +89,10 @@ export interface FighterData {
   // al ragdoll (proiettile: impulso nel punto esatto, vedi
   // PlayerCombatSoldier.tsx) -- il ricevente non deve aggiungerne un'altra.
   hitReactionHandled?: boolean;
+  // Colpo FORTE ricevuto (affondo di coltello, ...): chi lo riceve va KO
+  // fisico e poi si rialza (vedi ragdoll/knockdown.ts). Direzione orizzontale
+  // e velocita' della spinta (m/s); il ricevente lo consuma e lo azzera.
+  knockdown?: { dirX: number; dirZ: number; speed: number } | null;
 }
 
 export interface TowerData {

@@ -43,7 +43,7 @@ const TEX = '/audio-arena/textures/';
 
 // muri e casse bloccano anche i combattenti (gruppo Characters, vedi
 // SOLID_BODY_GROUPS), il pavimento no (i piedi ci poggiano sopra)
-const SOLID_GROUPS = groupsExcluding([CollisionGroups.Default, CollisionGroups.Characters]);
+const SOLID_GROUPS = groupsExcluding([CollisionGroups.Default, CollisionGroups.Characters, CollisionGroups.RagdollWorld]);
 
 // --- cassa a cubi (spettrogramma) ------------------------------------------
 const CUBE_COLS = 11; // x = -5..5 nell'originale: storia degli ultimi 11 frame
@@ -301,8 +301,9 @@ const AudioArena: React.FC = () => {
   const schermoSpeakerRef = useRef<THREE.Group>(null);
   const audioRef = useRef<{ listener: THREE.AudioListener; speakers: Record<SpeakerId, SpeakerAudio> } | null>(null);
   // play/pausa indipendente per cassa
-  const playingRef = useRef<Record<SpeakerId, boolean>>({ cubi: true, schermo: true });
-  const settingsRef = useRef({ 'suona cubi': true, 'suona schermo': true, volume: 1, attenuazione: DEFAULT_REF_DISTANCE, 'brano cubi': '-', 'brano schermo': '-' });
+  // "la musica e' spenta all'inizio": si accende con M (tutte) o J/K
+  const playingRef = useRef<Record<SpeakerId, boolean>>({ cubi: false, schermo: false });
+  const settingsRef = useRef({ 'suona cubi': false, 'suona schermo': false, volume: 1, attenuazione: DEFAULT_REF_DISTANCE, 'brano cubi': '-', 'brano schermo': '-' });
 
   const playlists = { cubi: getPlaylist('cubi'), schermo: getPlaylist('schermo') };
   const playlistKey = playlists.cubi.tracks.map((t) => t.url).join('|') + '#' + playlists.schermo.tracks.map((t) => t.url).join('|');

@@ -12,6 +12,7 @@ import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
 import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode, AnimCatalog } from './SquadArenaTypes';
 import { locomotionTuning as LT, RUN_CLIP, timeScaleFor } from './locomotion';
+import { GETUP_CLIP, measureLyingPose, newKnockdown, stepKnockdown } from './ragdoll/knockdown';
 
 // Velocita' dell'IA in m/s (prima erano spostamenti per FRAME: andavano al
 // doppio su uno schermo a 120 Hz). La corsa ora usa la clip Sprint e la
@@ -294,6 +295,17 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
 
   const knockVelRef = React.useRef(new THREE.Vector3());
   const obstacleHitCooldownRef = React.useRef(0);
+  // colpo forte: KO fisico e poi si rialza (vedi ragdoll/knockdown.ts)
+  const kdRef = React.useRef(newKnockdown());
+  const lyingPose = useMemo(() => measureLyingPose(scene, clipsMap[GETUP_CLIP]), [scene, clipsMap]);
+  const startKnockdown = (dirX: number, dirZ: number, speed: number) => {
+    if (!enableRagdoll || kdRef.current.active || data.isDead) return;
+    if (!ragdoll.knockDown(new THREE.Vector3(dirX, 0.3, dirZ).normalize(), speed)) return;
+    kdRef.current = { ...newKnockdown(), active: true };
+    data.state = 'A terra';
+    data.attackLock = 0;
+    knockVelRef.current.set(0, 0, 0);
+  };
   useFrame((_state, delta) => {
     // Posa animata rimessa nelle ossa prima del mixer (vedi
     // restoreActiveAnimationPose in useRagdollActive.ts).
@@ -382,15 +394,39 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       return;
     }
 
+    if (data.knockdown) {
+      startKnockdown(data.knockdown.dirX, data.knockdown.dirZ, data.knockdown.speed);
+      data.knockdown = null;
+    }
+    if (kdRef.current.active) {
+      data.triggerHit = null;
+      const place = stepKnockdown(kdRef.current, delta * globalSpeed, ragdoll, lyingPose);
+      if (!kdRef.current.active) {
+        if (place) {
+          data.position.x = place.x;
+          data.position.z = place.z;
+          data.rotation = place.rotation;
+          data.attackLock = transitionToAnimation(GETUP_CLIP, 0.05, false);
+          data.state = 'Si rialza';
+        } else {
+          data.state = 'In guardia';
+        }
+      }
+      applyTransform();
+      return;
+    }
+
     // Ostacoli dell'arena (come per il giocatore, vedi PlayerCombatSoldier):
     // esce dalle compenetrazioni e viene spinto/colpito da quelli in moto.
     if (enableRagdoll) {
       const dtO = delta * globalSpeed;
-      const ob = ragdoll.resolveObstacleContacts(bagSolidHandle ?? null);
+      const ob = ragdoll.resolveObstacleContacts(bagSolidHandle ?? null, dtO);
       data.position.x += ob.pushX;
       data.position.z += ob.pushZ;
       if (obstacleHitCooldownRef.current > 0) obstacleHitCooldownRef.current -= dtO;
-      if (ob.hitSpeed > 1.2) {
+      if (ob.hitSpeed >= 3.5 && data.state !== 'Si rialza') {
+        startKnockdown(ob.hitVX, ob.hitVZ, Math.min(ob.hitSpeed, 8));
+      } else if (ob.hitSpeed > 1.2) {
         const k = Math.min(1, 6 / ob.hitSpeed);
         knockVelRef.current.set(ob.hitVX * k, 0, ob.hitVZ * k);
         if (obstacleHitCooldownRef.current <= 0) {
