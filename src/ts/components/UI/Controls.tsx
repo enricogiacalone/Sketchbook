@@ -38,6 +38,8 @@ const PAD_LOCK_ON = ['L1']; // button 4
 const PAD_WEAPON_FISTS = ['D-pad ←']; // button 14
 const PAD_WEAPON_PISTOL = ['D-pad →']; // button 15
 const PAD_RELOAD = ['D-pad ↓']; // button 13
+const PAD_WEAPON_RIFLE = ['D-pad ↑']; // button 12
+const PAD_WEAPON_KNIFE = ['R3']; // button 11
 
 const Controls: React.FC = () => {
   const currentControllable = useStore((state) => state.currentControllable);
@@ -81,24 +83,45 @@ const Controls: React.FC = () => {
   const getControls = (): ControlRow[] => {
     switch (currentControllable) {
       case 'combatSoldier':
-        if (playerWeapon === 'pistol') {
+        if (playerWeapon === 'pistol' || playerWeapon === 'rifle') {
+          const rifle = playerWeapon === 'rifle';
           return [
             { keys: ['1'], pad: PAD_WEAPON_FISTS, desc: 'Pugni' },
-            { keys: ['2'], pad: PAD_WEAPON_PISTOL, desc: 'Pistola (in mano)' },
+            { keys: ['2'], pad: PAD_WEAPON_PISTOL, desc: rifle ? 'Pistola' : 'Pistola (in mano)' },
+            { keys: ['3'], pad: PAD_WEAPON_RIFLE, desc: rifle ? 'Fucile (in mano)' : 'Fucile' },
+            { keys: ['4'], pad: PAD_WEAPON_KNIFE, desc: 'Coltello' },
             { keys: ['W', 'A', 'S', 'D'], pad: PAD_LEFT_STICK, desc: 'Move / Strafe' },
             { keys: ['Shift'], pad: PAD_SHIFT, desc: 'Sprint (non in mira)' },
             { keys: ['Mouse'], desc: 'Punta il mirino' },
             { keys: ['Right Click', '(hold)'], pad: PAD_SECONDARY, desc: 'Mira (zoom, più preciso)' },
-            { keys: ['Left Click'], pad: PAD_PRIMARY, desc: 'Spara' },
-            { keys: ['R'], pad: PAD_RELOAD, desc: 'Ricarica (12 colpi)' },
+            { keys: rifle ? ['Left Click', '(hold)'] : ['Left Click'], pad: PAD_PRIMARY, desc: rifle ? 'Spara a raffica' : 'Spara' },
+            { keys: ['R'], pad: PAD_RELOAD, desc: rifle ? 'Ricarica (35 colpi)' : 'Ricarica (12 colpi)' },
             { keys: ['Space'], pad: PAD_JUMP, desc: 'Dodge' },
             { keys: ['M'], desc: 'Musica play / pausa (tutte)' },
           { keys: ['J', 'K'], desc: 'Play / pausa cassa cubi / schermo' },
           ];
         }
+        if (playerWeapon === 'knife') {
+          return [
+            { keys: ['1'], pad: PAD_WEAPON_FISTS, desc: 'Pugni' },
+            { keys: ['2'], pad: PAD_WEAPON_PISTOL, desc: 'Pistola' },
+            { keys: ['3'], pad: PAD_WEAPON_RIFLE, desc: 'Fucile' },
+            { keys: ['4'], pad: PAD_WEAPON_KNIFE, desc: 'Coltello (in mano)' },
+            { keys: ['W', 'A', 'S', 'D'], pad: PAD_LEFT_STICK, desc: 'Move' },
+            { keys: ['Shift'], pad: PAD_SHIFT, desc: 'Sprint' },
+            { keys: ['Left Click'], pad: PAD_PRIMARY, desc: 'Fendente (alternati)' },
+            { keys: ['Q'], pad: PAD_JAB, desc: 'Fendente dal basso' },
+            { keys: ['E'], pad: PAD_TRIANGLE, desc: 'Affondo pesante' },
+            { keys: ['Right Click', '(hold)'], pad: PAD_SECONDARY, desc: 'Parata' },
+            { keys: ['Space'], pad: PAD_JUMP, desc: 'Dodge' },
+            { keys: ['Ctrl', '(hold)'], pad: PAD_LOCK_ON, desc: 'Lock-on Avversario' },
+          ];
+        }
         return [
           { keys: ['1'], pad: PAD_WEAPON_FISTS, desc: 'Pugni (in mano)' },
           { keys: ['2'], pad: PAD_WEAPON_PISTOL, desc: 'Pistola' },
+          { keys: ['3'], pad: PAD_WEAPON_RIFLE, desc: 'Fucile' },
+          { keys: ['4'], pad: PAD_WEAPON_KNIFE, desc: 'Coltello' },
           { keys: ['W', 'A', 'S', 'D'], pad: PAD_LEFT_STICK, desc: 'Move' },
           { keys: ['Shift'], pad: PAD_SHIFT, desc: 'Sprint' },
           { keys: ['Left Click'], pad: PAD_PRIMARY, desc: 'Cross (R)' },

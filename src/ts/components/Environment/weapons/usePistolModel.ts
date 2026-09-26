@@ -5,6 +5,16 @@ import { useThree } from '@react-three/fiber';
 import { acquireAudioListener, releaseAudioListener } from '../../../lib/sharedAudioListener';
 import { SkeletonUtils } from 'three-stdlib';
 import {
+  RIFLE_MODEL_URL,
+  RIFLE_LENGTH_M,
+  RIFLE_GRIP_FROM_REAR,
+  RIFLE_GRIP_FROM_BOTTOM,
+  RIFLE_BORE_FROM_TOP,
+  RIFLE_SUPPORT_FROM_REAR,
+  RIFLE_SUPPORT_FROM_BOTTOM,
+  RIFLE_SHOT_VOLUME,
+  RIFLE_BOLT_KICK_M,
+  RIFLE_BOLT_RETURN_S,
   PISTOL_MODEL_URL,
   PISTOL_LENGTH_M,
   PISTOL_GRIP_FROM_REAR,
@@ -40,10 +50,85 @@ export const pistolHoldTuning = {
   rz: 10.6,
 };
 
+// Il fucile NON sta nella mano: e' agganciato al petto (osso spine_03), col
+// calcio nell'incavo della spalla destra, e sono le mani ad andare sull'arma
+// (IK: destra sull'impugnatura, sinistra sull'astina). Cosi' segue la
+// torsione/inclinazione del busto con cui si mira. Posizione (m) e rotazione
+// (gradi) del frame arma (origine = impugnatura) nel frame dell'osso;
+// "lowerDeg" = quanto punta in basso quando non si mira (pronto basso).
+export const rifleHoldTuning = {
+  // calcolati dal vivo in Pistol_Aim_Neutral: calcio nell'incavo della
+  // spalla destra, canna parallela alla direzione del corpo
+  // (poi arretrato di 12 cm e avvicinato al centro di 10: la mano
+  // sinistra deve arrivare all'astina)
+  px: -0.024,
+  py: 0.069,
+  pz: 0.263,
+  rx: 168.7,
+  ry: -13.6,
+  rz: 180,
+  lowerDeg: 30,
+};
+
+// Descrizione di un'arma da fuoco: modello, misure, pezzi mobili, suoni.
+export interface GunSpec {
+  name: string;
+  url: string;
+  lengthM: number;
+  gripFromRear: number;
+  gripFromBottom: number;
+  boreFromTop: number;
+  // punto d'appoggio della mano sinistra (astina), se c'e'
+  support?: { fromRear: number; fromBottom: number };
+  slideNode: string; // carrello / otturatore (arretra a ogni colpo)
+  // osso a cui e' agganciata l'arma (default: la mano destra)
+  mountBone?: string;
+  magNode: string;
+  kickM: number;
+  kickReturnS: number;
+  shotVolume: number;
+  hold: { px: number; py: number; pz: number; rx: number; ry: number; rz: number; lowerDeg?: number };
+}
+export const PISTOL_SPEC: GunSpec = {
+  name: 'pistola',
+  url: PISTOL_MODEL_URL,
+  lengthM: PISTOL_LENGTH_M,
+  gripFromRear: PISTOL_GRIP_FROM_REAR,
+  gripFromBottom: PISTOL_GRIP_FROM_BOTTOM,
+  boreFromTop: PISTOL_BORE_FROM_TOP,
+  slideNode: 'UP',
+  magNode: 'MAG',
+  kickM: PISTOL_SLIDE_KICK_M,
+  kickReturnS: PISTOL_SLIDE_RETURN_S,
+  shotVolume: PISTOL_SHOT_VOLUME,
+  hold: pistolHoldTuning,
+};
+export const RIFLE_SPEC: GunSpec = {
+  name: 'fucile',
+  url: RIFLE_MODEL_URL,
+  lengthM: RIFLE_LENGTH_M,
+  gripFromRear: RIFLE_GRIP_FROM_REAR,
+  gripFromBottom: RIFLE_GRIP_FROM_BOTTOM,
+  boreFromTop: RIFLE_BORE_FROM_TOP,
+  support: { fromRear: RIFLE_SUPPORT_FROM_REAR, fromBottom: RIFLE_SUPPORT_FROM_BOTTOM },
+  slideNode: 'Up',
+  magNode: 'Mag',
+  mountBone: 'spine_03',
+  kickM: RIFLE_BOLT_KICK_M,
+  kickReturnS: RIFLE_BOLT_RETURN_S,
+  shotVolume: RIFLE_SHOT_VOLUME,
+  hold: rifleHoldTuning,
+};
+
 export interface PistolModelApi {
   setVisible: (v: boolean) => void;
   getMuzzleWorld: (out: THREE.Vector3) => THREE.Vector3;
   getBoreDirWorld: (out: THREE.Vector3) => THREE.Vector3;
+  // appoggio della mano sinistra (astina del fucile); false se l'arma non ce l'ha
+  getSupportWorld: (out: THREE.Vector3) => boolean;
+  getGripWorld: (out: THREE.Vector3) => THREE.Vector3;
+  // 0 = pronto basso (canna giu' di hold.lowerDeg), 1 = in mira
+  setRaise: (k: number) => void;
   kick: () => void;
   // 0..1 durante la ricarica (caricatore giu' e su), null altrimenti
   setReloadProgress: (p: number | null) => void;
@@ -57,11 +142,18 @@ export interface PistolModelApi {
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 
-export function usePistolModel(
+export type GunModelApi = PistolModelApi;
+
+export function usePistolModel(modelRootRef: React.RefObject<THREE.Object3D | null>, handBoneName = 'hand_r'): PistolModelApi {
+  return useGunModel(modelRootRef, PISTOL_SPEC, handBoneName);
+}
+
+export function useGunModel(
   modelRootRef: React.RefObject<THREE.Object3D | null>,
+  spec: GunSpec,
   handBoneName = 'hand_r'
-): PistolModelApi {
-  const { scene } = useGLTF(PISTOL_MODEL_URL);
+): GunModelApi {
+  const { scene } = useGLTF(spec.url);
 
   const parts = useMemo(() => {
     const inner = SkeletonUtils.clone(scene) as THREE.Object3D;
@@ -76,41 +168,52 @@ export function usePistolModel(
     inner.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(inner);
     const size = box.getSize(new THREE.Vector3());
-    const scale = PISTOL_LENGTH_M / Math.max(1e-6, size.z);
+    const scale = spec.lengthM / Math.max(1e-6, size.z);
     const grip = new THREE.Vector3(
       (box.min.x + box.max.x) / 2,
-      box.min.y + PISTOL_GRIP_FROM_BOTTOM * size.y,
-      box.max.z - PISTOL_GRIP_FROM_REAR * size.z
+      box.min.y + spec.gripFromBottom * size.y,
+      box.max.z - spec.gripFromRear * size.z
     );
     const muzzleLocal = new THREE.Vector3(
       (box.min.x + box.max.x) / 2,
-      box.max.y - PISTOL_BORE_FROM_TOP * size.y,
+      box.max.y - spec.boreFromTop * size.y,
       box.min.z
     );
     // frame arma: origine all'impugnatura, stesse direzioni del modello
     const gunFrame = new THREE.Group();
-    gunFrame.name = 'pistol-frame';
+    gunFrame.name = spec.name + '-frame';
     inner.scale.setScalar(scale);
     inner.position.copy(grip).multiplyScalar(-scale);
     gunFrame.add(inner);
     const muzzle = new THREE.Object3D();
-    muzzle.name = 'pistol-muzzle';
+    muzzle.name = spec.name + '-muzzle';
     muzzle.position.copy(muzzleLocal).sub(grip).multiplyScalar(scale);
     gunFrame.add(muzzle);
+    let support: THREE.Object3D | null = null;
+    if (spec.support) {
+      support = new THREE.Object3D();
+      support.name = spec.name + '-support';
+      support.position
+        .set((box.min.x + box.max.x) / 2, box.min.y + spec.support.fromBottom * size.y, box.max.z - spec.support.fromRear * size.z)
+        .sub(grip)
+        .multiplyScalar(scale);
+      gunFrame.add(support);
+    }
     const holder = new THREE.Group();
-    holder.name = 'pistol-holder';
+    holder.name = spec.name + '-holder';
     holder.add(gunFrame);
     holder.visible = false;
     let slide: THREE.Object3D | null = null;
     let mag: THREE.Object3D | null = null;
     inner.traverse((o) => {
-      if (o.name === 'UP') slide = o;
-      if (o.name === 'MAG') mag = o;
+      if (o.name === spec.slideNode) slide = o;
+      if (o.name === spec.magNode) mag = o;
     });
     return {
       holder,
       gunFrame,
       muzzle,
+      support,
       slide: slide as THREE.Object3D | null,
       mag: mag as THREE.Object3D | null,
       slideRest: (slide as THREE.Object3D | null)?.position.clone() ?? new THREE.Vector3(),
@@ -137,7 +240,7 @@ export function usePistolModel(
       parent.add(a);
       return a;
     };
-    const shots = [0, 1, 2, 3].map(() => mk(parts.muzzle, PISTOL_SHOT_VOLUME));
+    const shots = [0, 1, 2, 3].map(() => mk(parts.muzzle, spec.shotVolume));
     const reload = mk(parts.gunFrame, PISTOL_RELOAD_VOLUME);
     soundRef.current = { shots, next: 0, reload };
     let alive = true;
@@ -146,13 +249,13 @@ export function usePistolModel(
       PISTOL_SHOT_SOUND_URL,
       (buf) => alive && shots.forEach((a) => a.setBuffer(buf)),
       undefined,
-      () => console.warn('[pistola] suono di sparo non trovato:', PISTOL_SHOT_SOUND_URL)
+      () => console.warn(`[${spec.name}] suono di sparo non trovato:`, PISTOL_SHOT_SOUND_URL)
     );
     loader.load(
       PISTOL_RELOAD_SOUND_URL,
       (buf) => alive && reload.setBuffer(buf),
       undefined,
-      () => console.warn('[pistola] suono di ricarica non trovato:', PISTOL_RELOAD_SOUND_URL)
+      () => console.warn(`[${spec.name}] suono di ricarica non trovato:`, PISTOL_RELOAD_SOUND_URL)
     );
     return () => {
       alive = false;
@@ -163,7 +266,7 @@ export function usePistolModel(
       soundRef.current = null;
       releaseAudioListener();
     };
-  }, [camera, parts]);
+  }, [camera, parts, spec]);
   const reloadRef = useRef<number | null>(null);
 
   // Aggancio all'osso della mano (appena il modello del personaggio c'e').
@@ -171,7 +274,7 @@ export function usePistolModel(
     let raf = 0;
     const tryAttach = () => {
       const root = modelRootRef.current;
-      const bone = root?.getObjectByName(handBoneName);
+      const bone = root?.getObjectByName(spec.mountBone ?? handBoneName);
       if (!bone) {
         raf = requestAnimationFrame(tryAttach);
         return;
@@ -183,7 +286,8 @@ export function usePistolModel(
       cancelAnimationFrame(raf);
       parts.holder.parent?.remove(parts.holder);
     };
-  }, [modelRootRef, handBoneName, parts]);
+  }, [modelRootRef, handBoneName, parts, spec]);
+  const raiseRef = useRef(1);
 
   // Sposta un nodo del modello di `meters` lungo un asse del frame arma
   // (in coordinate mondo), convertendo nello spazio del suo genitore.
@@ -201,7 +305,7 @@ export function usePistolModel(
   const BACK = new THREE.Vector3(0, 0, 1);
   const DOWN = new THREE.Vector3(0, -1, 0);
 
-  return useMemo<PistolModelApi>(
+  return useMemo<GunModelApi>(
     () => ({
       setVisible: (v) => {
         parts.holder.visible = v;
@@ -210,12 +314,25 @@ export function usePistolModel(
         parts.muzzle.updateWorldMatrix(true, false);
         return out.setFromMatrixPosition(parts.muzzle.matrixWorld);
       },
+      getSupportWorld: (out) => {
+        if (!parts.support) return false;
+        parts.support.updateWorldMatrix(true, false);
+        out.setFromMatrixPosition(parts.support.matrixWorld);
+        return true;
+      },
+      getGripWorld: (out) => {
+        parts.gunFrame.updateWorldMatrix(true, false);
+        return out.setFromMatrixPosition(parts.gunFrame.matrixWorld);
+      },
+      setRaise: (k) => {
+        raiseRef.current = k;
+      },
       getBoreDirWorld: (out) => {
         parts.gunFrame.updateWorldMatrix(true, false);
         return out.set(0, 0, -1).transformDirection(parts.gunFrame.matrixWorld);
       },
       kick: () => {
-        slideOffsetRef.current = PISTOL_SLIDE_KICK_M;
+        slideOffsetRef.current = spec.kickM;
       },
       setReloadProgress: (p) => {
         reloadRef.current = p;
@@ -228,8 +345,8 @@ export function usePistolModel(
         if (!a.buffer) return;
         if (a.context.state !== 'running') a.context.resume().catch(() => {});
         if (a.isPlaying) a.stop();
-        // piccola variazione di tono a ogni colpo
-        a.setDetune((Math.random() * 2 - 1) * 60);
+        // piccola variazione di tono a ogni colpo; il fucile un po' piu' grave
+        a.setDetune((Math.random() * 2 - 1) * 60 + (spec.support ? -350 : 0));
         a.play();
       },
       playReload: () => {
@@ -244,22 +361,24 @@ export function usePistolModel(
         if (a?.isPlaying) a.stop();
       },
       update: (delta) => {
-        const t = pistolHoldTuning;
+        const t = spec.hold;
         parts.holder.position.set(t.px, t.py, t.pz);
         parts.holder.rotation.set(
           THREE.MathUtils.degToRad(t.rx),
           THREE.MathUtils.degToRad(t.ry),
           THREE.MathUtils.degToRad(t.rz)
         );
+        // pronto basso: la canna ruota verso il basso attorno all'impugnatura
+        parts.gunFrame.rotation.x = -THREE.MathUtils.degToRad((t.lowerDeg ?? 0) * (1 - raiseRef.current));
         if (!parts.holder.visible) return;
-        slideOffsetRef.current = Math.max(0, slideOffsetRef.current - (PISTOL_SLIDE_KICK_M / PISTOL_SLIDE_RETURN_S) * delta);
+        slideOffsetRef.current = Math.max(0, slideOffsetRef.current - (spec.kickM / spec.kickReturnS) * delta);
         const p = reloadRef.current;
         // ricarica a tempo col suono (fasi in weaponConfig): caricatore
         // fuori -> dentro, poi carrello tirato indietro e rilasciato
         let rack = 0;
         if (p !== null && p >= RELOAD_SLIDE_START && p < RELOAD_SLIDE_END) {
           const k = (p - RELOAD_SLIDE_START) / (RELOAD_SLIDE_END - RELOAD_SLIDE_START);
-          rack = (k < 0.6 ? k / 0.6 : 1 - (k - 0.6) / 0.4) * PISTOL_SLIDE_KICK_M * 1.5;
+          rack = (k < 0.6 ? k / 0.6 : 1 - (k - 0.6) / 0.4) * spec.kickM * 1.5;
         }
         if (parts.slide) offsetAlongGunAxis(parts.slide, parts.slideRest, BACK, Math.max(slideOffsetRef.current, rack));
         if (parts.mag) {
@@ -274,8 +393,9 @@ export function usePistolModel(
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [parts]
+    [parts, spec]
   );
 }
 
 useGLTF.preload(PISTOL_MODEL_URL);
+useGLTF.preload(RIFLE_MODEL_URL);

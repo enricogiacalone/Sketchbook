@@ -15,6 +15,7 @@ import { useRagdollBones } from "./hooks/useRagdollBones";
 import { useRagdollHurtbox } from "./hooks/useRagdollHurtbox";
 import {
   useRagdollSolidBodies,
+  type ObstacleContact,
   type SolidBodySegmentDebug,
 } from "./hooks/useRagdollSolidBodies";
 
@@ -72,6 +73,9 @@ export interface RagdollController {
       blockedAmount: number
     ) => void
   ) => { x: number; z: number };
+  // ostacoli dell'arena: esce dalle compenetrazioni e dice chi lo sta
+  // spingendo (vedi useRagdollSolidBodies.resolveObstacleContacts)
+  resolveObstacleContacts: (skipHandle: number | null) => ObstacleContact;
   getSolidBodySegments: () => SolidBodySegmentDebug[];
   // Vedi ActiveRagdollSegmentDebug in useRagdollActive.ts -- collider
   // fisico e collider bersaglio (animazione) di ogni corpo del layer
@@ -110,7 +114,7 @@ export function useRagdoll(
   const { resolveBones } = useRagdollBones(modelRootRef);
   const { syncHurtbox, getHurtboxHandle: internalGetHurtboxHandle } =
     useRagdollHurtbox(modelRootRef);
-  const { syncSolidBody, resolveBodyMovement, getSolidBodySegments } =
+  const { syncSolidBody, resolveBodyMovement, resolveObstacleContacts, getSolidBodySegments } =
     useRagdollSolidBodies(modelRootRef, resolveBones, ownerId);
   const {
     buildBodies,
@@ -527,6 +531,7 @@ export function useRagdoll(
     pointIntersectsHurtbox,
     applySpineLean,
     resolveBodyMovement,
+    resolveObstacleContacts,
     getSolidBodySegments,
     getActiveRagdollDebugSegments,
     testActiveHit,

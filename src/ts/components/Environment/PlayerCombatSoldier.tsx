@@ -14,7 +14,9 @@ import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
 import { locomotionTuning as LT, RUN_CLIP, timeScaleFor, speedFor, strafeClipFor } from './locomotion';
 import { useRapier } from '@react-three/rapier';
-import { usePistolModel } from './weapons/usePistolModel';
+import { usePistolModel, useGunModel, RIFLE_SPEC, type GunModelApi } from './weapons/usePistolModel';
+import { useKnifeModel } from './weapons/useKnifeModel';
+import { solveTwoBoneIK } from './weapons/twoBoneIK';
 import { castShot, spreadDirection } from './weapons/hitscan';
 import { getShootableCollider, applyFighterHit } from './weapons/shootableRegistry';
 import { emitShotFx, type ShotSurface } from './weapons/weaponFx';
@@ -32,7 +34,68 @@ import {
   PISTOL_HIT_SPEED_BY_SEGMENT,
   PISTOL_HIT_SPEED_LIMB,
   PISTOL_WORLD_IMPULSE,
+  RIFLE_MAG_SIZE,
+  RIFLE_FIRE_INTERVAL_S,
+  RIFLE_RANGE_M,
+  RIFLE_SPREAD_HIP_DEG,
+  RIFLE_SPREAD_AIM_DEG,
+  RIFLE_DAMAGE_BY_SEGMENT,
+  RIFLE_DAMAGE_LIMB,
+  RIFLE_HIT_SPEED_BY_SEGMENT,
+  RIFLE_HIT_SPEED_LIMB,
+  RIFLE_WORLD_IMPULSE,
+  KNIFE_DAMAGE_SLASH,
+  KNIFE_DAMAGE_HEAVY,
+  KNIFE_DAMAGE_BLOCKED,
 } from './weapons/weaponConfig';
+
+// Armi del duello: 1 pugni, 2 pistola, 3 fucile (Galil), 4 coltello (M9).
+export type WeaponKind = 'fists' | 'pistol' | 'rifle' | 'knife';
+type GunKind = 'pistol' | 'rifle';
+interface GunStats {
+  mag: number;
+  interval: number;
+  auto: boolean; // tenendo premuto continua a sparare
+  range: number;
+  spreadHip: number;
+  spreadAim: number;
+  dmg: Record<string, number>;
+  dmgLimb: number;
+  hitSpeed: Record<string, number>;
+  hitSpeedLimb: number;
+  worldImpulse: number;
+}
+const GUN_STATS: Record<GunKind, GunStats> = {
+  pistol: {
+    mag: PISTOL_MAG_SIZE, interval: PISTOL_FIRE_INTERVAL_S, auto: false, range: PISTOL_RANGE_M,
+    spreadHip: PISTOL_SPREAD_HIP_DEG, spreadAim: PISTOL_SPREAD_AIM_DEG,
+    dmg: PISTOL_DAMAGE_BY_SEGMENT, dmgLimb: PISTOL_DAMAGE_LIMB,
+    hitSpeed: PISTOL_HIT_SPEED_BY_SEGMENT, hitSpeedLimb: PISTOL_HIT_SPEED_LIMB, worldImpulse: PISTOL_WORLD_IMPULSE,
+  },
+  rifle: {
+    mag: RIFLE_MAG_SIZE, interval: RIFLE_FIRE_INTERVAL_S, auto: true, range: RIFLE_RANGE_M,
+    spreadHip: RIFLE_SPREAD_HIP_DEG, spreadAim: RIFLE_SPREAD_AIM_DEG,
+    dmg: RIFLE_DAMAGE_BY_SEGMENT, dmgLimb: RIFLE_DAMAGE_LIMB,
+    hitSpeed: RIFLE_HIT_SPEED_BY_SEGMENT, hitSpeedLimb: RIFLE_HIT_SPEED_LIMB, worldImpulse: RIFLE_WORLD_IMPULSE,
+  },
+};
+// Coltello: fendenti alternati col tasto principale, colpo pesante con E
+// (e Q per il terzo fendente); parata con la guardia della spada.
+const KNIFE_SLASH_CLIPS = ['Sword_Regular_A', 'Sword_Regular_B'];
+const KNIFE_THIRD_CLIP = 'Sword_Regular_C';
+const KNIFE_HEAVY_CLIP = 'Sword_Attack';
+const KNIFE_IDLE_CLIP = 'Idle_Sword';
+const KNIFE_BLOCK_CLIP = 'Sword_Block';
+const PUNCH_DAMAGE = 25;
+const KNIFE_LUNGE_S = 0.3;
+// ostacoli in movimento: sopra questa velocita' nel punto di contatto il
+// personaggio viene colpito e spinto (m/s); la spinta si smorza cosi'
+const OBSTACLE_HIT_MIN_SPEED = 1.2;
+const OBSTACLE_KNOCK_MAX_SPEED = 6;
+const OBSTACLE_KNOCK_DECAY = 5; // 1/s
+const OBSTACLE_HIT_COOLDOWN_S = 0.6;
+const KNIFE_LUNGE_SPEED = 1.5; // m/s -> ~45 cm di passo
+const _support = new THREE.Vector3();
 
 // "estrai la pistola... aggiungilo al nostro personaggio" -- animazioni a
 // strati: con la pistola in mano le GAMBE fanno camminata/corsa/strafe e
@@ -49,7 +112,7 @@ function splitClip(clip: THREE.AnimationClip, part: 'legs' | 'upper'): THREE.Ani
   });
   return new THREE.AnimationClip(`${clip.name}__${part}`, clip.duration, tracks);
 }
-const PISTOL_BASE_CLIPS = ['Pistol_Idle', 'Walk', 'Walk_Backwards', 'Strafe_left', 'Strafe_right', 'Sprint', 'Jog'];
+const PISTOL_BASE_CLIPS = ['Pistol_Idle', 'Walk', 'Walk_Backwards', 'Strafe_left', 'Strafe_right', RUN_CLIP, 'Sprint', 'Jog'];
 const PISTOL_UPPER_CLIPS = ['Pistol_Idle', 'Pistol_Aim_Neutral', 'Pistol_Shoot', 'Pistol_Reload'];
 // timeScale delle clip di camminata direzionali (Walk / Walk_Backwards /
 // Strafe_*): la velocita' viene dalla clip (locomotion.ts), cosi' avanti,
@@ -147,6 +210,9 @@ const _handPos = new THREE.Vector3(); // scratch for checkAttackContact's hand-b
 // (useRagdoll.ts's pointIntersectsHurtbox) against the opponent's actual
 // hurtbox collider, not a hand-rolled distance formula.
 const ATTACK_HAND_BONES = ['hand_l', 'hand_r'] as const;
+// col coltello i punti di contatto sono la punta e la meta' della lama
+const KNIFE_PROBES = ['knife_tip', 'knife_mid'] as const;
+type AttackProbe = (typeof ATTACK_HAND_BONES)[number] | (typeof KNIFE_PROBES)[number];
 
 interface PlayerCombatSoldierProps {
   // Owned by DuelArena.tsx, same FighterData shape CombatSoldier.tsx
@@ -231,8 +297,26 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   // Pistola (vedi weapons/): modello agganciato alla mano destra e stato
   // dell'arma. Refs, non stato React: tutto vive nel loop di useFrame.
   const pistol = usePistolModel(modelRootRef);
-  const weaponRef = useRef<'fists' | 'pistol'>('fists');
-  const ammoRef = useRef(PISTOL_MAG_SIZE);
+  const rifle = useGunModel(modelRootRef, RIFLE_SPEC);
+  const knife = useKnifeModel(modelRootRef);
+  const weaponRef = useRef<WeaponKind>('fists');
+  const ammoRef = useRef<Record<GunKind, number>>({ pistol: PISTOL_MAG_SIZE, rifle: RIFLE_MAG_SIZE });
+  const reloadGunRef = useRef<GunKind>('pistol');
+  const meleeDamageRef = useRef(PUNCH_DAMAGE);
+  const knifeSlashRef = useRef(0);
+  // affondo: col coltello il colpo porta avanti di un passo (la lama e'
+  // corta, senza il passo i fendenti passavano a 35-40 cm dal bersaglio)
+  const knifeLungeLeftRef = useRef(0);
+  // ostacoli dell'arena che colpiscono il personaggio: spinta residua (m/s)
+  // e pausa tra un colpo e l'altro dello stesso ostacolo
+  const knockVelRef = useRef(new THREE.Vector3());
+  const obstacleHitCooldownRef = useRef(0);
+  type Arm = { upper: THREE.Object3D; lower: THREE.Object3D; hand: THREE.Object3D };
+  const armBonesRef = useRef<{ l: Arm; r: Arm } | null>(null);
+  const rifleRaiseRef = useRef(0);
+  const isGun = () => weaponRef.current === 'pistol' || weaponRef.current === 'rifle';
+  const gunKind = (): GunKind => (weaponRef.current === 'rifle' ? 'rifle' : 'pistol');
+  const gunApi = (k: GunKind = gunKind()): GunModelApi => (k === 'rifle' ? rifle : pistol);
   const reloadLeftRef = useRef(0);
   const reloadDurRef = useRef(PISTOL_RELOAD_FALLBACK_S);
   const fireCooldownRef = useRef(0);
@@ -457,7 +541,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   // effettivamente risolto (puo' essere diversi frame dopo il primo
   // contatto) -- il caller usa questo per latchare attackHasLandedRef.
   const pendingHitRef = useRef<{
-    bone: (typeof ATTACK_HAND_BONES)[number];
+    bone: AttackProbe;
     kind: 'opponent' | 'bag';
     pos: THREE.Vector3;
     // il nemico toccato (solo per kind === 'opponent')
@@ -479,11 +563,13 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       // Damage/blocking/death formulas copied VERBATIM from
       // CombatSoldier.tsx's own attack-resolution branch, on purpose --
       // a punch does the same thing whichever fighter threw it.
+      const withKnife = pending.bone === 'knife_tip' || pending.bone === 'knife_mid';
+      if (withKnife) knife.playHit();
       if (opponent.currentAnim === opponent.animCatalog?.block) {
-        opponent.hp -= 5;
+        opponent.hp -= withKnife ? KNIFE_DAMAGE_BLOCKED : 5;
         opponent.state = 'Danno parato!';
       } else {
-        opponent.hp -= 25;
+        opponent.hp -= meleeDamageRef.current;
         if (opponent.hp <= 0) {
           opponent.hp = 0;
           opponent.isDead = true;
@@ -500,9 +586,23 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     } else if (pending.kind === 'bag') {
       // "crea un sacco su cui allenarmi nell'arena.. mi serve per capire
       // la precisione delle collisioni" -- stessa logica, contro il sacco.
-      bagRef?.current?.registerHit(pending.pos, pending.bone);
+      if (pending.bone === 'knife_tip' || pending.bone === 'knife_mid') knife.playHit();
+      bagRef?.current?.registerHit(pending.pos, pending.bone === 'hand_l' ? 'hand_l' : 'hand_r');
     }
     return true;
+  };
+
+  // posizione mondo di un punto di contatto (osso della mano o lama)
+  const probePos = (probe: AttackProbe, out: THREE.Vector3): boolean => {
+    if (probe === 'knife_tip') {
+      knife.getTipWorld(out);
+      return true;
+    }
+    if (probe === 'knife_mid') {
+      knife.getMidBladeWorld(out);
+      return true;
+    }
+    return ragdoll.getBoneWorldPosition(probe, out);
   };
 
   const checkAttackContact = (): boolean => {
@@ -513,7 +613,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     if (pendingHitRef.current) {
       const pending = pendingHitRef.current;
       const stillIn =
-        ragdoll.getBoneWorldPosition(pending.bone, _handPos) &&
+        probePos(pending.bone, _handPos) &&
         (pending.kind === 'opponent'
           ? !!pending.target &&
             !pending.target.isDead &&
@@ -529,8 +629,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       return finalizePendingHit(); // appena uscita -- risolvi ora, nel punto piu' profondo raggiunto
     }
 
-    for (const boneName of ATTACK_HAND_BONES) {
-      if (!ragdoll.getBoneWorldPosition(boneName, _handPos)) continue;
+    const probes: readonly AttackProbe[] = weaponRef.current === 'knife' ? KNIFE_PROBES : ATTACK_HAND_BONES;
+    for (const boneName of probes) {
+      if (!probePos(boneName, _handPos)) continue;
 
       let touched: FighterData | null = null;
       for (const opponent of opponents) {
@@ -590,20 +691,26 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   const relaxedIdle = RELAXED_IDLE_CLIPS.find((n) => actions[n]) ?? animCatalog.idle;
   const isEngaged = () => !!input.lockOn && opponents.some((o) => !o.isDead);
   const idleName = () => {
-    if (weaponRef.current === 'pistol' && actions['Pistol_Idle__legs']) return 'Pistol_Idle__legs';
+    if (isGun() && actions['Pistol_Idle__legs']) return 'Pistol_Idle__legs';
+    if (weaponRef.current === 'knife' && actions[KNIFE_IDLE_CLIP]) return KNIFE_IDLE_CLIP;
     return isEngaged() ? animCatalog.idle : relaxedIdle;
   };
   const idleState = () => (weaponRef.current === 'fists' && !isEngaged() ? 'Riposo' : 'In guardia');
 
-  const equipWeapon = (w: 'fists' | 'pistol') => {
+  // la parata che l'IA riconosce (animCatalog.block) segue l'arma in mano
+  const fistsBlockRef = useRef(animCatalog.block);
+  const equipWeapon = (w: WeaponKind) => {
     if (weaponRef.current === w) return;
     weaponRef.current = w;
     reloadLeftRef.current = 0;
     shootAnimLeftRef.current = 0;
     raiseLeftRef.current = 0;
     aimingRef.current = false;
-    pistol.setReloadProgress(null);
-    pistol.stopReload();
+    for (const g of [pistol, rifle]) {
+      g.setReloadProgress(null);
+      g.stopReload();
+    }
+    animCatalog.block = w === 'knife' && actions[KNIFE_BLOCK_CLIP] ? KNIFE_BLOCK_CLIP : fistsBlockRef.current;
     // Se il personaggio e' libero, passa subito alla clip di riposo giusta
     // (altrimenti ci pensa la fine dell'attackLock).
     if (data.attackLock <= 0 && !data.isDead) transitionToAnimation(idleName(), 0.2, true);
@@ -636,7 +743,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     let desired: string | null = null;
     if (
       !tPose &&
-      weaponRef.current === 'pistol' &&
+      isGun() &&
       !data.isDead &&
       data.state !== 'Vittoria!' &&
       !isDodgingRef.current
@@ -654,13 +761,15 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   };
 
   const startReload = () => {
-    if (reloadLeftRef.current > 0 || ammoRef.current >= PISTOL_MAG_SIZE) return;
+    const k = gunKind();
+    if (reloadLeftRef.current > 0 || ammoRef.current[k] >= GUN_STATS[k].mag) return;
+    reloadGunRef.current = k;
     // dura quanto il suono di ricarica (la clip Pistol_Reload viene
     // riscalata su questa durata in setUpperLayer)
     reloadDurRef.current = clipsMap['Pistol_Reload'] ? PISTOL_RELOAD_S : PISTOL_RELOAD_FALLBACK_S;
     reloadLeftRef.current = reloadDurRef.current;
     aimingRef.current = false;
-    pistol.playReload();
+    gunApi(k).playReload();
   };
 
   // Sparo hitscan in terza persona (schema TPS classico): 1) raggio dalla
@@ -668,13 +777,16 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   // 2) raggio vero dalla canna verso quel punto (cosi' un ostacolo tra
   // pistola e bersaglio blocca il colpo anche se la camera lo "vede").
   const fire = () => {
-    if (ammoRef.current <= 0) {
+    const gk = gunKind();
+    const st = GUN_STATS[gk];
+    const gun = gunApi(gk);
+    if (ammoRef.current[gk] <= 0) {
       startReload();
       return;
     }
     const aiming = aimingRef.current;
     camera.getWorldDirection(_shotCamDir);
-    spreadDirection(_shotCamDir, aiming ? PISTOL_SPREAD_AIM_DEG : PISTOL_SPREAD_HIP_DEG, _shotCamDir);
+    spreadDirection(_shotCamDir, aiming ? st.spreadAim : st.spreadHip, _shotCamDir);
     // Il raggio camera parte all'altezza del personaggio lungo la linea di
     // mira, non dalla camera: un oggetto dietro le spalle non deve
     // "mangiarsi" il colpo.
@@ -682,16 +794,16 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     _chest.set(data.position.x, (groupRef.current?.position.y ?? 0) + 1.3, data.position.z);
     const t0 = Math.max(0, _toAim.subVectors(_chest, _camPos).dot(_shotCamDir));
     _camPos.addScaledVector(_shotCamDir, t0);
-    const camHit = castShot(world, rapier, _camPos, _shotCamDir, PISTOL_RANGE_M, data.id);
+    const camHit = castShot(world, rapier, _camPos, _shotCamDir, st.range, data.id);
 
-    pistol.getMuzzleWorld(_muzzle);
+    gun.getMuzzleWorld(_muzzle);
     _shotDir.subVectors(camHit.point, _muzzle);
     const dist = _shotDir.length();
     // Bersaglio praticamente dentro la canna o alle spalle della pistola:
     // si spara lungo la linea della camera.
     if (dist < 0.05 || _shotDir.dot(_shotCamDir) <= 0) _shotDir.copy(_shotCamDir);
     else _shotDir.divideScalar(dist);
-    const hit = castShot(world, rapier, _muzzle, _shotDir, PISTOL_RANGE_M, data.id);
+    const hit = castShot(world, rapier, _muzzle, _shotDir, st.range, data.id);
 
     let surface: ShotSurface = 'none';
     let decal = false;
@@ -704,7 +816,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         const head = seg === 'Head';
         let kill = false;
         if (target && !target.isDead) {
-          target.hp -= PISTOL_DAMAGE_BY_SEGMENT[seg] ?? PISTOL_DAMAGE_LIMB;
+          target.hp -= st.dmg[seg] ?? st.dmgLimb;
           if (target.hp <= 0) {
             target.hp = 0;
             target.isDead = true;
@@ -718,7 +830,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
           }
           useStore.getState().setPlayerWeaponState({ pistolHitAt: performance.now(), pistolHitKill: kill, pistolHitHead: head });
         }
-        applyFighterHit(info.ownerId, seg, _shotDir, PISTOL_HIT_SPEED_BY_SEGMENT[seg] ?? PISTOL_HIT_SPEED_LIMB, hit.point);
+        applyFighterHit(info.ownerId, seg, _shotDir, st.hitSpeed[seg] ?? st.hitSpeedLimb, hit.point);
       } else if (bagSolidHandle !== null && bagSolidHandle !== undefined && hit.collider.handle === bagSolidHandle) {
         surface = 'bag';
         bagRef?.current?.registerShot(hit.point, _shotDir);
@@ -727,7 +839,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         const body = hit.collider.parent();
         if (body && body.isDynamic()) {
           body.applyImpulseAtPoint(
-            { x: _shotDir.x * PISTOL_WORLD_IMPULSE, y: _shotDir.y * PISTOL_WORLD_IMPULSE, z: _shotDir.z * PISTOL_WORLD_IMPULSE },
+            { x: _shotDir.x * st.worldImpulse, y: _shotDir.y * st.worldImpulse, z: _shotDir.z * st.worldImpulse },
             { x: hit.point.x, y: hit.point.y, z: hit.point.z },
             true
           );
@@ -746,10 +858,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       };
     }
     emitShotFx({ from: _muzzle, to: hit.point, normal: hit.normal, surface, decal });
-    pistol.kick();
-    pistol.playShot();
-    ammoRef.current -= 1;
-    fireCooldownRef.current = PISTOL_FIRE_INTERVAL_S;
+    gun.kick();
+    gun.playShot();
+    ammoRef.current[gk] -= 1;
+    fireCooldownRef.current = st.interval;
     raiseLeftRef.current = PISTOL_RAISE_AFTER_SHOT_S;
     shootAnimLeftRef.current = PISTOL_SHOOT_ANIM_S;
     setUpperLayer('Pistol_Shoot__upper', true);
@@ -813,6 +925,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       if (!benchMode && !data.isDead) {
         if (input.consumeJustPressed('weapon1')) equipWeapon('fists');
         if (input.consumeJustPressed('weapon2')) equipWeapon('pistol');
+        if (input.consumeJustPressed('weapon3')) equipWeapon('rifle');
+        if (input.consumeJustPressed('weapon4')) equipWeapon('knife');
       }
       if (fireCooldownRef.current > 0) fireCooldownRef.current -= dtW;
       if (raiseLeftRef.current > 0) raiseLeftRef.current -= dtW;
@@ -821,33 +935,47 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         reloadLeftRef.current -= dtW;
         if (reloadLeftRef.current <= 0) {
           reloadLeftRef.current = 0;
-          ammoRef.current = PISTOL_MAG_SIZE;
-          pistol.setReloadProgress(null);
+          ammoRef.current[reloadGunRef.current] = GUN_STATS[reloadGunRef.current].mag;
+          gunApi(reloadGunRef.current).setReloadProgress(null);
         } else {
-          pistol.setReloadProgress(1 - reloadLeftRef.current / reloadDurRef.current);
+          gunApi(reloadGunRef.current).setReloadProgress(1 - reloadLeftRef.current / reloadDurRef.current);
         }
       }
-      if (weaponRef.current !== 'pistol' || data.isDead) aimingRef.current = false;
+      if (!isGun() || data.isDead) aimingRef.current = false;
       if (data.isDead && reloadLeftRef.current > 0) {
         // morto a meta' ricarica: niente rumori di caricatore dal cadavere
         reloadLeftRef.current = 0;
-        pistol.setReloadProgress(null);
-        pistol.stopReload();
+        for (const g of [pistol, rifle]) {
+          g.setReloadProgress(null);
+          g.stopReload();
+        }
       }
       updateUpperLayer(benchMode);
       pistol.setVisible(weaponRef.current === 'pistol' && !benchMode);
       pistol.update(dtW);
+      rifle.setVisible(weaponRef.current === 'rifle' && !benchMode);
+      // fucile: pronto basso -> in mira (anche subito dopo uno sparo)
+      {
+        const want = aimingRef.current || raiseLeftRef.current > 0 || shootAnimLeftRef.current > 0 ? 1 : 0;
+        const k = Math.min(1, dtW * 8);
+        rifleRaiseRef.current += (want - rifleRaiseRef.current) * k;
+        rifle.setRaise(rifleRaiseRef.current);
+      }
+      rifle.update(dtW);
+      knife.setVisible(weaponRef.current === 'knife' && !benchMode);
+      knife.update();
       const ws = weaponStoreRef.current;
       const reloading = reloadLeftRef.current > 0;
-      if (ws.w !== weaponRef.current || ws.a !== aimingRef.current || ws.n !== ammoRef.current || ws.r !== reloading) {
+      const ammoNow = isGun() ? ammoRef.current[gunKind()] : 0;
+      if (ws.w !== weaponRef.current || ws.a !== aimingRef.current || ws.n !== ammoNow || ws.r !== reloading) {
         ws.w = weaponRef.current;
         ws.a = aimingRef.current;
-        ws.n = ammoRef.current;
+        ws.n = ammoNow;
         ws.r = reloading;
         useStore.getState().setPlayerWeaponState({
           playerWeapon: weaponRef.current,
           playerAiming: aimingRef.current,
-          pistolAmmo: ammoRef.current,
+          pistolAmmo: ammoNow,
           pistolReloading: reloading,
         });
       }
@@ -881,6 +1009,22 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       // non a ogni frame.
       get activeSegments() {
         return ragdoll.getActiveRagdollDebugSegments();
+      },
+      // coltello: dove sono punta/lama e se toccano il sacco (debug dal vivo)
+      knifeProbe: () => {
+        const tip = knife.getTipWorld(new THREE.Vector3());
+        const mid = knife.getMidBladeWorld(new THREE.Vector3());
+        const bag = bagHurtboxHandle ?? null;
+        return {
+          tip: tip.toArray().map((n) => +n.toFixed(2)),
+          mid: mid.toArray().map((n) => +n.toFixed(2)),
+          tipInBag: bag !== null && ragdoll.pointIntersectsHurtbox(tip, bag),
+          midInBag: bag !== null && ragdoll.pointIntersectsHurtbox(mid, bag),
+          handInBag: bag !== null && ragdoll.getBoneWorldPosition('hand_r', _handPos) && ragdoll.pointIntersectsHurtbox(_handPos, bag),
+          attacking: isAttackingRef.current,
+          landed: attackHasLandedRef.current,
+          pending: pendingHitRef.current?.bone ?? null,
+        };
       },
     };
     // Spostato PRIMA di ragdoll.update(): la torsione/inclinazione del
@@ -922,6 +1066,31 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX),
       THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX)
     );
+    // Fucile: e' agganciato al petto (calcio alla spalla, vedi
+    // rifleHoldTuning) e le MANI vanno sull'arma: destra sull'impugnatura,
+    // sinistra sull'astina (non durante la ricarica: va al caricatore).
+    // Dopo la torsione del busto, prima del ragdoll: fa parte della posa
+    // bersaglio.
+    const rifleIK = () => {
+      if (tPoseBench || benchClip || weaponRef.current !== 'rifle' || data.isDead || isDodgingRef.current) return;
+      if (!armBonesRef.current) {
+        const get = (n: string) => clone.getObjectByName(n);
+        const l = [get('upperarm_l'), get('lowerarm_l'), get('hand_l')];
+        const r = [get('upperarm_r'), get('lowerarm_r'), get('hand_r')];
+        if (l.every(Boolean) && r.every(Boolean)) {
+          armBonesRef.current = {
+            l: { upper: l[0]!, lower: l[1]!, hand: l[2]! },
+            r: { upper: r[0]!, lower: r[1]!, hand: r[2]! },
+          };
+        }
+      }
+      const arms = armBonesRef.current;
+      if (arms) {
+        solveTwoBoneIK(arms.r.upper, arms.r.lower, arms.r.hand, rifle.getGripWorld(_support), 1);
+        if (reloadLeftRef.current <= 0 && rifle.getSupportWorld(_support)) solveTwoBoneIK(arms.l.upper, arms.l.lower, arms.l.hand, _support, 1);
+      }
+    };
+    rifleIK();
 
     // Runs every frame regardless of which branch below fires, same
     // reasoning as CombatSoldier.tsx: a hit-reaction pulse needs to keep
@@ -942,6 +1111,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       data.state === 'In guardia' || data.state === 'Riposo',
       useStore.getState().ragdollPassive
     );
+    // di nuovo DOPO il ragdoll attivo: le braccia fisiche non sempre
+    // riescono a seguire la posa (limiti dei giunti, inerzia) e il fucile
+    // e' rigido sul petto -- le mani restano comunque sull'arma
+    rifleIK();
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
     // fighter (their own checkAttackContact reads it off `opponent`) --
     // see FighterData's comment.
@@ -980,6 +1153,16 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       );
       data.position.x += corrected.x;
       data.position.z += corrected.z;
+      if (import.meta.env.DEV) {
+        // misura: quanto movimento viene chiesto e quanto ne resta dopo le
+        // collisioni del corpo solido (per il controllo di camminata/corsa)
+        const m = ((window as any).__moveDebug ??= { want: 0, got: 0, frames: 0, blocked: 0 });
+        const w = Math.hypot(desiredX, desiredZ), g = Math.hypot(corrected.x, corrected.z);
+        m.want += w;
+        m.got += g;
+        m.frames++;
+        if (g < w * 0.98) m.blocked++;
+      }
     };
 
     // "punto 1: ragdoll passivo alla morte" -- identical treatment to
@@ -1008,6 +1191,41 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       return;
     }
 
+    // Ostacoli dell'arena (pendoli, pale, pistoni): esce da eventuali
+    // compenetrazioni e, se l'ostacolo si muove, viene spinto e colpito.
+    {
+      const dtO = delta * globalSpeed;
+      const ob = ragdoll.resolveObstacleContacts(bagSolidHandle ?? null);
+      data.position.x += ob.pushX;
+      data.position.z += ob.pushZ;
+      if (obstacleHitCooldownRef.current > 0) obstacleHitCooldownRef.current -= dtO;
+      if (ob.hitSpeed > OBSTACLE_HIT_MIN_SPEED) {
+        // la spinta segue l'ostacolo (tetto per non volare via)
+        const k = Math.min(1, OBSTACLE_KNOCK_MAX_SPEED / ob.hitSpeed);
+        knockVelRef.current.set(ob.hitVX * k, 0, ob.hitVZ * k);
+        if (obstacleHitCooldownRef.current <= 0) {
+          obstacleHitCooldownRef.current = OBSTACLE_HIT_COOLDOWN_S;
+          _hitImpulseDir.set(ob.hitVX, 0.25 * ob.hitSpeed, ob.hitVZ).normalize();
+          ragdoll.pulseHit(
+            _hitImpulseDir,
+            THREE.MathUtils.clamp(ob.hitSpeed / 8, 0.25, 0.8),
+            ob.segment ?? 'Torso',
+            ob.hitX - _hitImpulseDir.x,
+            ob.hitZ - _hitImpulseDir.z
+          );
+          if (data.attackLock <= 0 && !isDodgingRef.current) {
+            data.attackLock = HIT_STAGGER_DURATION;
+            data.state = 'Colpito!';
+          }
+        }
+      }
+      const kv = knockVelRef.current;
+      if (kv.lengthSq() > 0.0025) {
+        resolveAndApplyMovement(kv.x * dtO, kv.z * dtO);
+        kv.multiplyScalar(Math.exp(-OBSTACLE_KNOCK_DECAY * dtO));
+      } else kv.set(0, 0, 0);
+    }
+
     if (data.triggerHit) {
       // No longer switches to the Hit_Chest/Hit_Head animation clip -- see
       // HIT_STAGGER_DURATION's comment above. The fighter keeps whatever
@@ -1030,6 +1248,11 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       // CombatSoldier.tsx.
       if (isDodgingRef.current) {
         resolveAndApplyMovement(dodgeDirRef.current.x * DODGE_SPEED * delta * globalSpeed, dodgeDirRef.current.z * DODGE_SPEED * delta * globalSpeed);
+      }
+      if (isAttackingRef.current && knifeLungeLeftRef.current > 0) {
+        const dt = Math.min(knifeLungeLeftRef.current, delta * globalSpeed);
+        knifeLungeLeftRef.current -= dt;
+        resolveAndApplyMovement(-Math.sin(data.rotation) * KNIFE_LUNGE_SPEED * dt, -Math.cos(data.rotation) * KNIFE_LUNGE_SPEED * dt);
       }
       // "il colpo deve essere sferrato dove effettivamente le mesh
       // collidono" -- while THIS swing is still live and hasn't already
@@ -1104,7 +1327,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // standing still. Aiming punches stays entirely the torso's job
     // either way (the camYaw/yawDiff block up top, unaffected by this).
     let targetRotation: number | null = null;
-    if (weaponRef.current === 'pistol') {
+    if (isGun()) {
       // Con la pistola il corpo guarda sempre dove guarda la camera
       // (terza persona sopra la spalla): si cammina/strafa mirando.
       targetRotation = camYaw;
@@ -1116,12 +1339,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     if (targetRotation !== null) {
       let angleDiff = targetRotation - data.rotation;
       angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
-      data.rotation += angleDiff * (weaponRef.current === 'pistol' ? PISTOL_FACE_TURN_RATE : FACE_TURN_RATE);
+      data.rotation += angleDiff * (isGun() ? PISTOL_FACE_TURN_RATE : FACE_TURN_RATE);
     }
 
     // --- Block (held) --- (solo a mani nude: con la pistola il tasto
     // destro e' la mira)
-    if (weaponRef.current === 'fists' && input.secondary) {
+    if ((weaponRef.current === 'fists' || weaponRef.current === 'knife') && input.secondary) {
       data.state = 'Parata';
       transitionToAnimation(animCatalog.block, 0.15, true);
       applyTransform();
@@ -1155,11 +1378,14 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // --- Pistola: mira (tasto destro), sparo (sinistro), ricarica (R),
     // movimento con strafe. Le gambe usano le clip __legs, il busto il
     // layer alto (updateUpperLayer).
-    if (weaponRef.current === 'pistol') {
+    if (isGun()) {
       const wantReload = input.consumeJustPressed('reload') || input.consumeJustPressed('respawn');
       if (wantReload) startReload();
       aimingRef.current = !!input.secondary && reloadLeftRef.current <= 0;
-      if (input.consumeJustPressed('primary') && reloadLeftRef.current <= 0 && fireCooldownRef.current <= 0) {
+      // pistola: un colpo per pressione; fucile: automatico finche' tieni premuto
+      const pressed = input.consumeJustPressed('primary');
+      const wantFire = GUN_STATS[gunKind()].auto ? pressed || !!input.primary : pressed;
+      if (wantFire && reloadLeftRef.current <= 0 && fireCooldownRef.current <= 0) {
         fire();
       }
       // i pugni non partono con la pistola in mano
@@ -1206,6 +1432,37 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // dominant side, so it stays on its own neutral key rather than
     // being called left or right.
     //
+    // --- Coltello: fendenti alternati (click), terzo fendente (Q),
+    // affondo pesante (E). Stesso sistema di contatto dei pugni, ma i punti
+    // che toccano sono la punta e la meta' della lama (checkAttackContact).
+    if (weaponRef.current === 'knife') {
+      let clip: string | null = null;
+      let dmg = KNIFE_DAMAGE_SLASH;
+      if (input.consumeJustPressed('primary')) {
+        clip = KNIFE_SLASH_CLIPS[knifeSlashRef.current % KNIFE_SLASH_CLIPS.length];
+        knifeSlashRef.current++;
+      } else if (input.consumeJustPressed('yawLeft') || input.consumeJustPressed('attackLeft')) {
+        clip = KNIFE_THIRD_CLIP;
+      } else if (input.consumeJustPressed('yawRight')) {
+        clip = KNIFE_HEAVY_CLIP;
+        dmg = KNIFE_DAMAGE_HEAVY;
+      }
+      if (clip) {
+        if (!actions[clip]) clip = animCatalog.attackCross;
+        meleeDamageRef.current = dmg;
+        data.state = `Coltello (${clip})`;
+        data.attackLock = transitionToAnimation(clip, 0.1, false);
+        isAttackingRef.current = true;
+        attackHasLandedRef.current = false;
+        knife.playSwing();
+        knifeLungeLeftRef.current = KNIFE_LUNGE_S;
+        applyTransform();
+        return;
+      }
+    } else {
+      meleeDamageRef.current = PUNCH_DAMAGE;
+    }
+
     // Cross (RIGHT arm) -- primary (Left Click / gamepad R2).
     if (input.consumeJustPressed('primary')) {
       data.state = `Attacco (${animCatalog.attackCross})`;

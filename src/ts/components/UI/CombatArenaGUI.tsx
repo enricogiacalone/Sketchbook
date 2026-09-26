@@ -2,8 +2,9 @@ import { useEffect } from 'react';
 import { useStore } from '../../store';
 import type { GameMode } from '../Environment/SquadArenaTypes';
 import { acquireDebugGui, releaseDebugGui } from '../../lib/debugGui';
-import { pistolHoldTuning } from '../Environment/weapons/usePistolModel';
-import { locomotionTuning, CLIP_GROUND_SPEED } from '../Environment/locomotion';
+import { pistolHoldTuning, rifleHoldTuning } from '../Environment/weapons/usePistolModel';
+import { knifeHoldTuning } from '../Environment/weapons/useKnifeModel';
+import { locomotionTuning, CLIP_GROUND_SPEED, RUN_CLIP } from '../Environment/locomotion';
 import { flyBrainSettings } from '../../flyBrain/flyBrainSettings';
 
 // "fammi scegliere come su simulation citta le modalita di scontro dei
@@ -222,10 +223,22 @@ const CombatArenaGUI: React.FC = () => {
     locoFolder.add({
       info: () =>
         console.log(
-          `[locomozione] Walk x${(locomotionTuning.walkSpeed / CLIP_GROUND_SPEED.Walk).toFixed(2)}, Sprint x${(locomotionTuning.runSpeed / CLIP_GROUND_SPEED.Sprint).toFixed(2)}`
+          `[locomozione] Walk x${(locomotionTuning.walkSpeed / CLIP_GROUND_SPEED.Walk).toFixed(2)}, ${RUN_CLIP} x${(locomotionTuning.runSpeed / CLIP_GROUND_SPEED[RUN_CLIP]).toFixed(2)}`
         ),
     }, 'info').name('Scrivi timeScale in console');
 
+    const holdFolders: ReturnType<typeof gui.addFolder>[] = [];
+    for (const [title, t] of [['Fucile (presa)', rifleHoldTuning], ['Coltello (presa)', knifeHoldTuning]] as const) {
+      const f = gui.addFolder(title);
+      holdFolders.push(f);
+      f.add(t, 'px', -0.3, 0.3, 0.005).name('pos X');
+      f.add(t, 'py', -0.3, 0.3, 0.005).name('pos Y');
+      f.add(t, 'pz', -0.3, 0.3, 0.005).name('pos Z');
+      f.add(t, 'rx', -180, 180, 1).name('rot X');
+      f.add(t, 'ry', -180, 180, 1).name('rot Y');
+      f.add(t, 'rz', -180, 180, 1).name('rot Z');
+      f.close();
+    }
     const pistolFolder = gui.addFolder('Pistola (presa)');
     pistolFolder.add(pistolHoldTuning, 'px', -0.2, 0.2, 0.005).name('pos X');
     pistolFolder.add(pistolHoldTuning, 'py', -0.2, 0.3, 0.005).name('pos Y');
@@ -236,6 +249,7 @@ const CombatArenaGUI: React.FC = () => {
     pistolFolder.close();
 
     return () => {
+      holdFolders.forEach((f) => f.destroy());
       pistolFolder.destroy();
       locoFolder.destroy();
       flyFolder.destroy();

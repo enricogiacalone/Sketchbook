@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
-import { PISTOL_MAG_SIZE } from '../Environment/weapons/weaponConfig';
+import { PISTOL_MAG_SIZE, RIFLE_MAG_SIZE } from '../Environment/weapons/weaponConfig';
 
 // HUD della pistola nel duello: mirino al centro dello schermo (la camera
 // sopra la spalla guarda esattamente li', vedi useThirdPersonCamera.ts),
@@ -32,7 +32,15 @@ const WeaponHUD: React.FC = () => {
     return () => window.clearTimeout(id);
   }, [hitAt, markerOn, markerAge]);
 
-  const pistol = weapon === 'pistol';
+  // "pistol" qui = un'arma da fuoco in mano (pistola o fucile)
+  const pistol = weapon === 'pistol' || weapon === 'rifle';
+  const magSize = weapon === 'rifle' ? RIFLE_MAG_SIZE : PISTOL_MAG_SIZE;
+  const slots: [string, string, string][] = [
+    ['fists', '1', 'Pugni'],
+    ['pistol', '2', 'Pistola'],
+    ['rifle', '3', 'Fucile'],
+    ['knife', '4', 'Coltello'],
+  ];
   const gap = aiming ? 4 : 10;
   const len = aiming ? 5 : 7;
   const color = reloading ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.9)';
@@ -89,19 +97,22 @@ const WeaponHUD: React.FC = () => {
         }}
       >
         <div style={{ fontSize: 11, opacity: 0.75 }}>
-          <span style={{ opacity: pistol ? 0.5 : 1, fontWeight: pistol ? 400 : 700 }}>1 Pugni</span>
-          {'  '}
-          <span style={{ opacity: pistol ? 1 : 0.5, fontWeight: pistol ? 700 : 400 }}>2 Pistola</span>
+          {slots.map(([id, key, label]) => (
+            <span key={id} style={{ opacity: weapon === id ? 1 : 0.5, fontWeight: weapon === id ? 700 : 400, marginLeft: 8 }}>
+              {key} {label}
+            </span>
+          ))}
         </div>
         {pistol && (
           <div style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.1, color: ammo === 0 && !reloading ? '#ef4444' : '#fff' }}>
             {reloading ? <span style={{ fontSize: 16 }}>Ricarica…</span> : ammo}
-            <span style={{ fontSize: 14, opacity: 0.6 }}> / {PISTOL_MAG_SIZE}</span>
+            <span style={{ fontSize: 14, opacity: 0.6 }}> / {magSize}</span>
           </div>
         )}
         {pistol && (
-          <div style={{ fontSize: 10, opacity: 0.6 }}>LMB spara · RMB mira · R ricarica</div>
+          <div style={{ fontSize: 10, opacity: 0.6 }}>{weapon === 'rifle' ? 'LMB (tieni) raffica' : 'LMB spara'} · RMB mira · R ricarica</div>
         )}
+        {weapon === 'knife' && <div style={{ fontSize: 10, opacity: 0.6 }}>LMB fendente · Q fendente · E affondo · RMB para</div>}
       </div>
     </>
   );

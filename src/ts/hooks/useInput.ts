@@ -29,6 +29,9 @@ const ACTION_NAMES = [
   // PlayerCombatSoldier.tsx legge entrambe).
   'weapon1',
   'weapon2',
+  // 3 = fucile, 4 = coltello (pad: croce su, pressione levetta destra)
+  'weapon3',
+  'weapon4',
   'reload',
   'music',
   // play/pausa di una sola cassa: J = cassa cubi, K = cassa schermo
@@ -60,6 +63,8 @@ const emptyActionMap = (): Record<Action, boolean> => ({
   lockOn: false,
   weapon1: false,
   weapon2: false,
+  weapon3: false,
+  weapon4: false,
   reload: false,
   music: false,
   musicCubi: false,
@@ -121,6 +126,8 @@ export const useInput = () => {
     ControlLeft: 'lockOn',
     Digit1: 'weapon1',
     Digit2: 'weapon2',
+    Digit3: 'weapon3',
+    Digit4: 'weapon4',
     // casse audio dell'arena (AudioArena.tsx): play/pausa
     KeyM: 'music',
     KeyJ: 'musicCubi',
@@ -290,6 +297,8 @@ export const useInput = () => {
     g.weapon1 = !!pad.buttons[14]?.pressed; // croce sinistra: pugni
     g.weapon2 = !!pad.buttons[15]?.pressed; // croce destra: pistola
     g.reload = !!pad.buttons[13]?.pressed; // croce giu': ricarica
+    g.weapon3 = !!pad.buttons[12]?.pressed; // croce su: fucile
+    g.weapon4 = !!pad.buttons[11]?.pressed; // R3 (levetta destra premuta): coltello
     // Back/Select: cycle the camera's 4 zoom presets (see ZOOM_LEVELS in
     // useThirdPersonCamera.ts). Reuses the 'camera' action, which already
     // existed with a keyboard binding (KeyC) but, like enter_passenger

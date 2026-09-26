@@ -80,3 +80,60 @@ export const PISTOL_HIT_SPEED_BY_SEGMENT: Record<string, number> = {
 export const PISTOL_HIT_SPEED_LIMB = 9;
 // Impulso su un corpo dinamico qualsiasi del mondo (N*s).
 export const PISTOL_WORLD_IMPULSE = 1.5;
+
+// ---------------------------------------------------------------------------
+// "da enari-engine prendi anche il coltello e il fucile come armi" -- stessa
+// provenienza della pistola (enari-engine, MIT, (c) 2024 iercan), stessa
+// regola: SOLO i nodi dell'arma, le mani/braccia in prima persona dei file
+// (materiali "v_hands"/"t_phoenix", da Counter-Strike) escluse.
+//  - FUCILE: Galil ("AK47" nel motore) da fps_mine_sketch_galil.glb ->
+//    public/rifle-galil.glb (nodi Armature/Torus.001/Root/Mag/Up, texture:
+//    la piccola tavolozza di colori dello stesso file).
+//  - COLTELLO: baionetta M9 da fps_mine_sketch_m9.glb -> public/knife-m9.glb
+//    (nodi Knife/OldKnifeMesh*, pelle "cotta" e riallineata: punta verso -Z,
+//    lama in acciaio invece dell'arancione a specchio dell'originale).
+export const RIFLE_MODEL_URL = 'rifle-galil.glb';
+export const RIFLE_LENGTH_M = 0.95; // Galil col calcio aperto, circa
+// punti notevoli (frazioni del box, misurate sul render del file: canna
+// verso -Z, sopra +Y, come la pistola)
+export const RIFLE_GRIP_FROM_REAR = 0.34; // impugnatura a pistola
+export const RIFLE_GRIP_FROM_BOTTOM = 0.44;
+export const RIFLE_BORE_FROM_TOP = 0.26;
+export const RIFLE_SUPPORT_FROM_REAR = 0.53; // inizio dell'astina: mano sinistra (piu' avanti non ci arriva)
+export const RIFLE_SUPPORT_FROM_BOTTOM = 0.72;
+export const RIFLE_MAG_SIZE = 35;
+// automatico: tenendo premuto spara ogni...
+export const RIFLE_FIRE_INTERVAL_S = 0.1;
+export const RIFLE_RANGE_M = 250;
+export const RIFLE_SPREAD_HIP_DEG = 3.5;
+export const RIFLE_SPREAD_AIM_DEG = 0.35;
+export const RIFLE_SHOT_VOLUME = 0.85;
+export const RIFLE_BOLT_KICK_M = 0.04;
+export const RIFLE_BOLT_RETURN_S = 0.06;
+export const RIFLE_DAMAGE_BY_SEGMENT: Record<string, number> = {
+  Head: 90,
+  SpineHigh: 34,
+  SpineMid: 34,
+  Torso: 34,
+  Hips: 30,
+};
+export const RIFLE_DAMAGE_LIMB = 20;
+export const RIFLE_HIT_SPEED_BY_SEGMENT: Record<string, number> = {
+  Head: 13,
+  SpineHigh: 10,
+  SpineMid: 10,
+  Torso: 10,
+  Hips: 9,
+};
+export const RIFLE_HIT_SPEED_LIMB = 8;
+export const RIFLE_WORLD_IMPULSE = 2.2;
+
+export const KNIFE_MODEL_URL = 'knife-m9.glb';
+export const KNIFE_LENGTH_M = 0.3;
+export const KNIFE_GRIP_FROM_REAR = 0.15; // centro del manico, dal pomolo
+export const KNIFE_GRIP_FROM_BOTTOM = 0.52;
+export const KNIFE_TIP_FROM_BOTTOM = 0.31;
+// danni del coltello (hp del duello = 250): fendente e affondo pesante
+export const KNIFE_DAMAGE_SLASH = 45;
+export const KNIFE_DAMAGE_HEAVY = 70;
+export const KNIFE_DAMAGE_BLOCKED = 10;

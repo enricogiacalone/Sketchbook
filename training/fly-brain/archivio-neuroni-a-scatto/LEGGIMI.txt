@@ -1,0 +1,7 @@
+Pesi addestrati con i neuroni "a scatto" (NEURON_LEAK = 1, fino al 25/09/2026).
+Con quella dinamica il connettoma VERO oscillava su-giu' a ogni passo (anelli
+inibitori) e faceva tremare il corpo, i rimescolati no: il confronto vero contro
+rimescolati era falsato. Dal 25/09 i neuroni hanno una costante di tempo
+(NEURON_LEAK = 0.3) e l'esperimento riparte da zero. Questi file non vengono
+piu' caricati (il campo neuronLeak manca = 1).
+Stand: vero gen 910, #1 640, #2 570, #3 675, #4 565, #5 625. Getup: gen 15.

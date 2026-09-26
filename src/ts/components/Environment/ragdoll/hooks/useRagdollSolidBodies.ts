@@ -155,8 +155,35 @@ export function useRagdollSolidBodies(
           SOLID_BODY_GROUPS,
           excludeOwnParts
         );
-        const corrected = controller.computedMovement();
+        let corrected: { x: number; z: number } = controller.computedMovement();
+        // "la camminata e la corsa nn mi sembrano corrette" -- misurato: nel
+        // duello i PIEDI appoggiati toccano il pavimento (collider fisso) e,
+        // con lo scivolamento spento, ogni passo li bloccava contro di esso:
+        // il 20% dei frame di camminata il corpo restava fermo (1.2 m/s
+        // invece di 1.5, a scatti, e i piedi pattinavano 6-19 cm a passo).
+        // Un contatto con normale quasi verticale e' il suolo (o un soffitto)
+        // su cui il segmento poggia, non un ostacolo davanti: si ignora.
+        {
+          const n = controller.numComputedCollisions();
+          let onlyGround = n > 0;
+          for (let i = 0; i < n && onlyGround; i++) {
+            const col = controller.computedCollision(i);
+            if (!col || Math.abs(col.normal1.y) < 0.7) onlyGround = false;
+          }
+          if (onlyGround) corrected = { x: desiredX, z: desiredZ };
+        }
         const magSq = corrected.x * corrected.x + corrected.z * corrected.z;
+        if (import.meta.env.DEV && magSq < desiredMagSq * 0.96) {
+          // chi blocca il corpo solido (misure di camminata/corsa)
+          const dbg = ((window as any).__solidBlockDebug ??= {} as Record<string, number>);
+          for (let i = 0; i < controller.numComputedCollisions(); i++) {
+            const c = controller.computedCollision(i)?.collider;
+            if (!c) continue;
+            const parent = c.parent();
+            const key = `${name}->h${c.handle}:${c.isSensor() ? 'sensor' : 'solid'}:${parent ? (parent.isFixed() ? 'fixed' : parent.isKinematic() ? 'kinematic' : 'dynamic') : 'nobody'}:y${c.translation().y.toFixed(2)}`;
+            dbg[key] = (dbg[key] ?? 0) + 1;
+          }
+        }
         if (magSq < bestMagSq) {
           bestMagSq = magSq;
           bestX = corrected.x;
@@ -187,6 +214,87 @@ export function useRagdollSolidBodies(
       world.propagateModifiedBodyPositionsToColliders();
 
       return { x: bestX, z: bestZ };
+    },
+    [ensureSolidBody, world]
+  );
+
+  // "perche' il personaggio non collide con gli ostacoli nell'arena?" -- il
+  // corpo solido e' cinematico come gli ostacoli (pendoli, pale, pistoni):
+  // tra due corpi cinematici Rapier non calcola contatti, e resolveBodyMovement
+  // blocca solo i movimenti DEL PERSONAGGIO. Un ostacolo che si muove gli
+  // passava attraverso, e poi il personaggio restava incastrato dentro
+  // (ogni suo movimento partiva gia' in collisione). Qui, a ogni frame:
+  //  - si cercano le compenetrazioni di ogni parte del corpo con gli ostacoli
+  //    (query di forma + contactCollider) e si sposta il corpo fuori
+  //    (solo in orizzontale), cosi' non resta mai incastrato;
+  //  - si restituisce la velocita' dell'ostacolo nel punto di contatto, per
+  //    la spinta/colpo (lo gestisce chi chiama: PlayerCombatSoldier/CombatSoldier).
+  const resolveObstacleContacts = useCallback(
+    (skipHandle: number | null): ObstacleContact => {
+      const out: ObstacleContact = { pushX: 0, pushZ: 0, hitSpeed: 0, hitVX: 0, hitVZ: 0, hitX: 0, hitY: 0, hitZ: 0, segment: null };
+      if (!ensureSolidBody()) return out;
+      const entries = solidBodiesRef.current;
+      const ownHandles = ownColliderHandlesRef.current;
+      const others: Collider[] = [];
+      for (const name of Object.keys(entries)) {
+        const col = entries[name].collider;
+        others.length = 0;
+        // prima si raccolgono, poi si interrogano (niente query annidate
+        // dentro una callback del mondo: Rapier va in errore)
+        world.intersectionsWithShape(
+          col.translation(),
+          col.rotation(),
+          col.shape,
+          (other) => {
+            others.push(other);
+            return true;
+          },
+          undefined,
+          SOLID_BODY_GROUPS,
+          undefined,
+          undefined,
+          (c: Collider) => !ownHandles.has(c.handle) && c.handle !== skipHandle && !c.isSensor()
+        );
+        for (const other of others) {
+          const c = col.contactCollider(other, 0);
+          if (!c || c.distance >= 0) continue;
+          // fuori dall'ostacolo: contro la normale di questa parte, di quanto compenetra
+          const px = c.normal1.x * c.distance;
+          const pz = c.normal1.z * c.distance;
+          if (Math.hypot(px, pz) > Math.hypot(out.pushX, out.pushZ)) {
+            out.pushX = px;
+            out.pushZ = pz;
+          }
+          const body = other.parent();
+          if (body && !body.isFixed()) {
+            const v = body.velocityAtPoint(c.point2);
+            const sp = Math.hypot(v.x, v.z);
+            if (sp > out.hitSpeed) {
+              out.hitSpeed = sp;
+              out.hitVX = v.x;
+              out.hitVZ = v.z;
+              out.hitX = c.point1.x;
+              out.hitY = c.point1.y;
+              out.hitZ = c.point1.z;
+              out.segment = name;
+            }
+          }
+        }
+      }
+      // limite per frame: esce in pochi frame senza teletrasporti
+      const len = Math.hypot(out.pushX, out.pushZ);
+      if (len > 0.12) {
+        out.pushX *= 0.12 / len;
+        out.pushZ *= 0.12 / len;
+      }
+      if (len > 0) {
+        for (const name of Object.keys(entries)) {
+          const t = entries[name].body.translation();
+          entries[name].body.setTranslation({ x: t.x + out.pushX, y: t.y, z: t.z + out.pushZ }, true);
+        }
+        world.propagateModifiedBodyPositionsToColliders();
+      }
+      return out;
     },
     [ensureSolidBody, world]
   );
@@ -222,6 +330,23 @@ export function useRagdollSolidBodies(
   return {
     syncSolidBody,
     resolveBodyMovement,
+    resolveObstacleContacts,
     getSolidBodySegments,
   };
+}
+
+export interface ObstacleContact {
+  // spostamento (m) gia' applicato al corpo solido per uscire dagli ostacoli:
+  // chi chiama lo aggiunge alla posizione del personaggio
+  pushX: number;
+  pushZ: number;
+  // ostacolo in movimento piu' veloce che lo tocca (velocita' orizzontale nel
+  // punto di contatto, m/s) e dove
+  hitSpeed: number;
+  hitVX: number;
+  hitVZ: number;
+  hitX: number;
+  hitY: number;
+  hitZ: number;
+  segment: string | null;
 }

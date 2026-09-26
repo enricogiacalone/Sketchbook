@@ -127,11 +127,22 @@ export interface PolicyLayout {
   affChannel: Int32Array;
   affIndex: Int32Array;
   decIndex: Int32Array; // nOut * fanIn indici di neuroni efferenti
+  // sensi aggiunti dopo (in coda all'ingresso, dopo i primi nIn canali):
+  // ognuno arriva a extraFan afferenti scelti a caso con pesi propri, che
+  // partono da ZERO -> i pesi gia' addestrati restano validi (vedi fitParams)
+  nExtra: number;
+  extraFan: number;
+  oExtra: number;
+  extraIndex: Int32Array;
 }
+
+// Sensi aggiunti: pressione sotto TALLONE e PUNTA di ciascun piede (4)
+export const N_EXTRA_SENSES = 4;
+const EXTRA_FAN = 24;
 
 // Assegnazioni FISSE e deterministiche (non addestrate): stesso layout nel
 // gioco e nell'addestramento.
-export function makeLayout(g: FlyGraph, nIn: number, nOut: number, fanIn = 16, passes = 3): PolicyLayout {
+export function makeLayout(g: FlyGraph, nIn: number, nOut: number, fanIn = 16, passes = 3, nExtra = N_EXTRA_SENSES): PolicyLayout {
   const aff: number[] = [];
   const eff: number[] = [];
   for (let i = 0; i < g.N; i++) {
@@ -157,7 +168,31 @@ export function makeLayout(g: FlyGraph, nIn: number, nOut: number, fanIn = 16, p
   const oBias = o; o += g.N;
   const oDec = o; o += nOut * fanIn;
   const oDecBias = o; o += nOut;
-  return { nIn, nOut, fanIn, passes, oEncGain, oEncBias, oGain, oBias, oDec, oDecBias, nParams: o, affChannel, affIndex: Int32Array.from(aff), decIndex };
+  // sensi aggiunti: generatore a parte, cosi' le scelte qui sopra non cambiano
+  let seed2 = 0xfee7;
+  const rnd2 = () => {
+    seed2 = (seed2 + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed2 ^ (seed2 >>> 15), 1 | seed2);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const extraIndex = new Int32Array(nExtra * EXTRA_FAN);
+  for (let j = 0; j < extraIndex.length; j++) extraIndex[j] = aff[Math.floor(rnd2() * aff.length)];
+  const oExtra = o; o += nExtra * EXTRA_FAN;
+  return { nIn, nOut, fanIn, passes, oEncGain, oEncBias, oGain, oBias, oDec, oDecBias, nParams: o, affChannel, affIndex: Int32Array.from(aff), decIndex, nExtra, extraFan: EXTRA_FAN, oExtra, extraIndex };
+}
+
+// Pesi salvati prima dei sensi aggiunti: stessi parametri meno quelli nuovi
+// in coda -> si completano con zeri (senso nuovo "spento", il resto intatto).
+// null = pesi di un altro cervello/corpo.
+export function fitParams(L: PolicyLayout, d: Float32Array): Float32Array | null {
+  if (d.length === L.nParams) return d;
+  if (d.length === L.oExtra) {
+    const p = new Float32Array(L.nParams);
+    p.set(d);
+    return p;
+  }
+  return null;
 }
 
 // Parametri iniziali: ingresso e neuroni "accesi" in modo moderato, uscita
@@ -179,7 +214,8 @@ export class ConnectomeBrain {
   constructor(g: FlyGraph, L: PolicyLayout, params: Float32Array) {
     this.g = g;
     this.L = L;
-    this.p = params;
+    // pesi di prima dei sensi aggiunti: completati con zeri
+    this.p = params.length >= L.nParams ? params : fitParams(L, params) ?? initialParams(L);
     this.h = new Float32Array(g.N);
     this.m = new Float32Array(g.N);
     this.inj = new Float32Array(g.N);
@@ -194,6 +230,12 @@ export class ConnectomeBrain {
     for (let k = 0; k < L.affIndex.length; k++) {
       inj[L.affIndex[k]] = Math.tanh(p[L.oEncGain + k] * input[L.affChannel[k]] + p[L.oEncBias + k]);
     }
+    for (let c = 0; c < L.nExtra; c++) {
+      const x = input[L.nIn + c];
+      if (!x) continue;
+      const base = c * L.extraFan;
+      for (let f = 0; f < L.extraFan; f++) inj[L.extraIndex[base + f]] += p[L.oExtra + base + f] * x;
+    }
     const { rowStart, pre, w } = g;
     for (let pass = 0; pass < L.passes; pass++) {
       for (let i = 0; i < g.N; i++) {
@@ -202,7 +244,8 @@ export class ConnectomeBrain {
         m[i] = s;
       }
       for (let i = 0; i < g.N; i++) {
-        h[i] = Math.tanh((1 + p[L.oGain + i]) * m[i] + p[L.oBias + i] + inj[i]);
+        const target = Math.tanh((1 + p[L.oGain + i]) * m[i] + p[L.oBias + i] + inj[i]);
+        h[i] += NEURON_LEAK.value * (target - h[i]);
       }
     }
     for (let j = 0; j < L.nOut; j++) {
@@ -214,6 +257,17 @@ export class ConnectomeBrain {
   }
 }
 
+// Costante di tempo dei neuroni: a ogni passaggio lo stato si muove solo di
+// una frazione verso il nuovo valore (neurone "a membrana", come quelli veri),
+// invece di saltarci sopra. 1 = salto immediato (versione vecchia: il
+// connettoma vero, pieno di anelli inibitori, oscillava su-giu' a ogni passo
+// e faceva tremare il corpo; i rimescolati no -> confronto falsato).
+// Con 0.3 (~3 passaggi = un passo di controllo, circa 30 ms) non oscilla piu'.
+export const NEURON_LEAK = { value: 0.3 };
+// pesi addestrati con una dinamica dei neuroni diversa non valgono
+export function weightsMatchDynamics(w: { neuronLeak?: number }): boolean {
+  return (w.neuronLeak ?? 1) === NEURON_LEAK.value;
+}
 export const RESIDUAL_SCALE_RAD = 0.6;
 // amplifica la lettura dei discendenti: con le attivita' tipiche (~0.4) e
 // 16 discendenti per azione, una piccola mutazione dei pesi deve poter
@@ -227,6 +281,8 @@ export interface FlyWeightsFile {
   // variante del cervello e versione del corpo su cui e' stato addestrato
   brain?: BrainVariant;
   bodyVersion?: number;
+  // costante dei neuroni con cui e' stato addestrato (assente = 1, vecchio)
+  neuronLeak?: number;
   nIn: number;
   nOut: number;
   fanIn: number;

@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { createFlyBody, destroyFlyBody, writeBodiesToBones, FLY_BODY_VERSION, type FlyBody } from '../../flyBrain/flyBody';
 import {
-  parseFlyGraph, makeLayout, ConnectomeBrain, initialParams, decodeParams, type FlyGraph, type FlyWeightsFile,
+  parseFlyGraph, makeLayout, ConnectomeBrain, initialParams, decodeParams, fitParams, weightsMatchDynamics, type FlyGraph, type FlyWeightsFile,
 } from '../../flyBrain/connectomePolicy';
 import { FlyController, CONTROL_HZ, N_CMD, type FlyTask } from '../../flyBrain/flyController';
 import { flyBrainSettings } from '../../flyBrain/flyBrainSettings';
@@ -96,7 +96,7 @@ const FlyBrainFighter: React.FC = () => {
         if (!r.ok || !(r.headers.get('content-type') ?? '').includes('json')) r = await fetch(`/fly-brain/weights-${task}.json?t=${Date.now()}`);
         if (r.ok) {
           const w = (await r.json()) as FlyWeightsFile;
-          if (w.bodyVersion === FLY_BODY_VERSION && (w.brain ?? 'real') === 'real') {
+          if (w.bodyVersion === FLY_BODY_VERSION && weightsMatchDynamics(w) && (w.brain ?? 'real') === 'real') {
             params = decodeParams(w.params);
             info = `${task}: generazione ${w.generation}, punteggio ${w.score.toFixed(3)}`;
           } else info = `${task}: pesi di un corpo vecchio, ignorati`;
@@ -119,8 +119,8 @@ const FlyBrainFighter: React.FC = () => {
     refRoot.updateMatrixWorld(true);
     const fb = createFlyBody(rapier as any, world as any, refRoot, refBones, clips['Fighting Idle'] ?? null);
     const layout = makeLayout(g, fb.nObs + N_CMD + fb.nAct, fb.nAct);
-    let params = paramsRef.current?.params ?? null;
-    if (!params || params.length !== layout.nParams || flyBrainSettings.brainOff) params = initialParams(layout);
+    let params = paramsRef.current?.params ? fitParams(layout, paramsRef.current.params) : null;
+    if (!params || flyBrainSettings.brainOff) params = initialParams(layout);
     const brain = new ConnectomeBrain(g, layout, params);
     const ctl = new FlyController(fb, brain, { idle: clips['Idle_A'], walk: clips['Walk'], lay: clips['LayToIdle'] }, refRoot, task);
     ctl.groundY = SPAWN.y;

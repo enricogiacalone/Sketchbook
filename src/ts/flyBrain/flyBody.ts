@@ -64,7 +64,7 @@ const FOOT_FRICTION = 1.0;
 // reggere 75 kg a 5 cm dal piede avrebbe dovuto piegarsi di 2 radianti --
 // il corpo si afflosciava in ~1.3 s qualunque cosa facesse il cervello.
 // Qui valori da umanoide simulato (ordine di grandezza di DeepMimic).
-const FLY_KP: Record<string, number> = {
+export const FLY_KP: Record<string, number> = {
   Torso: 1000, SpineMid: 1000, SpineHigh: 1000, Head: 100,
   ClavicleL: 400, ClavicleR: 400, UpperArm_L: 400, UpperArm_R: 400, ForeArm_L: 300, ForeArm_R: 300,
   Thigh_L: 500, Thigh_R: 500, Shin_L: 500, Shin_R: 500, Foot_L: 400, Foot_R: 400,
@@ -479,6 +479,40 @@ function footSensors(fb: FlyBody, o: Float32Array, k: number): number {
     }
     o[k++] = touching;
     o[k++] = Math.min(3, impulse / dt / weightN);
+  }
+  return k;
+}
+
+// Pressione sotto la pianta divisa tra TALLONE (meta' posteriore della
+// suola) e PUNTA (meta' anteriore), in pesi corporei, per piede: [tallone
+// sx, punta sx, tallone dx, punta dx]. E' il senso con cui noi sentiamo di
+// essere "sui talloni" e riportiamo il peso in avanti (e nella mosca vera
+// molti neuroni ascendenti portano il carico delle zampe).
+export function footPressure(fb: FlyBody, o: Float32Array, k: number): number {
+  const weightN = ACTIVE_RAGDOLL_TOTAL_MASS_KG * 9.81;
+  const dt = (fb.world as any).timestep || 1 / 120;
+  for (const name of ['Foot_L', 'Foot_R']) {
+    const s = fb.bySeg[name];
+    const col = s.body.collider(0);
+    _others.length = 0;
+    fb.world.contactPairsWith(col, (other: any) => {
+      if (other.parent()?.handle !== s.body.handle) _others.push(other);
+    });
+    let heel = 0, toe = 0;
+    for (const other of _others) {
+      fb.world.contactPair(col, other, (m: any, flipped: boolean) => {
+        const n = m.numContacts();
+        for (let i = 0; i < n; i++) {
+          // punto nel frame della scatola del piede: +z = verso la punta
+          const lp = flipped ? m.localContactPoint2(i) : m.localContactPoint1(i);
+          if (!lp) continue;
+          if (lp.z < 0) heel += m.contactImpulse(i);
+          else toe += m.contactImpulse(i);
+        }
+      });
+    }
+    o[k++] = Math.min(3, heel / dt / weightN);
+    o[k++] = Math.min(3, toe / dt / weightN);
   }
   return k;
 }

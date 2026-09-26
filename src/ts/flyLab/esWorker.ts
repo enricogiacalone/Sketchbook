@@ -42,18 +42,21 @@ self.onmessage = async (ev: MessageEvent) => {
     if (msg.type === 'eval' && env && eps && theta) {
       const base = new Float32Array(msg.theta);
       const scores: number[] = [];
+      const ups: number[] = [];
       let steps = 0;
       for (const job of msg.jobs as { seed: number; sign: number }[]) {
         perturbed(base, job.seed, job.sign, msg.sigma, eps, theta);
-        let s = 0;
+        let s = 0, u = 0;
         for (const ep of msg.episodes as number[]) {
-          const r = env.runEpisode(theta, msg.task as Task, ep, msg.seconds, undefined, msg.push ?? 0);
+          const r = env.runEpisode(theta, msg.task as Task, ep, msg.seconds, undefined, { push: msg.push ?? 0, assist: msg.assist ?? 0, rsi: !!msg.rsi });
           s += r.score;
+          u += r.up ? 1 : 0;
           steps += r.steps;
         }
         scores.push(s / msg.episodes.length);
+        ups.push(u / msg.episodes.length);
       }
-      (self as any).postMessage({ type: 'scores', id: msg.id, scores, steps });
+      (self as any).postMessage({ type: 'scores', id: msg.id, scores, ups, steps });
     }
   } catch (e: any) {
     (self as any).postMessage({ type: 'error', message: String(e?.message ?? e) });

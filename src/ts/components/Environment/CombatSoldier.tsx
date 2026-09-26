@@ -292,6 +292,8 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     return false;
   };
 
+  const knockVelRef = React.useRef(new THREE.Vector3());
+  const obstacleHitCooldownRef = React.useRef(0);
   useFrame((_state, delta) => {
     // Posa animata rimessa nelle ossa prima del mixer (vedi
     // restoreActiveAnimationPose in useRagdollActive.ts).
@@ -378,6 +380,34 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       if (enableRagdoll) ragdoll.activateDeath();
       applyTransform();
       return;
+    }
+
+    // Ostacoli dell'arena (come per il giocatore, vedi PlayerCombatSoldier):
+    // esce dalle compenetrazioni e viene spinto/colpito da quelli in moto.
+    if (enableRagdoll) {
+      const dtO = delta * globalSpeed;
+      const ob = ragdoll.resolveObstacleContacts(bagSolidHandle ?? null);
+      data.position.x += ob.pushX;
+      data.position.z += ob.pushZ;
+      if (obstacleHitCooldownRef.current > 0) obstacleHitCooldownRef.current -= dtO;
+      if (ob.hitSpeed > 1.2) {
+        const k = Math.min(1, 6 / ob.hitSpeed);
+        knockVelRef.current.set(ob.hitVX * k, 0, ob.hitVZ * k);
+        if (obstacleHitCooldownRef.current <= 0) {
+          obstacleHitCooldownRef.current = 0.6;
+          _hitImpulseDir.set(ob.hitVX, 0.25 * ob.hitSpeed, ob.hitVZ).normalize();
+          ragdoll.pulseHit(_hitImpulseDir, THREE.MathUtils.clamp(ob.hitSpeed / 8, 0.25, 0.8), ob.segment ?? 'Torso', ob.hitX - _hitImpulseDir.x, ob.hitZ - _hitImpulseDir.z);
+          if (data.attackLock <= 0) {
+            data.attackLock = HIT_STAGGER_DURATION;
+            data.state = 'Colpito!';
+          }
+        }
+      }
+      const kv = knockVelRef.current;
+      if (kv.lengthSq() > 0.0025) {
+        resolveAndApplyMovement(kv.x * dtO, kv.z * dtO);
+        kv.multiplyScalar(Math.exp(-5 * dtO));
+      } else kv.set(0, 0, 0);
     }
 
     if (data.triggerHit) {

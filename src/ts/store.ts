@@ -213,7 +213,7 @@ interface GameState {
   // personaggio" -- stato dell'arma del giocatore del duello, letto dalla
   // camera (mira sopra la spalla, useThirdPersonCamera.ts), dal mirino e
   // dal contatore colpi (WeaponHUD.tsx). Scritto da PlayerCombatSoldier.tsx.
-  playerWeapon: 'fists' | 'pistol';
+  playerWeapon: 'fists' | 'pistol' | 'rifle' | 'knife';
   playerAiming: boolean;
   pistolAmmo: number;
   pistolReloading: boolean;

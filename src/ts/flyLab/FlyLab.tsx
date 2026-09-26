@@ -3,13 +3,15 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import { Physics, RigidBody, CuboidCollider } from '@react-three/rapier';
 import LabFly, { type LabFlyStatus } from './LabFly';
+import PeaceFlag from './PeaceFlag';
 import { LabTrainer, type GenStats, type LabConfig } from './labTrainer';
 import {
-  parseFlyGraph, graphForVariant, makeLayout, initialParams, decodeParams, brainFileSuffix,
+  parseFlyGraph, graphForVariant, makeLayout, initialParams, decodeParams, fitParams, weightsMatchDynamics, brainFileSuffix,
   type FlyGraph, type FlyWeightsFile, type BrainVariant, type PolicyLayout,
 } from '../flyBrain/connectomePolicy';
 import { flyDims, FLY_BODY_VERSION } from '../flyBrain/flyBody';
 import { N_CMD, type FlyTask } from '../flyBrain/flyController';
+import { GETUP_METHOD } from '../flyBrain/flyEnv';
 
 // Laboratorio cervello mosca (terza voce del menu). Esperimento:
 // "connettoma VERO contro connettoma RIMESCOLATO" -- due cervelli con gli
@@ -23,7 +25,7 @@ import { N_CMD, type FlyTask } from '../flyBrain/flyController';
 
 const TASKS: { id: FlyTask; label: string; hint: string }[] = [
   { id: 'stand', label: 'Stare in piedi', hint: 'imitare Idle_A senza cadere' },
-  { id: 'getup', label: 'Alzarsi da terra', hint: 'da sdraiato, imitare LayToIdle (al rallentatore) e restare su' },
+  { id: 'getup', label: 'Alzarsi da terra', hint: 'da sdraiato, imitare LayToIdle (al rallentatore) e restare su. Una "mano che aiuta" lo tira su e cala da sola quando ce la fa: il cervello vince quando l\'aiuto arriva a 0%' },
   { id: 'walk', label: 'Camminare', hint: 'imitare Walk avanzando a 0.73 m/s' },
 ];
 const BRAINS: { id: BrainVariant; label: string; short: string; color: string }[] = [
@@ -41,7 +43,7 @@ const PUSHES = [
   { v: 50, label: 'forti (50 N·s)' },
 ];
 
-type Weights = FlyWeightsFile & { history?: GenStats[] };
+type Weights = FlyWeightsFile & { history?: GenStats[]; assist?: number; getupMethod?: number };
 
 async function loadGraph(): Promise<FlyGraph> {
   const [j, b] = await Promise.all([
@@ -112,6 +114,8 @@ interface BrainRun {
   trainer: React.MutableRefObject<LabTrainer | null>;
   status: React.MutableRefObject<LabFlyStatus>;
   best: React.MutableRefObject<number>;
+  // alzarsi: livello attuale della "mano che aiuta" (0..1)
+  assist: React.MutableRefObject<number>;
   setParams: (p: Float32Array | null) => void;
   bumpVersion: () => void;
   setGen: (g: number) => void;
@@ -127,7 +131,8 @@ function useBrainRun(variant: BrainVariant): BrainRun {
   const trainer = useRef<LabTrainer | null>(null);
   const status = useRef<LabFlyStatus>({ upFor: 0, episodes: 0, bestUp: 0 });
   const best = useRef(-Infinity);
-  return { variant, params, paramsVersion, gen, history, last, trainer, status, best, setParams, bumpVersion: () => setPV((v) => v + 1), setGen, setHistory, setLast };
+  const assist = useRef(1);
+  return { variant, params, paramsVersion, gen, history, last, trainer, status, best, assist, setParams, bumpVersion: () => setPV((v) => v + 1), setGen, setHistory, setLast };
 }
 
 // media delle ultime n misure del cervello (smussa il rumore degli episodi)
@@ -170,7 +175,7 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const [baselineScore, setBaselineScore] = useState<number | null>(null);
   const baseStatus = useRef<LabFlyStatus>({ upFor: 0, episodes: 0, bestUp: 0 });
   const totalCores = Math.max(2, (navigator.hardwareConcurrency || 4) - 2);
-  const [cfg, setCfg] = useState({ pop: 48, sigma: 0.01, lr: 0.003, seconds: 6, workers: totalCores, push: 0 });
+  const [cfg, setCfg] = useState({ pop: 48, sigma: 0.01, lr: 0.003, seconds: 10, workers: totalCores, push: 0 });
   const [, force] = useState(0);
   useEffect(() => {
     const id = window.setInterval(() => force((n) => n + 1), 250);
@@ -189,23 +194,47 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     return makeLayout(graph, nObs + N_CMD + nAct, nAct);
   }, [graph]);
 
+  // pesi validi per questo corpo, altrimenti null
+  const usable = (w: Weights | null) => {
+    if (!w || w.bodyVersion !== FLY_BODY_VERSION || !weightsMatchDynamics(w) || !layout) return null;
+    const d = decodeParams(w.params);
+    return fitParams(layout, d);
+  };
+  // punto di partenza "da zero": per alzarsi/camminare si parte dal cervello
+  // che sa gia' stare in piedi (lo stesso cervello: vero dal vero, #1 dal #1...)
+  const freshStart = useCallback(async (b: BrainVariant, t: FlyTask): Promise<{ p: Float32Array; note: string }> => {
+    if (t !== 'stand') {
+      const ws = await loadWeights('stand', b);
+      const d = usable(ws);
+      if (d) return { p: d, note: `da "in piedi" gen ${ws!.generation}` };
+    }
+    return { p: initialParams(layout!), note: 'da zero' };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout]);
+
   const loadRun = useCallback(async (run: BrainRun, t: FlyTask): Promise<string> => {
     if (!layout) return '';
     const w = await loadWeights(t, run.variant);
-    let p = initialParams(layout);
+    // alzarsi: i pesi addestrati senza "mano che aiuta" (metodo vecchio, non
+    // si alzavano mai) si scartano e si riparte da "in piedi"
+    const oldGetup = t === 'getup' && !!w && w.getupMethod !== GETUP_METHOD;
+    const d = oldGetup ? null : usable(w);
+    let p: Float32Array;
     let g = 0;
     let h: GenStats[] = [];
-    let note = 'da zero';
-    if (w) {
-      const d = decodeParams(w.params);
-      if (d.length === layout.nParams && w.bodyVersion === FLY_BODY_VERSION) {
-        p = d;
-        g = w.generation;
-        h = w.history ?? [];
-        note = `gen ${g}`;
-      } else note = 'corpo vecchio, da zero';
+    let note: string;
+    if (d) {
+      p = d;
+      g = w!.generation;
+      h = w!.history ?? [];
+      note = `gen ${g}`;
+    } else {
+      const f = await freshStart(run.variant, t);
+      p = f.p;
+      note = (oldGetup ? 'metodo vecchio, ' : w ? 'pesi vecchi, ' : '') + f.note;
     }
-    run.best.current = w && w.bodyVersion === FLY_BODY_VERSION ? w.score : -Infinity;
+    run.assist.current = t !== 'getup' ? 0 : d ? w!.assist ?? 1 : 1;
+    run.best.current = d ? w!.score : -Infinity;
     run.setParams(p.slice());
     run.bumpVersion();
     run.setGen(g);
@@ -214,7 +243,8 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     run.status.current = { upFor: 0, episodes: 0, bestUp: 0 };
     run.trainer.current?.setParams(p, g, h.slice());
     return note;
-  }, [layout]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, freshStart]);
 
   useEffect(() => {
     if (!layout) return;
@@ -230,7 +260,7 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const startRun = async (run: BrainRun, workers: number) => {
     if (!run.params || !layout) return;
     let tr = run.trainer.current;
-    const conf: LabConfig = { ...cfg, workers, task, brain: run.variant };
+    const conf: LabConfig = { ...cfg, workers, task, brain: run.variant, assist: run.assist.current };
     if (!tr || tr.workers.length !== workers || tr.cfg.brain !== run.variant) {
       tr?.dispose();
       tr = new LabTrainer(conf);
@@ -245,6 +275,7 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
       setMsg(`errore (${run.variant}): ${m}`);
     };
     tr.onGen = (st) => {
+      run.assist.current = tr!.cfg.assist;
       run.setGen(st.gen);
       run.setLast(st);
       run.setHistory(tr!.history.slice());
@@ -283,13 +314,16 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     setRunning(false);
     setMsg('in pausa (i pesi si salvano ogni 5 generazioni)');
   };
-  const resetFromZero = () => {
+  const resetFromZero = async () => {
     if (!layout) return;
     pause();
+    const notes: string[] = [];
     for (const b of active) {
       const r = runOf(b);
-      const p = initialParams(layout);
+      const { p, note } = await freshStart(b, task);
+      notes.push(note);
       r.best.current = -Infinity;
+      r.assist.current = task === 'getup' ? 1 : 0;
       r.setParams(p.slice());
       r.bumpVersion();
       r.setGen(0);
@@ -298,7 +332,7 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
       r.trainer.current?.setParams(p, 0, []);
     }
     setConfirmReset(false);
-    setMsg('i cervelli selezionati ripartono da zero');
+    setMsg(`i cervelli selezionati ripartono (${notes[0]})`);
   };
 
   const centre = (r: BrainRun) => r.history.filter((h) => h.centre !== null).slice(-1)[0]?.centre ?? null;
@@ -322,7 +356,9 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   if (withBaseline) lineup.push({ key: 'none', x: 0 });
   lineup.forEach((l, i) => (l.x = 0.6 + (i - (lineup.length - 1) / 2) * 1.2));
   const xOf = (k: string) => lineup.find((l) => l.key === k)?.x ?? 0;
-  const epSec = task === 'getup' ? 8 : 12;
+  // si riparte solo quando cade (o con "Riparti episodio"); in "alzarsi" anche
+  // se dopo 10 s e' ancora a terra
+  const epSec = task === 'getup' ? 10 : Infinity;
   const scenePushV = scenePush ? cfg.push || 30 : 0;
 
   return (
@@ -337,6 +373,8 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
           <meshStandardMaterial color="#17171f" />
         </mesh>
         {/* bersaglio spostato a sinistra: le mosche compaiono a destra del pannello */}
+        {/* bandiera della pace dietro le mosche */}
+        <PeaceFlag position={[-1.2, 0, -5]} />
         <OrbitControls target={[collapsed ? 0.6 : -1.6, 0.8, 0]} maxPolarAngle={Math.PI / 2 - 0.05} />
         <Suspense fallback={null}>
           {graph && (
@@ -349,12 +387,12 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
                 const meta = BRAINS.find((x) => x.id === b)!;
                 return (
                   <LabFly key={b} graph={graphs[b]!} params={r.params} paramsVersion={r.paramsVersion} task={task} x={xOf(b)} color={meta.color}
-                    ghost={ghost} episodeSeconds={epSec} restartNonce={restartNonce} status={r.status} paused={false} pushNonce={pushNonce} autoPush={scenePushV} />
+                    ghost={ghost} episodeSeconds={epSec} restartNonce={restartNonce} status={r.status} paused={false} pushNonce={pushNonce} autoPush={scenePushV} assist={r.assist.current} />
                 );
               })}
               {withBaseline && (
                 <LabFly graph={graph} params={null} paramsVersion={0} task={task} x={xOf('none')} color="#6b7280"
-                  ghost={false} episodeSeconds={epSec} restartNonce={restartNonce} status={baseStatus} paused={false} pushNonce={pushNonce} autoPush={scenePushV} />
+                  ghost={false} episodeSeconds={epSec} restartNonce={restartNonce} status={baseStatus} paused={false} pushNonce={pushNonce} autoPush={scenePushV} assist={0} />
               )}
             </Physics>
           )}
@@ -424,7 +462,7 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
           </div>
           <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>media delle ultime 5 misure di ogni cervello; i controlli sono mediati tra loro</div>
           <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-            <thead><tr style={{ opacity: 0.6 }}><td>cervello</td><td>gen</td><td>punteggio</td><td>in piedi (record)</td><td>s/gen</td></tr></thead>
+            <thead><tr style={{ opacity: 0.6 }}><td>cervello</td><td>gen</td><td>punteggio</td><td>in piedi (record)</td><td>{task === 'getup' ? 'aiuto' : 's/gen'}</td></tr></thead>
             <tbody>
               {active.map((b) => {
                 const r = runOf(b);
@@ -436,7 +474,7 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
                     <td>{r.gen}</td>
                     <td style={{ color: meta.color }}>{c !== null ? c.toFixed(3) : '-'}</td>
                     <td>{r.status.current.upFor.toFixed(1)} ({r.status.current.bestUp.toFixed(1)})</td>
-                    <td>{r.last ? r.last.sec.toFixed(1) : '-'}</td>
+                    <td>{task === 'getup' ? <b style={{ color: r.assist.current <= 0 ? '#22c55e' : '#eee' }}>{Math.round(r.assist.current * 100)}%</b> : r.last ? r.last.sec.toFixed(1) : '-'}</td>
                   </tr>
                 );
               })}

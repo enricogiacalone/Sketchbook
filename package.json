@@ -38,21 +38,21 @@
   },
   "homepage": "https://github.com/swift502/Sketchbook",
   "devDependencies": {
-    "@react-three/drei": "^10.7.8",
-    "@react-three/fiber": "^9.7.0",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.1",
     "@types/lodash": "^4.17.25",
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.6.2",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
-    "@types/three": "^0.185.4",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
     "nodemon": "^3.1.14",
-    "react": "~19.2.8",
-    "react-dom": "~19.2.8",
+    "react": "~19.3.0",
+    "react-dom": "~19.3.0",
     "three-stdlib": "^2.36.1",
     "typescript": "^6.0.3",
-    "vite": "^8.2.2",
+    "vite": "^8.3.1",
     "zustand": "^5.0.15"
   },
   "dependencies": {
@@ -63,14 +63,13 @@
     "express": "^5.2.1",
     "lil-gui": "^0.21.0",
     "lodash": "^4.18.1",
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.9",
     "simplex-noise": "^4.0.3",
-    "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4",
     "sqlite3": "^6.0.1",
     "stats.js": "^0.17.0",
     "sweetalert2": "^11.26.25",
-    "three": "^0.186.0",
-    "three-simplecloth": "^0.0.6"
+    "three": "^0.186.1"
   }
 }
