@@ -37,6 +37,8 @@ const ACTION_NAMES = [
   // play/pausa di una sola cassa: J = cassa cubi, K = cassa schermo
   'musicCubi',
   'musicSchermo',
+  // capriola del duello: Spazio adesso e' il salto (PlayerCombatSoldier)
+  'dodge',
 ] as const;
 type Action = (typeof ACTION_NAMES)[number];
 
@@ -69,6 +71,7 @@ const emptyActionMap = (): Record<Action, boolean> => ({
   music: false,
   musicCubi: false,
   musicSchermo: false,
+  dodge: false,
 });
 
 export const useInput = () => {
@@ -132,6 +135,7 @@ export const useInput = () => {
     KeyM: 'music',
     KeyJ: 'musicCubi',
     KeyK: 'musicSchermo',
+    KeyV: 'dodge',
   };
 
   useEffect(() => {
@@ -299,6 +303,7 @@ export const useInput = () => {
     g.reload = !!pad.buttons[13]?.pressed; // croce giu': ricarica
     g.weapon3 = !!pad.buttons[12]?.pressed; // croce su: fucile
     g.weapon4 = !!pad.buttons[11]?.pressed; // R3 (levetta destra premuta): coltello
+    g.dodge = !!pad.buttons[10]?.pressed; // L3 (levetta sinistra premuta): capriola
     // Back/Select: cycle the camera's 4 zoom presets (see ZOOM_LEVELS in
     // useThirdPersonCamera.ts). Reuses the 'camera' action, which already
     // existed with a keyboard binding (KeyC) but, like enter_passenger

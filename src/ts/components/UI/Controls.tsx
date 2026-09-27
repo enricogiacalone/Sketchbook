@@ -18,6 +18,7 @@ interface ControlRow {
 // button names may not actually line up with what the browser reads).
 const PAD_LEFT_STICK = ['Left Stick'];
 const PAD_JUMP = ['✕ Cross']; // button 0
+const PAD_DODGE = ['L3']; // button 10
 const PAD_SHIFT = ['R1', 'L2']; // buttons 5 or 6
 const PAD_PRIMARY = ['R2']; // button 7
 const PAD_SECONDARY = ['○ Circle']; // button 1
@@ -96,7 +97,8 @@ const Controls: React.FC = () => {
             { keys: ['Right Click', '(hold)'], pad: PAD_SECONDARY, desc: 'Mira (zoom, più preciso)' },
             { keys: rifle ? ['Left Click', '(hold)'] : ['Left Click'], pad: PAD_PRIMARY, desc: rifle ? 'Spara a raffica' : 'Spara' },
             { keys: ['R'], pad: PAD_RELOAD, desc: rifle ? 'Ricarica (35 colpi)' : 'Ricarica (12 colpi)' },
-            { keys: ['Space'], pad: PAD_JUMP, desc: 'Dodge' },
+            { keys: ['Space'], pad: PAD_JUMP, desc: 'Salto / scavalca / aggrappati / scala' },
+            { keys: ['V'], pad: PAD_DODGE, desc: 'Capriola' },
             { keys: ['M'], desc: 'Musica play / pausa (tutte)' },
           { keys: ['J', 'K'], desc: 'Play / pausa cassa cubi / schermo' },
           ];
@@ -113,7 +115,8 @@ const Controls: React.FC = () => {
             { keys: ['Q'], pad: PAD_JAB, desc: 'Fendente dal basso' },
             { keys: ['E'], pad: PAD_TRIANGLE, desc: 'Affondo pesante' },
             { keys: ['Right Click', '(hold)'], pad: PAD_SECONDARY, desc: 'Parata' },
-            { keys: ['Space'], pad: PAD_JUMP, desc: 'Dodge' },
+            { keys: ['Space'], pad: PAD_JUMP, desc: 'Salto / scavalca / aggrappati / scala' },
+            { keys: ['V'], pad: PAD_DODGE, desc: 'Capriola' },
             { keys: ['Ctrl', '(hold)'], pad: PAD_LOCK_ON, desc: 'Lock-on Avversario' },
           ];
         }
@@ -128,7 +131,8 @@ const Controls: React.FC = () => {
           { keys: ['Q'], pad: PAD_JAB, desc: 'Jab (L)' },
           { keys: ['E'], pad: PAD_TRIANGLE, desc: 'Hook' },
           { keys: ['Right Click', '(hold)'], pad: PAD_SECONDARY, desc: 'Block' },
-          { keys: ['Space'], pad: PAD_JUMP, desc: 'Dodge' },
+          { keys: ['Space'], pad: PAD_JUMP, desc: 'Salto / scavalca / aggrappati / scala' },
+            { keys: ['V'], pad: PAD_DODGE, desc: 'Capriola' },
           { keys: ['Ctrl', '(hold)'], pad: PAD_LOCK_ON, desc: 'Lock-on Avversario' },
           { keys: ['M'], desc: 'Musica play / pausa (tutte)' },
           { keys: ['J', 'K'], desc: 'Play / pausa cassa cubi / schermo' },

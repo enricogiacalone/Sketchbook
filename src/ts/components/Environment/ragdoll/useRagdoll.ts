@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useThree } from "@react-three/fiber";
 import { useRapier } from "@react-three/rapier";
-import { CollisionGroups } from "../../../enums/CollisionGroups";
+import { CollisionGroups, allocFighterBit } from "../../../enums/CollisionGroups";
 import { useStore } from "../../../store";
 import {
   RAGDOLL_PULSE_NEARBY,
@@ -123,10 +123,14 @@ export function useRagdoll(
   const { scene } = useThree();
 
   const { resolveBones } = useRagdollBones(modelRootRef);
+  // bit del combattente per i gruppi di collisione (vedi FIGHTER_BITS)
+  const fighterBitRef = useRef<number | null>(null);
+  if (fighterBitRef.current === null) fighterBitRef.current = allocFighterBit();
+  const fighterBit = fighterBitRef.current;
   const { syncHurtbox, getHurtboxHandle: internalGetHurtboxHandle } =
     useRagdollHurtbox(modelRootRef);
-  const { syncSolidBody, setRagdollBlocker, resolveBodyMovement, resolveObstacleContacts, getSolidBodySegments } =
-    useRagdollSolidBodies(modelRootRef, resolveBones, ownerId);
+  const { syncSolidBody, resolveBodyMovement, resolveObstacleContacts, getSolidBodySegments } =
+    useRagdollSolidBodies(modelRootRef, resolveBones, ownerId, fighterBit);
   const {
     buildBodies,
     destroyBodies,
@@ -153,7 +157,7 @@ export function useRagdoll(
     getActiveRagdollDebugSegments,
     measureClipRanges,
     setNeutralClip,
-  } = useRagdollActive(modelRootRef, resolveBones, ownerId);
+  } = useRagdollActive(modelRootRef, resolveBones, ownerId, fighterBit);
   // KO del layer attivo (morte con ragdoll attivo acceso): motori spenti,
   // gravita' piena, finche' il combattente non viene ricreato/deactivate.
   const activeKnockedOutRef = useRef(false);
@@ -401,9 +405,6 @@ export function useRagdoll(
           ensureActiveRagdoll();
           rebuildIfRequested();
           const passive = isPassive || activeKnockedOutRef.current;
-          // a terra: le proprie capsule solide non devono spingere il
-          // proprio ragdoll (vedi CollisionGroups.RagdollBody)
-          setRagdollBlocker(!passive);
           // Ordine: bersagli dall'animazione (gia' aggiornata da
           // mixer.update / skeleton.pose) -> motori -> ossa dalla fisica.
           captureActiveTargets(delta);
@@ -464,7 +465,6 @@ export function useRagdoll(
       clampJointCones,
       syncHurtbox,
       syncSolidBody,
-      setRagdollBlocker,
       ensureActiveRagdoll,
       rebuildIfRequested,
       captureActiveTargets,

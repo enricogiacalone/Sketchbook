@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useTexture } from '@react-three/drei';
-import { RigidBody, CuboidCollider } from '@react-three/rapier';
+import { RigidBody, CuboidCollider, interactionGroups } from '@react-three/rapier';
+import { useStore } from '../../../store';
 import * as THREE from 'three';
 import { SimplexNoise } from 'three-stdlib';
 import { getPlaylist, type SpeakerId, type Track } from './musicLibrary';
@@ -44,6 +45,15 @@ const TEX = '/audio-arena/textures/';
 // muri e casse bloccano anche i combattenti (gruppo Characters, vedi
 // SOLID_BODY_GROUPS), il pavimento no (i piedi ci poggiano sopra)
 const SOLID_GROUPS = groupsExcluding([CollisionGroups.Default, CollisionGroups.Characters, CollisionGroups.RagdollWorld]);
+// Pavimento: appartiene ai gruppi "storici" (0-6, come un collider di
+// default per tutto il resto del gioco) ma NON a quelli del ragdoll
+// attivo (RagdollWorld e i bit dei combattenti, 7-15): il ragdoll VIVO non
+// deve toccarlo (vedi aliveRagdollGroups in CollisionGroups.ts); da KO si'
+// (tramite Default).
+const FLOOR_GROUPS = interactionGroups(
+  [0, 1, 2, 3, 4, 5, 6],
+  Array.from({ length: 16 }, (_, i) => i)
+);
 
 // --- cassa a cubi (spettrogramma) ------------------------------------------
 const CUBE_COLS = 11; // x = -5..5 nell'originale: storia degli ultimi 11 frame
@@ -523,25 +533,37 @@ const AudioArena: React.FC = () => {
     mats.screenUniforms.iTime.value += dt;
   });
 
-  const wallProps = { castShadow: true, receiveShadow: true, material: mats.wallLong };
+  // pannello Arena > Scenario: pezzi accesi/spenti (mesh + collider)
+  const scene = useStore((st) => st.arenaScene);
+  const wallProps = { castShadow: true, receiveShadow: true, material: mats.wallLong, visible: scene.walls };
   const outer = ROOM_HALF + WALL_T / 2;
   return (
     <group>
       {/* pavimento: lastra visiva + collider per ragdoll/proiettili */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, AUDIO_ARENA_FLOOR_Y + 0.002, 0]} receiveShadow material={mats.floor}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, AUDIO_ARENA_FLOOR_Y + 0.002, 0]} receiveShadow material={mats.floor} visible={scene.floor}>
         <planeGeometry args={[ROOM_HALF * 2, ROOM_HALF * 2]} />
       </mesh>
+      {scene.floor && (
+        <RigidBody type="fixed" colliders={false}>
+          <CuboidCollider args={[ROOM_HALF, 0.5, ROOM_HALF]} position={[0, AUDIO_ARENA_FLOOR_Y - 0.5, 0]} collisionGroups={FLOOR_GROUPS} />
+        </RigidBody>
+      )}
+      {scene.walls && (
       <RigidBody type="fixed" colliders={false}>
-        <CuboidCollider args={[ROOM_HALF, 0.5, ROOM_HALF]} position={[0, AUDIO_ARENA_FLOOR_Y - 0.5, 0]} />
         {/* muri */}
         <CuboidCollider args={[outer + WALL_T / 2, WALL_H / 2, WALL_T / 2]} position={[0, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, -outer]} collisionGroups={SOLID_GROUPS} />
         <CuboidCollider args={[outer + WALL_T / 2, WALL_H / 2, WALL_T / 2]} position={[0, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, outer]} collisionGroups={SOLID_GROUPS} />
         <CuboidCollider args={[WALL_T / 2, WALL_H / 2, outer + WALL_T / 2]} position={[-outer, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, 0]} collisionGroups={SOLID_GROUPS} />
         <CuboidCollider args={[WALL_T / 2, WALL_H / 2, outer + WALL_T / 2]} position={[outer, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, 0]} collisionGroups={SOLID_GROUPS} />
+      </RigidBody>
+      )}
+      {scene.speakers && (
+      <RigidBody type="fixed" colliders={false}>
         {/* casse */}
         <CuboidCollider args={[SPEAKER_W / 2, SPEAKER_H / 2, SPEAKER_D / 2]} position={[-SPEAKER_X, SPEAKER_Y, 0]} collisionGroups={SOLID_GROUPS} />
         <CuboidCollider args={[SPEAKER_W / 2, SPEAKER_H / 2, SPEAKER_D / 2]} position={[SPEAKER_X, SPEAKER_Y, 0]} collisionGroups={SOLID_GROUPS} />
       </RigidBody>
+      )}
       <mesh position={[0, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, -outer]} {...wallProps}>
         <boxGeometry args={[(outer + WALL_T / 2) * 2, WALL_H, WALL_T]} />
       </mesh>
@@ -556,7 +578,9 @@ const AudioArena: React.FC = () => {
       </mesh>
 
       {/* cassa OVEST: spettrogramma a cubi, rivolta verso il centro (+X) */}
-      <group ref={cubiSpeakerRef} position={[-SPEAKER_X, SPEAKER_Y, 0]}>
+      {/* spente dal pannello: si nascondono ma restano montate (l'audio
+          posizionale e' agganciato a questi gruppi) */}
+      <group ref={cubiSpeakerRef} position={[-SPEAKER_X, SPEAKER_Y, 0]} visible={scene.speakers}>
         <mesh castShadow receiveShadow material={mats.speaker}>
           <boxGeometry args={[SPEAKER_W, SPEAKER_H, SPEAKER_D]} />
         </mesh>
@@ -566,7 +590,7 @@ const AudioArena: React.FC = () => {
       </group>
 
       {/* cassa EST: schermo con barre circolari, rivolto verso il centro (-X) */}
-      <group ref={schermoSpeakerRef} position={[SPEAKER_X, SPEAKER_Y, 0]}>
+      <group ref={schermoSpeakerRef} position={[SPEAKER_X, SPEAKER_Y, 0]} visible={scene.speakers}>
         <mesh castShadow receiveShadow material={mats.screenBody}>
           <boxGeometry args={[SPEAKER_W, SPEAKER_H, SPEAKER_D]} />
         </mesh>

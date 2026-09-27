@@ -12,7 +12,7 @@ import {
 } from "../ragdollConfig";
 import {
   SOLID_BODY_GROUPS,
-  SOLID_BODY_RAGDOLL_GROUPS,
+  solidBodyRagdollGroups,
 } from "../../../../enums/CollisionGroups";
 
 interface SolidBodyEntry {
@@ -39,16 +39,15 @@ export function useRagdollSolidBodies(
   modelRootRef: React.RefObject<THREE.Object3D | null>,
   resolveBones: () => Record<string, THREE.Bone> | null,
   // Proprietario dei collider per i proiettili (vedi shootableRegistry.ts)
-  ownerId?: string
+  ownerId?: string,
+  // bit del combattente (CollisionGroups.FIGHTER_BITS): il ragdoll degli
+  // altri tocca queste capsule, il proprio no
+  fighterBit?: number
 ) {
   const { world, rapier } = useRapier();
   const solidBodiesRef = useRef<Record<string, SolidBodyEntry>>({});
   const ownColliderHandlesRef = useRef<Set<number>>(new Set());
   const solidControllerRef = useRef<KinematicCharacterController | null>(null);
-  // Le capsule solide sono visibili ai ragdoll KO (CollisionGroups.RagdollBody)
-  // -- tranne quando il ragdoll a terra e' il NOSTRO: le capsule seguono le
-  // sue stesse ossa e lo spingerebbero da dentro.
-  const ragdollBlockerRef = useRef(true);
 
   const _solidV1 = new THREE.Vector3();
   const _solidV2 = new THREE.Vector3();
@@ -92,8 +91,8 @@ export function useRagdollSolidBodies(
         .setRotation({ x: rot.x, y: rot.y, z: rot.z, w: rot.w });
       const body = world.createRigidBody(bodyDesc);
       const colliderDesc = rapier.ColliderDesc.capsule(halfHeight, segment.radius)
-        .setCollisionGroups(ragdollBlockerRef.current ? SOLID_BODY_RAGDOLL_GROUPS : SOLID_BODY_GROUPS)
-        .setSolverGroups(ragdollBlockerRef.current ? SOLID_BODY_RAGDOLL_GROUPS : SOLID_BODY_GROUPS);
+        .setCollisionGroups(fighterBit !== undefined ? solidBodyRagdollGroups(fighterBit) : SOLID_BODY_GROUPS)
+        .setSolverGroups(fighterBit !== undefined ? solidBodyRagdollGroups(fighterBit) : SOLID_BODY_GROUPS);
       const collider = world.createCollider(colliderDesc, body);
 
       entries[segment.name] = { body, collider, halfHeight, radius: segment.radius };
@@ -101,7 +100,7 @@ export function useRagdollSolidBodies(
       if (ownerId) registerShootableCollider(collider.handle, { ownerId, segment: segment.name });
     }
     return Object.keys(entries).length > 0;
-  }, [rapier, world, resolveBones, ownerId]);
+  }, [rapier, world, resolveBones, ownerId, fighterBit]);
 
   const syncSolidBody = useCallback(() => {
     const entries = solidBodiesRef.current;
@@ -376,19 +375,8 @@ export function useRagdollSolidBodies(
     [world]
   );
 
-  const setRagdollBlocker = useCallback((enabled: boolean) => {
-    if (ragdollBlockerRef.current === enabled) return;
-    ragdollBlockerRef.current = enabled;
-    const g = enabled ? SOLID_BODY_RAGDOLL_GROUPS : SOLID_BODY_GROUPS;
-    for (const e of Object.values(solidBodiesRef.current)) {
-      e.collider.setCollisionGroups(g);
-      e.collider.setSolverGroups(g);
-    }
-  }, []);
-
   return {
     syncSolidBody,
-    setRagdollBlocker,
     resolveBodyMovement,
     resolveObstacleContacts,
     getSolidBodySegments,

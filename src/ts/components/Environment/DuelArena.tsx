@@ -8,6 +8,7 @@ import CombatSoldier from './CombatSoldier';
 import EnemyHealthBar from './EnemyHealthBar';
 import PlayerCombatSoldier, { ATTACK_RANGE } from './PlayerCombatSoldier';
 import PunchingBag, { PunchingBagHandle } from './PunchingBag';
+import ParkourCourse from './ParkourCourse';
 import DebugOrthoCamera from './DebugOrthoCamera';
 import ArenaObstacles from './ArenaObstacles';
 import { useStore } from '../../store';
@@ -35,7 +36,12 @@ const DUEL_SEPARATION = 4; // starting distance between the two fighters
 // the face-off line (fighters run along X at z=0, see playerX/enemyX
 // below), close enough to the player's own spawn to walk to in a couple
 // of steps, far enough out that it's never in the way of the actual duel.
-const BAG_OFFSET: [number, number] = [-1, 3.5];
+// "il sacco spostalo da dentro gli ostacoli" -- a (-3, 3.5) stava dentro
+// il giro delle pale rotanti (centro (0,5), raggio 4.75). Ora (-3.5,
+// -1.5): a sinistra-dietro del giocatore, fuori dalle pale (7.5 m dal
+// centro), dal pendolo con sfera (x -5.2..-6.8) e da quello con mazza
+// (z -4.2..-5.8) anche col sacco oscillante (~0.8 m).
+const BAG_OFFSET: [number, number] = [-1.5, -1.5];
 const GLOBAL_SPEED = 1.0;
 // "fai durare le vite di piu" -- CombatSoldier.tsx/PlayerCombatSoldier.tsx's
 // own damage formulas are shared, byte-for-byte, with the 120-fighter
@@ -163,6 +169,8 @@ const DuelArena: React.FC = () => {
   // nella stessa squadra AI_ENEMY: CombatSoldier.tsx non attacca mai un
   // compagno di squadra, quindi se la prendono solo col giocatore.
   const duelEnemyCount = useStore((state) => state.duelEnemyCount);
+  const showObstacles = useStore((state) => state.arenaScene.obstacles);
+  const showCourse = useStore((state) => state.arenaScene.course);
   const [enemies, setEnemies] = useState<FighterData[]>([]);
   const enemySerialRef = useRef(0);
   useEffect(() => {
@@ -440,7 +448,9 @@ const DuelArena: React.FC = () => {
         onSolidReady={setBagSolidHandle}
       />
       {/* Percorso ad ostacoli nell'arena (ostacoli oscillanti, pugni a molla e pale rotanti) */}
-      <ArenaObstacles />
+      {showObstacles && <ArenaObstacles />}
+      {/* percorso per salto/scavalcare/aggrapparsi/scala (traversal/) */}
+      {showCourse && <ParkourCourse />}
       {/* The AI opponent -- CombatSoldier.tsx itself is completely
           unmodified: passing the player's own FighterData inside
           allFightersData is all it takes for its existing, unmodified

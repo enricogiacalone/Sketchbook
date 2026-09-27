@@ -34,11 +34,30 @@ export enum CollisionGroups {
   // (muri, casse, ostacoli mobili dell'arena) -- NON il pavimento, che da
   // vivo resta escluso (vedi ALIVE_COLLISION_GROUPS in useRagdollActive).
   RagdollWorld = 7,
-  // Corpi che solo il ragdoll A TERRA/KO deve toccare: le capsule solide
-  // degli altri combattenti e il sacco. Da vivo le mani li attraversano
-  // (i colpi sono gestiti dalle hurtbox); da KO un corpo che cade addosso
-  // a un altro ci sbatte invece di passarci dentro.
+  // Corpi che solo il ragdoll A TERRA/KO deve toccare: il sacco (da vivo
+  // i pugni sul sacco li gestisce il sacco stesso).
   RagdollBody = 8,
+  // Geometria su cui ci si arrampica (percorso parkour, vedi
+  // traversal/traversalWorld.ts): le sonde di bordi/appoggio cercano solo
+  // questa.
+  Climbable = 9,
+}
+
+// "Chi e' chi" per le capsule solide dei combattenti (gruppi 10-15): ogni
+// combattente ne riceve uno (fighterRagdollBit). Il suo ragdoll tocca le
+// capsule di TUTTI gli altri bit -- anche da VIVO: un pugno o un braccio
+// si fermano sulla superficie del corpo dell'avversario invece di
+// entrarci -- ma mai le proprie, che seguono le sue stesse ossa e ci stanno
+// dentro per costruzione (escluse gia' dai gruppi: nessuna coppia inutile
+// da calcolare a ogni passo). Oltre 6 combattenti i bit si ripetono: due
+// combattenti con lo stesso bit non si toccano col ragdoll (restano solide
+// le capsule fra loro), limite accettato.
+export const FIGHTER_BITS = [10, 11, 12, 13, 14, 15];
+let nextFighterBit = 0;
+export function allocFighterBit(): number {
+  const b = FIGHTER_BITS[nextFighterBit % FIGHTER_BITS.length];
+  nextFighterBit++;
+  return b;
 }
 
 // "ogni parte del corpo deve essere un collider.. se collide collide"
@@ -59,11 +78,38 @@ export const SOLID_BODY_GROUPS = interactionGroups(
   [CollisionGroups.Characters]
 );
 
-// Capsule solide di un combattente IN PIEDI e sacco: come SOLID_BODY_GROUPS
-// + visibili al ragdoll KO (di un ALTRO combattente -- le proprie capsule
-// tornano a SOLID_BODY_GROUPS finche' il proprio ragdoll e' a terra, vedi
-// useRagdollSolidBodies.setRagdollBlocker).
-export const SOLID_BODY_RAGDOLL_GROUPS = interactionGroups(
+// Capsule solide di un combattente: come SOLID_BODY_GROUPS + visibili al
+// ragdoll (vivo o a terra) degli ALTRI combattenti tramite il bit del
+// combattente (vedi FIGHTER_BITS).
+export function solidBodyRagdollGroups(fighterBit: number): number {
+  return interactionGroups(
+    // NON RagdollBody: i gruppi sono in OR -- con RagdollBody il PROPRIO
+    // ragdoll a terra le avrebbe toccate comunque (misurato: piedi del
+    // morto 15 cm dentro le proprie capsule, spinti via)
+    [CollisionGroups.Characters, fighterBit],
+    [CollisionGroups.Characters, CollisionGroups.Ragdoll]
+  );
+}
+
+// Ragdoll attivo VIVO: muri/ostacoli (RagdollWorld) e le capsule degli
+// ALTRI combattenti -- non il pavimento, non gli altri ragdoll, non se
+// stesso (vedi useRagdollActive).
+export function aliveRagdollGroups(fighterBit: number): number {
+  return interactionGroups(
+    [CollisionGroups.Ragdoll],
+    [CollisionGroups.RagdollWorld, ...FIGHTER_BITS.filter((b) => b !== fighterBit)]
+  );
+}
+
+// Ragdoll a terra/KO: tutto il mondo, gli altri ragdoll e se stesso, tranne
+// le capsule dei personaggi "normali" (Characters) e le PROPRIE.
+export function passiveRagdollGroups(fighterBit: number): number {
+  return groupsExcluding(CollisionGroups.Ragdoll, CollisionGroups.Characters, fighterBit);
+}
+
+// Sacco: come sopra ma solo per il ragdoll a terra (da vivo i pugni sul
+// sacco sono gia' gestiti dal sacco stesso -- spinta e oscillazione).
+export const SOLID_BAG_GROUPS = interactionGroups(
   [CollisionGroups.Characters, CollisionGroups.RagdollBody],
   [CollisionGroups.Characters, CollisionGroups.Ragdoll]
 );

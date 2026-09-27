@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import * as THREE from "three";
-import { interactionGroups, useBeforePhysicsStep, useFilterContactPair, useRapier } from "@react-three/rapier";
+import { useBeforePhysicsStep, useFilterContactPair, useRapier } from "@react-three/rapier";
 import type { ImpulseJoint, RigidBody as RapierRigidBody } from "@dimforge/rapier3d-compat";
 import {
   ACTIVE_RAGDOLL_SEGMENTS,
@@ -20,7 +20,7 @@ import {
   ACTIVE_RAGDOLL_HIT_RECOVERY_S,
   type RagdollSegment,
 } from "../ragdollConfig";
-import { groupsExcluding, CollisionGroups } from "../../../../enums/CollisionGroups";
+import { aliveRagdollGroups, passiveRagdollGroups, FIGHTER_BITS } from "../../../../enums/CollisionGroups";
 import { useStore } from "../../../../store";
 import { registerShootableCollider, unregisterShootableCollider } from "../../weapons/shootableRegistry";
 import {
@@ -90,14 +90,15 @@ const RUNAWAY_DISTANCE_M = 1.5;
 // "migliora la fisica della ragdoll -- compenetrazioni" (stile GTA ma non
 // finto):
 //  - VIVO: tocca comunque muri/casse/ostacoli (CollisionGroups.RagdollWorld,
-//    non il pavimento): un braccio che si muove contro un muro si ferma
-//    sul muro invece di attraversarlo;
-//  - PASSIVO/KO: in piu' tocca gli ostacoli dell'arena, le capsule solide
-//    degli ALTRI combattenti e il sacco (RagdollBody), gli altri ragdoll a
-//    terra E SE STESSO (segmenti non vicini: braccio contro petto, gamba
-//    contro gamba) -- prima passava attraverso tutto tranne il terreno.
-const ALIVE_COLLISION_GROUPS = interactionGroups([CollisionGroups.Ragdoll], [CollisionGroups.RagdollWorld]);
-const PASSIVE_COLLISION_GROUPS = groupsExcluding(CollisionGroups.Ragdoll, CollisionGroups.Characters);
+//    non il pavimento) e il corpo degli ALTRI combattenti (FIGHTER_BITS):
+//    un braccio che si muove contro un muro, o un pugno che arriva sul
+//    petto dell'avversario, si ferma sulla superficie invece di entrarci;
+//  - PASSIVO/KO: in piu' il pavimento/mondo, il sacco (RagdollBody), gli
+//    altri ragdoll E SE STESSO (segmenti non vicini: braccio contro petto,
+//    gamba contro gamba) -- prima passava attraverso tutto tranne il
+//    terreno e i muri.
+// (gruppi per combattente: aliveRagdollGroups / passiveRagdollGroups in
+// CollisionGroups.ts -- le PROPRIE capsule solide sono escluse dai gruppi)
 
 // Auto-collisione da KO: coppie SEMPRE escluse = segmenti a 1-2 passi
 // nell'albero (collegati da un giunto, fratelli, nonno-nipote): capsule
@@ -136,6 +137,14 @@ const SELF_STATIC_EXCLUDED: Set<number> = (() => {
 // a 120 Hz -- abbastanza per attraversare uno spigolo o un altro corpo.
 const PASSIVE_CCD = true;
 
+// Da vivo il modello e' un misto animazione/fisica (peso 0.35 in
+// movimento): un braccio fermato da un muro si vedrebbe comunque per il
+// 65% dentro il muro. Il segmento che tocca qualcosa -- e i suoi genitori
+// lungo l'arto, fino alla colonna esclusa -- mostra la fisica per intero;
+// finito il contatto torna al misto normale in questo tempo.
+const CONTACT_SHOW_DECAY_S = 0.3;
+const CONTACT_CHAIN_STOP = new Set(["Hips", "Torso", "SpineMid", "SpineHigh"]);
+
 const ALIVE_LINEAR_DAMPING = 0.2;
 const ALIVE_ANGULAR_DAMPING = 1.0;
 const PASSIVE_LINEAR_DAMPING = 0.4;
@@ -173,6 +182,11 @@ interface JointFrameMap {
 
 interface BodyEntry {
   segment: RagdollSegment;
+  // 1 = questo segmento (o uno piu' in basso nella sua catena) sta
+  // toccando qualcosa: l'osso mostra la FISICA, non l'animazione (vedi
+  // syncActiveBonesBlended); scende a 0 in CONTACT_SHOW_DECAY_S.
+  contactLevel: number;
+  contactChain: number;
   body: RapierRigidBody;
   bone: THREE.Bone;
   // osso(mondo) = corpo(mondo) * bodyToBone
@@ -254,9 +268,13 @@ export function useRagdollActive(
   modelRootRef: React.RefObject<THREE.Object3D | null>,
   resolveBones: () => Record<string, THREE.Bone> | null,
   // Proprietario dei collider per i proiettili (vedi shootableRegistry.ts)
-  ownerId?: string
+  ownerId?: string,
+  // bit del combattente (vedi FIGHTER_BITS in CollisionGroups.ts)
+  fighterBit: number = FIGHTER_BITS[0]
 ) {
   const { world, rapier } = useRapier();
+  const ALIVE_COLLISION_GROUPS = aliveRagdollGroups(fighterBit);
+  const PASSIVE_COLLISION_GROUPS = passiveRagdollGroups(fighterBit);
   const activeBodiesRef = useRef<Record<string, BodyEntry>>({});
   const activeJointsRef = useRef<ImpulseJoint[]>([]);
   const bindRef = useRef<BindPoseSnapshot | null>(null);
@@ -271,6 +289,7 @@ export function useRagdollActive(
   // coppie proprie escluse ora (statiche + compenetrate all'inizio del KO)
   const selfExcludedRef = useRef<Set<number>>(new Set());
   const selfPendingRef = useRef<Array<[number, number]>>([]);
+  const lastLiftRef = useRef(0);
   const hipsPinnedRef = useRef(false);
   const gravityScaleRef = useRef<number | null>(null);
   const activeRagdollWeightRef = useRef(ACTIVE_RAGDOLL_WEIGHT_MOVING);
@@ -375,6 +394,7 @@ export function useRagdollActive(
           .setTranslation(capsuleOffset.x, capsuleOffset.y, capsuleOffset.z)
           .setRotation({ x: capsuleRot.x, y: capsuleRot.y, z: capsuleRot.z, w: capsuleRot.w })
           .setCollisionGroups(ALIVE_COLLISION_GROUPS)
+          .setActiveHooks(rapier.ActiveHooks.FILTER_CONTACT_PAIRS)
           .setFriction(ALIVE_FRICTION)
           .setMass(ACTIVE_RAGDOLL_MASS_KG[seg.name] ?? 1),
         body
@@ -410,6 +430,8 @@ export function useRagdollActive(
         animLocalQuat: new THREE.Quaternion(),
         animLocalPos: new THREE.Vector3(),
         animSaved: false,
+        contactLevel: 0,
+        contactChain: 0,
       };
     }
 
@@ -583,6 +605,34 @@ export function useRagdollActive(
   // ------------------------------------------------- auto-collisione da KO
   // Inizio KO: esclusioni statiche + coppie che in questo istante si
   // compenetrano gia' (verranno riattivate quando si separano).
+  // Da vivo il corpo non tocca il pavimento e la posa animata tiene piedi
+  // e ginocchia qualche cm SOTTO il terreno: nell'istante in cui va KO il
+  // contatto li sparava fuori (misurato: piede 8 cm dentro, un piccolo
+  // "salto" alla morte). Si solleva invece tutto il corpo, rigidamente, di
+  // quanto serve -- velocita' invariate, niente spinte.
+  const liftOutOfGround = () => {
+    const entries = activeBodiesRef.current;
+    let lift = 0;
+    const flags = rapier.QueryFilterFlags.ONLY_FIXED | rapier.QueryFilterFlags.EXCLUDE_SENSORS;
+    for (const e of Object.values(entries)) {
+      if (e.body.numColliders() === 0) continue;
+      const col = e.body.collider(0);
+      world.intersectionsWithShape(col.translation(), col.rotation(), col.shape, (other) => {
+        const c = col.contactCollider(other, 0);
+        // pavimento/terreno sotto il segmento (normale dal segmento verso il basso)
+        if (c && c.distance < 0 && c.normal1.y < -0.7) lift = Math.max(lift, -c.distance);
+        return true;
+      }, flags, PASSIVE_COLLISION_GROUPS);
+    }
+    lift = Math.min(lift, 0.15);
+    if (import.meta.env.DEV) lastLiftRef.current = lift;
+    if (lift < 0.002) return;
+    for (const e of Object.values(entries)) {
+      const t = e.body.translation();
+      e.body.setTranslation({ x: t.x, y: t.y + lift, z: t.z }, true);
+    }
+  };
+
   const beginSelfCollision = () => {
     const entries = activeBodiesRef.current;
     const excluded = selfExcludedRef.current;
@@ -636,6 +686,7 @@ export function useRagdollActive(
       passive: () => passiveRef.current,
       excluded: () => selfExcludedRef.current,
       pending: () => selfPendingRef.current,
+      lastLift: () => lastLiftRef.current,
       index: SEGMENT_INDEX,
       pairKey,
     };
@@ -647,8 +698,17 @@ export function useRagdollActive(
     const a = own.get(c1);
     const b = own.get(c2);
     if (a === undefined && b === undefined) return null; // non e' nostro
-    if (a !== undefined && b !== undefined && selfExcludedRef.current.has(pairKey(a, b))) {
-      return rapier.SolverFlags.EMPTY;
+    if (a !== undefined && b !== undefined) {
+      return selfExcludedRef.current.has(pairKey(a, b)) ? rapier.SolverFlags.EMPTY : rapier.SolverFlags.COMPUTE_IMPULSE;
+    }
+    // Da VIVO solo cio' che ha scelto di esserci (RagdollWorld): un
+    // collider lasciato ai gruppi di default appartiene a TUTTI i gruppi,
+    // RagdollWorld compreso (pavimenti, terreno, oggetti della citta') --
+    // e il pavimento sotto i piedi del corpo vivo e' proprio quello da
+    // evitare (vedi ALIVE_COLLISION_GROUPS).
+    if (!passiveRef.current) {
+      const other = world.getCollider(a === undefined ? c1 : c2);
+      if (other && (other.collisionGroups() >>> 16) === 0xffff) return rapier.SolverFlags.EMPTY;
     }
     return rapier.SolverFlags.COMPUTE_IMPULSE;
   });
@@ -668,12 +728,15 @@ export function useRagdollActive(
           const col = b.collider(0);
           col.setFriction(passive ? PASSIVE_FRICTION : ALIVE_FRICTION);
           col.setCollisionGroups(passive ? PASSIVE_COLLISION_GROUPS : ALIVE_COLLISION_GROUPS);
-          // filtro coppie (auto-collisione, vedi useFilterContactPair sotto)
-          col.setActiveHooks(passive ? rapier.ActiveHooks.FILTER_CONTACT_PAIRS : 0);
+          // filtro coppie (vedi useFilterContactPair sotto)
+          col.setActiveHooks(rapier.ActiveHooks.FILTER_CONTACT_PAIRS);
         }
         if (PASSIVE_CCD) b.enableCcd(passive);
       }
-      if (modeChanged && passive) beginSelfCollision();
+      if (modeChanged && passive) {
+        liftOutOfGround();
+        beginSelfCollision();
+      }
       gravityScaleRef.current = gravity;
       passiveRef.current = passive;
     }
@@ -966,8 +1029,40 @@ export function useRagdollActive(
     // muovendo e il blend normale darebbe piu' peso all'animazione),
     // altrimenti l'incasso si vedrebbe solo a meta'.
     weight = Math.max(weight, staggerRef.current);
-    if (weight <= 0.001) return;
     const entries = activeBodiesRef.current;
+
+    // contatti veri (con impulso) di ogni segmento in questo passo
+    let anyContact = false;
+    for (const seg of ACTIVE_RAGDOLL_SEGMENTS) {
+      const e = entries[seg.name];
+      if (!e || e.body.numColliders() === 0) continue;
+      const col = e.body.collider(0);
+      let touching = false;
+      if (weight < 0.999) {
+        world.contactPairsWith(col, (other) => {
+          if (touching) return;
+          // contatto VERO = con impulso (i contatti scartati dal filtro
+          // coppie restano elencati ma con impulso nullo)
+          world.contactPair(col, other, (m) => {
+            for (let i = 0; i < m.numContacts() && !touching; i++) {
+              if (m.contactImpulse(i) > 1e-4) touching = true;
+            }
+          });
+        });
+      }
+      e.contactLevel = touching ? 1 : Math.max(0, e.contactLevel - Math.max(0, delta) / CONTACT_SHOW_DECAY_S);
+      e.contactChain = e.contactLevel;
+    }
+    for (let i = ACTIVE_RAGDOLL_SEGMENTS.length - 1; i >= 0; i--) {
+      const seg = ACTIVE_RAGDOLL_SEGMENTS[i];
+      const e = entries[seg.name];
+      if (!e) continue;
+      if (e.contactChain > 0) anyContact = true;
+      if (!seg.parent || CONTACT_CHAIN_STOP.has(seg.parent)) continue;
+      const p = entries[seg.parent];
+      if (p) p.contactChain = Math.max(p.contactChain, e.contactChain);
+    }
+    if (weight <= 0.001 && !anyContact) return;
     let first = true;
     for (const seg of ACTIVE_RAGDOLL_SEGMENTS) {
       const e = entries[seg.name];
@@ -986,16 +1081,17 @@ export function useRagdollActive(
       s.q1.set(r.x, r.y, r.z, r.w).multiply(e.bodyToBone); // osso mondo
       parent.getWorldQuaternion(s.q2);
       s.q2.invert().multiply(s.q1); // osso locale
-      bone.quaternion.slerp(s.q2, weight);
+      const w = Math.max(weight, e.contactChain);
+      bone.quaternion.slerp(s.q2, w);
       if (!seg.parent) {
         const t = e.body.translation();
         s.v1.set(t.x, t.y, t.z);
         parent.worldToLocal(s.v1);
-        bone.position.lerp(s.v1, weight);
+        bone.position.lerp(s.v1, w);
       }
       bone.updateWorldMatrix(false, false);
     }
-  }, [s]);
+  }, [s, world]);
 
   // "si muove tantissimo" (seconda causa, misurata dal vivo): se in un
   // frame NESSUNA azione del mixer scrive un certo osso (clip finita,

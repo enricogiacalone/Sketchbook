@@ -17,6 +17,14 @@ import { useRapier } from '@react-three/rapier';
 import { usePistolModel, useGunModel, RIFLE_SPEC, type GunModelApi } from './weapons/usePistolModel';
 import { useKnifeModel } from './weapons/useKnifeModel';
 import { solveTwoBoneIK } from './weapons/twoBoneIK';
+import {
+  newTravState,
+  stepTraversal,
+  followGround,
+  isTraversing,
+  hangHandTargets,
+  type TravCtx,
+} from './traversal/traversal';
 import { GETUP_CLIP, measureLyingPose, newKnockdown, stepKnockdown, getUpPlacement } from './ragdoll/knockdown';
 import { castShot, spreadDirection } from './weapons/hitscan';
 import { getShootableCollider, applyFighterHit } from './weapons/shootableRegistry';
@@ -140,6 +148,11 @@ const _bodyFwd = new THREE.Vector3();
 const _bodyRight = new THREE.Vector3();
 const _camPos = new THREE.Vector3();
 const _chest = new THREE.Vector3();
+const _tFwd = new THREE.Vector3();
+const _tRight = new THREE.Vector3();
+const _tMove = new THREE.Vector3();
+const _hangL = new THREE.Vector3();
+const _hangR = new THREE.Vector3();
 
 // Banco ragdoll: clip che si possono ripetere in loop senza salti (le
 // altre vengono riprodotte una volta e poi si torna in guardia).
@@ -318,6 +331,15 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   const knockVelRef = useRef(new THREE.Vector3());
   const obstacleHitCooldownRef = useRef(0);
   const kdRef = useRef(newKnockdown());
+  // salto / arrampicata (traversal/traversal.ts): quota dei piedi, modo...
+  const travRef = useRef(
+    newTravState(
+      getTerrainHeight(data.position.x, data.position.z) + getRoadOffset(data.position.x, data.position.z) + data.position.y,
+      data.position.x,
+      data.position.z
+    )
+  );
+  const traving = () => isTraversing(travRef.current);
   const deadForRef = useRef(0);
   const maxHpRef = useRef(data.hp);
   const isDown = () => kdRef.current.active || data.state === 'Si rialza';
@@ -381,6 +403,16 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       actMap[clip.name] = action;
       cMap[clip.name] = clip;
     });
+    // "scavalca/sali": ClimbUp_1m_RM porta la radice su di 0.94 m e avanti
+    // di 1.57 m (root motion) e all'ultimo fotogramma torna all'inizio.
+    // Copia in-place (senza root.position, fino a 0.625 s): la posizione la
+    // decide traversal.ts, deformata sul bordo vero (motion warping).
+    if (cMap['ClimbUp_1m_RM']) {
+      const src = cMap['ClimbUp_1m_RM'];
+      const c = new THREE.AnimationClip('ClimbUp_1m__ip', 0.625, src.tracks.filter((t) => t.name !== 'root.position'));
+      actMap[c.name] = animMixer.clipAction(c);
+      cMap[c.name] = c;
+    }
     // Copie "solo gambe" / "solo busto" per la pistola (vedi splitClip).
     for (const name of PISTOL_BASE_CLIPS) {
       if (!cMap[name]) continue;
@@ -511,7 +543,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     };
   }, [clipsMap, ragdoll, camera]);
 
-  const transitionToAnimation = (animName: string, duration = 0.15, shouldLoop = true, timeScale = 1.0) => {
+  const transitionToAnimation = (animName: string, duration = 0.15, shouldLoop = true, timeScale = 1.0, startAt = 0) => {
     const target = actions[animName] ? animName : animCatalog.idle;
     if (!target || !actions[target]) return 1.0;
 
@@ -519,6 +551,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       actions[target].setEffectiveTimeScale(timeScale);
       if (shouldLoop) return clipsMap[target]?.duration || 1.0;
       actions[target].reset();
+      actions[target].time = startAt;
       actions[target].play();
       return clipsMap[target]?.duration || 1.0;
     }
@@ -529,6 +562,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     if (prevAction) prevAction.fadeOut(duration);
 
     nextAction.reset();
+    nextAction.time = startAt;
     nextAction.setEffectiveTimeScale(timeScale);
     nextAction.setEffectiveWeight(1);
     nextAction.setLoop(shouldLoop ? THREE.LoopRepeat : THREE.LoopOnce, shouldLoop ? Infinity : 1);
@@ -779,7 +813,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       !data.isDead &&
       !isDown() &&
       data.state !== 'Vittoria!' &&
-      !isDodgingRef.current
+      !isDodgingRef.current &&
+      !traving()
     ) {
       desired =
         reloadLeftRef.current > 0
@@ -1033,6 +1068,15 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       isDodging: isDodgingRef.current,
       posX: data.position.x,
       posZ: data.position.z,
+      // salto/arrampicata (traversal.ts): modo, quota piedi, teletrasporto per le prove
+      trav: { mode: travRef.current.mode, feetY: +travRef.current.feetY.toFixed(3), vy: +travRef.current.vy.toFixed(2), rot: +data.rotation.toFixed(3), anim: data.currentAnim, ledgeTop: travRef.current.ledge?.topY ?? null },
+      teleport: (x: number, z: number, rotation?: number) => {
+        data.position.x = x;
+        data.position.z = z;
+        if (rotation !== undefined) data.rotation = rotation;
+        travRef.current.lastX = x;
+        travRef.current.lastZ = z;
+      },
       solidSegments: ragdoll.getSolidBodySegments(),
       // "confronto layer per layer" -- richiesto dall'utente per
       // analizzare "i vari scheletri ad uno ad uno" (solid-body vs
@@ -1095,7 +1139,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     const camYaw = Math.atan2(_camAimDir.x, _camAimDir.z) + Math.PI;
     let yawDiff = camYaw - data.rotation;
     yawDiff = Math.atan2(Math.sin(yawDiff), Math.cos(yawDiff));
-    if (!tPoseBench && !benchClip) ragdoll.applySpineLean(
+    // (niente torsione verso la camera mentre si salta/arrampica)
+    if (!tPoseBench && !benchClip && !traving()) ragdoll.applySpineLean(
       THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX),
       THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX)
     );
@@ -1105,7 +1150,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // Dopo la torsione del busto, prima del ragdoll: fa parte della posa
     // bersaglio.
     const rifleIK = () => {
-      if (tPoseBench || benchClip || weaponRef.current !== 'rifle' || data.isDead || isDodgingRef.current || isDown()) return;
+      if (tPoseBench || benchClip || weaponRef.current !== 'rifle' || data.isDead || isDodgingRef.current || isDown() || traving()) return;
       if (!armBonesRef.current) {
         const get = (n: string) => clone.getObjectByName(n);
         const l = [get('upperarm_l'), get('lowerarm_l'), get('hand_l')];
@@ -1124,6 +1169,24 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       }
     };
     rifleIK();
+    // appeso a un bordo: mani sul bordo vero (IK), qualunque sia la posa
+    const hangIK = () => {
+      if (!hangHandTargets(travRef.current, _hangL, _hangR)) return;
+      if (!armBonesRef.current) {
+        const get = (n: string) => clone.getObjectByName(n);
+        const l = [get('upperarm_l'), get('lowerarm_l'), get('hand_l')];
+        const r = [get('upperarm_r'), get('lowerarm_r'), get('hand_r')];
+        if (!l.every(Boolean) || !r.every(Boolean)) return;
+        armBonesRef.current = {
+          l: { upper: l[0]!, lower: l[1]!, hand: l[2]! },
+          r: { upper: r[0]!, lower: r[1]!, hand: r[2]! },
+        };
+      }
+      const arms = armBonesRef.current;
+      solveTwoBoneIK(arms.l.upper, arms.l.lower, arms.l.hand, _hangL, 1);
+      solveTwoBoneIK(arms.r.upper, arms.r.lower, arms.r.hand, _hangR, 1);
+    };
+    hangIK();
 
     // Runs every frame regardless of which branch below fires, same
     // reasoning as CombatSoldier.tsx: a hit-reaction pulse needs to keep
@@ -1148,6 +1211,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // riescono a seguire la posa (limiti dei giunti, inerzia) e il fucile
     // e' rigido sul petto -- le mani restano comunque sull'arma
     rifleIK();
+    hangIK();
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
     // fighter (their own checkAttackContact reads it off `opponent`) --
     // see FighterData's comment.
@@ -1160,9 +1224,26 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
 
     if (!groupRef.current) return;
 
+    const groundBase = (x: number, z: number) => getTerrainHeight(x, z) + getRoadOffset(x, z);
+    // Quota: la decide traversal.ts (piedi a terra, sui blocchi, in aria,
+    // appesi...); data.position.y resta "sopra il terreno" come prima.
     const applyTransform = () => {
-      const groundY = getTerrainHeight(data.position.x, data.position.z) + getRoadOffset(data.position.x, data.position.z);
-      groupRef.current!.position.set(data.position.x, groundY + data.position.y, data.position.z);
+      const tr = travRef.current;
+      if (data.isDead || kdRef.current.active) {
+        // a terra per fisica: finito il KO si riparte da terra (followGround
+        // riporta i piedi sull'appoggio del punto in cui ci si rialza)
+        if (tr.mode !== 'ground') {
+          tr.mode = 'ground';
+          tr.vy = 0;
+          tr.ledge = null;
+          tr.ladder = null;
+        }
+      } else {
+        followGround(tr, { world, rapier, pos: data.position, baseY: groundBase });
+      }
+      const groundY = groundBase(data.position.x, data.position.z);
+      data.position.y = tr.feetY - groundY;
+      groupRef.current!.position.set(data.position.x, tr.feetY, data.position.z);
       groupRef.current!.rotation.y = data.rotation;
     };
 
@@ -1266,7 +1347,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
 
     // Ostacoli dell'arena (pendoli, pale, pistoni): esce da eventuali
     // compenetrazioni e, se l'ostacolo si muove, viene spinto e colpito.
-    {
+    // (non mentre si e' appesi / si scavalca / si sale una scala)
+    if (!traving() || travRef.current.mode === 'air' || travRef.current.mode === 'land') {
       const dtO = delta * globalSpeed;
       const ob = ragdoll.resolveObstacleContacts(bagSolidHandle ?? null, dtO);
       data.position.x += ob.pushX;
@@ -1314,6 +1396,52 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       // hit-pulse technique as CombatSoldier.tsx -- see useRagdoll.ts.
       _hitImpulseDir.set(Math.sin(data.rotation), 0.35, Math.cos(data.rotation));
       ragdoll.pulseHit(_hitImpulseDir, 0.3, Math.random() > 0.5 ? 'Head' : 'Torso', data.hitFromX, data.hitFromZ);
+    }
+
+    // --- Salto e arrampicata (Spazio): salto normale, scavalca i blocchi
+    // bassi, si aggrappa ai bordi alti, sale le scale (traversal.ts).
+    {
+      camera.getWorldDirection(_tFwd);
+      _tFwd.y = 0;
+      _tFwd.normalize();
+      _tRight.crossVectors(_tFwd, _worldUp).normalize();
+      _tMove.set(0, 0, 0);
+      if (input.forward) _tMove.add(_tFwd);
+      if (input.backward) _tMove.addScaledVector(_tFwd, -1);
+      if (input.left) _tMove.addScaledVector(_tRight, -1);
+      if (input.right) _tMove.add(_tRight);
+      if (_tMove.lengthSq() > 0.0001) _tMove.normalize();
+      const ctx: TravCtx = {
+        world,
+        rapier,
+        dt: delta * globalSpeed,
+        pos: data.position,
+        rotation: data.rotation,
+        setRotation: (r: number) => {
+          data.rotation = r;
+          ctx.rotation = r;
+        },
+        baseY: groundBase,
+        play: (clip, fade, loop, ts = 1, startAt = 0) => {
+          transitionToAnimation(clip, fade, loop, ts, startAt);
+        },
+        resolveMove: (dx, dz) => resolveAndApplyMovement(dx, dz),
+        input: {
+          forward: !!input.forward,
+          backward: !!input.backward,
+          jumpPressed: input.consumeJustPressed('jump'),
+          move: _tMove,
+          moveSpeed: input.shift && !aimingRef.current ? LT.runSpeed : LT.walkSpeed,
+        },
+        canAct: data.attackLock <= 0 && data.state !== 'Si rialza' && !isDodgingRef.current,
+      };
+      if (stepTraversal(travRef.current, ctx)) {
+        const m = travRef.current.mode;
+        data.state =
+          m === 'air' ? 'In aria' : m === 'hang' ? 'Appeso' : m === 'ladder' ? 'Sulla scala' : m === 'land' ? 'Atterra' : 'Arrampica';
+        applyTransform();
+        return;
+      }
     }
 
     if (data.attackLock > 0) {
@@ -1428,7 +1556,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
 
     // --- Dodge (tap Space) -- moved off Shift, which is also "hold to
     // sprint": sharing the key meant every sprint tap also fired a dodge.
-    if (input.consumeJustPressed('jump') && dodgeLockRef.current <= 0) {
+    // (Spazio adesso e' il salto, vedi traversal.ts: la capriola va su V / L3)
+    if (input.consumeJustPressed('dodge') && dodgeLockRef.current <= 0) {
       data.state = 'Capriola';
       if (_moveDir.lengthSq() > 0.0001) {
         dodgeDirRef.current.copy(_moveDir).normalize();

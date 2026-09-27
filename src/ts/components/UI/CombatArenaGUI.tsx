@@ -201,6 +201,21 @@ const CombatArenaGUI: React.FC = () => {
     // game loads.
     folder.close();
 
+    // "una gui per togliere gli ostacoli, le mura, il pavimento, le casse"
+    const sceneFolder = gui.addFolder('Scenario arena');
+    const sceneState = { ...useStore.getState().arenaScene };
+    sceneFolder.add(sceneState, 'obstacles').name('Ostacoli (pendoli, pistoni, pale)')
+      .onChange((v: boolean) => useStore.getState().setArenaScene({ obstacles: v }));
+    sceneFolder.add(sceneState, 'walls').name('Mura')
+      .onChange((v: boolean) => useStore.getState().setArenaScene({ walls: v }));
+    sceneFolder.add(sceneState, 'floor').name('Pavimento')
+      .onChange((v: boolean) => useStore.getState().setArenaScene({ floor: v }));
+    sceneFolder.add(sceneState, 'speakers').name('Casse')
+      .onChange((v: boolean) => useStore.getState().setArenaScene({ speakers: v }));
+    sceneFolder.add(sceneState, 'course').name('Percorso parkour')
+      .onChange((v: boolean) => useStore.getState().setArenaScene({ course: v }));
+    sceneFolder.close();
+
     // Presa della pistola nella mano destra (vedi usePistolModel.ts):
     // letta ogni frame, quindi i cursori agiscono dal vivo.
     // "la mosca si crede un umano" (FlyBrainFighter.tsx)
@@ -253,6 +268,7 @@ const CombatArenaGUI: React.FC = () => {
       pistolFolder.destroy();
       locoFolder.destroy();
       flyFolder.destroy();
+      sceneFolder.destroy();
       folder.destroy();
       releaseDebugGui();
     };

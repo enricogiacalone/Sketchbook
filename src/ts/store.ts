@@ -26,6 +26,14 @@ export interface EntityInfo {
   rotation: number; // Yaw in radians
 }
 
+export interface ArenaSceneToggles {
+  obstacles: boolean; // pendoli, pistoni, pale rotanti (ArenaObstacles.tsx)
+  walls: boolean; // le 4 mura della sala (AudioArena.tsx)
+  floor: boolean; // pavimento della sala (lastra + collider)
+  speakers: boolean; // le due casse audio (AudioArena.tsx)
+  course: boolean; // percorso parkour: blocchi, bordi, scala (ParkourCourse.tsx)
+}
+
 interface GameState {
   health: number;
   maxHealth: number;
@@ -230,6 +238,9 @@ interface GameState {
   // se un collider e' davvero allineato o solo sembra esserlo per via
   // dell'angolazione.
   debugOrthoCamera: boolean;
+  // "una gui per togliere gli ostacoli, le mura, il pavimento, le casse"
+  // -- pezzi dell'arena del duello accesi/spenti (mesh E collider insieme)
+  arenaScene: ArenaSceneToggles;
   // Angolo (gradi) attorno al personaggio da cui la vista ortogonale
   // guarda -- 0 = frontale, 90/180/270 = laterale/retro/laterale
   // opposto. Cambiato dal pulsante "Ruota vista 90'" del pannello Arena,
@@ -326,6 +337,7 @@ interface GameState {
   setPlayerWeaponState: (partial: Partial<Pick<GameState, 'playerWeapon' | 'playerAiming' | 'pistolAmmo' | 'pistolReloading' | 'pistolHitAt' | 'pistolHitKill' | 'pistolHitHead'>>) => void;
   clearDuelEnemies: () => void;
   setDebugOrthoCamera: (active: boolean) => void;
+  setArenaScene: (partial: Partial<ArenaSceneToggles>) => void;
   setDebugOrthoCameraAngleDeg: (deg: number) => void;
   setRagdollBench: (partial: Partial<RagdollBenchSettings>) => void;
   setShowGameplayHud: (active: boolean) => void;
@@ -386,6 +398,7 @@ export const useStore = create<GameState>((set) => ({
   pistolHitKill: false,
   pistolHitHead: false,
   debugOrthoCamera: false,
+  arenaScene: { obstacles: true, walls: true, floor: true, speakers: true, course: true },
   debugOrthoCameraAngleDeg: 0,
   ragdollBench: { ...DEFAULT_RAGDOLL_BENCH },
   showGameplayHud: false,
@@ -455,6 +468,7 @@ export const useStore = create<GameState>((set) => ({
   setPlayerWeaponState: (partial) => set(partial),
   clearDuelEnemies: () => set({ duelEnemyCount: 0 }),
   setDebugOrthoCamera: (debugOrthoCamera) => set({ debugOrthoCamera }),
+  setArenaScene: (partial) => set((state) => ({ arenaScene: { ...state.arenaScene, ...partial } })),
   setDebugOrthoCameraAngleDeg: (debugOrthoCameraAngleDeg) => set({ debugOrthoCameraAngleDeg }),
   setRagdollBench: (partial) => set((state) => ({ ragdollBench: { ...state.ragdollBench, ...partial } })),
   setShowGameplayHud: (showGameplayHud) => set({ showGameplayHud }),
