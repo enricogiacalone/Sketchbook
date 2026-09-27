@@ -2,7 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { RigidBody, CuboidCollider } from '@react-three/rapier';
 import { AUDIO_ARENA_FLOOR_Y } from './audioArena/AudioArena';
-import { CLIMBABLE_GROUPS, registerLadder, unregisterLadder } from './traversal/traversalWorld';
+import { CLIMBABLE_GROUPS, STAIR_RAMP_GROUPS, registerLadder, unregisterLadder } from './traversal/traversalWorld';
 
 // "procedi, voglio anche il salto normale" -- percorso di prova per il
 // movimento da avventura (traversal/traversal.ts), nell'angolo dell'arena
@@ -11,7 +11,8 @@ import { CLIMBABLE_GROUPS, registerLadder, unregisterLadder } from './traversal/
 //   muretto 1.0 m      -> scavalca (sottile: ci si sale e si riscende)
 //   blocco 1.3 m       -> sali sopra
 //   muro 2.7 m (4 m)   -> salta, aggrappati, spostati appeso, tirati su
-//   piattaforma 3.5 m  -> scala a pioli
+//   piattaforma 3.5 m  -> scala a pioli davanti, rampa di scale sul lato
+//                         ovest (come le scale dei palazzi del playground)
 //   pietre 0.6 / 0.9 m -> salti da un blocco all'altro
 // Bordi arrampicabili segnati in giallo (convenzione dei giochi d'avventura).
 const BASE = AUDIO_ARENA_FLOOR_Y;
@@ -35,12 +36,26 @@ const BLOCKS: Block[] = [
 // scala sulla faccia +z della piattaforma alta
 const LADDER = { x: -10, z: -16 + 1.5 + 0.06, halfWidth: 0.3, top: 3.5 };
 
+// Scale "come quelle degli edifici del playground" (City.tsx): gradini
+// indaco a sbalzo, uno per ogni tratto della rampa, e sotto una rampa
+// invisibile che e' quello su cui si cammina davvero (li' e' la funzione
+// d'altezza getBuildingHeightOffset, qui una rampa di collisione che
+// supportHeight segue). Salgono verso +x fino alla cima della piattaforma
+// alta (faccia ovest, x = -11.5).
+const STAIRS = { x0: -14.5, x1: -11.5, z: -16, width: 2.0, rise: 3.5, steps: 12 };
+const STAIR_RUN = STAIRS.x1 - STAIRS.x0;
+const STAIR_ANGLE = Math.atan2(STAIRS.rise, STAIR_RUN);
+const STAIR_LEN = Math.hypot(STAIRS.rise, STAIR_RUN);
+const RAMP_T = 0.3; // spessore della rampa di collisione
+
 const ParkourCourse: React.FC = () => {
   const mats = useMemo(
     () => ({
       block: new THREE.MeshStandardMaterial({ color: '#8a8f98', roughness: 0.85, metalness: 0.05 }),
       edge: new THREE.MeshStandardMaterial({ color: '#f5c518', roughness: 0.5, emissive: '#3a2d00' }),
       ladder: new THREE.MeshStandardMaterial({ color: '#6b4a2b', roughness: 0.7 }),
+      // stesso colore dei gradini dei palazzi del playground (City.tsx)
+      stair: new THREE.MeshStandardMaterial({ color: '#4f46e5', roughness: 0.7, metalness: 0.1 }),
     }),
     []
   );
@@ -67,6 +82,17 @@ const ParkourCourse: React.FC = () => {
   return (
     <group>
       <RigidBody type="fixed" colliders={false}>
+        {/* rampa delle scale: la faccia superiore passa da (x0, base) a (x1, base+rise) */}
+        <CuboidCollider
+          args={[STAIR_LEN / 2, RAMP_T / 2, STAIRS.width / 2]}
+          position={[
+            (STAIRS.x0 + STAIRS.x1) / 2 + Math.sin(STAIR_ANGLE) * (RAMP_T / 2),
+            BASE + STAIRS.rise / 2 - Math.cos(STAIR_ANGLE) * (RAMP_T / 2),
+            STAIRS.z,
+          ]}
+          rotation={[0, 0, STAIR_ANGLE]}
+          collisionGroups={STAIR_RAMP_GROUPS}
+        />
         {BLOCKS.map((b, i) => (
           <CuboidCollider
             key={i}
@@ -96,6 +122,23 @@ const ParkourCourse: React.FC = () => {
           </mesh>
         </group>
       ))}
+      {/* gradini (la cima di ognuno sta sulla rampa, al suo centro) */}
+      {Array.from({ length: STAIRS.steps }, (_, i) => {
+        const t = (i + 0.5) / STAIRS.steps;
+        const stepRun = (STAIR_RUN / STAIRS.steps) * 1.1;
+        const stepRise = STAIRS.rise / STAIRS.steps;
+        return (
+          <mesh
+            key={`st${i}`}
+            position={[STAIRS.x0 + t * STAIR_RUN, BASE + t * STAIRS.rise - stepRise / 2, STAIRS.z]}
+            material={mats.stair}
+            castShadow
+            receiveShadow
+          >
+            <boxGeometry args={[stepRun, stepRise, STAIRS.width]} />
+          </mesh>
+        );
+      })}
       {/* scala a pioli */}
       <group position={[LADDER.x, BASE, LADDER.z]}>
         {[-LADDER.halfWidth, LADDER.halfWidth].map((x) => (

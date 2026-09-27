@@ -413,6 +413,29 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       actMap[c.name] = animMixer.clipAction(c);
       cMap[c.name] = c;
     }
+    // Posa di caduta per le cadute lunghe: i primi 0.29 s di Land_Three_Point
+    // sono proprio la caduta da cui parte quell'atterraggio, ma col bacino
+    // 4 m piu' in alto (la caduta e' "cotta" nella traccia del bacino). Copia
+    // con il bacino fermo alla quota che ha all'istante del contatto (0.46 s):
+    // in aria resta la posa, e l'atterraggio (che parte da 0.46 s) si
+    // raccorda senza salti.
+    if (cMap['Land_Three_Point']) {
+      const src = cMap['Land_Three_Point'];
+      const sub = THREE.AnimationUtils.subclip(src, 'Fall_Air__ip', 0, 7, 24);
+      const pelvisSrc = src.tracks.find((t) => t.name === 'pelvis.position');
+      const pelvisSub = sub.tracks.find((t) => t.name === 'pelvis.position');
+      // senza traccia del bacino la posa resterebbe 4 m in alto: niente clip
+      if (pelvisSrc && pelvisSub) {
+        const at = (pelvisSrc as THREE.VectorKeyframeTrack).InterpolantFactoryMethodLinear(new Float32Array(3)).evaluate(0.46) as Float32Array;
+        for (let i = 0; i < pelvisSub.values.length; i += 3) {
+          pelvisSub.values[i] = at[0];
+          pelvisSub.values[i + 1] = at[1];
+          pelvisSub.values[i + 2] = at[2];
+        }
+        actMap[sub.name] = animMixer.clipAction(sub);
+        cMap[sub.name] = sub;
+      }
+    }
     // Copie "solo gambe" / "solo busto" per la pistola (vedi splitClip).
     for (const name of PISTOL_BASE_CLIPS) {
       if (!cMap[name]) continue;
@@ -1070,10 +1093,11 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       posZ: data.position.z,
       // salto/arrampicata (traversal.ts): modo, quota piedi, teletrasporto per le prove
       trav: { mode: travRef.current.mode, feetY: +travRef.current.feetY.toFixed(3), vy: +travRef.current.vy.toFixed(2), rot: +data.rotation.toFixed(3), anim: data.currentAnim, ledgeTop: travRef.current.ledge?.topY ?? null },
-      teleport: (x: number, z: number, rotation?: number) => {
+      teleport: (x: number, z: number, rotation?: number, feetY?: number) => {
         data.position.x = x;
         data.position.z = z;
         if (rotation !== undefined) data.rotation = rotation;
+        if (feetY !== undefined) travRef.current.feetY = feetY;
         travRef.current.lastX = x;
         travRef.current.lastZ = z;
       },
@@ -1348,7 +1372,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // Ostacoli dell'arena (pendoli, pale, pistoni): esce da eventuali
     // compenetrazioni e, se l'ostacolo si muove, viene spinto e colpito.
     // (non mentre si e' appesi / si scavalca / si sale una scala)
-    if (!traving() || travRef.current.mode === 'air' || travRef.current.mode === 'land') {
+    if (!traving() || travRef.current.mode === 'air' || travRef.current.mode === 'land' || travRef.current.mode === 'roll') {
       const dtO = delta * globalSpeed;
       const ob = ragdoll.resolveObstacleContacts(bagSolidHandle ?? null, dtO);
       data.position.x += ob.pushX;
@@ -1424,6 +1448,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         baseY: groundBase,
         play: (clip, fade, loop, ts = 1, startAt = 0) => {
           transitionToAnimation(clip, fade, loop, ts, startAt);
+          // la posa di caduta e' un frammento di 0.29 s: avanti e indietro
+          // (ping-pong) e lenta, cosi' "si agita" senza scatti di ripartenza
+          if (clip === 'Fall_Air__ip' && actions[clip]) actions[clip].setLoop(THREE.LoopPingPong, Infinity);
         },
         resolveMove: (dx, dz) => resolveAndApplyMovement(dx, dz),
         input: {
@@ -1438,7 +1465,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       if (stepTraversal(travRef.current, ctx)) {
         const m = travRef.current.mode;
         data.state =
-          m === 'air' ? 'In aria' : m === 'hang' ? 'Appeso' : m === 'ladder' ? 'Sulla scala' : m === 'land' ? 'Atterra' : 'Arrampica';
+          m === 'air' ? 'In aria' : m === 'hang' ? 'Appeso' : m === 'ladder' ? 'Sulla scala' : m === 'land' || m === 'bigLand' ? 'Atterra' : m === 'roll' ? 'Capriola' : 'Arrampica';
         applyTransform();
         return;
       }

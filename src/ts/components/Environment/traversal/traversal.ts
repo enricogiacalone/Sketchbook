@@ -38,6 +38,14 @@ const JUMP_V = Math.sqrt(2 * GRAVITY * JUMP_HEIGHT);
 const AIR_CONTROL = 3; // 1/s: quanto in fretta la velocita' in aria segue lo stick
 const COYOTE_S = 0.12; // si puo' ancora saltare appena usciti da un bordo
 const HARD_LANDING_V = 9; // m/s di caduta oltre cui l'atterraggio piega le gambe
+// "l'animazione a mezz'aria quando cado da altezze piu' alte del normale e
+// anche l'atterraggio diverso": sotto i piedi piu' di FALL_POSE_MIN m di
+// vuoto -> posa di caduta; atterrando da piu' di BIG_FALL m -> atterraggio
+// "a tre punti" (mano a terra) da fermi, capriola se si arriva correndo.
+const FALL_POSE_MIN = 1.8;
+const HARD_FALL = 1.3;
+const BIG_FALL = 2.4;
+const ROLL_MIN_SPEED = 2.5;
 const SHIMMY_SPEED = 0.6;
 const MAX_STEP_DOWN = 0.12; // m per frame seguiti senza "cadere" (pendii, gradini)
 
@@ -47,13 +55,19 @@ export const TRAV_CLIPS = {
   jumpStart: 'Jump_Start',
   air: 'Jump_air',
   land: 'Jump_Land',
+  // posa di caduta: primi 0.29 s di Land_Three_Point (la caduta da cui
+  // parte quell'atterraggio) resi in-place, vedi PlayerCombatSoldier
+  fall: 'Fall_Air__ip',
+  bigLand: 'Land_Three_Point',
+  bigLandUp: 'NinjaJump_Land',
+  roll: 'Roll',
   hang: 'Ledge Hang',
   pullUp: 'Climb Wall',
   mantle: 'ClimbUp_1m__ip',
   ladder: 'Climb Ladder',
 };
 
-export type TravMode = 'ground' | 'air' | 'land' | 'mantle' | 'grab' | 'hang' | 'pullUp' | 'ladder';
+export type TravMode = 'ground' | 'air' | 'land' | 'bigLand' | 'roll' | 'mantle' | 'grab' | 'hang' | 'pullUp' | 'ladder';
 
 export interface TravInput {
   forward: boolean;
@@ -99,6 +113,10 @@ export interface TravState {
   ladder: Ladder | null;
   lockLeft: number;
   started: boolean;
+  // quota piu' alta raggiunta in aria (altezza della caduta all'atterraggio)
+  apexY: number;
+  fallPose: boolean;
+  upPlayed: boolean;
 }
 
 export function newTravState(feetY: number, x: number, z: number): TravState {
@@ -106,6 +124,7 @@ export function newTravState(feetY: number, x: number, z: number): TravState {
     mode: 'ground', t: 0, feetY, vy: 0, vel: new THREE.Vector3(), lastX: x, lastZ: z,
     coyote: 0, grabCooldown: 0, from: new THREE.Vector3(), to: new THREE.Vector3(), dur: 0,
     next: 'ground', ledge: null, ladder: null, lockLeft: 0, started: false,
+    apexY: feetY, fallPose: false, upPlayed: false,
   };
 }
 
@@ -118,6 +137,10 @@ function enter(s: TravState, mode: TravMode) {
   s.mode = mode;
   s.t = 0;
   s.started = false;
+  if (mode === 'air') {
+    s.apexY = s.feetY;
+    s.fallPose = false;
+  }
 }
 
 // posizione della radice appesa al bordo
@@ -243,6 +266,33 @@ export function stepTraversal(s: TravState, ctx: TravCtx): boolean {
       return false;
     }
 
+    case 'bigLand': {
+      s.lockLeft -= dt;
+      // accovacciati con la mano a terra ~0.5 s, poi ci si rialza
+      if (!s.upPlayed && s.t > 0.6) {
+        s.upPlayed = true;
+        ctx.play(TRAV_CLIPS.bigLandUp, 0.25, false, 1.0, 0.3);
+      }
+      if (s.lockLeft <= 0) {
+        enter(s, 'ground');
+        return false;
+      }
+      return true;
+    }
+
+    case 'roll': {
+      s.lockLeft -= dt;
+      ctx.resolveMove(s.vel.x * dt, s.vel.z * dt);
+      const k = Math.exp(-1.6 * dt);
+      s.vel.x *= k;
+      s.vel.z *= k;
+      if (s.lockLeft <= 0) {
+        enter(s, 'ground');
+        return false;
+      }
+      return true;
+    }
+
     case 'land': {
       s.lockLeft -= dt;
       // un atterraggio morbido si interrompe camminando
@@ -263,7 +313,7 @@ export function stepTraversal(s: TravState, ctx: TravCtx): boolean {
       }
       if (s.t > 0.28 && !s.started) {
         s.started = true;
-        ctx.play(TRAV_CLIPS.air, 0.2, true);
+        if (!s.fallPose) ctx.play(TRAV_CLIPS.air, 0.2, true);
       }
       // controllo in aria
       const m = inp.move;
@@ -278,21 +328,65 @@ export function stepTraversal(s: TravState, ctx: TravCtx): boolean {
         d = Math.atan2(Math.sin(d), Math.cos(d));
         ctx.setRotation(ctx.rotation + d * Math.min(1, 8 * dt));
       }
-      const prevFeet = s.feetY;
-      s.vy -= GRAVITY * dt;
-      s.feetY += s.vy * dt;
-      ctx.resolveMove(s.vel.x * dt, s.vel.z * dt);
-      if (airGrab(s, ctx)) return true;
-      // atterraggio: appoggio sotto, cercato da dove erano i piedi prima
-      const base = ctx.baseY(ctx.pos.x, ctx.pos.z);
-      const sup = supportHeight(ctx.world, ctx.rapier, ctx.pos.x, ctx.pos.z, Math.max(prevFeet, s.feetY) + 0.3, base);
-      if (s.vy <= 0 && s.feetY <= sup) {
+      // "credo gli manchi la spinta in alto": misurato, il salto partiva ma
+      // un frame lungo (300 ms, vedi AudioArena) veniva integrato in UN
+      // passo -- vy azzerata dalla gravita' in un colpo, 2 cm di salto.
+      // Passi da al massimo 1/60 s: la parabola e' la stessa a qualunque
+      // frame rate e anche dopo un intoppo.
+      const steps = Math.min(12, Math.max(1, Math.ceil(dt * 60)));
+      const sdt = dt / steps;
+      let landed = false;
+      for (let k = 0; k < steps && !landed; k++) {
+        const prevFeet = s.feetY;
+        s.vy -= GRAVITY * sdt;
+        s.feetY += s.vy * sdt;
+        if (s.feetY > s.apexY) s.apexY = s.feetY;
+        ctx.resolveMove(s.vel.x * sdt, s.vel.z * sdt);
+        // atterraggio: appoggio sotto, cercato da dove erano i piedi prima
+        if (s.vy <= 0) {
+          const base = ctx.baseY(ctx.pos.x, ctx.pos.z);
+          const sup = supportHeight(ctx.world, ctx.rapier, ctx.pos.x, ctx.pos.z, Math.max(prevFeet, s.feetY) + 0.3, base);
+          if (s.feetY <= sup) {
+            s.feetY = sup;
+            landed = true;
+          }
+        }
+      }
+      if (!landed && airGrab(s, ctx)) return true;
+      // caduta lunga: quanto vuoto c'e' sotto? oltre FALL_POSE_MIN, posa di caduta
+      if (!landed && !s.fallPose && s.vy < -1) {
+        const below = supportHeight(ctx.world, ctx.rapier, ctx.pos.x, ctx.pos.z, s.feetY + 0.1, ctx.baseY(ctx.pos.x, ctx.pos.z));
+        if (s.feetY - below > FALL_POSE_MIN) {
+          s.fallPose = true;
+          s.started = true;
+          ctx.play(TRAV_CLIPS.fall, 0.3, true, 0.45);
+        }
+      }
+      if (landed) {
         const impact = -s.vy;
-        s.feetY = sup;
+        const fallH = s.apexY - s.feetY;
+        const hSpeed = Math.hypot(s.vel.x, s.vel.z);
         s.vy = 0;
         s.lastX = ctx.pos.x;
         s.lastZ = ctx.pos.z;
-        if (impact > HARD_LANDING_V) {
+        if (fallH >= BIG_FALL) {
+          if (hSpeed > ROLL_MIN_SPEED) {
+            // arrivando di corsa: capriola in avanti che scarica la caduta
+            enter(s, 'roll');
+            s.lockLeft = 1.0;
+            ctx.setRotation(facing(s.vel.x, s.vel.z));
+            ctx.play(TRAV_CLIPS.roll, 0.08, false, 1.5, 0.05);
+          } else {
+            // da fermi: atterraggio a tre punti (mano a terra), poi su
+            enter(s, 'bigLand');
+            s.lockLeft = 1.15;
+            s.upPlayed = false;
+            s.vel.set(0, 0, 0);
+            ctx.play(TRAV_CLIPS.bigLand, 0.06, false, 1.0, 0.46);
+          }
+          return true;
+        }
+        if (impact > HARD_LANDING_V || fallH >= HARD_FALL) {
           enter(s, 'land');
           s.next = 'land';
           s.lockLeft = 0.45;
@@ -439,7 +533,7 @@ export function stepTraversal(s: TravState, ctx: TravCtx): boolean {
 // pendii/gradini piccoli) e fa cadere quando sotto i piedi non c'e' piu'
 // niente. Da chiamare ogni frame dopo il movimento orizzontale.
 export function followGround(s: TravState, ctx: { world: World; rapier: RapierModule; pos: THREE.Vector3; baseY: (x: number, z: number) => number }) {
-  if (s.mode !== 'ground' && s.mode !== 'land') return;
+  if (s.mode !== 'ground' && s.mode !== 'land' && s.mode !== 'roll') return;
   const base = ctx.baseY(ctx.pos.x, ctx.pos.z);
   const sup = supportHeight(ctx.world, ctx.rapier, ctx.pos.x, ctx.pos.z, s.feetY + 0.45, base);
   if (sup >= s.feetY - MAX_STEP_DOWN) {

@@ -211,32 +211,38 @@ function makePbr(
   });
 }
 
+const ARENA_TEXTURES = {
+  floorMap: TEX + 'rustediron2_albedo.jpg',
+  floorNormal: TEX + 'rustediron2_normal.jpg',
+  floorRough: TEX + 'rustediron2_roughness.jpg',
+  floorMetal: TEX + 'rustediron2_metallic.jpg',
+  wallMap: TEX + 'concrete3-albedo.jpg',
+  wallNormal: TEX + 'concrete3-normal.jpg',
+  wallRough: TEX + 'concrete3-roughness.jpg',
+  wallMetal: TEX + 'concrete3-metallic.jpg',
+  spkMap: TEX + 'worn_metal4_albedo.jpg',
+  spkNormal: TEX + 'worn_metal4_normal.jpg',
+  spkRough: TEX + 'worn_metal4_roughness.jpg',
+  spkMetal: TEX + 'worn_metal4_metallic.jpg',
+  cubeMap: TEX + 'broken_down_concrete2_albedo.jpg',
+  cubeNormal: TEX + 'broken_down_concrete2_normal.jpg',
+  cubeRough: TEX + 'broken_down_concrete2_roughness.jpg',
+  cubeMetal: TEX + 'broken_down_concrete2_metallic.jpg',
+  screenMap: TEX + 'background-grey-dots.jpg',
+  screenNormal: TEX + 'flaking-plaster_normal-ogl.jpg',
+  screenRough: TEX + 'flaking-plaster_roughness.jpg',
+  screenMetal: TEX + 'flaking-plaster_metallic.jpg',
+};
+
 const AudioArena: React.FC = () => {
   const { camera, gl } = useThree();
   const input = useInput();
 
-  const tex = useTexture({
-    floorMap: TEX + 'rustediron2_albedo.jpg',
-    floorNormal: TEX + 'rustediron2_normal.jpg',
-    floorRough: TEX + 'rustediron2_roughness.jpg',
-    floorMetal: TEX + 'rustediron2_metallic.jpg',
-    wallMap: TEX + 'concrete3-albedo.jpg',
-    wallNormal: TEX + 'concrete3-normal.jpg',
-    wallRough: TEX + 'concrete3-roughness.jpg',
-    wallMetal: TEX + 'concrete3-metallic.jpg',
-    spkMap: TEX + 'worn_metal4_albedo.jpg',
-    spkNormal: TEX + 'worn_metal4_normal.jpg',
-    spkRough: TEX + 'worn_metal4_roughness.jpg',
-    spkMetal: TEX + 'worn_metal4_metallic.jpg',
-    cubeMap: TEX + 'broken_down_concrete2_albedo.jpg',
-    cubeNormal: TEX + 'broken_down_concrete2_normal.jpg',
-    cubeRough: TEX + 'broken_down_concrete2_roughness.jpg',
-    cubeMetal: TEX + 'broken_down_concrete2_metallic.jpg',
-    screenMap: TEX + 'background-grey-dots.jpg',
-    screenNormal: TEX + 'flaking-plaster_normal-ogl.jpg',
-    screenRough: TEX + 'flaking-plaster_roughness.jpg',
-    screenMetal: TEX + 'flaking-plaster_metallic.jpg',
-  }) as unknown as Record<string, THREE.Texture>;
+  // oggetto COSTANTE (modulo): con un oggetto letterale nuovo a ogni render
+  // useTexture restituisce una mappa nuova -> `mats` (useMemo su tex) veniva
+  // ricreato -> 20 materiali nuovi da compilare a OGNI tasto premuto
+  // (misurato: ~300 ms di blocco alla pressione e al rilascio di ogni tasto)
+  const tex = useTexture(ARENA_TEXTURES) as unknown as Record<string, THREE.Texture>;
 
   const mats = useMemo(() => {
     const an = Math.min(8, gl.capabilities.getMaxAnisotropy());

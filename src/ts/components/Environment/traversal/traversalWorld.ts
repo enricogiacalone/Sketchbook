@@ -22,6 +22,11 @@ export const CLIMBABLE_GROUPS = interactionGroups(
   [CollisionGroups.Default, CollisionGroups.Characters, CollisionGroups.Climbable],
   ALL
 );
+// Rampa delle scale: solo appoggio (Climbable) e mondo (Default: proiettili,
+// ragdoll a terra) -- NON Characters, se no le capsule del corpo la
+// prenderebbero di fronte come un muro. Ci si sale come nei palazzi del
+// playground: la quota dei piedi segue la rampa (supportHeight).
+export const STAIR_RAMP_GROUPS = interactionGroups([CollisionGroups.Default, CollisionGroups.Climbable], ALL);
 // gruppi della QUERY: trova solo i collider Climbable
 const QUERY_GROUPS = interactionGroups([CollisionGroups.Characters], [CollisionGroups.Climbable]);
 
@@ -91,7 +96,10 @@ export function supportHeight(world: World, rapier: RapierModule, x: number, z: 
   const pts = [[0, 0], [R, 0], [-R, 0], [0, R], [0, -R]];
   for (const [ox, oz] of pts) {
     const h = ray(world, rapier, x + ox, fromY, z + oz, 0, -1, 0, len, true);
-    if (h && h.ny > 0.7) best = Math.max(best, fromY - h.toi);
+    // centro: anche le rampe (scale, fino a ~60 gradi); raggi laterali solo
+    // sulle cime piatte (su una rampa alzerebbero i piedi di quello che la
+    // rampa sale in 15 cm)
+    if (h && h.ny > (ox === 0 && oz === 0 ? 0.45 : 0.9)) best = Math.max(best, fromY - h.toi);
   }
   return best;
 }
