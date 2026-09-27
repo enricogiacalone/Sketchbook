@@ -32,6 +32,7 @@ export interface ArenaSceneToggles {
   floor: boolean; // pavimento della sala (lastra + collider)
   speakers: boolean; // le due casse audio (AudioArena.tsx)
   course: boolean; // percorso parkour: blocchi, bordi, scala (ParkourCourse.tsx)
+  car: boolean; // l'auto guidabile dell'arena (Car.tsx)
 }
 
 interface GameState {
@@ -398,7 +399,7 @@ export const useStore = create<GameState>((set) => ({
   pistolHitKill: false,
   pistolHitHead: false,
   debugOrthoCamera: false,
-  arenaScene: { obstacles: true, walls: true, floor: true, speakers: true, course: true },
+  arenaScene: { obstacles: true, walls: true, floor: true, speakers: true, course: true, car: true },
   debugOrthoCameraAngleDeg: 0,
   ragdollBench: { ...DEFAULT_RAGDOLL_BENCH },
   showGameplayHud: false,

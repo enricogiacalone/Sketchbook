@@ -1,6 +1,6 @@
 import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { RigidBody, CuboidCollider, RapierRigidBody, useRapier, useBeforePhysicsStep } from '@react-three/rapier';
+import { RigidBody, CuboidCollider, RapierRigidBody, useRapier, useBeforePhysicsStep, interactionGroups } from '@react-three/rapier';
 import { useGLTF, useAnimations, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
@@ -8,6 +8,7 @@ import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
+import { vehicleBodyHandles } from './vehicleRegistry';
 import { simDebug } from '../../debug/simDebug';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { getRoadOffset } from '../Environment/Road';
@@ -29,6 +30,18 @@ interface CarProps {
   // afterwards so this doesn't constrain it in any way once physics takes
   // over.
   rotation?: [number, number, number];
+  // "inserisci una macchina nell'arena.. insegnare al personaggio ad
+  // entrarci": car.glb e' a misura dell'omino boxman del playground (lunga
+  // 2.5 m, tetto a 1.2 m); il soldato del duello e' alto 1.8 m. Scala
+  // TUTTA l'auto -- modello, scocca, ruote, sospensioni, fari, sedili --
+  // tenendo la stessa massa (densita' / scala^3), cosi' guida come prima.
+  scale?: number;
+  // Massa vera (kg). car.glb pesa 2.1 kg (densita' 1 sui suoi due box): con
+  // i ragdoll a terra da 75 kg un'auto "di carta" si fermava contro un
+  // corpo come contro un muro. Con la massa si scalano allo stesso modo
+  // motore e freni (la sospensione di Rapier e' gia' proporzionale alla
+  // massa), cosi' la guida resta identica. Assente = com'era.
+  massKg?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,6 +162,16 @@ const CHASSIS_SHAPES = [
   { fullDimensions: [1.2233487367630005, 0.4973112344741821, 2.420389175415039] as [number, number, number], position: [0, 0.09126596, 0.03799713] as [number, number, number] },
   { fullDimensions: [1.0837020874023438, 0.5600574016571045, 1.071435809135437] as [number, number, number], position: [0, 0.6199502944946289, -0.2552129924297333] as [number, number, number] },
 ];
+// Raggi delle ruote: solo il "terreno" (chi appartiene a Default o ai
+// trimesh: strade, terreno, pavimenti, muri, altri veicoli) -- non i
+// personaggi (Characters: capsule dei combattenti, sfera del giocatore) ne'
+// i pezzi dei ragdoll. Prima le ruote ci salivano sopra: un'auto contro una
+// persona in piedi si fermava di colpo come contro un gradino.
+const WHEEL_RAY_GROUPS = interactionGroups([CollisionGroups.Default], [CollisionGroups.Default, CollisionGroups.TrimeshColliders]);
+
+// massa "di fabbrica" (densita' 1): volume dei due box
+const CHASSIS_VOLUMES = CHASSIS_SHAPES.map((s) => s.fullDimensions[0] * s.fullDimensions[1] * s.fullDimensions[2]);
+const CHASSIS_BASE_MASS = CHASSIS_VOLUMES.reduce((a, b) => a + b, 0);
 
 // Module-level scratch objects, reused across every Car instance's useFrame/
 // useBeforePhysicsStep calls instead of allocating fresh THREE.Vector3/
@@ -220,10 +243,12 @@ const Officer: React.FC<{ seatPosition: [number, number, number]; seatQuaternion
   );
 };
 
-const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation = [0, 0, 0], patrolRoute }) => {
+const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation = [0, 0, 0], patrolRoute, scale = 1, massKg }) => {
+  const S = scale;
+  const FORCE_SCALE = massKg ? massKg / CHASSIS_BASE_MASS : 1;
   const { scene } = useGLTF('car.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
-  const { world } = useRapier();
+  const { world, rapier } = useRapier();
 
   const wheelDefs = useMemo<WheelDef[]>(() => {
     const defs: WheelDef[] = [];
@@ -460,9 +485,9 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
   const wheelConnectionPoints = useMemo(
     () => [0, 1, 2, 3].map((i) => {
       const def = wheelDefs[i] ?? FALLBACK_WHEEL;
-      return new THREE.Vector3(def.position[0], def.position[1] + 0.2, def.position[2]);
+      return new THREE.Vector3(def.position[0] * S, (def.position[1] + 0.2) * S, def.position[2] * S);
     }),
-    [wheelDefs]
+    [wheelDefs, S]
   );
 
   useEffect(() => {
@@ -479,15 +504,16 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     controller.setIndexForwardAxis = 2;
 
     for (let i = 0; i < 4; i++) {
-      controller.addWheel(wheelConnectionPoints[i], WHEEL_DIRECTION_AXIS, WHEEL_AXLE_AXIS, SUSPENSION_REST_LENGTH, WHEEL_RADIUS);
+      controller.addWheel(wheelConnectionPoints[i], WHEEL_DIRECTION_AXIS, WHEEL_AXLE_AXIS, SUSPENSION_REST_LENGTH * S, WHEEL_RADIUS * S);
       controller.setWheelSuspensionStiffness(i, SUSPENSION_STIFFNESS);
-      controller.setWheelMaxSuspensionTravel(i, MAX_SUSPENSION_TRAVEL);
+      controller.setWheelMaxSuspensionTravel(i, MAX_SUSPENSION_TRAVEL * S);
       controller.setWheelFrictionSlip(i, FRICTION_SLIP);
       controller.setWheelSuspensionRelaxation(i, DAMPING_RELAXATION);
       controller.setWheelSuspensionCompression(i, DAMPING_COMPRESSION);
     }
 
     vehicleController.current = controller;
+    vehicleBodyHandles.add(chassis.handle);
     // Populate the store immediately instead of waiting for the first
     // throttled updateEntity below, so e.g. Player.tsx's nearest-vehicle
     // search doesn't have a stale/missing entry for this car right after it
@@ -496,6 +522,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     updateEntity(id, { type: 'car', position: [t.x, t.y, t.z] });
 
     return () => {
+      vehicleBodyHandles.delete(chassis.handle);
       world.removeVehicleController(controller);
       vehicleController.current = null;
       // Drop this car's window.__sim telemetry entry on unmount (e.g.
@@ -568,7 +595,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
           // same way", not a random teleport.
           const yaw = _uprightEuler.setFromQuaternion(_chassisQuat, 'YXZ').y;
           _uprightQuat.setFromEuler(_uprightEuler.set(0, yaw, 0));
-          chassis.setTranslation({ x: flipPos.x, y: groundY + 1.2, z: flipPos.z }, true);
+          chassis.setTranslation({ x: flipPos.x, y: groundY + 1.2 * S, z: flipPos.z }, true);
           chassis.setRotation({ x: _uprightQuat.x, y: _uprightQuat.y, z: _uprightQuat.z, w: _uprightQuat.w }, true);
           chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
           chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
@@ -603,7 +630,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
         id,
         active,
         paused: isPaused,
-        enginePower: typeof extra?.engineForce === 'number' ? (extra.engineForce as number) / ENGINE_FORCE : 0,
+        enginePower: typeof extra?.engineForce === 'number' ? (extra.engineForce as number) / (ENGINE_FORCE * FORCE_SCALE) : 0,
         input: Object.fromEntries(Object.entries(input).filter(([, v]) => typeof v === 'boolean')),
         pos: [posT.x, posT.y, posT.z],
         quat: [rotT.x, rotT.y, rotT.z, rotT.w],
@@ -651,7 +678,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       steeringSpring.current.target = 0;
       gear.current = 1;
       shiftTimer.current = 0;
-      controller.updateVehicle(dt);
+      controller.updateVehicle(dt, rapier.QueryFilterFlags.EXCLUDE_SENSORS, WHEEL_RAY_GROUPS);
       if (import.meta.env.DEV) reportTelemetry(false);
       return;
     }
@@ -764,7 +791,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       shiftTimer.current = Math.max(0, shiftTimer.current - dt);
     } else if (activeBackward) {
       const powerFactor = (GEARS_MAX_SPEEDS['R'] - speed) / Math.abs(GEARS_MAX_SPEEDS['R']);
-      const force = (ENGINE_FORCE / gear.current) * Math.abs(powerFactor);
+      const force = ((ENGINE_FORCE * FORCE_SCALE) / gear.current) * Math.abs(powerFactor);
       // Sign flipped (Claude) -- see the "forward" branch below, same fix,
       // opposite direction: this was applying its force with the wrong
       // sign relative to Rapier's DynamicRayCastVehicleController
@@ -787,7 +814,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
         shiftTimer.current = TIME_TO_SHIFT;
         for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, 0);
       } else if (activeForward) {
-        const force = (ENGINE_FORCE / gear.current) * powerFactor;
+        const force = ((ENGINE_FORCE * FORCE_SCALE) / gear.current) * powerFactor;
         // Sign flipped (Claude) -- was `-force`. Rapier's vehicle
         // controller's positive wheel engine force turned out to drive
         // this chassis in its local -Z (the same direction `_forward`/
@@ -830,10 +857,10 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     for (let j = 0; j < steeringIndices.length; j++) controller.setWheelSteering(steeringIndices[j], steeringSpring.current.position);
 
     // -- Handbrake (Space), rear wheels only, matching the original.
-    const brakeForce = input.jump ? BRAKE_FORCE : 0;
+    const brakeForce = input.jump ? BRAKE_FORCE * FORCE_SCALE : 0;
     for (let j = 0; j < rwdIndices.length; j++) controller.setWheelBrake(rwdIndices[j], brakeForce);
 
-    controller.updateVehicle(dt);
+    controller.updateVehicle(dt, rapier.QueryFilterFlags.EXCLUDE_SENSORS, WHEEL_RAY_GROUPS);
 
     if (import.meta.env.DEV) {
       reportTelemetry(true, {
@@ -936,15 +963,17 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       for (let i = 0; i < 4; i++) {
         const def = wheelDefs[i];
         if (!def?.node) continue;
-        const suspLen = controller.wheelSuspensionLength(i) ?? SUSPENSION_REST_LENGTH;
+        const suspLen = controller.wheelSuspensionLength(i) ?? SUSPENSION_REST_LENGTH * S;
         const steerAngle = controller.wheelSteering(i) ?? 0;
         const spinAngle = controller.wheelRotation(i) ?? 0;
 
         const conn = wheelConnectionPoints[i];
+        // (i nodi delle ruote stanno dentro il modello scalato: posizione
+        // nel suo spazio = spazio della scocca / S)
         def.node.position.set(
-          conn.x + WHEEL_DIRECTION_AXIS.x * suspLen,
-          conn.y + WHEEL_DIRECTION_AXIS.y * suspLen,
-          conn.z + WHEEL_DIRECTION_AXIS.z * suspLen
+          (conn.x + WHEEL_DIRECTION_AXIS.x * suspLen) / S,
+          (conn.y + WHEEL_DIRECTION_AXIS.y * suspLen) / S,
+          (conn.z + WHEEL_DIRECTION_AXIS.z * suspLen) / S
         );
 
         _steerQuat.setFromAxisAngle(WHEEL_UP_AXIS, steerAngle);
@@ -980,13 +1009,14 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       {CHASSIS_SHAPES.map((shape, i) => (
         <CuboidCollider
           key={i}
-          args={[shape.fullDimensions[0] / 2, shape.fullDimensions[1] / 2, shape.fullDimensions[2] / 2]}
-          position={shape.position}
+          args={[(shape.fullDimensions[0] / 2) * S, (shape.fullDimensions[1] / 2) * S, (shape.fullDimensions[2] / 2) * S]}
+          position={[shape.position[0] * S, shape.position[1] * S, shape.position[2] * S]}
           friction={0.3}
           restitution={0}
+          {...(massKg ? { mass: (massKg * CHASSIS_VOLUMES[i]) / CHASSIS_BASE_MASS } : { density: 1 / (S * S * S) })}
         />
       ))}
-      <primitive object={clonedScene} />
+      <primitive object={clonedScene} scale={S} />
 
       {/* Headlights -- conditionally mounted (see the big comment above):
           only exist in the scene graph at all while `headlightsOn`, so a
@@ -995,7 +1025,7 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
         <>
           <spotLight
             ref={leftHeadlightRef}
-            position={[HEADLIGHT_X, HEADLIGHT_Y, HEADLIGHT_Z]}
+            position={[HEADLIGHT_X * S, HEADLIGHT_Y * S, HEADLIGHT_Z * S]}
             angle={0.45}
             penumbra={0.5}
             distance={26}
@@ -1003,15 +1033,15 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
             intensity={HEADLIGHT_INTENSITY}
             color="#fff4d6"
           />
-          <object3D ref={leftHeadlightTargetRef} position={[HEADLIGHT_X, HEADLIGHT_Y - 1, HEADLIGHT_Z + 20]} />
-          <mesh position={[HEADLIGHT_X, HEADLIGHT_Y, HEADLIGHT_Z]}>
+          <object3D ref={leftHeadlightTargetRef} position={[HEADLIGHT_X * S, HEADLIGHT_Y * S - 1, HEADLIGHT_Z * S + 20]} />
+          <mesh position={[HEADLIGHT_X * S, HEADLIGHT_Y * S, HEADLIGHT_Z * S]}>
             <sphereGeometry args={[0.06, 12, 12]} />
             <meshStandardMaterial color="#fffbe6" emissive="#fff4d6" emissiveIntensity={HEADLIGHT_BULB_EMISSIVE} toneMapped={false} />
           </mesh>
 
           <spotLight
             ref={rightHeadlightRef}
-            position={[-HEADLIGHT_X, HEADLIGHT_Y, HEADLIGHT_Z]}
+            position={[-HEADLIGHT_X * S, HEADLIGHT_Y * S, HEADLIGHT_Z * S]}
             angle={0.45}
             penumbra={0.5}
             distance={26}
@@ -1019,8 +1049,8 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
             intensity={HEADLIGHT_INTENSITY}
             color="#fff4d6"
           />
-          <object3D ref={rightHeadlightTargetRef} position={[-HEADLIGHT_X, HEADLIGHT_Y - 1, HEADLIGHT_Z + 20]} />
-          <mesh position={[-HEADLIGHT_X, HEADLIGHT_Y, HEADLIGHT_Z]}>
+          <object3D ref={rightHeadlightTargetRef} position={[-HEADLIGHT_X * S, HEADLIGHT_Y * S - 1, HEADLIGHT_Z * S + 20]} />
+          <mesh position={[-HEADLIGHT_X * S, HEADLIGHT_Y * S, HEADLIGHT_Z * S]}>
             <sphereGeometry args={[0.06, 12, 12]} />
             <meshStandardMaterial color="#fffbe6" emissive="#fff4d6" emissiveIntensity={HEADLIGHT_BULB_EMISSIVE} toneMapped={false} />
           </mesh>

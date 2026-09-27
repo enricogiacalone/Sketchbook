@@ -214,6 +214,8 @@ const CombatArenaGUI: React.FC = () => {
       .onChange((v: boolean) => useStore.getState().setArenaScene({ speakers: v }));
     sceneFolder.add(sceneState, 'course').name('Percorso parkour')
       .onChange((v: boolean) => useStore.getState().setArenaScene({ course: v }));
+    sceneFolder.add(sceneState, 'car').name('Auto')
+      .onChange((v: boolean) => useStore.getState().setArenaScene({ car: v }));
     sceneFolder.close();
 
     // Presa della pistola nella mano destra (vedi usePistolModel.ts):

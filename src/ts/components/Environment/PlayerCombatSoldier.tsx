@@ -148,6 +148,28 @@ const _bodyFwd = new THREE.Vector3();
 const _bodyRight = new THREE.Vector3();
 const _camPos = new THREE.Vector3();
 const _chest = new THREE.Vector3();
+// --- auto (vedi il blocco "Auto" in useFrame) ---
+type VehMode = 'none' | 'toDoor' | 'opening' | 'entering' | 'driving' | 'exiting';
+// Driving (clip): bacino 0.54 m sopra la radice e 0.31 m dietro. seat_1 e'
+// la superficie del sedile: radice = sedile - 0.44 m (sotto il bacino di
+// ~10 cm c'e' il sedere) + 0.31 m in avanti
+const CAR_SEAT_FWD = 0.31;
+const CAR_SEAT_DOWN = 0.44;
+const CAR_ENTER_RANGE = 2.5;
+const CAR_OPEN_S = 0.8;
+const CAR_ENTER_S = 1.2;
+const CAR_EXIT_S = 1.1;
+const CAR_EXIT_MAX_SPEED = 2.5;
+const _carQuat = new THREE.Quaternion();
+const _carQ2 = new THREE.Quaternion();
+const _carQ3 = new THREE.Quaternion();
+const _carFwd = new THREE.Vector3();
+const _carUp = new THREE.Vector3();
+const _carTmp = new THREE.Vector3();
+const _carTmp2 = new THREE.Vector3();
+const _carEuler = new THREE.Euler();
+const _yawPi = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+
 const _tFwd = new THREE.Vector3();
 const _tRight = new THREE.Vector3();
 const _tMove = new THREE.Vector3();
@@ -267,6 +289,9 @@ interface PlayerCombatSoldierProps {
   // IS the bag" and push it for real instead of just stopping. Same
   // "not there yet" null handling as bagHurtboxHandle.
   bagSolidHandle?: number | null;
+  // auto guidabili dell'arena (id del RigidBody di Car.tsx): F vicino alla
+  // portiera del guidatore -> ci si sale e si guida
+  vehicleIds?: string[];
 }
 
 // The player-input-driven half of the 1v1 duel -- "siamo io che controllo
@@ -289,7 +314,7 @@ interface PlayerCombatSoldierProps {
 // applied via useRagdoll's applySpineLean), independent of which way the
 // legs are currently facing -- so punches can be aimed in 2D without
 // spinning the whole body around to do it.
-const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponents, entityName, globalSpeed, bagHurtboxHandle, bagRef, bagSolidHandle }) => {
+const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponents, entityName, globalSpeed, bagHurtboxHandle, bagRef, bagSolidHandle, vehicleIds }) => {
   const groupRef = useRef<THREE.Group>(null);
   // Points at the SkeletonUtils clone (set below) so useRagdoll can walk
   // its bone hierarchy -- see CombatSoldier.tsx for why this is a ref
@@ -311,7 +336,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   // one player -- no perf reason to ever skip this here.
   const ragdoll = useRagdoll(modelRootRef, data.id);
   const input = useInput();
-  const { camera } = useThree();
+  const { camera, scene: threeScene } = useThree();
   const { world, rapier } = useRapier();
   // Pistola (vedi weapons/): modello agganciato alla mano destra e stato
   // dell'arma. Refs, non stato React: tutto vive nel loop di useFrame.
@@ -340,6 +365,21 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     )
   );
   const traving = () => isTraversing(travRef.current);
+  // salire in auto / guidare / scendere (vedi il blocco "Auto" in useFrame)
+  const vehRef = useRef<{
+    mode: VehMode;
+    carId: string | null;
+    t: number;
+    from: THREE.Vector3;
+    fromQuat: THREE.Quaternion;
+    // posizione dell'auto al frame prima (velocita' per poter scendere)
+    carPrev: THREE.Vector3;
+    carSpeed: number;
+  }>({ mode: 'none', carId: null, t: 0, from: new THREE.Vector3(), fromQuat: new THREE.Quaternion(), carPrev: new THREE.Vector3(), carSpeed: 0 });
+  // seduti dentro l'auto (o mentre si entra/esce): niente ragdoll attivo --
+  // il corpo segue il sedile, la fisica del corpo dentro l'abitacolo in
+  // movimento non avrebbe senso
+  const inCarBody = () => vehRef.current.mode === 'entering' || vehRef.current.mode === 'driving' || vehRef.current.mode === 'exiting';
   const deadForRef = useRef(0);
   const maxHpRef = useRef(data.hp);
   const isDown = () => kdRef.current.active || data.state === 'Si rialza';
@@ -1227,7 +1267,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // lo stesso pattern che CombatSoldier.tsx usa per l'IA.
     ragdoll.update(
       delta,
-      useStore.getState().euphoriaRagdollEnabled,
+      useStore.getState().euphoriaRagdollEnabled && !inCarBody(),
       data.state === 'In guardia' || data.state === 'Riposo',
       useStore.getState().ragdollPassive
     );
@@ -1302,6 +1342,185 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         if (g < w * 0.98) m.blocked++;
       }
     };
+
+    // --- Auto: "dobbiamo insegnare al personaggio ad entrarci e guidarla".
+    // F vicino alla portiera del guidatore: va alla portiera, la apre, si
+    // siede (Sitting_Enter) e prende il volante (Driving, controllo
+    // all'auto); F guidando (piano): scende dalla stessa parte (Sitting_Exit).
+    // Posizioni dai nodi del modello dell'auto (seat_1 / entrance_1 /
+    // door_1), come fa il personaggio del playground (Player.tsx).
+    {
+      const vs = vehRef.current;
+      const st = useStore.getState();
+      const dtV = delta * globalSpeed;
+      const carParts = (id: string | null) => {
+        if (!id) return null;
+        const root = threeScene.getObjectByName(id);
+        const seat = root?.getObjectByName('seat_1');
+        const entrance = root?.getObjectByName('entrance_1');
+        if (!root || !seat || !entrance) return null;
+        return { root, seat, entrance };
+      };
+      // radice del personaggio seduto al posto di guida + orientamento del gruppo
+      const seatPose = (parts: NonNullable<ReturnType<typeof carParts>>, outPos: THREE.Vector3, outQuat: THREE.Quaternion) => {
+        parts.root.getWorldQuaternion(_carQuat);
+        parts.seat.getWorldPosition(outPos);
+        _carFwd.set(0, 0, 1).applyQuaternion(_carQuat);
+        _carUp.set(0, 1, 0).applyQuaternion(_carQuat);
+        outPos.addScaledVector(_carFwd, CAR_SEAT_FWD).addScaledVector(_carUp, -CAR_SEAT_DOWN);
+        // il gruppo del personaggio guarda verso il suo -Z locale (vedi la
+        // rotazione di PI del modello): auto * giro di 180 gradi
+        outQuat.copy(_carQuat).multiply(_yawPi);
+      };
+      const entrancePose = (parts: NonNullable<ReturnType<typeof carParts>>, outPos: THREE.Vector3, outQuat: THREE.Quaternion) => {
+        parts.root.getWorldQuaternion(_carQuat);
+        parts.entrance.getWorldPosition(outPos);
+        outPos.y = groundBase(outPos.x, outPos.z);
+        // in piedi alla portiera, rivolto verso l'auto (verso il sedile)
+        parts.seat.getWorldPosition(_carTmp);
+        const fx = _carTmp.x - outPos.x, fz = _carTmp.z - outPos.z;
+        outQuat.setFromAxisAngle(_worldUp, Math.atan2(-fx, -fz));
+      };
+      const setGroupPose = (pos: THREE.Vector3, quat: THREE.Quaternion) => {
+        groupRef.current!.position.copy(pos);
+        groupRef.current!.quaternion.copy(quat);
+        data.position.x = pos.x;
+        data.position.z = pos.z;
+        data.rotation = _carEuler.setFromQuaternion(quat, 'YXZ').y;
+      };
+
+      if (vs.mode === 'none') {
+        // F a piedi, fermi e liberi: auto vicina?
+        const fPressed = input.consumeJustPressed('enter');
+        if (
+          fPressed &&
+          vehicleIds?.length &&
+          !data.isDead &&
+          !kdRef.current.active &&
+          !traving() &&
+          data.attackLock <= 0
+        ) {
+          for (const id of vehicleIds) {
+            const parts = carParts(id);
+            if (!parts) continue;
+            parts.entrance.getWorldPosition(_carTmp);
+            if (Math.hypot(_carTmp.x - data.position.x, _carTmp.z - data.position.z) < CAR_ENTER_RANGE) {
+              vs.mode = 'toDoor';
+              vs.carId = id;
+              vs.t = 0;
+              data.state = "Va all'auto";
+              break;
+            }
+          }
+        }
+      }
+
+      if (vs.mode !== 'none') {
+        const parts = carParts(vs.carId);
+        if (!parts) {
+          vs.mode = 'none';
+        } else {
+          vs.t += dtV;
+          if (vs.mode === 'toDoor') {
+            // cammina fino alla portiera (ultimi 2.5 m: niente giro attorno all'auto)
+            entrancePose(parts, _carTmp2, _carQ2);
+            const dx = _carTmp2.x - data.position.x, dz = _carTmp2.z - data.position.z;
+            const d = Math.hypot(dx, dz);
+            if (d < 0.06 || vs.t > 4) {
+              vs.mode = 'opening';
+              vs.t = 0;
+              transitionToAnimation('Interact', 0.2, false, 1.3, 0.35);
+            } else {
+              const step = Math.min(d, LT.walkSpeed * dtV);
+              data.position.x += (dx / d) * step;
+              data.position.z += (dz / d) * step;
+              let a = Math.atan2(-dx, -dz) - data.rotation;
+              a = Math.atan2(Math.sin(a), Math.cos(a));
+              data.rotation += a * Math.min(1, 10 * dtV);
+              transitionToAnimation(animCatalog.walk, 0.15, true, timeScaleFor(animCatalog.walk, LT.walkSpeed));
+              applyTransform();
+            }
+            if (vs.mode === 'toDoor') return;
+          }
+          if (vs.mode === 'opening') {
+            // si gira verso l'auto e tira la maniglia; la portiera si apre a 0.3 s
+            entrancePose(parts, _carTmp2, _carQ2);
+            _carQ3.setFromAxisAngle(_worldUp, data.rotation).slerp(_carQ2, Math.min(1, 8 * dtV));
+            data.rotation = _carEuler.setFromQuaternion(_carQ3, 'YXZ').y;
+            data.position.x = _carTmp2.x;
+            data.position.z = _carTmp2.z;
+            if (vs.t > 0.3 && !st.isVehicleTransitioning) st.setIsVehicleTransitioning(true, vs.carId, 'door_1');
+            applyTransform();
+            if (vs.t >= CAR_OPEN_S) {
+              vs.mode = 'entering';
+              vs.t = 0;
+              vs.from.set(data.position.x, travRef.current.feetY, data.position.z);
+              vs.fromQuat.setFromAxisAngle(_worldUp, data.rotation);
+              transitionToAnimation('Sitting_Enter', 0.2, false, 1.62 / CAR_ENTER_S);
+            }
+            return;
+          }
+          if (vs.mode === 'entering' || vs.mode === 'exiting') {
+            const dur = vs.mode === 'entering' ? CAR_ENTER_S : CAR_EXIT_S;
+            const f = Math.min(1, vs.t / dur);
+            const e = -(Math.cos(Math.PI * f) - 1) / 2; // easeInOutSine, come il playground
+            if (vs.mode === 'entering') seatPose(parts, _carTmp2, _carQ2);
+            else entrancePose(parts, _carTmp2, _carQ2);
+            _carTmp.lerpVectors(vs.from, _carTmp2, e);
+            _carQ3.slerpQuaternions(vs.fromQuat, _carQ2, e);
+            setGroupPose(_carTmp, _carQ3);
+            if (f >= 1) {
+              if (vs.mode === 'entering') {
+                vs.mode = 'driving';
+                st.setIsVehicleTransitioning(false);
+                st.setCurrentControllable('car', vs.carId, 'driver', 'seat_1');
+                transitionToAnimation('Driving', 0.2, true);
+                data.state = 'Guida';
+              } else {
+                vs.mode = 'none';
+                st.setIsVehicleTransitioning(false);
+                st.setCurrentControllable('combatSoldier', entityName);
+                groupRef.current!.quaternion.setFromAxisAngle(_worldUp, data.rotation);
+                const tr = travRef.current;
+                tr.mode = 'ground';
+                tr.feetY = _carTmp2.y;
+                tr.vy = 0;
+                tr.lastX = data.position.x;
+                tr.lastZ = data.position.z;
+                data.state = idleState();
+                transitionToAnimation(idleName(), 0.25, true);
+                vs.carId = null;
+              }
+            }
+            return;
+          }
+          if (vs.mode === 'driving') {
+            seatPose(parts, _carTmp2, _carQ2);
+            setGroupPose(_carTmp2, _carQ2);
+            transitionToAnimation('Driving', 0.2, true);
+            parts.root.getWorldPosition(_carTmp);
+            if (dtV > 1e-4 && vs.t > dtV * 1.5) {
+              const sp = Math.hypot(_carTmp.x - vs.carPrev.x, _carTmp.z - vs.carPrev.z) / dtV;
+              vs.carSpeed += (sp - vs.carSpeed) * Math.min(1, 10 * dtV);
+            }
+            vs.carPrev.copy(_carTmp);
+            // F: scende (solo a bassa velocita')
+            if (input.consumeJustPressed('enter')) {
+              if (vs.carSpeed < CAR_EXIT_MAX_SPEED) {
+                vs.mode = 'exiting';
+                vs.t = 0;
+                vs.from.copy(_carTmp2);
+                vs.fromQuat.copy(_carQ2);
+                st.setIsVehicleTransitioning(true, vs.carId, 'door_1');
+                transitionToAnimation('Sitting_Exit', 0.2, false, 1.29 / CAR_EXIT_S);
+                data.state = "Scende dall'auto";
+              }
+            }
+            return;
+          }
+        }
+      }
+    }
 
     // "punto 1: ragdoll passivo alla morte" -- identical treatment to
     // CombatSoldier.tsx's own dead branch: once dead, physics drives the
@@ -1380,6 +1599,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       if (obstacleHitCooldownRef.current > 0) obstacleHitCooldownRef.current -= dtO;
       if (ob.hitSpeed >= OBSTACLE_KNOCKDOWN_SPEED && data.state !== 'Si rialza') {
         startKnockdown(ob.hitVX, ob.hitVZ, Math.min(ob.hitSpeed, 8));
+        // finito il frame qui: prima proseguiva e la camminata/idle sotto
+        // riscriveva stato e animazione ("Riposo" mentre si vola a terra)
+        if (kdRef.current.active) {
+          applyTransform();
+          return;
+        }
       } else if (ob.hitSpeed > OBSTACLE_HIT_MIN_SPEED) {
         // la spinta segue l'ostacolo (tetto per non volare via)
         const k = Math.min(1, OBSTACLE_KNOCK_MAX_SPEED / ob.hitSpeed);

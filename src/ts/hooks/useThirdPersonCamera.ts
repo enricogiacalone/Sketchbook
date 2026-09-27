@@ -13,6 +13,7 @@ import { droneMouseDelta, droneOrientation, droneShake } from '../lib/droneFligh
 // frame, there's no smoothing on it (only `radius` is lerped, same as here).
 const PLAYER_RADIUS = 1.6;
 const VEHICLE_RADIUS = 3;
+const DUEL_CAR_CAM_RADIUS = 6;
 // "siamo io che controllo un combat soldier" -- the 1v1 duel's player-
 // controlled fighter (see PlayerCombatSoldier.tsx/DuelArena.tsx) is an
 // on-foot human character, same silhouette/height as 'player', so it gets
@@ -106,6 +107,9 @@ const _droneCamTargetQuat = new THREE.Quaternion();
 // side (Player.tsx bumps it on every shot).
 const _droneShakeOffset = new THREE.Vector3();
 const DRONE_SHAKE_DECAY = 0.85; // per-frame-at-60fps retention, same "settle then hold" style as Player.tsx's own DRONE_DAMPING
+
+const _carCamQ = new THREE.Quaternion();
+const _carCamF = new THREE.Vector3();
 
 export const useThirdPersonCamera = () => {
   const { camera, gl, scene } = useThree();
@@ -306,6 +310,18 @@ export const useThirdPersonCamera = () => {
         phi.current = DUEL_START_PHI;
         targetRadius.current = DUEL_START_RADIUS;
         radius.current = DUEL_START_RADIUS;
+      } else if (currentControllable === 'car' && prevControllable.current === 'combatSoldier') {
+        // "insegnare al personaggio ad entrarci e guidarla": salito in auto
+        // nel duello, la camera va DIETRO l'auto (stessa convenzione di
+        // theta del combattente: atan2(avanti) + PI)
+        targetObj.getWorldQuaternion(_carCamQ);
+        _carCamF.set(0, 0, 1).applyQuaternion(_carCamQ);
+        theta.current = THREE.MathUtils.radToDeg(Math.atan2(_carCamF.x, _carCamF.z) + Math.PI);
+        phi.current = 15;
+        // l'auto del duello e' ingrandita del 50% (DuelArena): a 3 m la
+        // camera finiva dentro il lunotto
+        targetRadius.current = DUEL_CAR_CAM_RADIUS;
+        radius.current = DUEL_CAR_CAM_RADIUS;
       }
       prevControllable.current = currentControllable;
     }

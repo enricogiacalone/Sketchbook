@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import * as THREE from "three";
 import { useRapier } from "@react-three/rapier";
 import { registerShootableCollider, unregisterShootableCollider } from "../../weapons/shootableRegistry";
+import { vehicleBodyHandles } from "../../../Vehicles/vehicleRegistry";
 import type {
   RigidBody as RapierRigidBody,
   Collider,
@@ -240,7 +241,7 @@ export function useRagdollSolidBodies(
   const prevPosesRef = useRef(new Map<number, { t: THREE.Vector3; q: THREE.Quaternion }>());
   const _pq = useRef({ q: new THREE.Quaternion(), qi: new THREE.Quaternion(), v: new THREE.Vector3(), w: new THREE.Vector3() });
   const resolveObstacleContacts = useCallback(
-    (skipHandle: number | null, dt: number): ObstacleContact => {
+    (skipHandle: number | null, dt: number, ignoreBodyHandle: number | null = null): ObstacleContact => {
       const out: ObstacleContact = { pushX: 0, pushZ: 0, hitSpeed: 0, hitVX: 0, hitVZ: 0, hitX: 0, hitY: 0, hitZ: 0, segment: null };
       if (!ensureSolidBody()) return out;
       const entries = solidBodiesRef.current;
@@ -286,6 +287,59 @@ export function useRagdollSolidBodies(
             v.set(c.point2.x - bt.x, c.point2.y - bt.y, c.point2.z - bt.z).applyQuaternion(qi);
             w.copy(v).applyQuaternion(prev.q).add(prev.t);
             const vx = (c.point2.x - w.x) / dt, vz = (c.point2.z - w.z) / dt;
+            const sp = Math.hypot(vx, vz);
+            if (sp > out.hitSpeed) {
+              out.hitSpeed = sp;
+              out.hitVX = vx;
+              out.hitVZ = vz;
+              out.hitX = c.point1.x;
+              out.hitY = c.point1.y;
+              out.hitZ = c.point1.z;
+              out.segment = name;
+            }
+          }
+        }
+      }
+      // Veicoli (Car.tsx): non sono nel gruppo Characters, si cercano a
+      // parte. Stessa uscita dalla compenetrazione (non si attraversano a
+      // piedi) e la velocita' vera del punto di contatto (corpo dinamico:
+      // linvel + angvel x r) -- un'auto che arriva abbastanza forte butta a
+      // terra (vedi OBSTACLE_KNOCKDOWN_SPEED nei combattenti).
+      if (vehicleBodyHandles.size > 0) {
+        for (const name of Object.keys(entries)) {
+          const col = entries[name].collider;
+          others.length = 0;
+          world.intersectionsWithShape(
+            col.translation(),
+            col.rotation(),
+            col.shape,
+            (other) => {
+              others.push(other);
+              return true;
+            },
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            (c: Collider) => {
+              const b = c.parent();
+              return !!b && vehicleBodyHandles.has(b.handle) && b.handle !== ignoreBodyHandle;
+            }
+          );
+          for (const other of others) {
+            const c = col.contactCollider(other, 0);
+            if (!c || c.distance >= 0) continue;
+            const px = c.normal1.x * c.distance;
+            const pz = c.normal1.z * c.distance;
+            if (Math.hypot(px, pz) > Math.hypot(out.pushX, out.pushZ)) {
+              out.pushX = px;
+              out.pushZ = pz;
+            }
+            const body = other.parent()!;
+            const lv = body.linvel(), av = body.angvel(), com = body.worldCom();
+            const rx = c.point2.x - com.x, ry = c.point2.y - com.y, rz = c.point2.z - com.z;
+            const vx = lv.x + av.y * rz - av.z * ry;
+            const vz = lv.z + av.x * ry - av.y * rx;
             const sp = Math.hypot(vx, vz);
             if (sp > out.hitSpeed) {
               out.hitSpeed = sp;

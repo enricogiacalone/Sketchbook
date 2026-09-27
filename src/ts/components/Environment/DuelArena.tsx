@@ -9,6 +9,7 @@ import EnemyHealthBar from './EnemyHealthBar';
 import PlayerCombatSoldier, { ATTACK_RANGE } from './PlayerCombatSoldier';
 import PunchingBag, { PunchingBagHandle } from './PunchingBag';
 import ParkourCourse from './ParkourCourse';
+import Car from '../Vehicles/Car';
 import DebugOrthoCamera from './DebugOrthoCamera';
 import ArenaObstacles from './ArenaObstacles';
 import { useStore } from '../../store';
@@ -27,6 +28,11 @@ import { FighterData } from './SquadArenaTypes';
 // tuned for many-FFA-fighter clusters scattered across the whole city) --
 // this is exactly two fighters, face to face, in one fixed spot.
 export const DUEL_PLAYER_ID = 'duel-player';
+// "inserisci una macchina nell'arena": l'auto di Car.tsx (quella del
+// playground) ingrandita del 50% -- a misura del soldato (vedi Car.scale)
+export const DUEL_CAR_ID = 'duel-car';
+const DUEL_CAR_SCALE = 1.5;
+const DUEL_CAR_SPAWN: [number, number, number] = [10, 1.6, 10];
 // Far from both Airport.tsx's pads (RUNWAY/HELIPORT_CENTER sit at z=-260)
 // and CombatArena's own citywide spread -- nothing else should ever be
 // standing here.
@@ -171,6 +177,7 @@ const DuelArena: React.FC = () => {
   const duelEnemyCount = useStore((state) => state.duelEnemyCount);
   const showObstacles = useStore((state) => state.arenaScene.obstacles);
   const showCourse = useStore((state) => state.arenaScene.course);
+  const showCar = useStore((state) => state.arenaScene.car);
   const [enemies, setEnemies] = useState<FighterData[]>([]);
   const enemySerialRef = useRef(0);
   useEffect(() => {
@@ -437,6 +444,7 @@ const DuelArena: React.FC = () => {
         bagHurtboxHandle={bagHurtboxHandle}
         bagSolidHandle={bagSolidHandle}
         bagRef={bagRef}
+        vehicleIds={showCar ? [DUEL_CAR_ID] : []}
       />
       {/* "crea un sacco su cui allenarmi nell'arena.. mi serve per capire
           la precisione delle collisioni" -- see PunchingBag.tsx. Static,
@@ -451,6 +459,8 @@ const DuelArena: React.FC = () => {
       {showObstacles && <ArenaObstacles />}
       {/* percorso per salto/scavalcare/aggrapparsi/scala (traversal/) */}
       {showCourse && <ParkourCourse />}
+      {/* auto guidabile: F vicino alla portiera del guidatore (lato +z qui) */}
+      {showCar && <Car id={DUEL_CAR_ID} position={DUEL_CAR_SPAWN} rotation={[0, -Math.PI / 2, 0]} scale={DUEL_CAR_SCALE} massKg={1100} />}
       {/* The AI opponent -- CombatSoldier.tsx itself is completely
           unmodified: passing the player's own FighterData inside
           allFightersData is all it takes for its existing, unmodified
