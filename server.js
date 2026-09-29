@@ -5,6 +5,7 @@ import { Server } from "socket.io";
 import dotenv from "dotenv";
 import cors from "cors";
 import sqlite3 from "sqlite3";
+import os from "os";
 
 dotenv.config();
 
@@ -18,6 +19,27 @@ const io = new Server(server, {
     origin: "*",
     methods: "*",
   },
+});
+
+function getLocalIP() {
+  if (process.env.LOCAL_IP) return process.env.LOCAL_IP;
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const net of interfaces[name]) {
+      if (net.family === "IPv4" && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  return "192.168.1.7";
+}
+
+app.get("/api/config", (req, res) => {
+  res.json({ ip: getLocalIP(), port: port });
+});
+
+app.get("/controller", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "public", "controller.html"));
 });
 
 // Database setup
@@ -169,6 +191,10 @@ updateNameSpace.on("connection", (socket) => {
       senderId: socket.id,
       message: data.message,
     });
+  });
+
+  socket.on("phoneControllerInput", (data) => {
+    socket.broadcast.emit("phoneControllerInput", data);
   });
 });
 

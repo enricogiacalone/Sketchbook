@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Sketchbook Phone Controller</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            background: #111;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        header {
+            text-align: center;
+            padding: 8px 12px;
+            background: rgba(0,0,0,0.9);
+            border-bottom: 1px solid #333;
+            font-size: 14px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header-left {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        #status {
+            font-size: 11px;
+            color: #888;
+            margin-top: 1px;
+        }
+        #fullscreen-btn {
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        #fullscreen-btn:active {
+            transform: scale(0.95);
+        }
+        .main-container {
+            flex: 1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 35px;
+            position: relative;
+        }
+
+        /* Control Areas (Left & Right) */
+        .left-control-area, .right-control-area {
+            width: 260px;
+            height: 260px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Joysticks */
+        .stick-zone {
+            width: 160px;
+            height: 160px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            border-radius: 50%;
+            position: relative;
+            touch-action: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .stick-handle {
+            width: 75px;
+            height: 75px;
+            background: rgba(255, 255, 255, 0.45);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            position: absolute;
+            pointer-events: none;
+            transition: transform 0.05s ease-out;
+        }
+        .label-stick {
+            position: absolute;
+            bottom: -24px;
+            font-size: 11px;
+            color: #aaa;
+            letter-spacing: 1px;
+            font-weight: bold;
+            width: 100%;
+            text-align: center;
+        }
+
+        /* Center: Pause Button Area */
+        .center-control-area {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .pause-btn {
+            width: 60px;
+            height: 60px;
+            background: #d97706;
+            border-radius: 50%;
+            border: none;
+            font-size: 26px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.4);
+            cursor: pointer;
+            outline: none;
+        }
+        .pause-btn:active, .pause-btn.pressed {
+            transform: scale(0.92);
+            filter: brightness(1.2);
+        }
+        .label-center {
+            font-size: 10px;
+            color: #aaa;
+            letter-spacing: 1px;
+            font-weight: bold;
+            margin-top: 8px;
+        }
+
+        /* Buttons (D-Pad & PlayStation Actions) */
+        .game-btn {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            border: none;
+            position: absolute;
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.4);
+            cursor: pointer;
+            outline: none;
+            z-index: 10;
+        }
+        .game-btn:active, .game-btn.pressed {
+            transform: scale(0.92);
+            filter: brightness(1.2);
+        }
+
+        /* D-Pad around Movement Joystick (Left Area) */
+        #btn-dpad-up    { top: 5px; left: 105px; background: #374151; font-size: 16px; } /* Up: Weapon Change */
+        #btn-dpad-right { top: 105px; left: 205px; background: #374151; font-size: 16px; } /* Right */
+        #btn-dpad-down  { top: 205px; left: 105px; background: #374151; font-size: 16px; } /* Down */
+        #btn-dpad-left  { top: 105px; left: 5px; background: #374151; font-size: 16px; } /* Left */
+
+        /* PlayStation Buttons around Camera Joystick (Right Area) */
+        #btn-triangle { top: 5px; left: 105px; background: #27ae60; } /* Top: Green */
+        #btn-circle   { top: 105px; left: 205px; background: #c0392b; } /* Right: Red */
+        #btn-x        { top: 205px; left: 105px; background: #2980b9; } /* Bottom: Blue */
+        #btn-square   { top: 105px; left: 5px; background: #8e44ad; } /* Left: Purple */
+
+        footer {
+            text-align: center;
+            padding: 6px;
+            background: rgba(0,0,0,0.9);
+            font-size: 10px;
+            color: #666;
+            border-top: 1px solid #222;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-left">
+            <span>SKETCHBOOK CONTROLLER</span>
+            <div id="status">Connessione in corso...</div>
+        </div>
+        <button id="fullscreen-btn">⛶ Schermo Intero</button>
+    </header>
+
+    <div class="main-container">
+        <!-- Left: Movement Stick + D-Pad (Up = Weapon Change) -->
+        <div class="left-control-area">
+            <button id="btn-dpad-up" class="game-btn">▲</button>
+            <button id="btn-dpad-right" class="game-btn">▶</button>
+            <button id="btn-dpad-down" class="game-btn">▼</button>
+            <button id="btn-dpad-left" class="game-btn">◀</button>
+
+            <div id="joystick-zone" class="stick-zone">
+                <div id="joystick-handle" class="stick-handle"></div>
+                <div class="label-stick">MOVIMENTO</div>
+            </div>
+        </div>
+
+        <!-- Center: Pause Button -->
+        <div class="center-control-area">
+            <button id="btn-pause" class="pause-btn">⏸</button>
+            <div class="label-center">PAUSA</div>
+        </div>
+
+        <!-- Right: Camera Orbit Stick with PlayStation Buttons Surrounding It -->
+        <div class="right-control-area">
+            <button id="btn-triangle" class="game-btn">△</button>
+            <button id="btn-circle" class="game-btn">◯</button>
+            <button id="btn-x" class="game-btn">✕</button>
+            <button id="btn-square" class="game-btn">□</button>
+
+            <div id="orbit-zone" class="stick-zone">
+                <div id="orbit-handle" class="stick-handle"></div>
+                <div class="label-stick">CAMERA</div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        Sinistra: Movimento & D-Pad (↑ Cambio Arma) • Centro: Pausa • Destra: Camera & Azioni
+    </footer>
+
+    <!-- Socket.io client -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Fullscreen toggle
+        const fsBtn = document.getElementById('fullscreen-btn');
+        fsBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log("Errore fullscreen:", err);
+                });
+                fsBtn.textContent = "✕ Esci Schermo Intero";
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+                fsBtn.textContent = "⛶ Schermo Intero";
+            }
+        });
+
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+                fsBtn.textContent = "⛶ Schermo Intero";
+            }
+        });
+
+        const socket = io(`${window.location.protocol}//${window.location.host}/update`);
+        const statusEl = document.getElementById('status');
+
+        socket.on('connect', () => {
+            statusEl.textContent = 'Connesso al gioco!';
+            statusEl.style.color = '#2ecc71';
+            socket.emit('joinGame', 'PhoneController');
+        });
+
+        socket.on('disconnect', () => {
+            statusEl.textContent = 'Disconnesso. Riconnessione...';
+            statusEl.style.color = '#e74c3c';
+        });
+
+        // Controller state
+        const state = {
+            axes: [0, 0],       // Left stick: movement
+            axesRight: [0, 0],  // Right stick: camera orbit
+            buttons: {
+                x: false,
+                circle: false,
+                square: false,
+                triangle: false,
+                pause: false,
+                dpadUp: false,
+                dpadDown: false,
+                dpadLeft: false,
+                dpadRight: false
+            }
+        };
+
+        function sendState() {
+            socket.emit('phoneControllerInput', state);
+        }
+
+        // Generic joystick setup helper
+        function setupJoystick(zoneId, handleId, axisTargetKey) {
+            const zone = document.getElementById(zoneId);
+            const handle = document.getElementById(handleId);
+            const maxDist = 45;
+            let touchId = null;
+            let centerX = 0;
+            let centerY = 0;
+
+            function updateCenter() {
+                const rect = zone.getBoundingClientRect();
+                centerX = rect.left + rect.width / 2;
+                centerY = rect.top + rect.height / 2;
+            }
+
+            window.addEventListener('resize', updateCenter);
+            updateCenter();
+
+            zone.addEventListener('touchstart', (e) => {
+                if (touchId !== null) return;
+                const touch = e.changedTouches[0];
+                touchId = touch.identifier;
+                updateCenter();
+                handleMove(touch.clientX, touch.clientY);
+            });
+
+            zone.addEventListener('touchmove', (e) => {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    const touch = e.changedTouches[i];
+                    if (touch.identifier === touchId) {
+                        handleMove(touch.clientX, touch.clientY);
+                    }
+                }
+            });
+
+            function endTouch(e) {
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    if (e.changedTouches[i].identifier === touchId) {
+                        touchId = null;
+                        handle.style.transform = `translate(0px, 0px)`;
+                        state[axisTargetKey] = [0, 0];
+                        sendState();
+                    }
+                }
+            }
+
+            zone.addEventListener('touchend', endTouch);
+            zone.addEventListener('touchcancel', endTouch);
+
+            // Mouse support for testing
+            let mouseDown = false;
+            zone.addEventListener('mousedown', (e) => {
+                mouseDown = true;
+                updateCenter();
+                handleMove(e.clientX, e.clientY);
+            });
+            window.addEventListener('mousemove', (e) => {
+                if (!mouseDown) return;
+                handleMove(e.clientX, e.clientY);
+            });
+            window.addEventListener('mouseup', () => {
+                if (!mouseDown) return;
+                mouseDown = false;
+                handle.style.transform = `translate(0px, 0px)`;
+                state[axisTargetKey] = [0, 0];
+                sendState();
+            });
+
+            function handleMove(clientX, clientY) {
+                let dx = clientX - centerX;
+                let dy = clientY - centerY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist > maxDist) {
+                    dx = (dx / dist) * maxDist;
+                    dy = (dy / dist) * maxDist;
+                }
+
+                handle.style.transform = `translate(${dx}px, ${dy}px)`;
+
+                state[axisTargetKey] = [
+                    dx / maxDist,
+                    dy / maxDist
+                ];
+                sendState();
+            }
+        }
+
+        setupJoystick('joystick-zone', 'joystick-handle', 'axes');
+        setupJoystick('orbit-zone', 'orbit-handle', 'axesRight');
+
+        // Button events
+        const buttonsMap = [
+            { id: 'btn-x', key: 'x' },
+            { id: 'btn-circle', key: 'circle' },
+            { id: 'btn-square', key: 'square' },
+            { id: 'btn-triangle', key: 'triangle' },
+            { id: 'btn-pause', key: 'pause' },
+            { id: 'btn-dpad-up', key: 'dpadUp' },
+            { id: 'btn-dpad-down', key: 'dpadDown' },
+            { id: 'btn-dpad-left', key: 'dpadLeft' },
+            { id: 'btn-dpad-right', key: 'dpadRight' }
+        ];
+
+        buttonsMap.forEach(({ id, key }) => {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+
+            const pressOn = (e) => {
+                e.preventDefault();
+                btn.classList.add('pressed');
+                state.buttons[key] = true;
+                sendState();
+            };
+
+            const pressOff = (e) => {
+                e.preventDefault();
+                btn.classList.remove('pressed');
+                state.buttons[key] = false;
+                sendState();
+            };
+
+            btn.addEventListener('touchstart', pressOn);
+            btn.addEventListener('touchend', pressOff);
+            btn.addEventListener('mousedown', pressOn);
+            btn.addEventListener('mouseup', pressOff);
+            btn.addEventListener('mouseleave', pressOff);
+        });
+
+        // Send state periodically
+        setInterval(sendState, 100);
+    </script>
+</body>
+</html>

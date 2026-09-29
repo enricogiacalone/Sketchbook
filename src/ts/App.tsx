@@ -142,6 +142,18 @@ const App: React.FC = () => {
   // lets a test session opt out from the console (`window.__disableAutoPause
   // = true`) without touching the real behavior real players get.
   useEffect(() => {
+    import('socket.io-client').then(({ io }) => {
+      const socket = io(`${window.location.protocol}//${window.location.hostname}:3000/update`);
+      socket.on('phoneControllerInput', (data) => {
+        (window as any).__phoneControllerInput = data;
+      });
+      return () => {
+        socket.disconnect();
+      };
+    });
+  }, []);
+
+  useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden && !(window as any).__disableAutoPause)
         setPaused(true);

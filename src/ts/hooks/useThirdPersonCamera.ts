@@ -249,25 +249,33 @@ export const useThirdPersonCamera = () => {
     // Right-stick look (see CAMERA_STICK_* comment above) -- runs
     // regardless of what's currently controlled, same as mouse-look, so you
     // can still look around a vehicle you're riding in.
+    const phoneInput = (window as any).__phoneControllerInput;
+    let rx = 0;
+    let ry = 0;
+
     const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : [];
     let pad: Gamepad | null = null;
     for (let i = 0; i < pads.length; i++) {
       if (pads[i]) { pad = pads[i] as Gamepad; break; }
     }
     if (pad) {
-      const rx = pad.axes[2] ?? 0;
-      const ry = pad.axes[3] ?? 0;
-      if (Math.abs(rx) > CAMERA_STICK_DEADZONE) {
-        theta.current -= rx * CAMERA_STICK_YAW_SPEED * delta;
-        theta.current %= 360;
-      }
-      if (Math.abs(ry) > CAMERA_STICK_DEADZONE) {
-        phi.current = THREE.MathUtils.clamp(
-          phi.current + ry * CAMERA_STICK_PITCH_SPEED * delta,
-          -85,
-          85
-        );
-      }
+      rx = pad.axes[2] ?? 0;
+      ry = pad.axes[3] ?? 0;
+    } else if (phoneInput && phoneInput.axesRight) {
+      rx = phoneInput.axesRight[0] ?? 0;
+      ry = phoneInput.axesRight[1] ?? 0;
+    }
+
+    if (Math.abs(rx) > CAMERA_STICK_DEADZONE) {
+      theta.current -= rx * CAMERA_STICK_YAW_SPEED * delta;
+      theta.current %= 360;
+    }
+    if (Math.abs(ry) > CAMERA_STICK_DEADZONE) {
+      phi.current = THREE.MathUtils.clamp(
+        phi.current + ry * CAMERA_STICK_PITCH_SPEED * delta,
+        -85,
+        85
+      );
     }
 
     // Both 'player' and 'combatSoldier' are on-foot human characters --

@@ -17,6 +17,23 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
   const [name, setName] = useState('Enrico');
   const [controlMethod, setControlMethod] = useState('keyboard');
   const [error, setError] = useState('');
+  const [showPhoneModal, setShowPhoneModal] = useState(false);
+  const [phoneUrl, setPhoneUrl] = useState('');
+
+  const handleOpenPhoneController = async () => {
+    try {
+      const res = await fetch('/api/config');
+      const data = await res.json();
+      const url = `http://${data.ip}:${data.port}/controller`;
+      setPhoneUrl(url);
+      setShowPhoneModal(true);
+    } catch (e) {
+      console.error("Failed to fetch config", e);
+      const url = `${window.location.protocol}//${window.location.hostname}:${window.location.port || '3000'}/controller`;
+      setPhoneUrl(url);
+      setShowPhoneModal(true);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,8 +120,42 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
           <button className="welcome-button welcome-button-fly" type="button" onClick={() => onJoin(name.trim() || 'Ricercatore', controlMethod, 'flylab')}>
             🪰 Laboratorio cervello mosca
           </button>
+
+          <button className="welcome-button" style={{ background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)', marginTop: 12 }} type="button" onClick={handleOpenPhoneController}>
+            📱 Usa Smartphone come Joystick
+          </button>
         </form>
       </div>
+
+      {showPhoneModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.85)', display: 'flex', justifyContent: 'center',
+          alignItems: 'center', zIndex: 9999999
+        }}>
+          <div className="welcome-card" style={{ maxWidth: 380, textAlign: 'center' }}>
+            <h2 style={{ fontSize: 22, marginBottom: 12, color: '#a5b4fc' }}>Joystick Smartphone</h2>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 20 }}>
+              Inquadra il QR code con la fotocamera del telefono (stessa rete Wi-Fi) per usarlo come controller.
+            </p>
+            <div style={{ background: '#fff', padding: 12, borderRadius: 12, display: 'inline-block', marginBottom: 16 }}>
+              <img 
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(phoneUrl)}`} 
+                alt="QR Code Controller" 
+                style={{ width: 180, height: 180, display: 'block' }}
+              />
+            </div>
+            <div style={{ marginBottom: 20, wordBreak: 'break-all', fontSize: 12, background: 'rgba(255,255,255,0.05)', padding: 8, borderRadius: 6 }}>
+              <a href={phoneUrl} target="_blank" rel="noreferrer" style={{ color: '#818cf8', textDecoration: 'none' }}>
+                {phoneUrl}
+              </a>
+            </div>
+            <button className="welcome-button" type="button" onClick={() => setShowPhoneModal(false)}>
+              Chiudi
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -82,6 +82,14 @@ export default defineConfig({
     // once this is on (requires restarting `npm run dev`, not just HMR --
     // this is server bind config, not app code).
     host: true,
+    proxy: {
+      '/controller': 'http://localhost:3000',
+      '/api': 'http://localhost:3000',
+      '/socket.io': {
+        target: 'http://localhost:3000',
+        ws: true,
+      },
+    },
     // i pesi della mosca cambiano ogni pochi secondi durante l'addestramento:
     // non devono ricaricare la pagina
     watch: { ignored: ["**/public/fly-brain/weights-*", "**/training/**"] },

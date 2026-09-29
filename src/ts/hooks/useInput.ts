@@ -224,6 +224,50 @@ export const useInput = () => {
       }
     }
 
+    const phoneInput = (window as any).__phoneControllerInput;
+    if (phoneInput) {
+      const axisForward = phoneInput.axes[1] ?? 0;
+      const axisStrafe = phoneInput.axes[0] ?? 0;
+
+      if (
+        Math.abs(axisForward) > 0.05 ||
+        Math.abs(axisStrafe) > 0.05 ||
+        phoneInput.buttons.x ||
+        phoneInput.buttons.circle ||
+        phoneInput.buttons.square ||
+        phoneInput.buttons.triangle ||
+        phoneInput.buttons.pause ||
+        phoneInput.buttons.dpadUp ||
+        phoneInput.buttons.dpadDown ||
+        phoneInput.buttons.dpadLeft ||
+        phoneInput.buttons.dpadRight
+      ) {
+        pad = {
+          id: 'PhoneController',
+          mapping: 'standard',
+          axes: [
+            axisStrafe,
+            axisForward,
+            phoneInput.axesRight?.[0] ?? 0,
+            phoneInput.axesRight?.[1] ?? 0,
+          ],
+          buttons: [
+            { pressed: phoneInput.buttons.x, value: phoneInput.buttons.x ? 1 : 0 }, // 0: X
+            { pressed: phoneInput.buttons.circle, value: phoneInput.buttons.circle ? 1 : 0 }, // 1: Circle
+            { pressed: phoneInput.buttons.square, value: phoneInput.buttons.square ? 1 : 0 }, // 2: Square
+            { pressed: phoneInput.buttons.triangle, value: phoneInput.buttons.triangle ? 1 : 0 }, // 3: Triangle
+            {}, {}, {}, {}, {},
+            { pressed: phoneInput.buttons.pause, value: phoneInput.buttons.pause ? 1 : 0 }, // 9: Pause
+            {}, {},
+            { pressed: phoneInput.buttons.dpadUp, value: phoneInput.buttons.dpadUp ? 1 : 0 }, // 12: D-pad Up (weapon change)
+            { pressed: phoneInput.buttons.dpadDown, value: phoneInput.buttons.dpadDown ? 1 : 0 }, // 13: D-pad Down
+            { pressed: phoneInput.buttons.dpadLeft, value: phoneInput.buttons.dpadLeft ? 1 : 0 }, // 14: D-pad Left
+            { pressed: phoneInput.buttons.dpadRight, value: phoneInput.buttons.dpadRight ? 1 : 0 }, // 15: D-pad Right
+          ],
+        } as unknown as Gamepad;
+      }
+    }
+
     const g = gamepadActions.current;
 
     // Live snapshot for the on-screen calibration readout (GamepadDebug.tsx)
