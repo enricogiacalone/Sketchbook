@@ -71,8 +71,8 @@
 
         /* Control Areas (Left & Right) */
         .left-control-area, .right-control-area {
-            width: 260px;
-            height: 260px;
+            width: 300px;
+            height: 300px;
             position: relative;
             display: flex;
             align-items: center;
@@ -81,8 +81,8 @@
 
         /* Joysticks */
         .stick-zone {
-            width: 160px;
-            height: 160px;
+            width: 200px;
+            height: 200px;
             background: rgba(255, 255, 255, 0.05);
             border: 2px solid rgba(255, 255, 255, 0.25);
             border-radius: 50%;
@@ -93,8 +93,8 @@
             justify-content: center;
         }
         .stick-handle {
-            width: 75px;
-            height: 75px;
+            width: 90px;
+            height: 90px;
             background: rgba(255, 255, 255, 0.45);
             border: 2px solid #fff;
             border-radius: 50%;
@@ -171,17 +171,17 @@
             filter: brightness(1.2);
         }
 
-        /* D-Pad around Movement Joystick (Left Area) */
-        #btn-dpad-up    { top: 5px; left: 105px; background: #374151; font-size: 16px; } /* Up: Weapon Change */
-        #btn-dpad-right { top: 105px; left: 205px; background: #374151; font-size: 16px; } /* Right */
-        #btn-dpad-down  { top: 205px; left: 105px; background: #374151; font-size: 16px; } /* Down */
-        #btn-dpad-left  { top: 105px; left: 5px; background: #374151; font-size: 16px; } /* Left */
+        /* D-Pad around Movement Joystick (Left Area) - Rotated 45° & Spaced Out */
+        #btn-dpad-up    { top: 26px; left: 224px; background: #374151; font-size: 16px; } /* Up: Weapon Change */
+        #btn-dpad-right { top: 224px; left: 224px; background: #374151; font-size: 16px; } /* Right */
+        #btn-dpad-down  { top: 224px; left: 26px; background: #374151; font-size: 16px; } /* Down */
+        #btn-dpad-left  { top: 26px; left: 26px; background: #374151; font-size: 16px; } /* Left */
 
-        /* PlayStation Buttons around Camera Joystick (Right Area) */
-        #btn-triangle { top: 5px; left: 105px; background: #27ae60; } /* Top: Green */
-        #btn-circle   { top: 105px; left: 205px; background: #c0392b; } /* Right: Red */
-        #btn-x        { top: 205px; left: 105px; background: #2980b9; } /* Bottom: Blue */
-        #btn-square   { top: 105px; left: 5px; background: #8e44ad; } /* Left: Purple */
+        /* PlayStation Buttons around Camera Joystick (Right Area) - Rotated 45° & Spaced Out */
+        #btn-triangle { top: 26px; left: 224px; background: #27ae60; } /* Top: Green */
+        #btn-circle   { top: 224px; left: 224px; background: #c0392b; } /* Right: Red */
+        #btn-x        { top: 224px; left: 26px; background: #2980b9; } /* Bottom: Blue */
+        #btn-square   { top: 26px; left: 26px; background: #8e44ad; } /* Left: Purple */
 
         footer {
             text-align: center;
@@ -305,7 +305,7 @@
         function setupJoystick(zoneId, handleId, axisTargetKey) {
             const zone = document.getElementById(zoneId);
             const handle = document.getElementById(handleId);
-            const maxDist = 45;
+            const maxDist = 55;
             let touchId = null;
             let centerX = 0;
             let centerY = 0;
