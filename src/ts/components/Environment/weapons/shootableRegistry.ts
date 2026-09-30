@@ -39,3 +39,40 @@ export function registerFighterHitHandler(ownerId: string, fn: FighterHitHandler
 export function applyFighterHit(ownerId: string, segment: string, dirWorld: THREE.Vector3, speed: number, pointWorld: THREE.Vector3) {
   hitHandlers.get(ownerId)?.(segment, dirWorld, speed, pointWorld);
 }
+
+// Danno "dall'esterno" a un combattente: proiettili fisici dei nemici della
+// citta' (Bullet.tsx), colpi di un altro giocatore in rete (CityPlayer.tsx).
+// Chi possiede il combattente decide cosa farne (vita, reazione, ragdoll).
+export type FighterDamageHandler = (hit: {
+  segment: string;
+  damage: number;
+  dirWorld: THREE.Vector3;
+  speed: number;
+  pointWorld: THREE.Vector3;
+}) => void;
+const damageHandlers = new Map<string, FighterDamageHandler>();
+
+export function registerFighterDamageHandler(ownerId: string, fn: FighterDamageHandler): () => void {
+  damageHandlers.set(ownerId, fn);
+  return () => {
+    if (damageHandlers.get(ownerId) === fn) damageHandlers.delete(ownerId);
+  };
+}
+
+export function damageFighter(ownerId: string, hit: Parameters<FighterDamageHandler>[0]): boolean {
+  const fn = damageHandlers.get(ownerId);
+  if (!fn) return false;
+  fn(hit);
+  return true;
+}
+
+// Collider che i proiettili attraversano (es. il corpo solido "d'ingombro"
+// di un giocatore remoto: gli spari devono prendere i suoi segmenti dentro)
+const shotTransparent = new Set<number>();
+export function setShotTransparent(handle: number, on: boolean) {
+  if (on) shotTransparent.add(handle);
+  else shotTransparent.delete(handle);
+}
+export function isShotTransparent(handle: number): boolean {
+  return shotTransparent.has(handle);
+}

@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { useInput } from './useInput';
-import { droneMouseDelta, droneOrientation, droneShake } from '../lib/droneFlight';
+import { droneMouseDelta, droneShake, droneCamPose } from '../lib/droneFlight';
 
 // Ports the original's CameraOperator.ts "normal" (non-free-fly) orbit mode:
 // spherical coordinates in degrees around a target, phi clamped to [-85, 85],
@@ -81,25 +81,6 @@ const CAMERA_STICK_PITCH_SPEED = 110;
 // again just jumps targetRadius to the next fixed value.
 const ZOOM_LEVELS = [1.6, 4, 8, 14];
 
-// Chase-cam offset while piloting the drone (see the big branch in the
-// frame loop below) -- behind and slightly above, in the DRONE'S OWN
-// local frame (so it swings around and banks WITH the drone through a
-// turn, unlike the normal player/vehicle orbit cam's fixed world-up
-// spherical coordinates, which can't represent roll at all).
-const DRONE_CAM_BACK = 6;
-const DRONE_CAM_UP = 2;
-const _droneCamOffset = new THREE.Vector3();
-const _droneCamLookQuat = new THREE.Quaternion();
-// The drone's own local +Z is "forward" (matches the thrust/offset math
-// just above, and Player.tsx's bullet-direction convention -- at yaw 0,
-// Math.sin/cos(yaw) gives (0,0,1)) -- but a three.js Camera looks down
-// its OWN local -Z by convention. Setting camera.quaternion straight to
-// droneOrientation would point the camera the wrong way down the track
-// (verified live: the drone was never in frame, camera looked dead away
-// from it) -- fixed by post-rotating 180 deg around Y so the camera's
-// own -Z lines up with the drone's +Z instead of opposing it.
-const _droneForwardFlip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
-const _droneCamTargetQuat = new THREE.Quaternion();
 // "camera shake" for the drone's gun (droneWorld: x.camera.shake.start(5)
 // while firing) -- a small random jitter added to the chase-cam position
 // on top of its normal offset, decayed back to 0 every frame it isn't
@@ -318,7 +299,7 @@ export const useThirdPersonCamera = () => {
         phi.current = DUEL_START_PHI;
         targetRadius.current = DUEL_START_RADIUS;
         radius.current = DUEL_START_RADIUS;
-      } else if (currentControllable === 'car' && prevControllable.current === 'combatSoldier') {
+      } else if (currentControllable === 'car' && (prevControllable.current === 'combatSoldier' || prevControllable.current === 'player')) {
         // "insegnare al personaggio ad entrarci e guidarla": salito in auto
         // nel duello, la camera va DIETRO l'auto (stessa convenzione di
         // theta del combattente: atan2(avanti) + PI)
@@ -351,8 +332,11 @@ export const useThirdPersonCamera = () => {
     // WITH the drone through a turn -- the normal spherical theta/phi math
     // below is anchored to world-up and has no way to represent that.
     if (useStore.getState().isDrone) {
-      _droneCamOffset.set(0, DRONE_CAM_UP, -DRONE_CAM_BACK).applyQuaternion(droneOrientation);
-      camera.position.copy(target.current).add(_droneCamOffset);
+      // "quando vola deve comportarsi come in droneWorld": la camera E' il
+      // telaio che vola (Drone.tsx lo integra come FlyControls di
+      // droneWorld e ne pubblica la posa), il drone sta davanti e sotto.
+      camera.position.copy(droneCamPose.position);
+      camera.quaternion.copy(droneCamPose.quaternion);
       // Gun-fire shake: a fresh random jitter each frame, scaled by the
       // current shake magnitude (topped up by Player.tsx on every shot,
       // decayed here every frame regardless of whether a shot landed this
@@ -367,13 +351,6 @@ export const useThirdPersonCamera = () => {
         camera.position.add(_droneShakeOffset);
       }
       droneShake.current *= Math.pow(DRONE_SHAKE_DECAY, delta * 60);
-      // Slerp rather than a hard copy so a sudden hard bank doesn't snap
-      // the view instantly -- same spirit as radius's own lerp just below.
-      // _droneForwardFlip corrects the camera-vs-drone forward-axis
-      // mismatch explained above the constant's declaration.
-      _droneCamTargetQuat.copy(droneOrientation).multiply(_droneForwardFlip);
-      _droneCamLookQuat.copy(camera.quaternion).slerp(_droneCamTargetQuat, 0.25);
-      camera.quaternion.copy(_droneCamLookQuat);
       return;
     }
 
@@ -384,7 +361,7 @@ export const useThirdPersonCamera = () => {
 
     // Spalla/mira: blend esponenziale indipendente dal framerate.
     const ws = useStore.getState();
-    const pistolOn = currentControllable === 'combatSoldier' && ws.playerWeapon === 'pistol';
+    const pistolOn = isFootController && ws.playerWeapon === 'pistol';
     const k = 1 - Math.exp(-delta * 12);
     shoulderBlend.current += ((pistolOn ? 1 : 0) - shoulderBlend.current) * k;
     aimBlend.current += ((pistolOn && ws.playerAiming ? 1 : 0) - aimBlend.current) * k;

@@ -255,6 +255,9 @@ const ATTACK_HAND_BONES = ['hand_l', 'hand_r'] as const;
 const KNIFE_PROBES = ['knife_tip', 'knife_mid'] as const;
 type AttackProbe = (typeof ATTACK_HAND_BONES)[number] | (typeof KNIFE_PROBES)[number];
 
+// altezza sopra i piedi pubblicata come posizione del giocatore (store)
+const PLAYER_INFO_Y = 0.5;
+
 interface PlayerCombatSoldierProps {
   // Owned by DuelArena.tsx, same FighterData shape CombatSoldier.tsx
   // mutates in place -- the AI opponent's own unmodified attack-resolution
@@ -291,7 +294,16 @@ interface PlayerCombatSoldierProps {
   bagSolidHandle?: number | null;
   // auto guidabili dell'arena (id del RigidBody di Car.tsx): F vicino alla
   // portiera del guidatore -> ci si sale e si guida
-  vehicleIds?: string[];
+  vehicleIds?: string[] | (() => string[]);
+  // Tipo di controllo "a piedi": 'combatSoldier' nel duello, 'player' nel
+  // playground (dove Drone.tsx, pedoni, minimappa ecc. parlano di 'player').
+  // Mentre il controllo e' altrove (drone) il manichino resta fermo in idle.
+  footControllable?: 'combatSoldier' | 'player';
+  // B: prende il controllo del drone compagno (Drone.tsx) -- solo playground
+  droneId?: string;
+  // pubblica posizione/direzione nello store (minimappa, missioni, nemici,
+  // drone che segue): lo faceva Player.tsx (il boxman)
+  publishPlayerInfo?: boolean;
 }
 
 // The player-input-driven half of the 1v1 duel -- "siamo io che controllo
@@ -314,7 +326,7 @@ interface PlayerCombatSoldierProps {
 // applied via useRagdoll's applySpineLean), independent of which way the
 // legs are currently facing -- so punches can be aimed in 2D without
 // spinning the whole body around to do it.
-const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponents, entityName, globalSpeed, bagHurtboxHandle, bagRef, bagSolidHandle, vehicleIds }) => {
+const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponents, entityName, globalSpeed, bagHurtboxHandle, bagRef, bagSolidHandle, vehicleIds, footControllable = 'combatSoldier', droneId, publishPlayerInfo = false }) => {
   const groupRef = useRef<THREE.Group>(null);
   // Points at the SkeletonUtils clone (set below) so useRagdoll can walk
   // its bone hierarchy -- see CombatSoldier.tsx for why this is a ref
@@ -1392,15 +1404,16 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       if (vs.mode === 'none') {
         // F a piedi, fermi e liberi: auto vicina?
         const fPressed = input.consumeJustPressed('enter');
+        const vehIds = typeof vehicleIds === 'function' ? vehicleIds() : vehicleIds;
         if (
           fPressed &&
-          vehicleIds?.length &&
+          vehIds?.length &&
           !data.isDead &&
           !kdRef.current.active &&
           !traving() &&
           data.attackLock <= 0
         ) {
-          for (const id of vehicleIds) {
+          for (const id of vehIds) {
             const parts = carParts(id);
             if (!parts) continue;
             parts.entrance.getWorldPosition(_carTmp);
@@ -1479,7 +1492,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
               } else {
                 vs.mode = 'none';
                 st.setIsVehicleTransitioning(false);
-                st.setCurrentControllable('combatSoldier', entityName);
+                st.setCurrentControllable(footControllable, entityName);
                 groupRef.current!.quaternion.setFromAxisAngle(_worldUp, data.rotation);
                 const tr = travRef.current;
                 tr.mode = 'ground';
@@ -1519,6 +1532,48 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
             return;
           }
         }
+      }
+    }
+
+    // Controllo altrove (drone): il corpo resta dov'e', in idle, niente input.
+    // Il B che RIDA' il controllo arriva a Drone.tsx; qui si scarica soltanto,
+    // altrimenti al frame dopo verrebbe letto come un nuovo "vai al drone".
+    {
+      const st = useStore.getState();
+      if (vehRef.current.mode === 'none' && st.currentControllable !== footControllable) {
+        input.consumeJustPressed('fly');
+        input.consumeJustPressed('enter');
+        input.consumeJustPressed('jump');
+        input.consumeJustPressed('dodge');
+        input.consumeJustPressed('primary');
+        // R/F volano il drone (su/giu'): niente ricarica al ritorno a piedi
+        input.consumeJustPressed('reload');
+        input.consumeJustPressed('respawn');
+        if (!data.isDead && !kdRef.current.active && data.attackLock <= 0 && !traving()) {
+          transitionToAnimation(idleName(), 0.25, true);
+          data.state = idleState();
+        }
+        applyTransform();
+        return;
+      }
+      if (publishPlayerInfo && vehRef.current.mode === 'none') {
+        // il gruppo guarda verso il suo -Z (modello girato di PI): per lo
+        // store "yaw" e' la direzione di +Z avanti, come boxman e auto
+        const yaw = data.rotation + Math.PI;
+        // quota: come il boxman (centro del corpo 0.5 m sopra i piedi) -- i
+        // nemici misurano la distanza e mirano da li'
+        st.setPlayerInfo([data.position.x, travRef.current.feetY + PLAYER_INFO_Y, data.position.z], Math.atan2(Math.sin(yaw), Math.cos(yaw)));
+      }
+      if (
+        droneId &&
+        vehRef.current.mode === 'none' &&
+        input.consumeJustPressed('fly') &&
+        !data.isDead &&
+        !kdRef.current.active &&
+        !traving()
+      ) {
+        st.setIsDrone(true);
+        st.setCurrentControllable('drone', droneId);
       }
     }
 

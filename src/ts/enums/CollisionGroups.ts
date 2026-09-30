@@ -87,7 +87,9 @@ export function solidBodyRagdollGroups(fighterBit: number): number {
     // ragdoll a terra le avrebbe toccate comunque (misurato: piedi del
     // morto 15 cm dentro le proprie capsule, spinti via)
     [CollisionGroups.Characters, fighterBit],
-    [CollisionGroups.Characters, CollisionGroups.Ragdoll]
+    // Bullet: i proiettili fisici dei nemici della citta' (Bullet.tsx) si
+    // fermano sul corpo e dicono quale segmento hanno preso
+    [CollisionGroups.Characters, CollisionGroups.Ragdoll, CollisionGroups.Bullet]
   );
 }
 

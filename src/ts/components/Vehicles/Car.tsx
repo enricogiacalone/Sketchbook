@@ -1,7 +1,7 @@
 import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RigidBody, CuboidCollider, RapierRigidBody, useRapier, useBeforePhysicsStep, interactionGroups } from '@react-three/rapier';
-import { useGLTF, useAnimations, Html } from '@react-three/drei';
+import { useGLTF, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { useInput } from '../../hooks/useInput';
@@ -9,6 +9,8 @@ import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { vehicleBodyHandles } from './vehicleRegistry';
+import { MANNEQUIN_URL, MANNEQUIN_BASE_ANIMS_URL } from '../city/useMannequinActor';
+import { remoteDrivenCars, isRemoteDriven } from '../multiplayer/remoteVehicles';
 import { simDebug } from '../../debug/simDebug';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { getRoadOffset } from '../Environment/Road';
@@ -227,23 +229,60 @@ const PATROL_STUCK_TIMEOUT = 5; // seconds, matches the original's staleTimer
 // other car -- same lesson as the headlights: "il gioco e' rallentato di
 // molto" the first time real per-instance cost wasn't gated behind an
 // actual mount/unmount).
-const Officer: React.FC<{ seatPosition: [number, number, number]; seatQuaternion: [number, number, number, number] }> = ({ seatPosition, seatQuaternion }) => {
-  const { scene, animations } = useGLTF('boxman.glb');
-  const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
-  const { actions } = useAnimations(animations, clonedScene);
+// "anche la polizia sostituiscila con il manichino": l'agente al volante
+// e' il manichino del giocatore (stesse ossa, stessa clip 'Driving', stessa
+// posizione sul sedile di PlayerCombatSoldier: 0.31 m avanti e 0.44 m sotto
+// il nodo seat_1), in divisa blu. Solo visivo.
+const OFFICER_COLOR = '#1e40af';
+const OFFICER_SEAT_FWD = 0.31;
+const OFFICER_SEAT_DOWN = 0.44;
+const Officer: React.FC<{ seatPosition: [number, number, number]; seatQuaternion: [number, number, number, number] }> = ({ seatPosition }) => {
+  const { scene } = useGLTF(MANNEQUIN_URL);
+  const { animations } = useGLTF(MANNEQUIN_BASE_ANIMS_URL);
+  const { clone, mixer } = useMemo(() => {
+    const c = SkeletonUtils.clone(scene);
+    c.traverse((child: any) => {
+      if (child.isSkinnedMesh) {
+        child.material = child.material.clone();
+        child.material.emissive = new THREE.Color(OFFICER_COLOR);
+        child.material.emissiveIntensity = 0.45;
+      }
+    });
+    return { clone: c, mixer: new THREE.AnimationMixer(c) };
+  }, [scene]);
 
   useEffect(() => {
-    actions['driving']?.reset().fadeIn(0.2).play();
-  }, [actions]);
+    const clip = animations.find((a) => a.name === 'Driving');
+    if (!clip) return;
+    const a = mixer.clipAction(clip);
+    a.play();
+    return () => {
+      a.stop();
+    };
+  }, [animations, mixer]);
+  useFrame((_, delta) => mixer.update(delta));
 
+  // nello spazio del telaio: avanti = +Z, il modello guarda gia' avanti
   return (
-    <group position={seatPosition} quaternion={seatQuaternion}>
-      <primitive object={clonedScene} />
+    <group position={[seatPosition[0], seatPosition[1] - OFFICER_SEAT_DOWN, seatPosition[2] + OFFICER_SEAT_FWD]}>
+      <primitive object={clone} />
     </group>
   );
 };
 
-const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation = [0, 0, 0], patrolRoute, scale = 1, massKg }) => {
+// Scala/massa di default di tutte le auto: il manichino e' alto 1.8 m, il
+// modello originale era fatto per il boxman (x1.5 = stessa proporzione
+// dell'auto dell'arena). Massa reale: investire qualcuno lo butta giu'.
+export const DEFAULT_CAR_SCALE = 1.5;
+export const DEFAULT_CAR_MASS_KG = 1100;
+
+// auto guidata da un altro giocatore: inseguimento della posa di rete
+const REMOTE_CAR_FOLLOW_RATE = 14; // 1/s
+const REMOTE_CAR_SNAP_DIST = 8; // m
+const _remoteCarQ = new THREE.Quaternion();
+const _remoteCarQ2 = new THREE.Quaternion();
+
+const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation = [0, 0, 0], patrolRoute, scale = DEFAULT_CAR_SCALE, massKg = DEFAULT_CAR_MASS_KG }) => {
   const S = scale;
   const FORCE_SCALE = massKg ? massKg / CHASSIS_BASE_MASS : 1;
   const { scene } = useGLTF('car.glb');
@@ -341,10 +380,11 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     seatNode.getWorldQuaternion(worldQuat);
     const localPos = clonedScene.worldToLocal(worldPos.clone());
     return {
-      position: [localPos.x, localPos.y, localPos.z] as [number, number, number],
+      // il modello e' scalato di S dentro il RigidBody, l'Officer no
+      position: [localPos.x * S, localPos.y * S, localPos.z * S] as [number, number, number],
       quaternion: [worldQuat.x, worldQuat.y, worldQuat.z, worldQuat.w] as [number, number, number, number],
     };
-  }, [clonedScene, patrolRoute]);
+  }, [clonedScene, patrolRoute, S]);
 
   // -- Doors, mirroring the original's VehicleDoor: whichever door the
   // player is actually walking through swings open for the whole
@@ -455,6 +495,8 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
   // practice not noticeable since the suspension keeps normal ride height
   // well clear of it.
   const chassisRef = useRef<RapierRigidBody>(null);
+  // guidata in rete da un altro giocatore (vedi useBeforePhysicsStep)
+  const remoteCarRef = useRef({ active: false, vel: new THREE.Vector3() });
 
   // Real vehicle controller (see useEffect below) -- replaces BOTH
   // useRaycastVehicle (never actually propelled or suspended the chassis in
@@ -568,6 +610,39 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     if (!controller || !chassis) return;
 
     const dt = world.timestep;
+
+    // -- Guidata da un altro giocatore (rete): niente simulazione, il telaio
+    // (cinematico) insegue la posa che arriva da chi guida. Quando smette di
+    // arrivare torna fisico con la velocita' che aveva.
+    {
+      const rc = remoteDrivenCars.get(id);
+      const remote = !humanIsDriving && !!rc && isRemoteDriven(id);
+      const rs = remoteCarRef.current;
+      if (remote && rc) {
+        if (!rs.active) {
+          chassis.setBodyType(rapier.RigidBodyType.KinematicPositionBased, true);
+          rs.active = true;
+        }
+        const cur = chassis.translation();
+        const k = 1 - Math.exp(-dt * REMOTE_CAR_FOLLOW_RATE);
+        const dx = rc.p[0] - cur.x, dy = rc.p[1] - cur.y, dz = rc.p[2] - cur.z;
+        const snap = dx * dx + dy * dy + dz * dz > REMOTE_CAR_SNAP_DIST * REMOTE_CAR_SNAP_DIST;
+        const f = snap ? 1 : k;
+        const nx = cur.x + dx * f, ny = cur.y + dy * f, nz = cur.z + dz * f;
+        rs.vel.set((nx - cur.x) / dt, (ny - cur.y) / dt, (nz - cur.z) / dt);
+        chassis.setNextKinematicTranslation({ x: nx, y: ny, z: nz });
+        const r = chassis.rotation();
+        _remoteCarQ.set(r.x, r.y, r.z, r.w).slerp(_remoteCarQ2.set(rc.q[0], rc.q[1], rc.q[2], rc.q[3]), f);
+        chassis.setNextKinematicRotation({ x: _remoteCarQ.x, y: _remoteCarQ.y, z: _remoteCarQ.z, w: _remoteCarQ.w });
+        return;
+      }
+      if (rs.active) {
+        chassis.setBodyType(rapier.RigidBodyType.Dynamic, true);
+        chassis.setLinvel({ x: rs.vel.x, y: rs.vel.y, z: rs.vel.z }, true);
+        chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
+        rs.active = false;
+      }
+    }
 
     // -- Flip recovery: runs unconditionally (driven or parked), since a
     // parked car can just as easily get knocked over by another car or the
@@ -982,7 +1057,9 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       }
     }
 
-    setPlayerInfo([_carPos.x, _carPos.y, _carPos.z], _carEuler.y);
+    // solo l'auto guidata dal giocatore e' "il giocatore" (minimappa, missioni,
+    // nemici): le auto in pattuglia non devono sovrascriverne la posizione
+    if (humanIsDriving) setPlayerInfo([_carPos.x, _carPos.y, _carPos.z], _carEuler.y);
 
     if (state.clock.getElapsedTime() % 0.1 < 0.02) {
       updateEntity(id, {

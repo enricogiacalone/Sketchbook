@@ -429,8 +429,18 @@ export function useRagdollSolidBodies(
     [world]
   );
 
+  // Morto (rig transitorio della morte): le capsule solide seguirebbero le
+  // ossa, cioe' il corpo che cade, e lo spingerebbero (stesso bit del
+  // combattente: si toccano) -- un ciclo che lo faceva salire in aria. Si
+  // parcheggiano lontano finche' non torna in vita.
+  const parkSolidBody = useCallback(() => {
+    const entries = solidBodiesRef.current;
+    for (const name of Object.keys(entries)) entries[name].body.setTranslation({ x: 0, y: -1000, z: 0 }, true);
+  }, []);
+
   return {
     syncSolidBody,
+    parkSolidBody,
     resolveBodyMovement,
     resolveObstacleContacts,
     getSolidBodySegments,

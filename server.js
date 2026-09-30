@@ -182,7 +182,29 @@ updateNameSpace.on("connection", (socket) => {
       socket.userData.quaternion.z = player.quaternion[2];
       socket.userData.quaternion.w = player.quaternion[3];
       socket.userData.animation = player.animation;
+      // manichino: posa dello scheletro (binario, ~370 byte) e arma in mano
+      // -- vedi src/ts/components/multiplayer/mannequinPose.ts
+      if (player.model) socket.userData.model = player.model;
+      if (player.weapon) socket.userData.weapon = player.weapon;
+      if (player.pose) socket.userData.pose = player.pose;
+      // stato di gioco del manichino (vita, arma, veicolo, drone...): il
+      // server non lo interpreta, lo inoltra agli altri
+      if (player.ext && typeof player.ext === "object") socket.userData.ext = player.ext;
     }
+  });
+
+  // Colpo di un giocatore su un altro: lo decide chi spara/colpisce (lui
+  // vede il bersaglio), lo applica il colpito sul proprio manichino.
+  socket.on("hit", (hit) => {
+    if (!socket.userData || !hit || typeof hit.target !== "string") return;
+    const target = connectedSockets.get(hit.target);
+    if (target) target.emit("hit", { ...hit, from: socket.id });
+  });
+
+  // Sparo (tracciante, lampo, scintille) da far vedere agli altri
+  socket.on("shot", (fx) => {
+    if (!socket.userData || !fx) return;
+    socket.broadcast.emit("shot", { ...fx, from: socket.id });
   });
 
   socket.on("chatMessage", (data) => {
@@ -214,6 +236,10 @@ setInterval(() => {
       quaternion_z: s.userData.quaternion.z,
       quaternion_w: s.userData.quaternion.w,
       animation: s.userData.animation,
+      model: s.userData.model,
+      weapon: s.userData.weapon,
+      pose: s.userData.pose,
+      ext: s.userData.ext,
     });
   }
   updateNameSpace.emit("playerData", playerData);

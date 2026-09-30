@@ -49,6 +49,60 @@ export const droneShake = { current: 0 };
 // Exposing both module singletons directly lets a test script push
 // deltas / read the live orientation in one line instead. Dev-only,
 // same convention as window.__sim / window.__camera elsewhere.
+// "quando vola deve comportarsi come in droneWorld": in droneWorld chi
+// vola e' la CAMERA (FlyControls muove la camera, il drone e' disegnato
+// 20 unita' davanti e 8 sotto di lei). Drone.tsx integra quel "telaio del
+// pilota" e ne scrive qui la posa; useThirdPersonCamera.ts la copia tale e
+// quale sulla camera mentre si pilota (piu' lo scuotimento della
+// mitragliatrice).
+export const droneCamPose = {
+  position: new THREE.Vector3(),
+  quaternion: new THREE.Quaternion(),
+};
+
+// Stato dell'interfaccia di volo (DroneHUD.tsx, copia di src/hud di
+// droneWorld): scritto da Drone.tsx a ogni frame, letto dal HUD con il suo
+// requestAnimationFrame -- niente React state a 60 Hz.
+export interface DroneHudTarget {
+  id: string;
+  name: string;
+  x: number; // posizione del marcatore (px, gia' limitata alla zona)
+  y: number;
+  scale: number;
+  behind: boolean;
+  inSight: boolean;
+  distance: number; // m
+  inRange: boolean; // entro la gittata della mitragliatrice
+  life: number; // 0..1
+  arrowDeg: number;
+  arrowOpacity: number;
+  // anticipo per la mitragliatrice (segmento dal bersaglio al punto dove
+  // sara'), in px dal marcatore
+  gunHud: boolean;
+  hudX: number;
+  hudY: number;
+  leadDX: number;
+  leadDY: number;
+}
+export const droneHud = {
+  active: false,
+  width: 0,
+  height: 0,
+  zone: 400, // raggio del "limitatore" (px)
+  focal: 150, // raggio del cerchio focale (px)
+  pointerX: 0, // puntatore virtuale (px dal centro)
+  pointerY: 0,
+  horizonY: 0, // px
+  horizonDeg: 0,
+  altitude: NaN, // m
+  speed: 0, // m/s
+  gunHeat: 0, // 0..1
+  lockLevel: 0, // 0..1
+  lock: false,
+  gunTargetId: null as string | null,
+  targets: [] as DroneHudTarget[],
+};
+
 if (import.meta.env.DEV) {
-  (window as any).__droneFlight = { droneMouseDelta, droneOrientation, droneShake };
+  (window as any).__droneFlight = { droneMouseDelta, droneOrientation, droneShake, droneCamPose, droneHud };
 }

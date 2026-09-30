@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { RUNWAY_CENTER, HELIPORT_CENTER } from '../Environment/Airport';
 import { acquireDebugGui, releaseDebugGui } from '../../lib/debugGui';
+import { useStore } from '../../store';
 
 // Debug-only teleport/test panel ("Scenari") built on the __teleportPlayer
 // hook Player.tsx already exposes on window for manual testing (see the
@@ -21,11 +22,12 @@ const ScenariosGUI: React.FC = () => {
     // A few meters off each vehicle's spawn point, not on top of it, so the
     // player doesn't land inside the fuselage/chassis and get stuck.
     const scenarios: Record<string, () => void> = {
+      // teletrasporto del manichino (PlayerCombatSoldier.tsx, __pcsDebug)
       'Vai all\'aereo': () => {
-        (window as any).__teleportPlayer?.(RUNWAY_CENTER[0] + 4, RUNWAY_CENTER[1]);
+        (window as any).__pcsDebug?.teleport(RUNWAY_CENTER[0] + 4, RUNWAY_CENTER[1]);
       },
       'Vai all\'elicottero': () => {
-        (window as any).__teleportPlayer?.(HELIPORT_CENTER[0] + 4, HELIPORT_CENTER[1]);
+        (window as any).__pcsDebug?.teleport(HELIPORT_CENTER[0] + 4, HELIPORT_CENTER[1]);
       },
       // Clean, distraction-free test scenarios: strips the city/traffic/
       // collectibles/missions out of the world (see Scene.tsx's
@@ -61,6 +63,13 @@ const ScenariosGUI: React.FC = () => {
     scenari.add(scenarios, 'Test guida: Macchina (pulito)');
     scenari.add(scenarios, 'Gara: Auto vs Polizia (3)');
     scenari.add(scenarios, 'Torna al mondo normale');
+    // "metti la possibilita di attivarli da checkbox, di default nn si deve
+    // vedere la roba di simulation citta" -- soldati decorativi + arena
+    // rossi contro blu (SoldierSpawner.tsx)
+    const simCitta = { 'Mostra simulation-citta': useStore.getState().showSimCitta };
+    scenari
+      .add(simCitta, 'Mostra simulation-citta')
+      .onChange((v: boolean) => useStore.getState().setShowSimCitta(v));
     // "le colonne devono essere retratte" -- lil-gui folders actually
     // default to OPEN (verified live), so this needs an explicit
     // .close() to start collapsed instead of always springing open the

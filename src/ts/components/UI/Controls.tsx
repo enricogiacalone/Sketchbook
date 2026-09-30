@@ -83,10 +83,19 @@ const Controls: React.FC = () => {
 
   const getControls = (): ControlRow[] => {
     switch (currentControllable) {
-      case 'combatSoldier':
+      case 'player':
+      case 'combatSoldier': {
+        const cityRows: ControlRow[] =
+          currentControllable === 'player'
+            ? [
+                { keys: ['F'], pad: PAD_ENTER, desc: 'Sali in auto' },
+                { keys: ['B'], desc: 'Drone' },
+              ]
+            : [];
         if (playerWeapon === 'pistol' || playerWeapon === 'rifle') {
           const rifle = playerWeapon === 'rifle';
           return [
+            ...cityRows,
             { keys: ['1'], pad: PAD_WEAPON_FISTS, desc: 'Pugni' },
             { keys: ['2'], pad: PAD_WEAPON_PISTOL, desc: rifle ? 'Pistola' : 'Pistola (in mano)' },
             { keys: ['3'], pad: PAD_WEAPON_RIFLE, desc: rifle ? 'Fucile (in mano)' : 'Fucile' },
@@ -105,6 +114,7 @@ const Controls: React.FC = () => {
         }
         if (playerWeapon === 'knife') {
           return [
+            ...cityRows,
             { keys: ['1'], pad: PAD_WEAPON_FISTS, desc: 'Pugni' },
             { keys: ['2'], pad: PAD_WEAPON_PISTOL, desc: 'Pistola' },
             { keys: ['3'], pad: PAD_WEAPON_RIFLE, desc: 'Fucile' },
@@ -121,6 +131,7 @@ const Controls: React.FC = () => {
           ];
         }
         return [
+            ...cityRows,
           { keys: ['1'], pad: PAD_WEAPON_FISTS, desc: 'Pugni (in mano)' },
           { keys: ['2'], pad: PAD_WEAPON_PISTOL, desc: 'Pistola' },
           { keys: ['3'], pad: PAD_WEAPON_RIFLE, desc: 'Fucile' },
@@ -136,6 +147,20 @@ const Controls: React.FC = () => {
           { keys: ['Ctrl', '(hold)'], pad: PAD_LOCK_ON, desc: 'Lock-on Avversario' },
           { keys: ['M'], desc: 'Musica play / pausa (tutte)' },
           { keys: ['J', 'K'], desc: 'Play / pausa cassa cubi / schermo' },
+        ];
+      }
+      case 'drone':
+        // come droneWorld (FlyControls.js)
+        return [
+          { keys: ['Mouse'], desc: 'Cloche: sposta il puntatore (imbardata/beccheggio)' },
+          { keys: ['W', 'S'], desc: 'Spinta avanti / indietro' },
+          { keys: ['R', 'F'], desc: 'Su / giù (anche Spazio / Shift)' },
+          { keys: ['A', 'D'], desc: 'Imbardata' },
+          { keys: ['↑', '↓'], desc: 'Beccheggio' },
+          { keys: ['Q', 'E'], desc: 'Rollio' },
+          { keys: ['Left Click', '(hold)'], desc: 'Mitragliatrice (si surriscalda)' },
+          { keys: ['Right Click'], desc: 'Missile (bersaglio agganciato)' },
+          { keys: ['B'], desc: 'Torna a piedi' },
         ];
       case 'car':
         return [

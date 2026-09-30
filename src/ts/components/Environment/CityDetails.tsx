@@ -222,10 +222,10 @@ const CityDetails: React.FC = () => {
   // was standing. Kept as local state here rather than in the global store
   // since nothing outside this tree needs to know about it.
   const [pedestrianEnemies, setPedestrianEnemies] = useState<
-    Array<{ id: string; position: [number, number, number] }>
+    Array<{ id: string; position: [number, number, number]; hp?: number }>
   >([]);
-  const handlePedestrianHit = useCallback((id: string, position: [number, number, number]) => {
-    setPedestrianEnemies((prev) => (prev.some((e) => e.id === id) ? prev : [...prev, { id, position }]));
+  const handlePedestrianHit = useCallback((id: string, position: [number, number, number], hp?: number) => {
+    setPedestrianEnemies((prev) => (prev.some((e) => e.id === id) ? prev : [...prev, { id, position, hp }]));
   }, []);
   // Enemy.tsx calls this once it's been chasing without ever actually
   // closing the distance for a while (see GIVE_UP_TIME there) -- "essere
@@ -340,11 +340,14 @@ const CityDetails: React.FC = () => {
           // real physics settle it the rest of the way, unlike the old
           // fixed ParkedCar this replaces which had to precompute its own
           // resting height by hand.
-          position={[c.x, getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + 1.2, c.z]}
+          position={[c.x, getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + 1.6, c.z]}
           rotation={[0, c.rotationY, 0]}
         />
       ))}
-      {pedestrians.map((p, i) => (
+      {/* il passante diventato nemico non c'e' piu' come passante (il suo
+          corpo -- capsule, ragdoll -- e' quello del nemico al suo posto);
+          quando il nemico rinuncia o muore torna sul suo percorso */}
+      {pedestrians.map((p, i) => hostileIds.has(`enemy-ped-${i}`) ? null : (
         <Pedestrian
           key={`ped-${i}`}
           id={`enemy-ped-${i}`}
@@ -354,12 +357,11 @@ const CityDetails: React.FC = () => {
           z2={p.z2}
           speed={p.speed}
           phase={p.phase}
-          isHostile={hostileIds.has(`enemy-ped-${i}`)}
           onBecomeEnemy={handlePedestrianHit}
         />
       ))}
       {pedestrianEnemies.map((e) => (
-        <Enemy key={e.id} id={e.id} initialPosition={e.position} onGiveUp={handleEnemyGiveUp} />
+        <Enemy key={e.id} id={e.id} initialPosition={e.position} initialHp={e.hp} onGiveUp={handleEnemyGiveUp} />
       ))}
       {billboards.map((b, i) => (
         <Billboard key={`bb-${i}`} x={b.x} z={b.z} rotationY={b.rotationY} schemeIndex={b.schemeIndex} />

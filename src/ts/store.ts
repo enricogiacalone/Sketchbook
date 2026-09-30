@@ -242,6 +242,10 @@ interface GameState {
   // "una gui per togliere gli ostacoli, le mura, il pavimento, le casse"
   // -- pezzi dell'arena del duello accesi/spenti (mesh E collider insieme)
   arenaScene: ArenaSceneToggles;
+  // "di default nn si deve vedere la roba di simulation citta": soldati
+  // decorativi e arena rossi contro blu portati da simulation-citta
+  // (SoldierSpawner.tsx), accesi solo dalla casella nel pannello Scenari
+  showSimCitta: boolean;
   // Angolo (gradi) attorno al personaggio da cui la vista ortogonale
   // guarda -- 0 = frontale, 90/180/270 = laterale/retro/laterale
   // opposto. Cambiato dal pulsante "Ruota vista 90'" del pannello Arena,
@@ -339,6 +343,7 @@ interface GameState {
   clearDuelEnemies: () => void;
   setDebugOrthoCamera: (active: boolean) => void;
   setArenaScene: (partial: Partial<ArenaSceneToggles>) => void;
+  setShowSimCitta: (on: boolean) => void;
   setDebugOrthoCameraAngleDeg: (deg: number) => void;
   setRagdollBench: (partial: Partial<RagdollBenchSettings>) => void;
   setShowGameplayHud: (active: boolean) => void;
@@ -400,6 +405,7 @@ export const useStore = create<GameState>((set) => ({
   pistolHitHead: false,
   debugOrthoCamera: false,
   arenaScene: { obstacles: true, walls: true, floor: true, speakers: true, course: true, car: true },
+  showSimCitta: false,
   debugOrthoCameraAngleDeg: 0,
   ragdollBench: { ...DEFAULT_RAGDOLL_BENCH },
   showGameplayHud: false,
@@ -470,6 +476,7 @@ export const useStore = create<GameState>((set) => ({
   clearDuelEnemies: () => set({ duelEnemyCount: 0 }),
   setDebugOrthoCamera: (debugOrthoCamera) => set({ debugOrthoCamera }),
   setArenaScene: (partial) => set((state) => ({ arenaScene: { ...state.arenaScene, ...partial } })),
+  setShowSimCitta: (on) => set({ showSimCitta: on }),
   setDebugOrthoCameraAngleDeg: (debugOrthoCameraAngleDeg) => set({ debugOrthoCameraAngleDeg }),
   setRagdollBench: (partial) => set((state) => ({ ragdollBench: { ...state.ragdollBench, ...partial } })),
   setShowGameplayHud: (showGameplayHud) => set({ showGameplayHud }),

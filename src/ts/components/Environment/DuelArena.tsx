@@ -97,7 +97,7 @@ function facingToward(fromX: number, fromZ: number, toX: number, toZ: number): n
 }
 
 
-function makeFighter(id: string, name: string, team: string, x: number, z: number, rotation: number): FighterData {
+export function makeFighter(id: string, name: string, team: string, x: number, z: number, rotation: number): FighterData {
   return {
     id,
     name,

@@ -41,6 +41,10 @@ export interface RagdollController {
   isActive: () => boolean;
   isDeath: () => boolean;
   activateDeath: () => void;
+  // Dopo activateDeath (rig transitorio): lancia il corpo morto -- tutti i
+  // segmenti a `share` della velocita', quello colpito (se c'e') a piena
+  // velocita' (colpo mortale, investimento). No-op col rig attivo.
+  launchDeath: (vel: THREE.Vector3, segment?: string | null, share?: number) => void;
   // "vorrei si comportasse piu' da ragdoll se il colpo e' forte" -- colpo
   // forte: il corpo attivo va KO (motori spenti, gravita' piena) e vola con
   // la spinta; poi chi chiama lo rimette in piedi (standUp) quando si e'
@@ -129,7 +133,7 @@ export function useRagdoll(
   const fighterBit = fighterBitRef.current;
   const { syncHurtbox, getHurtboxHandle: internalGetHurtboxHandle } =
     useRagdollHurtbox(modelRootRef);
-  const { syncSolidBody, resolveBodyMovement, resolveObstacleContacts, getSolidBodySegments } =
+  const { syncSolidBody, parkSolidBody, resolveBodyMovement, resolveObstacleContacts, getSolidBodySegments } =
     useRagdollSolidBodies(modelRootRef, resolveBones, ownerId, fighterBit);
   const {
     buildBodies,
@@ -397,7 +401,8 @@ export function useRagdoll(
       }
 
       syncHurtbox();
-      syncSolidBody();
+      if (stateRef.current.active && stateRef.current.isDeath) parkSolidBody();
+      else syncSolidBody();
 
       const s = stateRef.current;
       if (!s.active) {
@@ -607,10 +612,23 @@ export function useRagdoll(
     return registerFighterHitHandler(ownerId, (segment, dir, speed, point) => shotReactionRef.current(segment, dir, speed, point));
   }, [ownerId]);
 
+  const launchDeath = useCallback(
+    (vel: THREE.Vector3, segment?: string | null, share = 0.45) => {
+      if (!stateRef.current.isDeath) return;
+      const entries = bodiesRef.current;
+      for (const key of Object.keys(entries)) {
+        const k = key === segment ? 1 : share;
+        entries[key].body.setLinvel({ x: vel.x * k, y: vel.y * k, z: vel.z * k }, true);
+      }
+    },
+    [bodiesRef, stateRef]
+  );
+
   return {
     isActive: () => stateRef.current.active,
     isDeath: () => stateRef.current.isDeath,
     activateDeath,
+    launchDeath,
     knockDown,
     standUp,
     isKnockedDown,

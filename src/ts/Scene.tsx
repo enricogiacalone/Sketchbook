@@ -31,7 +31,6 @@ import { useStore } from "./store";
 useGLTF.preload("car.glb");
 useGLTF.preload("airplane.glb");
 useGLTF.preload("heli.glb");
-useGLTF.preload("boxman.glb");
 
 // DEBUG: temporarily stripped cars/vehicles/enemies out of the scene to
 // isolate the periodic stutter -- it turned out to be MeteoriteSpawner's
@@ -86,6 +85,7 @@ const Scene: React.FC = () => {
   // "aggiungi il tasto retry" -- read fresh each render so a change
   // (see store.ts's retryDuel) flows straight into the key below.
   const duelRound = useStore((state) => state.duelRound);
+  const showSimCitta = useStore((state) => state.showSimCitta);
   // "aggiungi ... gli ufo e [le meteoriti]" -- the race scenario wants
   // some sci-fi atmosphere/spectacle overhead (it's a "gara", not a
   // precision physics test), so UFO + MeteoriteSpawner get an exception to
@@ -105,8 +105,9 @@ const Scene: React.FC = () => {
       {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}
       {showSkyAtmosphere && <MeteoriteSpawner />}
       {!isCleanTest && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
-      {/* Soldati portati da simulation-citta (AgentSoldier + RiggedCitizen), decorativi come i pedoni */}
-      {!isCleanTest && <SoldierSpawner />}
+      {/* Soldati portati da simulation-citta (AgentSoldier + RiggedCitizen), decorativi come i pedoni.
+          Spenti di default: casella "simulation-citta" nel pannello Scenari */}
+      {!isCleanTest && showSimCitta && <SoldierSpawner />}
 
       {/* Carichiamo i modelli in blocchi separati per non bloccare la fisica */}
       <Suspense fallback={null}>
@@ -126,18 +127,18 @@ const Scene: React.FC = () => {
                 absorb a small drop, matching how a real raycast vehicle
                 controller is meant to be used (see git history / chat, "cade
                 oltre il terrain e sparisce"). */}
-            <Car id="car-1" position={[10, 1.2, 0]} />
-            <Car id="car-2" position={[60, 1.2, 0]} />
-            <Car id="car-3" position={[0, 1.2, 60]} />
-            <Car id="car-4" position={[-60, 1.2, 60]} />
-            <Car id="car-5" position={[60, 1.2, 60]} />
-            <Car id="car-6" position={[-60, 1.2, -60]} />
+            <Car id="car-1" position={[10, 1.6, 0]} />
+            <Car id="car-2" position={[60, 1.6, 0]} />
+            <Car id="car-3" position={[0, 1.6, 60]} />
+            <Car id="car-4" position={[-60, 1.6, 60]} />
+            <Car id="car-5" position={[60, 1.6, 60]} />
+            <Car id="car-6" position={[-60, 1.6, -60]} />
 
             {/* Police patrol cars -- rotation Math.PI/2 faces +X, matching
                 each route's first leg (see POLICE_ROUTE_INNER/OUTER above:
                 first waypoint -> second waypoint both run along +X). */}
-            <Car id="police-1" position={[POLICE_ROUTE_INNER[0][0], 1.2, POLICE_ROUTE_INNER[0][1]]} rotation={[0, Math.PI / 2, 0]} patrolRoute={POLICE_ROUTE_INNER} />
-            <Car id="police-2" position={[POLICE_ROUTE_OUTER[0][0], 1.2, POLICE_ROUTE_OUTER[0][1]]} rotation={[0, Math.PI / 2, 0]} patrolRoute={POLICE_ROUTE_OUTER} />
+            <Car id="police-1" position={[POLICE_ROUTE_INNER[0][0], 1.6, POLICE_ROUTE_INNER[0][1]]} rotation={[0, Math.PI / 2, 0]} patrolRoute={POLICE_ROUTE_INNER} />
+            <Car id="police-2" position={[POLICE_ROUTE_OUTER[0][0], 1.6, POLICE_ROUTE_OUTER[0][1]]} rotation={[0, Math.PI / 2, 0]} patrolRoute={POLICE_ROUTE_OUTER} />
           </>
         )}
 
@@ -167,7 +168,7 @@ const Scene: React.FC = () => {
             on the first drop, see the comment above), with none of the
             other 7 city/police cars around to get in the way or confuse
             which one is actually being driven. */}
-        {isCarTest && <Car id="test-car-1" position={[10, 1.2, 0]} />}
+        {isCarTest && <Car id="test-car-1" position={[10, 1.6, 0]} />}
 
         {/* "una gara contro 3 poliziotti in un percorso con curve e dossi" --
             the player's own racer plus 3 AI police, all on RaceTrack.tsx's

@@ -17,7 +17,20 @@ export interface ShotFx {
 
 const queue: ShotFx[] = [];
 
-export function emitShotFx(fx: ShotFx) {
+// Chi vuole sapere degli spari locali (la rete: CityPlayer li manda agli
+// altri giocatori). Gli spari arrivati dalla rete si emettono con
+// remote=true e non vengono ripetuti ai listener (niente eco).
+type ShotFxListener = (fx: ShotFx) => void;
+const listeners = new Set<ShotFxListener>();
+export function onLocalShotFx(fn: ShotFxListener): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+export function emitShotFx(fx: ShotFx, remote = false) {
+  if (!remote) listeners.forEach((fn) => fn(fx));
   queue.push({
     from: fx.from.clone(),
     to: fx.to.clone(),

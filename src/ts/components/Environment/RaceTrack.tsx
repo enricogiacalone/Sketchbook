@@ -79,10 +79,10 @@ export const RACE_TRACK: [number, number][] = [
 // spare.
 export const RACE_START_ROTATION: [number, number, number] = [0, Math.PI / 2, 0];
 export const RACE_GRID = {
-  player: [-150, 1.2, -187] as [number, number, number],
-  cop1: [-150, 1.2, -181] as [number, number, number],
-  cop2: [-150, 1.2, -175] as [number, number, number],
-  cop3: [-150, 1.2, -169] as [number, number, number],
+  player: [-150, 1.6, -187] as [number, number, number],
+  cop1: [-150, 1.6, -181] as [number, number, number],
+  cop2: [-150, 1.6, -175] as [number, number, number],
+  cop3: [-150, 1.6, -169] as [number, number, number],
 };
 
 // Speed bumps ("dossi") -- deliberately placed ONLY on the two long,

@@ -20,6 +20,7 @@ import LoadingScreen from "./components/UI/LoadingScreen";
 import ChatInput from "./components/UI/ChatInput";
 import Minimap from "./components/UI/Minimap";
 import Crosshair from "./components/UI/Crosshair";
+import DroneHUD from "./components/UI/DroneHUD";
 import GamepadDebug from "./components/UI/GamepadDebug";
 import ScenariosGUI from "./components/UI/ScenariosGUI";
 import CombatArenaGUI from "./components/UI/CombatArenaGUI";
@@ -28,7 +29,8 @@ import RagdollBenchOverlay from "./components/UI/RagdollBenchOverlay";
 import DuelHUD from "./components/UI/DuelHUD";
 import { DUEL_PLAYER_ID } from "./components/Environment/DuelArena";
 import Loader from "./components/UI/Loader"; // Helper to track loading
-import Player from "./components/Player"; // Import Player directly to pass userName
+// "sostituire il personaggio boxman in playground con il nostro manichino"
+import CityPlayer from "./components/CityPlayer";
 import Drone from "./components/Drone";
 import ThirdPersonCamera from "./components/ThirdPersonCamera";
 import { useStore } from "./store";
@@ -263,7 +265,7 @@ const App: React.FC = () => {
               {testScene !== 'duel' && (
                 <>
                   {/* Player needs userName for network identification */}
-                  <Player userName={userName} />
+                  <CityPlayer userName={userName} />
                   {/* "il drone e' il compagno del player e gli fluttua
                       attorno" -- always mounted outside the duel, own
                       persistent entity (see Drone.tsx), not something
@@ -318,6 +320,7 @@ const App: React.FC = () => {
           )}
           <ChatInput />
           <Crosshair />
+          <DroneHUD />
           <GamepadDebug />
           <ScenariosGUI />
           <CombatArenaGUI />

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { World, Collider } from '@dimforge/rapier3d-compat';
-import { getShootableCollider } from './shootableRegistry';
+import { getShootableCollider, isShotTransparent } from './shootableRegistry';
 
 // Hitscan alla enari-engine (Player.shoot: rayTest "closest hit" dal
 // punto di partenza lungo la direzione, il primo oggetto colpito e'
@@ -33,7 +33,7 @@ export function castShot(
     undefined,
     undefined,
     undefined,
-    (c: Collider) => getShootableCollider(c.handle)?.ownerId !== shooterId
+    (c: Collider) => getShootableCollider(c.handle)?.ownerId !== shooterId && !isShotTransparent(c.handle)
   );
   if (!res) {
     return { hit: false, point: origin.clone().addScaledVector(dir, maxDistance), normal: null, collider: null, distance: maxDistance };
