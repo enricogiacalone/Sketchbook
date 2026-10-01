@@ -1,3 +1,4 @@
+import { setCameraFocus, clearCameraFocus } from '../../lib/cameraFocus';
 import React, { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
@@ -18,14 +19,7 @@ import { useRapier } from '@react-three/rapier';
 import { usePistolModel, useGunModel, RIFLE_SPEC, type GunModelApi } from './weapons/usePistolModel';
 import { useKnifeModel } from './weapons/useKnifeModel';
 import { solveTwoBoneIK } from './weapons/twoBoneIK';
-import {
-  newTravState,
-  stepTraversal,
-  followGround,
-  isTraversing,
-  hangHandTargets,
-  type TravCtx,
-} from './traversal/traversal';
+import { newTravState, stepTraversal, followGround, isTraversing, hangHandTargets, type TravCtx } from './traversal/traversal';
 import { GETUP_CLIP, measureLyingPose, newKnockdown, stepKnockdown, getUpPlacement } from './ragdoll/knockdown';
 import { castShot, spreadDirection } from './weapons/hitscan';
 import { getShootableCollider, applyFighterHit } from './weapons/shootableRegistry';
@@ -77,16 +71,30 @@ interface GunStats {
 }
 const GUN_STATS: Record<GunKind, GunStats> = {
   pistol: {
-    mag: PISTOL_MAG_SIZE, interval: PISTOL_FIRE_INTERVAL_S, auto: false, range: PISTOL_RANGE_M,
-    spreadHip: PISTOL_SPREAD_HIP_DEG, spreadAim: PISTOL_SPREAD_AIM_DEG,
-    dmg: PISTOL_DAMAGE_BY_SEGMENT, dmgLimb: PISTOL_DAMAGE_LIMB,
-    hitSpeed: PISTOL_HIT_SPEED_BY_SEGMENT, hitSpeedLimb: PISTOL_HIT_SPEED_LIMB, worldImpulse: PISTOL_WORLD_IMPULSE,
+    mag: PISTOL_MAG_SIZE,
+    interval: PISTOL_FIRE_INTERVAL_S,
+    auto: false,
+    range: PISTOL_RANGE_M,
+    spreadHip: PISTOL_SPREAD_HIP_DEG,
+    spreadAim: PISTOL_SPREAD_AIM_DEG,
+    dmg: PISTOL_DAMAGE_BY_SEGMENT,
+    dmgLimb: PISTOL_DAMAGE_LIMB,
+    hitSpeed: PISTOL_HIT_SPEED_BY_SEGMENT,
+    hitSpeedLimb: PISTOL_HIT_SPEED_LIMB,
+    worldImpulse: PISTOL_WORLD_IMPULSE,
   },
   rifle: {
-    mag: RIFLE_MAG_SIZE, interval: RIFLE_FIRE_INTERVAL_S, auto: true, range: RIFLE_RANGE_M,
-    spreadHip: RIFLE_SPREAD_HIP_DEG, spreadAim: RIFLE_SPREAD_AIM_DEG,
-    dmg: RIFLE_DAMAGE_BY_SEGMENT, dmgLimb: RIFLE_DAMAGE_LIMB,
-    hitSpeed: RIFLE_HIT_SPEED_BY_SEGMENT, hitSpeedLimb: RIFLE_HIT_SPEED_LIMB, worldImpulse: RIFLE_WORLD_IMPULSE,
+    mag: RIFLE_MAG_SIZE,
+    interval: RIFLE_FIRE_INTERVAL_S,
+    auto: true,
+    range: RIFLE_RANGE_M,
+    spreadHip: RIFLE_SPREAD_HIP_DEG,
+    spreadAim: RIFLE_SPREAD_AIM_DEG,
+    dmg: RIFLE_DAMAGE_BY_SEGMENT,
+    dmgLimb: RIFLE_DAMAGE_LIMB,
+    hitSpeed: RIFLE_HIT_SPEED_BY_SEGMENT,
+    hitSpeedLimb: RIFLE_HIT_SPEED_LIMB,
+    worldImpulse: RIFLE_WORLD_IMPULSE,
   },
 };
 // Coltello: fendenti alternati col tasto principale, colpo pesante con E
@@ -221,6 +229,11 @@ const SPINE_LEAN_MAX = THREE.MathUtils.degToRad(40);
 // than the pitch clamp, matches useRagdoll.ts's own SPINE_TWIST_MAX_RAD
 // (kept here too, redundant-safe, same reasoning as SPINE_LEAN_MAX).
 const SPINE_TWIST_MAX = THREE.MathUtils.degToRad(80);
+// torsione del busto: quanto ci mette a sparire a terra / rientrare in piedi (s)
+const SPINE_LEAN_BLEND_S = 0.35;
+// rialzo da terra: alzata massima della clip (m) e in quanto torna a zero (s)
+const GETUP_LIFT_MAX = 0.25;
+const GETUP_LIFT_S = 0.9;
 // How much of the remaining facing-angle gap closes per frame -- same
 // convention/units as CombatSoldier.tsx's own duel-facing turn (there
 // 0.15); a touch snappier here since this is player-driven, not an
@@ -327,7 +340,19 @@ interface PlayerCombatSoldierProps {
 // applied via useRagdoll's applySpineLean), independent of which way the
 // legs are currently facing -- so punches can be aimed in 2D without
 // spinning the whole body around to do it.
-const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponents, entityName, globalSpeed, bagHurtboxHandle, bagRef, bagSolidHandle, vehicleIds, footControllable = 'combatSoldier', droneId, publishPlayerInfo = false }) => {
+const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
+  data,
+  opponents,
+  entityName,
+  globalSpeed,
+  bagHurtboxHandle,
+  bagRef,
+  bagSolidHandle,
+  vehicleIds,
+  footControllable = 'combatSoldier',
+  droneId,
+  publishPlayerInfo = false,
+}) => {
   const groupRef = useRef<THREE.Group>(null);
   // Points at the SkeletonUtils clone (set below) so useRagdoll can walk
   // its bone hierarchy -- see CombatSoldier.tsx for why this is a ref
@@ -369,6 +394,15 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   const knockVelRef = useRef(new THREE.Vector3());
   const obstacleHitCooldownRef = useRef(0);
   const kdRef = useRef(newKnockdown());
+  const spineLeanWRef = useRef(1); // peso della torsione del busto (0 a terra)
+  // rialzo: di quanto e' alzata la clip sopra il suolo all'inizio, e da quanto
+  const getUpRef = useRef({ lift0: 0, t: 0 });
+  const getUpLift = () => {
+    const g = getUpRef.current;
+    if (data.state !== 'Si rialza' || g.lift0 <= 0) return 0;
+    const k = Math.max(0, 1 - g.t / GETUP_LIFT_S);
+    return g.lift0 * k * k * (3 - 2 * k);
+  };
   // salto / arrampicata (traversal/traversal.ts): quota dei piedi, modo...
   const travRef = useRef(
     newTravState(
@@ -388,7 +422,15 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // posizione dell'auto al frame prima (velocita' per poter scendere)
     carPrev: THREE.Vector3;
     carSpeed: number;
-  }>({ mode: 'none', carId: null, t: 0, from: new THREE.Vector3(), fromQuat: new THREE.Quaternion(), carPrev: new THREE.Vector3(), carSpeed: 0 });
+  }>({
+    mode: 'none',
+    carId: null,
+    t: 0,
+    from: new THREE.Vector3(),
+    fromQuat: new THREE.Quaternion(),
+    carPrev: new THREE.Vector3(),
+    carSpeed: 0,
+  });
   // seduti dentro l'auto (o mentre si entra/esce): niente ragdoll attivo --
   // il corpo segue il sedile, la fisica del corpo dentro l'abitacolo in
   // movimento non avrebbe senso
@@ -444,6 +486,13 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         child.material = child.material.clone();
         child.material.emissive = new THREE.Color(PLAYER_COLOR);
         child.material.emissiveIntensity = 0.35;
+        // "a volte quando cade scompare e poi riappare": il volume di
+        // visibilita' del modello e' quello della posa a riposo attorno
+        // alla radice, che durante il KO resta ferma mentre il corpo vola
+        // via in ragdoll -- con la telecamera che segue il corpo, la radice
+        // usciva dall'inquadratura e il modello veniva scartato. Uno solo,
+        // si disegna sempre.
+        child.frustumCulled = false;
       }
     });
 
@@ -462,7 +511,11 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // decide traversal.ts, deformata sul bordo vero (motion warping).
     if (cMap['ClimbUp_1m_RM']) {
       const src = cMap['ClimbUp_1m_RM'];
-      const c = new THREE.AnimationClip('ClimbUp_1m__ip', 0.625, src.tracks.filter((t) => t.name !== 'root.position'));
+      const c = new THREE.AnimationClip(
+        'ClimbUp_1m__ip',
+        0.625,
+        src.tracks.filter((t) => t.name !== 'root.position')
+      );
       actMap[c.name] = animMixer.clipAction(c);
       cMap[c.name] = c;
     }
@@ -479,7 +532,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       const pelvisSub = sub.tracks.find((t) => t.name === 'pelvis.position');
       // senza traccia del bacino la posa resterebbe 4 m in alto: niente clip
       if (pelvisSrc && pelvisSub) {
-        const at = (pelvisSrc as THREE.VectorKeyframeTrack).InterpolantFactoryMethodLinear(new Float32Array(3)).evaluate(0.46) as Float32Array;
+        const at = (pelvisSrc as THREE.VectorKeyframeTrack)
+          .InterpolantFactoryMethodLinear(new Float32Array(3))
+          .evaluate(0.46) as Float32Array;
         for (let i = 0; i < pelvisSub.values.length; i += 3) {
           pelvisSub.values[i] = at[0];
           pelvisSub.values[i + 1] = at[1];
@@ -558,6 +613,15 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   }, [scene, animations, data]);
 
   const lyingPose = useMemo(() => measureLyingPose(scene, clipsMap[GETUP_CLIP]), [scene, clipsMap]);
+  // a terra (KO o morto): la telecamera segue il bacino del ragdoll, non la
+  // radice rimasta dov'era (lib/cameraFocus.ts)
+  const _focus = useMemo(() => new THREE.Vector3(), []);
+  useFrame(() => {
+    const down = kdRef.current.active || data.isDead;
+    if (down && ragdoll.getBoneWorldPosition('pelvis', _focus)) setCameraFocus(entityName, _focus);
+    else clearCameraFocus(entityName);
+  });
+  React.useEffect(() => () => clearCameraFocus(entityName), [entityName]);
   // colpo forte: KO fisico (vedi ragdoll/knockdown.ts)
   const startKnockdown = (dirX: number, dirZ: number, speed: number, up = 0.3) => {
     if (kdRef.current.active || data.isDead) return;
@@ -591,13 +655,14 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
   React.useEffect(() => {
     if (!import.meta.env.DEV) return;
     const bench = {
-      clipNames: () => Object.keys(clipsMap).filter((n) => !n.includes('__')).sort(),
+      clipNames: () =>
+        Object.keys(clipsMap)
+          .filter((n) => !n.includes('__'))
+          .sort(),
       clipDuration: (n: string) => clipsMap[n]?.duration ?? null,
       report: () => ragdoll.getActiveRagdollDebugSegments(),
       measureClips: (names?: string[]) => {
-        const list = (names && names.length ? names : Object.keys(clipsMap))
-          .map((n) => clipsMap[n])
-          .filter(Boolean);
+        const list = (names && names.length ? names : Object.keys(clipsMap)).map((n) => clipsMap[n]).filter(Boolean);
         return ragdoll.measureClipRanges(list);
       },
       // Colpo di prova che arriva dalla direzione della camera (spinge il
@@ -708,7 +773,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         opponent.hp -= meleeDamageRef.current;
         // affondo pesante col coltello: colpo forte -> KO fisico
         if (withKnife && meleeDamageRef.current >= KNIFE_DAMAGE_HEAVY && opponent.hp > 0) {
-          const dx = opponent.position.x - data.position.x, dz = opponent.position.z - data.position.z;
+          const dx = opponent.position.x - data.position.x,
+            dz = opponent.position.z - data.position.z;
           const l = Math.hypot(dx, dz) || 1;
           opponent.knockdown = { dirX: dx / l, dirZ: dz / l, speed: KNIFE_HEAVY_KNOCKDOWN_SPEED };
         }
@@ -761,9 +827,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
             !pending.target.isDead &&
             pending.target.hurtboxHandle !== null &&
             ragdoll.pointIntersectsHurtbox(_handPos, pending.target.hurtboxHandle)
-          : bagHurtboxHandle !== null &&
-            bagHurtboxHandle !== undefined &&
-            ragdoll.pointIntersectsHurtbox(_handPos, bagHurtboxHandle));
+          : bagHurtboxHandle !== null && bagHurtboxHandle !== undefined && ragdoll.pointIntersectsHurtbox(_handPos, bagHurtboxHandle));
       if (stillIn) {
         pending.pos.copy(_handPos); // ancora dentro -- continua a tracciare, non risolto
         return false;
@@ -794,11 +858,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       // collider (PunchingBag.tsx) instead. Landing on the bag never
       // affects the fight (no hp/opponent state touched at all) -- it
       // only feeds the bag's own hit counter/marker via registerHit.
-      if (
-        bagHurtboxHandle !== null &&
-        bagHurtboxHandle !== undefined &&
-        ragdoll.pointIntersectsHurtbox(_handPos, bagHurtboxHandle)
-      ) {
+      if (bagHurtboxHandle !== null && bagHurtboxHandle !== undefined && ragdoll.pointIntersectsHurtbox(_handPos, bagHurtboxHandle)) {
         pendingHitRef.current = { bone: boneName, kind: 'bag', pos: _handPos.clone() };
         return false;
       }
@@ -883,15 +943,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
 
   const updateUpperLayer = (tPose: boolean) => {
     let desired: string | null = null;
-    if (
-      !tPose &&
-      isGun() &&
-      !data.isDead &&
-      !isDown() &&
-      data.state !== 'Vittoria!' &&
-      !isDodgingRef.current &&
-      !traving()
-    ) {
+    if (!tPose && isGun() && !data.isDead && !isDown() && data.state !== 'Vittoria!' && !isDodgingRef.current && !traving()) {
       desired =
         reloadLeftRef.current > 0
           ? 'Pistol_Reload__upper'
@@ -995,8 +1047,21 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     if (import.meta.env.DEV) {
       (window as any).__lastShot = {
         surface,
-        camHit: camHit.hit ? { d: +camHit.distance.toFixed(2), h: camHit.collider?.handle, info: camHit.collider ? getShootableCollider(camHit.collider.handle) : null } : null,
-        hit: hit.hit ? { d: +hit.distance.toFixed(2), h: hit.collider?.handle, info: hit.collider ? getShootableCollider(hit.collider.handle) : null, sensor: hit.collider?.isSensor() } : null,
+        camHit: camHit.hit
+          ? {
+              d: +camHit.distance.toFixed(2),
+              h: camHit.collider?.handle,
+              info: camHit.collider ? getShootableCollider(camHit.collider.handle) : null,
+            }
+          : null,
+        hit: hit.hit
+          ? {
+              d: +hit.distance.toFixed(2),
+              h: hit.collider?.handle,
+              info: hit.collider ? getShootableCollider(hit.collider.handle) : null,
+              sensor: hit.collider?.isSensor(),
+            }
+          : null,
         muzzle: _muzzle.toArray().map((n) => +n.toFixed(2)),
         dir: _shotDir.toArray().map((n) => +n.toFixed(2)),
       };
@@ -1032,7 +1097,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // alla chiusura indossa l'arma scelta
     const wheelOpen = benchState.weaponWheelOpen;
     if (wheelOpen) {
-      for (const a of ['primary', 'yawLeft', 'yawRight', 'attackLeft', 'weapon1', 'weapon2', 'weapon3', 'weapon4', 'dodge']) input.consumeJustPressed(a);
+      for (const a of ['primary', 'yawLeft', 'yawRight', 'attackLeft', 'weapon1', 'weapon2', 'weapon3', 'weapon4', 'dodge'])
+        input.consumeJustPressed(a);
     }
     const tPoseBench = benchState.tPoseDebug;
     const benchClip = benchState.ragdollBench.benchClip;
@@ -1155,7 +1221,18 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       posX: data.position.x,
       posZ: data.position.z,
       // salto/arrampicata (traversal.ts): modo, quota piedi, teletrasporto per le prove
-      trav: { mode: travRef.current.mode, feetY: +travRef.current.feetY.toFixed(3), vy: +travRef.current.vy.toFixed(2), rot: +data.rotation.toFixed(3), anim: data.currentAnim, ledgeTop: travRef.current.ledge?.topY ?? null },
+      trav: {
+        mode: travRef.current.mode,
+        feetY: +travRef.current.feetY.toFixed(3),
+        vy: +travRef.current.vy.toFixed(2),
+        rot: +data.rotation.toFixed(3),
+        anim: data.currentAnim,
+        ledgeTop: travRef.current.ledge?.topY ?? null,
+      },
+      // Laboratorio KO (UI/koLab.ts): a terra / si sta rialzando, e KO vero
+      // (stesso percorso di un colpo: rialzo automatico, telecamera)
+      down: kdRef.current.active || data.state === 'Si rialza',
+      knockDown: (dirX: number, dirZ: number, speed: number, up?: number) => startKnockdown(dirX, dirZ, speed, up),
       teleport: (x: number, z: number, rotation?: number, feetY?: number) => {
         data.position.x = x;
         data.position.z = z;
@@ -1227,10 +1304,24 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     let yawDiff = camYaw - data.rotation;
     yawDiff = Math.atan2(Math.sin(yawDiff), Math.cos(yawDiff));
     // (niente torsione verso la camera mentre si salta/arrampica)
-    if (!tPoseBench && !benchClip && !traving()) ragdoll.applySpineLean(
-      THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX),
-      THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX)
+    // "a volte quando cade scompare e poi riappare, sembra cadere sotto il
+    // suolo": la torsione SOSTITUISCE la rotazione animata della spina --
+    // al rialzo (LayToIdle) il busto sdraiato e curvo della clip diventava
+    // dritto e girato verso la telecamera, e le braccia finivano 30-35 cm
+    // sotto il pavimento (il corpo fisico le seguiva). A terra e mentre si
+    // rialza niente torsione; poi rientra piano.
+    if (data.state === 'Si rialza') getUpRef.current.t += delta;
+    spineLeanWRef.current = THREE.MathUtils.clamp(
+      spineLeanWRef.current + (isDown() || data.isDead ? -1 : 1) * (delta / SPINE_LEAN_BLEND_S),
+      0,
+      1
     );
+    if (!tPoseBench && !benchClip && !traving())
+      ragdoll.applySpineLean(
+        THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX),
+        THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX),
+        spineLeanWRef.current
+      );
     // Fucile: e' agganciato al petto (calcio alla spalla, vedi
     // rifleHoldTuning) e le MANI vanno sull'arma: destra sull'impugnatura,
     // sinistra sull'astina (non durante la ricarica: va al caricatore).
@@ -1252,7 +1343,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       const arms = armBonesRef.current;
       if (arms) {
         solveTwoBoneIK(arms.r.upper, arms.r.lower, arms.r.hand, rifle.getGripWorld(_support), 1);
-        if (reloadLeftRef.current <= 0 && rifle.getSupportWorld(_support)) solveTwoBoneIK(arms.l.upper, arms.l.lower, arms.l.hand, _support, 1);
+        if (reloadLeftRef.current <= 0 && rifle.getSupportWorld(_support))
+          solveTwoBoneIK(arms.l.upper, arms.l.lower, arms.l.hand, _support, 1);
       }
     };
     rifleIK();
@@ -1308,7 +1400,6 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // personaggio sta fermo sul posto, niente macchina a stati/input.
     if (tPoseBench || benchClip) return;
 
-
     if (!groupRef.current) return;
 
     const groundBase = (x: number, z: number) => getTerrainHeight(x, z) + getRoadOffset(x, z);
@@ -1330,7 +1421,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       }
       const groundY = groundBase(data.position.x, data.position.z);
       data.position.y = tr.feetY - groundY;
-      groupRef.current!.position.set(data.position.x, tr.feetY, data.position.z);
+      // (rialzo da terra: il modello parte alzato, vedi getUpRef)
+      groupRef.current!.position.set(data.position.x, tr.feetY + getUpLift(), data.position.z);
       groupRef.current!.rotation.y = data.rotation;
     };
 
@@ -1348,9 +1440,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         desiredX,
         desiredZ,
         bagSolidHandle ?? null,
-        bagRef?.current
-          ? (point, dir, blocked) => bagRef.current!.applyBodyBump(point, dir, blocked)
-          : undefined
+        bagRef?.current ? (point, dir, blocked) => bagRef.current!.applyBodyBump(point, dir, blocked) : undefined
       );
       data.position.x += corrected.x;
       data.position.z += corrected.z;
@@ -1358,7 +1448,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         // misura: quanto movimento viene chiesto e quanto ne resta dopo le
         // collisioni del corpo solido (per il controllo di camminata/corsa)
         const m = ((window as any).__moveDebug ??= { want: 0, got: 0, frames: 0, blocked: 0 });
-        const w = Math.hypot(desiredX, desiredZ), g = Math.hypot(corrected.x, corrected.z);
+        const w = Math.hypot(desiredX, desiredZ),
+          g = Math.hypot(corrected.x, corrected.z);
         m.want += w;
         m.got += g;
         m.frames++;
@@ -1401,7 +1492,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         outPos.y = groundBase(outPos.x, outPos.z);
         // in piedi alla portiera, rivolto verso l'auto (verso il sedile)
         parts.seat.getWorldPosition(_carTmp);
-        const fx = _carTmp.x - outPos.x, fz = _carTmp.z - outPos.z;
+        const fx = _carTmp.x - outPos.x,
+          fz = _carTmp.z - outPos.z;
         outQuat.setFromAxisAngle(_worldUp, Math.atan2(-fx, -fz));
       };
       const setGroupPose = (pos: THREE.Vector3, quat: THREE.Quaternion) => {
@@ -1416,14 +1508,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         // F a piedi, fermi e liberi: auto vicina?
         const fPressed = input.consumeJustPressed('enter');
         const vehIds = typeof vehicleIds === 'function' ? vehicleIds() : vehicleIds;
-        if (
-          fPressed &&
-          vehIds?.length &&
-          !data.isDead &&
-          !kdRef.current.active &&
-          !traving() &&
-          data.attackLock <= 0
-        ) {
+        if (fPressed && vehIds?.length && !data.isDead && !kdRef.current.active && !traving() && data.attackLock <= 0) {
           for (const id of vehIds) {
             const parts = carParts(id);
             if (!parts) continue;
@@ -1448,7 +1533,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
           if (vs.mode === 'toDoor') {
             // cammina fino alla portiera (ultimi 2.5 m: niente giro attorno all'auto)
             entrancePose(parts, _carTmp2, _carQ2);
-            const dx = _carTmp2.x - data.position.x, dz = _carTmp2.z - data.position.z;
+            const dx = _carTmp2.x - data.position.x,
+              dz = _carTmp2.z - data.position.z;
             const d = Math.hypot(dx, dz);
             if (d < 0.06 || vs.t > 4) {
               vs.mode = 'opening';
@@ -1580,7 +1666,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         const yaw = data.rotation + Math.PI;
         // quota: come il boxman (centro del corpo 0.5 m sopra i piedi) -- i
         // nemici misurano la distanza e mirano da li'
-        st.setPlayerInfo([data.position.x, travRef.current.feetY + PLAYER_INFO_Y, data.position.z], Math.atan2(Math.sin(yaw), Math.cos(yaw)));
+        st.setPlayerInfo(
+          [data.position.x, travRef.current.feetY + PLAYER_INFO_Y, data.position.z],
+          Math.atan2(Math.sin(yaw), Math.cos(yaw))
+        );
       }
       if (
         droneId &&
@@ -1619,7 +1708,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
           data.position.x = place.x;
           data.position.z = place.z;
           data.rotation = place.rotation;
-          data.attackLock = transitionToAnimation(GETUP_CLIP, 0.05, false);
+          // senza dissolvenza: la clip parte gia' sdraiata sul corpo a terra,
+          // una dissolvenza dall'Idle in piedi trascinava i bersagli del
+          // ragdoll su e giu' (vedi useRagdollActive, WAKE_NO_FEEDFORWARD_S)
+          data.attackLock = transitionToAnimation(GETUP_CLIP, 0, false);
           data.state = 'Si rialza';
         } else {
           data.attackLock = 0;
@@ -1644,14 +1736,34 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       const place = stepKnockdown(kdRef.current, delta * globalSpeed, ragdoll, lyingPose);
       if (import.meta.env.DEV && !kdRef.current.active) {
         const ly = ragdoll.getLyingState();
-        (window as any).__kdDebug = { t: kdRef.current.t, rolls: kdRef.current.rolls, place, lyPelvis: ly?.pelvis.toArray(), lyHead: ly?.headDir.toArray(), faceUp: ly?.faceUp, rootBefore: [data.position.x, data.position.z], pose: lyingPose };
+        (window as any).__kdDebug = {
+          t: kdRef.current.t,
+          rolls: kdRef.current.rolls,
+          place,
+          lyPelvis: ly?.pelvis.toArray(),
+          lyHead: ly?.headDir.toArray(),
+          faceUp: ly?.faceUp,
+          rootBefore: [data.position.x, data.position.z],
+          pose: lyingPose,
+        };
       }
       if (!kdRef.current.active) {
         if (place) {
+          // la clip ha le articolazioni a filo del suolo (bacino a 4 cm), il
+          // corpo fisico ci sta sopra con il suo spessore (bacino a ~15):
+          // senza alzarla i motori tiravano gomiti e mani dentro il
+          // pavimento. Si parte alzati della differenza e si scende piano.
+          const ly = ragdoll.getLyingState();
+          getUpRef.current.t = 0;
+          getUpRef.current.lift0 =
+            ly && lyingPose ? THREE.MathUtils.clamp(ly.pelvis.y - (travRef.current.feetY + lyingPose.pelvisY), 0, GETUP_LIFT_MAX) : 0;
           data.position.x = place.x;
           data.position.z = place.z;
           data.rotation = place.rotation;
-          data.attackLock = transitionToAnimation(GETUP_CLIP, 0.05, false);
+          // senza dissolvenza: la clip parte gia' sdraiata sul corpo a terra,
+          // una dissolvenza dall'Idle in piedi trascinava i bersagli del
+          // ragdoll su e giu' (vedi useRagdollActive, WAKE_NO_FEEDFORWARD_S)
+          data.attackLock = transitionToAnimation(GETUP_CLIP, 0, false);
           data.state = 'Si rialza';
         } else {
           data.state = idleState();
@@ -1671,7 +1783,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       data.position.z += ob.pushZ;
       if (obstacleHitCooldownRef.current > 0) obstacleHitCooldownRef.current -= dtO;
       if (ob.hitSpeed >= OBSTACLE_KNOCKDOWN_SPEED && data.state !== 'Si rialza') {
-        startKnockdown(ob.hitVX, ob.hitVZ, Math.min(ob.hitSpeed, 8));
+        // fino a 11 m/s: la punta del rotore va a ~14, un tetto basso
+        // lasciava il corpo cadere quasi sul posto
+        startKnockdown(ob.hitVX, ob.hitVZ, Math.min(ob.hitSpeed, 11));
         // finito il frame qui: prima proseguiva e la camminata/idle sotto
         // riscriveva stato e animazione ("Riposo" mentre si vola a terra)
         if (kdRef.current.active) {
@@ -1763,7 +1877,17 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       if (stepTraversal(travRef.current, ctx)) {
         const m = travRef.current.mode;
         data.state =
-          m === 'air' ? 'In aria' : m === 'hang' ? 'Appeso' : m === 'ladder' ? 'Sulla scala' : m === 'land' || m === 'bigLand' ? 'Atterra' : m === 'roll' ? 'Capriola' : 'Arrampica';
+          m === 'air'
+            ? 'In aria'
+            : m === 'hang'
+              ? 'Appeso'
+              : m === 'ladder'
+                ? 'Sulla scala'
+                : m === 'land' || m === 'bigLand'
+                  ? 'Atterra'
+                  : m === 'roll'
+                    ? 'Capriola'
+                    : 'Arrampica';
         applyTransform();
         return;
       }
@@ -1775,7 +1899,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       // attack swing or a hit-stun both stay planted in place, same as
       // CombatSoldier.tsx.
       if (isDodgingRef.current) {
-        resolveAndApplyMovement(dodgeDirRef.current.x * DODGE_SPEED * delta * globalSpeed, dodgeDirRef.current.z * DODGE_SPEED * delta * globalSpeed);
+        resolveAndApplyMovement(
+          dodgeDirRef.current.x * DODGE_SPEED * delta * globalSpeed,
+          dodgeDirRef.current.z * DODGE_SPEED * delta * globalSpeed
+        );
       }
       if (isAttackingRef.current && knifeLungeLeftRef.current > 0) {
         const dt = Math.min(knifeLungeLeftRef.current, delta * globalSpeed);

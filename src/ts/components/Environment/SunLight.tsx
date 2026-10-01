@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
@@ -37,7 +37,20 @@ const SunLight: React.FC = () => {
   const skyColor = useMemo(() => new THREE.Color(), []);
   const groundColor = useMemo(() => new THREE.Color(), []);
 
+  // ombre ridisegnate a frame alterni (30 Hz): la mappa delle ombre e' il
+  // passaggio piu' caro dopo la scena (rifa' tutte le draw call di chi
+  // proietta ombra) e a 30 Hz il ritardo non si vede
+  const gl = useThree((s) => s.gl);
+  const shadowFrame = useRef(0);
+  useEffect(
+    () => () => {
+      gl.shadowMap.autoUpdate = true;
+    },
+    [gl]
+  );
   useFrame((state) => {
+    gl.shadowMap.autoUpdate = false;
+    if ((shadowFrame.current++ & 1) === 0) gl.shadowMap.needsUpdate = true;
     const dir = getSunDirection(state.clock.elapsedTime);
     const dayFactor = getDayFactor(dir.y);
     const warmth = getWarmth(dir.y);

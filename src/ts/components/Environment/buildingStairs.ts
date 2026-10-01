@@ -35,9 +35,12 @@ export const getHoleBounds = (w: number, d: number, corner: number) => {
   const holeMinX = sx < 0 ? -w / 2 : w / 2 - BUILDING_HOLE_LEN;
   const holeMinZ = d / 2 - BUILDING_HOLE_SIZE;
   return {
-    sx, sz,
-    holeMinX, holeMaxX: holeMinX + BUILDING_HOLE_LEN,
-    holeMinZ, holeMaxZ: holeMinZ + BUILDING_HOLE_SIZE,
+    sx,
+    sz,
+    holeMinX,
+    holeMaxX: holeMinX + BUILDING_HOLE_LEN,
+    holeMinZ,
+    holeMaxZ: holeMinZ + BUILDING_HOLE_SIZE,
   };
 };
 
@@ -66,7 +69,14 @@ export function getStairwell(w: number, d: number, corner: number): Stairwell {
   const zInner = zWall - sz * (BUILDING_STAIR_LANE + BUILDING_STAIR_GAP + BUILDING_STAIR_LANE / 2);
   const zEdge = zWall - sz * (2 * BUILDING_STAIR_LANE + BUILDING_STAIR_GAP);
   return {
-    sx, sz, xWall, xLanding, xIn, zOuter, zInner, zEdge,
+    sx,
+    sz,
+    xWall,
+    xLanding,
+    xIn,
+    zOuter,
+    zInner,
+    zEdge,
     landingCX: (xWall + xLanding) / 2,
     landingCZ: (zWall + zEdge) / 2,
     landingHX: BUILDING_STAIR_LANDING / 2,
@@ -79,8 +89,10 @@ export const floorTopY = (f: number, numFloors: number, floorHeight: number) =>
   f <= 0 ? 0 : f >= numFloors ? numFloors * floorHeight + BUILDING_WALL_THICKNESS : f * floorHeight + BUILDING_SLAB_THICKNESS / 2;
 
 export interface StairFlight {
-  xa: number; ya: number; // attacco (in basso)
-  xb: number; yb: number; // arrivo (in alto)
+  xa: number;
+  ya: number; // attacco (in basso)
+  xb: number;
+  yb: number; // arrivo (in alto)
   z: number;
 }
 

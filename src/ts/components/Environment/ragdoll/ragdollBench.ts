@@ -48,6 +48,23 @@ export interface RagdollBenchSettings {
   // Incrementato per chiedere la ricostruzione del rig (dopo aver
   // cambiato parametri che valgono solo al build).
   rebuildNonce: number;
+  // --- KO "alla GTA IV" (pannello "Laboratorio KO", useRagdollActive.ts) ---
+  // Tono muscolare all'istante del colpo (frazione della rigidita' da
+  // vivo): il corpo tiene la sua forma invece di afflosciarsi di colpo.
+  koTone: number;
+  // Costante di tempo (s) con cui il tono cala dopo il colpo.
+  koRelaxS: number;
+  // Tono minimo che resta finche' non e' del tutto molle (svenuto, non
+  // morto: gli arti non ciondolano come stracci).
+  koFloor: number;
+  // Al massimo dopo quanti secondi i muscoli si fermano al tono minimo
+  // (di solito succede prima: mezzo secondo dopo che e' atterrato).
+  koLimpS: number;
+  // Riflesso di parata: forza (frazione della rigidita' da vivo) con cui
+  // le braccia vanno verso il suolo nella direzione della caduta...
+  koReflex: number;
+  // ...e per quanti secondi dopo il colpo.
+  koReflexS: number;
 }
 
 export const DEFAULT_RAGDOLL_BENCH: RagdollBenchSettings = {
@@ -63,4 +80,13 @@ export const DEFAULT_RAGDOLL_BENCH: RagdollBenchSettings = {
   benchClip: null,
   testHitSpeed: 12,
   rebuildNonce: 0,
+  koTone: 0.45,
+  koRelaxS: 0.7,
+  koFloor: 0.12,
+  koLimpS: 2.5,
+  koReflex: 0.55,
+  koReflexS: 0.9,
 };
+
+// campi del "Laboratorio KO" (per "Copia valori")
+export const KO_BENCH_KEYS = ['koTone', 'koRelaxS', 'koFloor', 'koLimpS', 'koReflex', 'koReflexS'] as const;

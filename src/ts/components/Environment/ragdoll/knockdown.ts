@@ -17,6 +17,7 @@ const ROLL_WAIT_S = 0.7;
 
 export interface LyingPose {
   pelvis: THREE.Vector3; // bacino nella clip, nel frame del gruppo del personaggio
+  pelvisY: number; // altezza del bacino sopra il suolo nel primo fotogramma
   headAngle: number; // direzione bacino->testa nel frame del gruppo (atan2 x,z)
 }
 
@@ -32,18 +33,21 @@ export function measureLyingPose(scene: THREE.Object3D, clip: THREE.AnimationCli
   mixer.clipAction(clip).play();
   mixer.setTime(0);
   holder.updateMatrixWorld(true);
-  const p = c.getObjectByName('pelvis'), h = c.getObjectByName('head');
+  const p = c.getObjectByName('pelvis'),
+    h = c.getObjectByName('head');
   if (!p || !h) return null;
-  const pp = p.getWorldPosition(new THREE.Vector3()), hp = h.getWorldPosition(new THREE.Vector3());
+  const pp = p.getWorldPosition(new THREE.Vector3()),
+    hp = h.getWorldPosition(new THREE.Vector3());
   mixer.stopAllAction();
-  return { pelvis: new THREE.Vector3(pp.x, 0, pp.z), headAngle: Math.atan2(hp.x - pp.x, hp.z - pp.z) };
+  return { pelvis: new THREE.Vector3(pp.x, 0, pp.z), pelvisY: pp.y, headAngle: Math.atan2(hp.x - pp.x, hp.z - pp.z) };
 }
 
 // Dove mettere la radice (x, z) e con che rotazione, perche' la clip parta
 // esattamente sul corpo a terra.
 export function getUpPlacement(ly: LyingState, pose: LyingPose): { x: number; z: number; rotation: number } {
   const rotation = Math.atan2(ly.headDir.x, ly.headDir.z) - pose.headAngle;
-  const c = Math.cos(rotation), s = Math.sin(rotation);
+  const c = Math.cos(rotation),
+    s = Math.sin(rotation);
   // stessa convenzione di Object3D.rotation.y
   const ox = pose.pelvis.x * c + pose.pelvis.z * s;
   const oz = -pose.pelvis.x * s + pose.pelvis.z * c;

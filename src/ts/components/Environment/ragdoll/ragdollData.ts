@@ -23,7 +23,6 @@ export interface RagdollSegment {
   lengthScale?: number;
 }
 
-
 export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
   { name: 'Hips', drivingBone: 'pelvis', parent: null, toBone: 'spine_01', radius: 0.15, lengthScale: 0.6 },
   // "osserva bene questo collider ragdoll attivo.. mi pare nn
@@ -68,7 +67,6 @@ export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
   { name: 'Foot_R', drivingBone: 'foot_r', parent: 'Shin_R', toBone: 'ball_r', radius: 0.075, lengthScale: 1.4 },
 ];
 
-
 export const ACTIVE_RAGDOLL_MASS_WEIGHT: Record<string, number> = {
   Hips: 0.199,
   Torso: 0.149,
@@ -94,8 +92,8 @@ export const ACTIVE_RAGDOLL_MASS_WEIGHT: Record<string, number> = {
   UpperArm_R: 0.028,
   ForeArm_L: 0.022, // include la mano (non simulata a parte), come "forearm and hand" di Winter
   ForeArm_R: 0.022,
-  Thigh_L: 0.10,
-  Thigh_R: 0.10,
+  Thigh_L: 0.1,
+  Thigh_R: 0.1,
   Shin_L: 0.0465,
   Shin_R: 0.0465,
   Foot_L: 0.0145,
@@ -121,10 +119,7 @@ export const ACTIVE_RAGDOLL_JOINT_LIMIT_FALLBACK_DEG = 150;
 // che fa l'animazione). Cosi' nessuna animazione del gioco finisce mai
 // contro un limite, e un colpo o un KO non producono pose disumane.
 // Ginocchia: iperestensione tenuta a -15.
-export const ACTIVE_RAGDOLL_JOINT_LIMITS_DEG: Record<
-  string,
-  { x: [number, number]; y: [number, number]; z: [number, number] }
-> = {
+export const ACTIVE_RAGDOLL_JOINT_LIMITS_DEG: Record<string, { x: [number, number]; y: [number, number]; z: [number, number] }> = {
   Torso: { x: [-31, 30], y: [-32, 33], z: [-25, 25] },
   SpineMid: { x: [-35, 56], y: [-36, 44], z: [-26, 41] },
   SpineHigh: { x: [-36, 39], y: [-44, 60], z: [-46, 32] },
@@ -181,3 +176,26 @@ export const ACTIVE_RAGDOLL_JOINT_FREQ: Record<string, number> = {
 // (moltiplicato per l'inerzia del sotto-albero) -- evita che un corpo
 // molle oscilli all'infinito come un pendolo senza attrito.
 export const ACTIVE_RAGDOLL_PASSIVE_JOINT_FRICTION = 4;
+
+// KO "alla GTA IV": tono di ogni giunto rispetto agli altri (moltiplica
+// la pulsazione da vivo insieme a koTone/koFloor del banco). Il tronco e
+// il collo tengono di piu' (la testa non ciondola come uno straccio),
+// spalle e gomiti sono morbidi, gambe a meta'.
+export const ACTIVE_RAGDOLL_KO_TONE: Record<string, number> = {
+  Torso: 1,
+  SpineMid: 1,
+  SpineHigh: 1,
+  Head: 0.9,
+  ClavicleL: 0.8,
+  ClavicleR: 0.8,
+  UpperArm_L: 0.6,
+  UpperArm_R: 0.6,
+  ForeArm_L: 0.5,
+  ForeArm_R: 0.5,
+  Thigh_L: 0.75,
+  Thigh_R: 0.75,
+  Shin_L: 0.6,
+  Shin_R: 0.6,
+  Foot_L: 0.5,
+  Foot_R: 0.5,
+};

@@ -1,20 +1,11 @@
-import { useCallback, useEffect, useRef } from "react";
-import * as THREE from "three";
-import { useRapier } from "@react-three/rapier";
-import { registerShootableCollider, unregisterShootableCollider } from "../../weapons/shootableRegistry";
-import { vehicleBodyHandles } from "../../../Vehicles/vehicleRegistry";
-import type {
-  RigidBody as RapierRigidBody,
-  Collider,
-  KinematicCharacterController,
-} from "@dimforge/rapier3d-compat";
-import {
-  SOLID_BODY_SEGMENTS,
-} from "../ragdollConfig";
-import {
-  SOLID_BODY_GROUPS,
-  solidBodyRagdollGroups,
-} from "../../../../enums/CollisionGroups";
+import { useCallback, useEffect, useRef } from 'react';
+import * as THREE from 'three';
+import { useRapier } from '@react-three/rapier';
+import { registerShootableCollider, unregisterShootableCollider } from '../../weapons/shootableRegistry';
+import { vehicleBodyHandles } from '../../../Vehicles/vehicleRegistry';
+import type { RigidBody as RapierRigidBody, Collider, KinematicCharacterController } from '@dimforge/rapier3d-compat';
+import { SOLID_BODY_SEGMENTS } from '../ragdollConfig';
+import { SOLID_BODY_GROUPS, solidBodyRagdollGroups } from '../../../../enums/CollisionGroups';
 
 interface SolidBodyEntry {
   body: RapierRigidBody;
@@ -34,6 +25,12 @@ export interface SolidBodySegmentDebug {
   qw: number;
   halfHeight: number;
   radius: number;
+}
+
+let parkCounter = 0;
+export function nextParkSpot() {
+  const k = parkCounter++;
+  return { x: 20000 + (k % 50) * 40, z: 20000 + Math.floor(k / 50) * 40 };
 }
 
 export function useRagdollSolidBodies(
@@ -281,12 +278,14 @@ export function useRagdollSolidBodies(
           if (body && !body.isFixed() && prev && dt > 1e-4) {
             // punto di contatto nel frame dell'ostacolo, riportato alla posa di prima
             const { q, qi, v, w } = _pq.current;
-            const bt = body.translation(), br = body.rotation();
+            const bt = body.translation(),
+              br = body.rotation();
             q.set(br.x, br.y, br.z, br.w);
             qi.copy(q).invert();
             v.set(c.point2.x - bt.x, c.point2.y - bt.y, c.point2.z - bt.z).applyQuaternion(qi);
             w.copy(v).applyQuaternion(prev.q).add(prev.t);
-            const vx = (c.point2.x - w.x) / dt, vz = (c.point2.z - w.z) / dt;
+            const vx = (c.point2.x - w.x) / dt,
+              vz = (c.point2.z - w.z) / dt;
             const sp = Math.hypot(vx, vz);
             if (sp > out.hitSpeed) {
               out.hitSpeed = sp;
@@ -336,8 +335,12 @@ export function useRagdollSolidBodies(
               out.pushZ = pz;
             }
             const body = other.parent()!;
-            const lv = body.linvel(), av = body.angvel(), com = body.worldCom();
-            const rx = c.point2.x - com.x, ry = c.point2.y - com.y, rz = c.point2.z - com.z;
+            const lv = body.linvel(),
+              av = body.angvel(),
+              com = body.worldCom();
+            const rx = c.point2.x - com.x,
+              ry = c.point2.y - com.y,
+              rz = c.point2.z - com.z;
             const vx = lv.x + av.y * rz - av.z * ry;
             const vz = lv.z + av.x * ry - av.y * rx;
             const sp = Math.hypot(vx, vz);
@@ -366,12 +369,14 @@ export function useRagdollSolidBodies(
             const b = c.parent();
             if (b && b.isKinematic() && !seen.has(b.handle)) {
               seen.add(b.handle);
-              const t = b.translation(), r = b.rotation();
+              const t = b.translation(),
+                r = b.rotation();
               const e = prevPosesRef.current.get(b.handle);
               if (e) {
                 e.t.set(t.x, t.y, t.z);
                 e.q.set(r.x, r.y, r.z, r.w);
-              } else prevPosesRef.current.set(b.handle, { t: new THREE.Vector3(t.x, t.y, t.z), q: new THREE.Quaternion(r.x, r.y, r.z, r.w) });
+              } else
+                prevPosesRef.current.set(b.handle, { t: new THREE.Vector3(t.x, t.y, t.z), q: new THREE.Quaternion(r.x, r.y, r.z, r.w) });
             }
             return true;
           },
@@ -433,9 +438,16 @@ export function useRagdollSolidBodies(
   // ossa, cioe' il corpo che cade, e lo spingerebbero (stesso bit del
   // combattente: si toccano) -- un ciclo che lo faceva salire in aria. Si
   // parcheggiano lontano finche' non torna in vita.
+  // ognuno parcheggia in un posto suo: tanti corpi parcheggiati nello
+  // stesso punto si sovrapporrebbero tutti (coppie inutili nella fase
+  // larga della fisica, che crescono col quadrato)
+  const parkSpotRef = useRef<{ x: number; z: number } | null>(null);
   const parkSolidBody = useCallback(() => {
+    const spot = (parkSpotRef.current ??= nextParkSpot());
     const entries = solidBodiesRef.current;
-    for (const name of Object.keys(entries)) entries[name].body.setTranslation({ x: 0, y: -1000, z: 0 }, true);
+    let k = 0;
+    for (const name of Object.keys(entries))
+      entries[name].body.setTranslation({ x: spot.x + (k++ % 4) * 3, y: -1000, z: spot.z + Math.floor(k / 4) * 3 }, true);
   }, []);
 
   return {

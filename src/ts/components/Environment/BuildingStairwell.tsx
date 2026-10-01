@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { RigidBody, CuboidCollider, interactionGroups } from '@react-three/rapier';
+import { interactionGroups } from '@react-three/rapier';
+import { useStaticBoxes, type StaticBox } from './staticColliders';
 import { CollisionGroups } from '../../enums/CollisionGroups';
 import { STAIR_RAMP_GROUPS } from './traversal/traversalWorld';
 import {
@@ -26,10 +27,7 @@ import {
 // corpo non li prendono di fronte come muri); il parapetto invece blocca.
 
 const ALL = Array.from({ length: 16 }, (_, i) => i);
-const RAIL_GROUPS = interactionGroups(
-  [CollisionGroups.Default, CollisionGroups.Characters, CollisionGroups.RagdollWorld],
-  ALL
-);
+const RAIL_GROUPS = interactionGroups([CollisionGroups.Default, CollisionGroups.Characters, CollisionGroups.RagdollWorld], ALL);
 const RAIL_H = 1.0;
 const RAIL_T = 0.06;
 const STRINGER_T = 0.12;
@@ -127,48 +125,60 @@ export const BuildingStairwell: React.FC<Props> = ({ x, y, z, width, depth, heig
     }
   }, [x, y, z, g, numFloors, floorHeight, steps, stepRise, sw, pieceA, pieceB, flights, landings, railYs, railCX, railZ]);
 
+  // collider (creati in blocco, staticColliders.ts): rampe, pianerottoli,
+  // solette, tetto, parapetti
+  const boxes = useMemo(() => {
+    const out: StaticBox[] = [];
+    for (const fl of flights) {
+      const r = rampTransform(fl);
+      out.push({
+        half: [r.len / 2, STAIR_RAMP_T / 2, BUILDING_STAIR_LANE / 2],
+        pos: [r.x, r.y, r.z],
+        rotZ: r.rotZ,
+        groups: STAIR_RAMP_GROUPS,
+      });
+    }
+    for (const l of landings) {
+      out.push({
+        half: [sw.landingHX, LANDING_T / 2, sw.landingHZ],
+        pos: [sw.landingCX, l.y - LANDING_T / 2, sw.landingCZ],
+        groups: STAIR_RAMP_GROUPS,
+      });
+    }
+    for (let k = 1; k < numFloors; k++) {
+      const cy = k * floorHeight;
+      out.push({
+        half: [pieceA.w / 2, BUILDING_SLAB_THICKNESS / 2, pieceA.d / 2],
+        pos: [pieceA.cx, cy, pieceA.cz],
+        groups: STAIR_RAMP_GROUPS,
+      });
+      out.push({
+        half: [pieceB.w / 2, BUILDING_SLAB_THICKNESS / 2, pieceB.d / 2],
+        pos: [pieceB.cx, cy, pieceB.cz],
+        groups: STAIR_RAMP_GROUPS,
+      });
+    }
+    out.push({
+      half: [pieceA.w / 2, BUILDING_WALL_THICKNESS / 2, pieceA.d / 2],
+      pos: [pieceA.cx, roofY, pieceA.cz],
+      groups: STAIR_RAMP_GROUPS,
+    });
+    out.push({
+      half: [pieceB.w / 2, BUILDING_WALL_THICKNESS / 2, pieceB.d / 2],
+      pos: [pieceB.cx, roofY, pieceB.cz],
+      groups: STAIR_RAMP_GROUPS,
+    });
+    for (const ry of railYs)
+      out.push({ half: [railLen / 2, RAIL_H / 2, RAIL_T / 2], pos: [railCX, ry + RAIL_H / 2, railZ], groups: RAIL_GROUPS });
+    return out;
+  }, [flights, landings, sw, numFloors, floorHeight, pieceA, pieceB, roofY, railYs, railLen, railCX, railZ]);
+  useStaticBoxes([x, y, z], boxes);
+
   const stringerLen = rampTransform(flights[0]).len;
   const key = `${numFloors}-${floorHeight.toFixed(4)}-${width.toFixed(3)}-${depth.toFixed(3)}-${corner}`;
 
   return (
     <group>
-      <RigidBody type="fixed" colliders={false} position={[x, y, z]}>
-        {flights.map((fl, i) => {
-          const r = rampTransform(fl);
-          return (
-            <CuboidCollider
-              key={`ramp-${i}`}
-              args={[r.len / 2, STAIR_RAMP_T / 2, BUILDING_STAIR_LANE / 2]}
-              position={[r.x, r.y, r.z]}
-              rotation={[0, 0, r.rotZ]}
-              collisionGroups={STAIR_RAMP_GROUPS}
-            />
-          );
-        })}
-        {landings.map((l, i) => (
-          <CuboidCollider
-            key={`landing-${i}`}
-            args={[sw.landingHX, LANDING_T / 2, sw.landingHZ]}
-            position={[sw.landingCX, l.y - LANDING_T / 2, sw.landingCZ]}
-            collisionGroups={STAIR_RAMP_GROUPS}
-          />
-        ))}
-        {Array.from({ length: Math.max(0, numFloors - 1) }, (_, k) => {
-          const cy = (k + 1) * floorHeight;
-          return (
-            <React.Fragment key={`slab-${k}`}>
-              <CuboidCollider args={[pieceA.w / 2, BUILDING_SLAB_THICKNESS / 2, pieceA.d / 2]} position={[pieceA.cx, cy, pieceA.cz]} collisionGroups={STAIR_RAMP_GROUPS} />
-              <CuboidCollider args={[pieceB.w / 2, BUILDING_SLAB_THICKNESS / 2, pieceB.d / 2]} position={[pieceB.cx, cy, pieceB.cz]} collisionGroups={STAIR_RAMP_GROUPS} />
-            </React.Fragment>
-          );
-        })}
-        <CuboidCollider args={[pieceA.w / 2, BUILDING_WALL_THICKNESS / 2, pieceA.d / 2]} position={[pieceA.cx, roofY, pieceA.cz]} collisionGroups={STAIR_RAMP_GROUPS} />
-        <CuboidCollider args={[pieceB.w / 2, BUILDING_WALL_THICKNESS / 2, pieceB.d / 2]} position={[pieceB.cx, roofY, pieceB.cz]} collisionGroups={STAIR_RAMP_GROUPS} />
-        {railYs.map((ry, i) => (
-          <CuboidCollider key={`rail-${i}`} args={[railLen / 2, RAIL_H / 2, RAIL_T / 2]} position={[railCX, ry + RAIL_H / 2, railZ]} collisionGroups={RAIL_GROUPS} />
-        ))}
-      </RigidBody>
-
       {/* tetto a L: il vano resta aperto, l'ultima rampa esce sul tetto */}
       <mesh position={[x + pieceA.cx, y + roofY, z + pieceA.cz]} castShadow receiveShadow>
         <boxGeometry args={[pieceA.w, BUILDING_WALL_THICKNESS, pieceA.d]} />

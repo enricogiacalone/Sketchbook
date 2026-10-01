@@ -1,11 +1,35 @@
 import React, { useRef } from 'react';
 import * as THREE from 'three';
-import { RigidBody, RapierRigidBody, useBeforePhysicsStep, RoundCuboidCollider, CuboidCollider, CylinderCollider, BallCollider } from '@react-three/rapier';
+import {
+  RigidBody,
+  RapierRigidBody,
+  useBeforePhysicsStep,
+  RoundCuboidCollider,
+  CuboidCollider,
+  CylinderCollider,
+  BallCollider,
+} from '@react-three/rapier';
 import { SOLID_OBSTACLE_GROUPS } from '../../enums/CollisionGroups';
+import { CoefficientCombineRule } from '@dimforge/rapier3d-compat';
+import { sweeperColliders } from './ragdoll/sweepers';
 import { getTerrainHeight } from './Terrain';
 
 // bloccano combattenti e ragdoll (vivo o KO) -- vedi CollisionGroups.ts
 const SOLID_BODY_GROUPS = SOLID_OBSTACLE_GROUPS;
+
+// "quando vengo colpito dal coso rotante la ragdoll impazzisce e fa
+// capovolte strane tremando" -- misurato: il corpo KO finiva SOPRA una
+// pala (bacino a 1.24 m, la pala arriva a 1.1) e l'attrito se lo portava
+// in giro, a 15 m/s in tondo attorno al perno, con braccia e gambe che
+// sbattevano contro l'altra pala. Il rotore senza attrito (regola Min: 0
+// anche contro i corpi che ne hanno) spinge ancora di lato ma non
+// trascina: la pala gli scivola sotto e il corpo cade giu'.
+const NO_GRIP = { friction: 0, frictionCombineRule: CoefficientCombineRule.Min } as const;
+
+// i collider del rotore si iscrivono come "spazzatori" (ragdoll/sweepers.ts)
+const sweeperRef = (c: { handle: number } | null) => {
+  if (c) sweeperColliders.add(c.handle);
+};
 
 export const ArenaObstacles: React.FC = () => {
   const pendulum1Ref = useRef<RapierRigidBody>(null);
@@ -15,6 +39,7 @@ export const ArenaObstacles: React.FC = () => {
   const piston2Ref = useRef<RapierRigidBody>(null);
 
   const timeRef = useRef(0);
+  React.useEffect(() => () => sweeperColliders.clear(), []);
 
   // Mossi a OGNI passo di fisica (1/120 s), non a ogni frame: con
   // setNextKinematic* in useFrame (60 Hz) un passo su due l'ostacolo
@@ -120,17 +145,17 @@ export const ArenaObstacles: React.FC = () => {
             <cylinderGeometry args={[0.6, 0.6, 1.2, 16]} />
             <meshStandardMaterial color="#1f2937" metalness={0.9} roughness={0.1} />
           </mesh>
-          <CylinderCollider args={[0.6, 0.6]} position={[0, 0, 0]} />
+          <CylinderCollider args={[0.6, 0.6]} position={[0, 0, 0]} {...NO_GRIP} ref={sweeperRef} />
           <mesh position={[2.5, 0, 0]}>
             <boxGeometry args={[4.5, 0.5, 0.8]} />
             <meshStandardMaterial color="#f97316" metalness={0.8} roughness={0.2} />
           </mesh>
-          <RoundCuboidCollider args={[2.15, 0.15, 0.3, 0.1]} position={[2.5, 0, 0]} />
+          <RoundCuboidCollider args={[2.15, 0.15, 0.3, 0.1]} position={[2.5, 0, 0]} {...NO_GRIP} ref={sweeperRef} />
           <mesh position={[-2.5, 0, 0]}>
             <boxGeometry args={[4.5, 0.5, 0.8]} />
             <meshStandardMaterial color="#f97316" metalness={0.8} roughness={0.2} />
           </mesh>
-          <RoundCuboidCollider args={[2.15, 0.15, 0.3, 0.1]} position={[-2.5, 0, 0]} />
+          <RoundCuboidCollider args={[2.15, 0.15, 0.3, 0.1]} position={[-2.5, 0, 0]} {...NO_GRIP} ref={sweeperRef} />
         </RigidBody>
       </group>
 

@@ -8,7 +8,7 @@ import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
-import { vehicleBodyHandles } from './vehicleRegistry';
+import { vehicleBodyHandles, farCars } from './vehicleRegistry';
 import { MANNEQUIN_URL, MANNEQUIN_BASE_ANIMS_URL } from '../city/useMannequinActor';
 import { remoteDrivenCars, isRemoteDriven } from '../multiplayer/remoteVehicles';
 import { simDebug } from '../../debug/simDebug';
@@ -66,7 +66,11 @@ class FixedTickSpring {
   private offset = 0;
   private readonly tickTime: number;
 
-  constructor(private mass: number, private damping: number, fps: number = 60) {
+  constructor(
+    private mass: number,
+    private damping: number,
+    fps: number = 60
+  ) {
     this.tickTime = 1 / fps;
   }
 
@@ -161,8 +165,14 @@ const FALLBACK_WHEEL: WheelDef = { node: null, position: [0, 0, 0], steering: fa
 // CuboidCollider args are half-extents like raw cannon-es, so they're halved
 // again at the call site below.
 const CHASSIS_SHAPES = [
-  { fullDimensions: [1.2233487367630005, 0.4973112344741821, 2.420389175415039] as [number, number, number], position: [0, 0.09126596, 0.03799713] as [number, number, number] },
-  { fullDimensions: [1.0837020874023438, 0.5600574016571045, 1.071435809135437] as [number, number, number], position: [0, 0.6199502944946289, -0.2552129924297333] as [number, number, number] },
+  {
+    fullDimensions: [1.2233487367630005, 0.4973112344741821, 2.420389175415039] as [number, number, number],
+    position: [0, 0.09126596, 0.03799713] as [number, number, number],
+  },
+  {
+    fullDimensions: [1.0837020874023438, 0.5600574016571045, 1.071435809135437] as [number, number, number],
+    position: [0, 0.6199502944946289, -0.2552129924297333] as [number, number, number],
+  },
 ];
 // Raggi delle ruote: solo il "terreno" (chi appartiene a Default o ai
 // trimesh: strade, terreno, pavimenti, muri, altri veicoli) -- non i
@@ -236,7 +246,9 @@ const PATROL_STUCK_TIMEOUT = 5; // seconds, matches the original's staleTimer
 const OFFICER_COLOR = '#1e40af';
 const OFFICER_SEAT_FWD = 0.31;
 const OFFICER_SEAT_DOWN = 0.44;
-const Officer: React.FC<{ seatPosition: [number, number, number]; seatQuaternion: [number, number, number, number] }> = ({ seatPosition }) => {
+const Officer: React.FC<{ seatPosition: [number, number, number]; seatQuaternion: [number, number, number, number] }> = ({
+  seatPosition,
+}) => {
   const { scene } = useGLTF(MANNEQUIN_URL);
   const { animations } = useGLTF(MANNEQUIN_BASE_ANIMS_URL);
   const { clone, mixer } = useMemo(() => {
@@ -277,12 +289,23 @@ export const DEFAULT_CAR_SCALE = 1.5;
 export const DEFAULT_CAR_MASS_KG = 1100;
 
 // auto guidata da un altro giocatore: inseguimento della posa di rete
+// oltre questa distanza dal giocatore un'auto parcheggiata e ferma si congela
+const CAR_SLEEP_DIST = 60;
+// oltre questa distanza dalla telecamera il modello e' quello semplificato in blocco
+const CAR_LOD_DIST = 70;
 const REMOTE_CAR_FOLLOW_RATE = 14; // 1/s
 const REMOTE_CAR_SNAP_DIST = 8; // m
 const _remoteCarQ = new THREE.Quaternion();
 const _remoteCarQ2 = new THREE.Quaternion();
 
-const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation = [0, 0, 0], patrolRoute, scale = DEFAULT_CAR_SCALE, massKg = DEFAULT_CAR_MASS_KG }) => {
+const Car: React.FC<CarProps> = ({
+  position = [10, 5, 0],
+  id = 'car-1',
+  rotation = [0, 0, 0],
+  patrolRoute,
+  scale = DEFAULT_CAR_SCALE,
+  massKg = DEFAULT_CAR_MASS_KG,
+}) => {
   const S = scale;
   const FORCE_SCALE = massKg ? massKg / CHASSIS_BASE_MASS : 1;
   const { scene } = useGLTF('car.glb');
@@ -323,13 +346,26 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       }
     });
     if (defs.length !== 4) {
-      console.warn(`Car ${id}: expected 4 wheel nodes in car.glb, found ${defs.length}. Falling back to a stub wheel (physics only, no visual) for any missing slot.`);
+      console.warn(
+        `Car ${id}: expected 4 wheel nodes in car.glb, found ${defs.length}. Falling back to a stub wheel (physics only, no visual) for any missing slot.`
+      );
     }
     return defs;
   }, [clonedScene]);
 
   const input = useInput();
-  const { currentControllable, controlledEntityId, controlledSeatType, isVehicleTransitioning, transitioningEntityId, transitioningDoorName, openVehicleDoors, updateEntity, setPlayerInfo, isPaused } = useStore(
+  const {
+    currentControllable,
+    controlledEntityId,
+    controlledSeatType,
+    isVehicleTransitioning,
+    transitioningEntityId,
+    transitioningDoorName,
+    openVehicleDoors,
+    updateEntity,
+    setPlayerInfo,
+    isPaused,
+  } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
@@ -525,10 +561,11 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
   // and the visual wheel-sync loop in useFrame, so the rendered wheel mesh
   // always matches exactly what the controller is actually simulating.
   const wheelConnectionPoints = useMemo(
-    () => [0, 1, 2, 3].map((i) => {
-      const def = wheelDefs[i] ?? FALLBACK_WHEEL;
-      return new THREE.Vector3(def.position[0] * S, (def.position[1] + 0.2) * S, def.position[2] * S);
-    }),
+    () =>
+      [0, 1, 2, 3].map((i) => {
+        const def = wheelDefs[i] ?? FALLBACK_WHEEL;
+        return new THREE.Vector3(def.position[0] * S, (def.position[1] + 0.2) * S, def.position[2] * S);
+      }),
     [wheelDefs, S]
   );
 
@@ -598,6 +635,9 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
   // itself. useBeforePhysicsStep can fire more than once per rendered frame
   // (whenever physics needs to catch up); that's fine here since everything
   // below re-reads the CURRENT chassis state fresh each call.
+  // parcheggiata lontano: corpo fisso (vedi sotto)
+  const frozenRef = useRef(false);
+  const settledRef = useRef(0);
   useBeforePhysicsStep((world) => {
     // Belt-and-suspenders: <Physics paused> (App.tsx) should already stop
     // this from firing at all, but this doesn't cost anything to check and
@@ -619,16 +659,21 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       const remote = !humanIsDriving && !!rc && isRemoteDriven(id);
       const rs = remoteCarRef.current;
       if (remote && rc) {
+        frozenRef.current = false;
         if (!rs.active) {
           chassis.setBodyType(rapier.RigidBodyType.KinematicPositionBased, true);
           rs.active = true;
         }
         const cur = chassis.translation();
         const k = 1 - Math.exp(-dt * REMOTE_CAR_FOLLOW_RATE);
-        const dx = rc.p[0] - cur.x, dy = rc.p[1] - cur.y, dz = rc.p[2] - cur.z;
+        const dx = rc.p[0] - cur.x,
+          dy = rc.p[1] - cur.y,
+          dz = rc.p[2] - cur.z;
         const snap = dx * dx + dy * dy + dz * dz > REMOTE_CAR_SNAP_DIST * REMOTE_CAR_SNAP_DIST;
         const f = snap ? 1 : k;
-        const nx = cur.x + dx * f, ny = cur.y + dy * f, nz = cur.z + dz * f;
+        const nx = cur.x + dx * f,
+          ny = cur.y + dy * f,
+          nz = cur.z + dz * f;
         rs.vel.set((nx - cur.x) / dt, (ny - cur.y) / dt, (nz - cur.z) / dt);
         chassis.setNextKinematicTranslation({ x: nx, y: ny, z: nz });
         const r = chassis.rotation();
@@ -683,6 +728,10 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
 
     const isAiDriving = !!patrolRoute && patrolRoute.length >= 2 && !humanIsDriving;
     const isCarActive = humanIsDriving || isAiDriving;
+    if (isCarActive && frozenRef.current) {
+      chassis.setBodyType(rapier.RigidBodyType.Dynamic, true);
+      frozenRef.current = false;
+    }
 
     // Unified telemetry for window.__sim (debug/simDebug.ts) -- same idea
     // as Airplane.tsx/Helicopter.tsx's reportTelemetry, adapted to this
@@ -700,7 +749,9 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       const angvelT = chassis.angvel();
       const collider0 = chassis.collider(0);
       let numContacts = 0;
-      world.contactPairsWith(collider0, () => { numContacts += 1; });
+      world.contactPairsWith(collider0, () => {
+        numContacts += 1;
+      });
       simDebug.registerVehicle('car', chassis, {
         id,
         active,
@@ -753,6 +804,42 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       steeringSpring.current.target = 0;
       gear.current = 1;
       shiftTimer.current = 0;
+      // "oggetti lontani non calcolano fisica": parcheggiata, ferma, dritta
+      // e lontana dal giocatore diventa un corpo FISSO (niente sospensioni
+      // da integrare, fuori dal solutore; il corpo ha canSleep=false, quindi
+      // dormire non basterebbe). Torna dinamica, ferma dov'era, appena il
+      // giocatore si riavvicina.
+      {
+        const pp = useStore.getState().playerPos;
+        const ct = chassis.translation();
+        const dx = ct.x - pp[0],
+          dz = ct.z - pp[2];
+        const far = dx * dx + dz * dz > CAR_SLEEP_DIST * CAR_SLEEP_DIST;
+        if (far) {
+          if (frozenRef.current) return;
+          // solo dopo che si e' posata davvero: ferma da un po' e con le
+          // ruote a terra (appena nata e' ferma ma ancora in aria)
+          const v = chassis.linvel();
+          let grounded = true;
+          for (let w = 0; w < controller.numWheels(); w++) grounded &&= controller.wheelIsInContact(w);
+          if (grounded && v.x * v.x + v.y * v.y + v.z * v.z < 0.05 && _chassisUp.y > FLIP_UP_DOT_THRESHOLD) {
+            settledRef.current += dt;
+          } else {
+            settledRef.current = 0;
+          }
+          if (settledRef.current > 1) {
+            chassis.setBodyType(rapier.RigidBodyType.Fixed, false);
+            frozenRef.current = true;
+            settledRef.current = 0;
+            return;
+          }
+        } else if (frozenRef.current) {
+          chassis.setBodyType(rapier.RigidBodyType.Dynamic, true);
+          chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
+          chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
+          frozenRef.current = false;
+        }
+      }
       controller.updateVehicle(dt, rapier.QueryFilterFlags.EXCLUDE_SENSORS, WHEEL_RAY_GROUPS);
       if (import.meta.env.DEV) reportTelemetry(false);
       return;
@@ -769,7 +856,10 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     // -- AI patrol input, ported from FollowPath.ts/FollowTarget.ts (see
     // the big comment on PATROL_NODE_RADIUS above) -- only computed for an
     // AI-driven car; the real keyboard `input` is used untouched otherwise.
-    let aiForward = false, aiBackward = false, aiLeft = false, aiRight = false;
+    let aiForward = false,
+      aiBackward = false,
+      aiLeft = false,
+      aiRight = false;
     if (isAiDriving && patrolRoute && patrolRoute.length >= 2) {
       const posNow = chassis.translation();
       const wp = patrolRoute[aiTargetIndex.current];
@@ -803,7 +893,11 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
         if (_aiSegDir.lengthSq() > 0.001) {
           _aiSegDir.normalize();
           const slowDownDot = _aiViewDir.dot(_aiSegDir);
-          if (slowDownDot < PATROL_CORNER_SLOWDOWN_DOT && distToTarget < PATROL_CORNER_SLOWDOWN_DIST && speed > PATROL_CORNER_SLOWDOWN_SPEED) {
+          if (
+            slowDownDot < PATROL_CORNER_SLOWDOWN_DOT &&
+            distToTarget < PATROL_CORNER_SLOWDOWN_DIST &&
+            speed > PATROL_CORNER_SLOWDOWN_SPEED
+          ) {
             aiForward = false;
             aiBackward = true;
           }
@@ -951,6 +1045,29 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
     }
   });
 
+  // "modelli semplificati da lontano": oltre CAR_LOD_DIST dalla telecamera
+  // il modello (9 mesh) si nasconde e l'auto viene disegnata in blocco con
+  // tutte le altre lontane (FarCars.tsx: 2 draw call per tutte).
+  useFrame(({ camera }) => {
+    const c = chassisRef.current;
+    if (!c) return;
+    const t = c.translation();
+    const dx = t.x - camera.position.x,
+      dz = t.z - camera.position.z;
+    const far = !humanIsDriving && dx * dx + dz * dz > CAR_LOD_DIST * CAR_LOD_DIST;
+    if (far !== !clonedScene.visible) {
+      clonedScene.visible = !far;
+      if (far) farCars.set(id, clonedScene);
+      else farCars.delete(id);
+    }
+  });
+  useEffect(
+    () => () => {
+      farCars.delete(id);
+    },
+    [id]
+  );
+
   useFrame((state, delta) => {
     if (!chassisRef.current) return;
     // Freezes door-swing animation and the debug/entity-sync writes below
@@ -988,14 +1105,12 @@ const Car: React.FC<CarProps> = ({ position = [10, 5, 0], id = 'car-1', rotation
       // open too. That's what lets the door hang open the whole time you're
       // stopped mid-drive instead of auto-closing the instant the
       // entering/exiting lerp itself ends.
-      const transitioningDoor = isVehicleTransitioning && transitioningEntityId === id
-        ? (transitioningDoorName ?? 'door_1')
-        : null;
+      const transitioningDoor = isVehicleTransitioning && transitioningEntityId === id ? (transitioningDoorName ?? 'door_1') : null;
       const step = DOOR_ROTATION_SPEED * delta;
       for (const doorName in doorsRef.current) {
         const door = doorsRef.current[doorName];
         const isHeldOpen = !!openVehicleDoors[`${id}:${doorName}`];
-        const target = (doorName === transitioningDoor || isHeldOpen) ? 1 : 0;
+        const target = doorName === transitioningDoor || isHeldOpen ? 1 : 0;
         const current = doorOpenFactors.current[doorName] ?? 0;
         const diff = target - current;
         const next = Math.abs(diff) <= step ? target : current + Math.sign(diff) * step;

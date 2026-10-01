@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef } from "react";
-import * as THREE from "three";
-import { useBeforePhysicsStep, useFilterContactPair, useRapier } from "@react-three/rapier";
-import type { ImpulseJoint, RigidBody as RapierRigidBody } from "@dimforge/rapier3d-compat";
+import { useCallback, useEffect, useRef } from 'react';
+import * as THREE from 'three';
+import { useBeforePhysicsStep, useFilterContactPair, useRapier } from '@react-three/rapier';
+import type { ImpulseJoint, RigidBody as RapierRigidBody } from '@dimforge/rapier3d-compat';
 import {
   ACTIVE_RAGDOLL_SEGMENTS,
   ACTIVE_RAGDOLL_MASS_WEIGHT,
@@ -15,14 +15,54 @@ import {
   ACTIVE_RAGDOLL_JOINT_FREQ,
   ACTIVE_RAGDOLL_JOINT_FREQ_DEFAULT,
   ACTIVE_RAGDOLL_PASSIVE_JOINT_FRICTION,
+  ACTIVE_RAGDOLL_KO_TONE,
   ACTIVE_RAGDOLL_HIPS_POS_STIFFNESS,
   ACTIVE_RAGDOLL_HIPS_ROT_STIFFNESS,
   ACTIVE_RAGDOLL_HIT_RECOVERY_S,
   type RagdollSegment,
-} from "../ragdollConfig";
-import { aliveRagdollGroups, passiveRagdollGroups, FIGHTER_BITS } from "../../../../enums/CollisionGroups";
-import { useStore } from "../../../../store";
-import { registerShootableCollider, unregisterShootableCollider } from "../../weapons/shootableRegistry";
+} from '../ragdollConfig';
+import { aliveRagdollGroups, passiveRagdollGroups, FIGHTER_BITS } from '../../../../enums/CollisionGroups';
+import { useStore } from '../../../../store';
+import { registerShootableCollider, unregisterShootableCollider } from '../../weapons/shootableRegistry';
+import { sweeperColliders } from '../sweepers';
+
+// tetti di velocita' dei corpi del ragdoll KO (m/s, rad/s)
+const KO_MAX_LIN_SPEED = 30;
+const KO_MAX_ANG_SPEED = 60;
+// per quanto il rotore spinge ancora il corpo appena andato KO (s)
+const SWEEPER_GRACE_S = 0.3;
+// corpo KO quasi fermo (m/s, rad/s) per SETTLE_S secondi -> si addormenta
+const SETTLE_LIN = 0.15;
+const SETTLE_ANG = 1.2;
+const SETTLE_S = 0.35;
+// KO "alla GTA IV" (vedi driveActiveRagdoll, ramo passivo):
+// tempo di reazione del riflesso di parata (s) e quanto ci mette a
+// entrare/uscire (s)
+const KO_REFLEX_DELAY_S = 0.07;
+const KO_REFLEX_RAMP_S = 0.15;
+const KO_REFLEX_FADE_S = 0.2;
+// quanto in fretta la posa "tenuta" cede a quella vera del corpo verso la
+// fine (1/s, a koLimpS): all'inizio la tiene, poi si lascia andare
+const KO_GIVE_RATE = 6;
+// "a terra": tronco quasi fermo (m/s) dopo almeno KO_LAND_MIN_S -- da li'
+// il riflesso finisce (le braccia non spingono piu' "verso il suolo",
+// cioe' dentro il pavimento: era il tremolio) e i muscoli accettano la
+// posa in cui e' atterrato (KO_GIVE_LANDED, 1/s)
+const KO_LAND_SPEED = 1.0;
+const KO_LAND_MIN_S = 0.25;
+const KO_GIVE_LANDED = 8;
+// atterrato e fermo: dopo KO_LANDED_LIMP_S i muscoli si spengono del tutto
+// (con un po' di tono un piede restava in micro-movimento a 0.5-1 rad/s
+// finche' non si spegnevano, e il corpo non si addormentava)
+const KO_LANDED_LIMP_S = 0.5;
+// braccio di parata: quanto verso la caduta e quanto in fuori rispetto
+// al giu' (il giu' pesa 1)
+const KO_REFLEX_FORWARD = 0.9;
+const KO_REFLEX_OUTWARD = 0.35;
+// appena rialzato (motori riaccesi): per un attimo niente velocita'
+// dell'animazione da inseguire (s) -- vedi driveActiveRagdoll
+const WAKE_NO_FEEDFORWARD_S = 0.25;
+const KO_REFLEX_ARMS: Record<string, string> = { UpperArm_L: 'ClavicleL', UpperArm_R: 'ClavicleR' };
 import {
   captureBindPose,
   captureClipPose,
@@ -30,7 +70,7 @@ import {
   measureClipJointRanges,
   type BindPoseSnapshot,
   type JointRange,
-} from "../activeRagdollFrames";
+} from '../activeRagdollFrames';
 
 // ===========================================================================
 // Ragdoll attivo ("stile Euphoria") -- riscritto da zero.
@@ -111,9 +151,11 @@ const RUNAWAY_DISTANCE_M = 1.5;
 // SELF_RELEASE_M: riattivarle subito le farebbe esplodere via.
 const SELF_OVERLAP_M = 0.005;
 const SELF_RELEASE_M = 0.02;
-const SELF_ALWAYS_COLLIDE = new Set(["Thigh_L|Thigh_R", "Thigh_R|Thigh_L"]);
+const SELF_ALWAYS_COLLIDE = new Set(['Thigh_L|Thigh_R', 'Thigh_R|Thigh_L']);
 const SEGMENT_INDEX: Record<string, number> = {};
-ACTIVE_RAGDOLL_SEGMENTS.forEach((seg, i) => { SEGMENT_INDEX[seg.name] = i; });
+ACTIVE_RAGDOLL_SEGMENTS.forEach((seg, i) => {
+  SEGMENT_INDEX[seg.name] = i;
+});
 const pairKey = (a: number, b: number) => (a < b ? a * 64 + b : b * 64 + a);
 const SELF_STATIC_EXCLUDED: Set<number> = (() => {
   const out = new Set<number>();
@@ -121,13 +163,17 @@ const SELF_STATIC_EXCLUDED: Set<number> = (() => {
   const segs = ACTIVE_RAGDOLL_SEGMENTS;
   for (let i = 0; i < segs.length; i++) {
     for (let j = i + 1; j < segs.length; j++) {
-      const a = segs[i].name, b = segs[j].name;
+      const a = segs[i].name,
+        b = segs[j].name;
       if (SELF_ALWAYS_COLLIDE.has(`${a}|${b}`)) continue;
-      const pa = parentOf(a), pb = parentOf(b);
+      const pa = parentOf(a),
+        pb = parentOf(b);
       const near =
-        pa === b || pb === a || // giunto
+        pa === b ||
+        pb === a || // giunto
         (pa !== null && pa === pb) || // fratelli
-        (pa !== null && parentOf(pa) === b) || (pb !== null && parentOf(pb) === a); // nonno
+        (pa !== null && parentOf(pa) === b) ||
+        (pb !== null && parentOf(pb) === a); // nonno
       if (near) out.add(pairKey(i, j));
     }
   }
@@ -143,7 +189,7 @@ const PASSIVE_CCD = true;
 // lungo l'arto, fino alla colonna esclusa -- mostra la fisica per intero;
 // finito il contatto torna al misto normale in questo tempo.
 const CONTACT_SHOW_DECAY_S = 0.3;
-const CONTACT_CHAIN_STOP = new Set(["Hips", "Torso", "SpineMid", "SpineHigh"]);
+const CONTACT_CHAIN_STOP = new Set(['Hips', 'Torso', 'SpineMid', 'SpineHigh']);
 
 const ALIVE_LINEAR_DAMPING = 0.2;
 const ALIVE_ANGULAR_DAMPING = 1.0;
@@ -239,11 +285,21 @@ export interface ActiveRagdollJointDebug {
 export interface ActiveRagdollSegmentDebug {
   name: string;
   // posa mondo del collider FISICO
-  x: number; y: number; z: number;
-  qx: number; qy: number; qz: number; qw: number;
+  x: number;
+  y: number;
+  z: number;
+  qx: number;
+  qy: number;
+  qz: number;
+  qw: number;
   // posa mondo del collider BERSAGLIO (dove l'animazione vuole il corpo)
-  tx: number; ty: number; tz: number;
-  tqx: number; tqy: number; tqz: number; tqw: number;
+  tx: number;
+  ty: number;
+  tz: number;
+  tqx: number;
+  tqy: number;
+  tqz: number;
+  tqw: number;
   hasTarget: boolean;
   radius: number;
   halfHeight: number;
@@ -284,6 +340,17 @@ export function useRagdollActive(
   const neutralClipRef = useRef<THREE.AnimationClip | null>(null);
   const jointFrameRef = useRef<JointFrameMap | null>(null);
   const passiveRef = useRef(false);
+  const passiveSinceRef = useRef(0); // quando e' andato KO (performance.now)
+  const settledForRef = useRef(0); // da quanto il corpo KO e' quasi fermo (s)
+  // KO alla GTA IV: tempo dal colpo, posa "tenuta" per giunto (relativa al
+  // genitore), direzione della caduta, muscoli gia' spenti del tutto
+  const koTimeRef = useRef(0);
+  const wakeGraceRef = useRef(0);
+  const koStartedRef = useRef(false);
+  const koLandedAtRef = useRef(-1); // quando e' "atterrato" (s dal colpo), -1 = in volo
+  const koLimpRef = useRef(false);
+  const koRelRef = useRef<Record<string, THREE.Quaternion>>({});
+  const koDirRef = useRef(new THREE.Vector3());
   // handle del collider -> indice del segmento (solo i NOSTRI collider)
   const colliderIndexRef = useRef<Map<number, number>>(new Map());
   // coppie proprie escluse ora (statiche + compenetrate all'inizio del KO)
@@ -301,8 +368,7 @@ export function useRagdollActive(
   // resto del corpo (75 kg) e il servo del bacino assorbivano e
   // annullavano subito l'impulso. Cosi' il corpo incassa davvero.
   const staggerRef = useRef(0);
-  const effWeakness = (e: BodyEntry) =>
-    Math.max(e.hitWeakness, staggerRef.current * (e.segment.parent ? 0.85 : 1));
+  const effWeakness = (e: BodyEntry) => Math.max(e.hitWeakness, staggerRef.current * (e.segment.parent ? 0.85 : 1));
 
   // scratch
   const s = useRef({
@@ -316,6 +382,13 @@ export function useRagdollActive(
     ang2: new THREE.Vector3(),
     q4: new THREE.Quaternion(),
     v4: new THREE.Vector3(),
+    kq1: new THREE.Quaternion(),
+    kq2: new THREE.Quaternion(),
+    kq3: new THREE.Quaternion(),
+    kv1: new THREE.Vector3(),
+    kv2: new THREE.Vector3(),
+    kv3: new THREE.Vector3(),
+    tgt: [0, 0, 0],
   }).current;
 
   const hasRig = () => Object.keys(activeBodiesRef.current).length > 0;
@@ -327,7 +400,7 @@ export function useRagdollActive(
     const root = modelRootRef.current;
     if (!bones || !root) return false;
 
-    const names = new Set<string>(["thigh_l", "thigh_r", "pelvis"]);
+    const names = new Set<string>(['thigh_l', 'thigh_r', 'pelvis']);
     for (const seg of ACTIVE_RAGDOLL_SEGMENTS) {
       names.add(seg.drivingBone);
       names.add(seg.toBone);
@@ -335,8 +408,7 @@ export function useRagdollActive(
     const bind = captureBindPose(root, [...names]);
     if (!bind) return false;
     bindRef.current = bind;
-    const ref =
-      (neutralClipRef.current && captureClipPose(root, neutralClipRef.current, 0, [...names], bind)) || bind;
+    const ref = (neutralClipRef.current && captureClipPose(root, neutralClipRef.current, 0, [...names], bind)) || bind;
     refPoseRef.current = ref;
     const refInv = ref.refQuat.clone().invert();
     const yAxis = new THREE.Vector3(0, 1, 0);
@@ -447,9 +519,14 @@ export function useRagdollActive(
         const to = ref.pos[seg.toBone];
         if (!from || !to) continue;
         const len = from.distanceTo(to) * (seg.lengthScale ?? 0.92);
-        const c = to.clone().sub(from).normalize().multiplyScalar(len / 2).add(from);
+        const c = to
+          .clone()
+          .sub(from)
+          .normalize()
+          .multiplyScalar(len / 2)
+          .add(from);
         const m = ACTIVE_RAGDOLL_MASS_KG[seg.name] ?? 1;
-        centers[seg.name] = { c, m, own: m * (len * len / 12 + seg.radius * seg.radius * 0.5) };
+        centers[seg.name] = { c, m, own: m * ((len * len) / 12 + seg.radius * seg.radius * 0.5) };
       }
       const isDescendant = (name: string, ancestor: string): boolean => {
         let cur: string | null = name;
@@ -519,9 +596,7 @@ export function useRagdollActive(
       const raw = (joint as any).rawSet;
       const limits = toLimitsRad(e.segment.name);
       const my = [limits.x, limits.y, limits.z];
-      const rl: [number, number][] = axes.map(({ j, sign }) =>
-        sign > 0 ? [my[j][0], my[j][1]] : [-my[j][1], -my[j][0]]
-      );
+      const rl: [number, number][] = axes.map(({ j, sign }) => (sign > 0 ? [my[j][0], my[j][1]] : [-my[j][1], -my[j][0]]));
       for (let k = 0; k < 3; k++) {
         raw.jointSetLimits(joint.handle, RAW_AXIS_ANG[k], rl[k][0], rl[k][1]);
         raw.jointConfigureMotorModel(joint.handle, RAW_AXIS_ANG[k], MOTOR_MODEL_FORCE_BASED);
@@ -567,40 +642,43 @@ export function useRagdollActive(
   // --------------------------------------------------- bersagli animazione
   // Va chiamata DOPO mixer.update() (o skeleton.pose() in T-pose) e PRIMA
   // che syncActiveBonesBlended sovrascriva le ossa con la fisica.
-  const captureActiveTargets = useCallback((delta: number) => {
-    const entries = activeBodiesRef.current;
-    for (const key of Object.keys(entries)) {
-      const e = entries[key];
-      e.bone.getWorldPosition(s.v1);
-      e.bone.getWorldQuaternion(s.q1);
-      s.q1.multiply(e.bodyFromBone);
-      if (e.targetValid && delta > 1e-4) {
-        e.targetLinVel.copy(s.v1).sub(e.targetPos).divideScalar(delta);
-        // velocita' angolare mondo da q_prev -> q_now
-        s.q2.copy(s.q1).multiply(s.q3.copy(e.targetQuat).invert());
-        if (s.q2.w < 0) s.q2.set(-s.q2.x, -s.q2.y, -s.q2.z, -s.q2.w);
-        const sinHalf = Math.sqrt(s.q2.x * s.q2.x + s.q2.y * s.q2.y + s.q2.z * s.q2.z);
-        if (sinHalf > 1e-8) {
-          const angle = 2 * Math.atan2(sinHalf, s.q2.w);
-          e.targetAngVel.set(s.q2.x, s.q2.y, s.q2.z).multiplyScalar(angle / sinHalf / delta);
+  const captureActiveTargets = useCallback(
+    (delta: number) => {
+      const entries = activeBodiesRef.current;
+      for (const key of Object.keys(entries)) {
+        const e = entries[key];
+        e.bone.getWorldPosition(s.v1);
+        e.bone.getWorldQuaternion(s.q1);
+        s.q1.multiply(e.bodyFromBone);
+        if (e.targetValid && delta > 1e-4) {
+          e.targetLinVel.copy(s.v1).sub(e.targetPos).divideScalar(delta);
+          // velocita' angolare mondo da q_prev -> q_now
+          s.q2.copy(s.q1).multiply(s.q3.copy(e.targetQuat).invert());
+          if (s.q2.w < 0) s.q2.set(-s.q2.x, -s.q2.y, -s.q2.z, -s.q2.w);
+          const sinHalf = Math.sqrt(s.q2.x * s.q2.x + s.q2.y * s.q2.y + s.q2.z * s.q2.z);
+          if (sinHalf > 1e-8) {
+            const angle = 2 * Math.atan2(sinHalf, s.q2.w);
+            e.targetAngVel.set(s.q2.x, s.q2.y, s.q2.z).multiplyScalar(angle / sinHalf / delta);
+          } else {
+            e.targetAngVel.set(0, 0, 0);
+          }
+          // un salto enorme (teletrasporto, cambio posa istantaneo) non e'
+          // una velocita' da inseguire -- soglie alte: un gancio ruota il
+          // bacino a ~17 rad/s e le braccia ben oltre.
+          if (e.targetLinVel.lengthSq() > 30 * 30) e.targetLinVel.set(0, 0, 0);
+          if (e.targetAngVel.lengthSq() > 80 * 80) e.targetAngVel.set(0, 0, 0);
         } else {
+          e.targetLinVel.set(0, 0, 0);
           e.targetAngVel.set(0, 0, 0);
         }
-        // un salto enorme (teletrasporto, cambio posa istantaneo) non e'
-        // una velocita' da inseguire -- soglie alte: un gancio ruota il
-        // bacino a ~17 rad/s e le braccia ben oltre.
-        if (e.targetLinVel.lengthSq() > 30 * 30) e.targetLinVel.set(0, 0, 0);
-        if (e.targetAngVel.lengthSq() > 80 * 80) e.targetAngVel.set(0, 0, 0);
-      } else {
-        e.targetLinVel.set(0, 0, 0);
-        e.targetAngVel.set(0, 0, 0);
+        e.targetPos.copy(s.v1);
+        e.targetQuat.copy(s.q1);
+        e.targetValid = true;
+        e.captureAt = performance.now();
       }
-      e.targetPos.copy(s.v1);
-      e.targetQuat.copy(s.q1);
-      e.targetValid = true;
-      e.captureAt = performance.now();
-    }
-  }, [s]);
+    },
+    [s]
+  );
 
   // ------------------------------------------------- auto-collisione da KO
   // Inizio KO: esclusioni statiche + coppie che in questo istante si
@@ -617,12 +695,19 @@ export function useRagdollActive(
     for (const e of Object.values(entries)) {
       if (e.body.numColliders() === 0) continue;
       const col = e.body.collider(0);
-      world.intersectionsWithShape(col.translation(), col.rotation(), col.shape, (other) => {
-        const c = col.contactCollider(other, 0);
-        // pavimento/terreno sotto il segmento (normale dal segmento verso il basso)
-        if (c && c.distance < 0 && c.normal1.y < -0.7) lift = Math.max(lift, -c.distance);
-        return true;
-      }, flags, PASSIVE_COLLISION_GROUPS);
+      world.intersectionsWithShape(
+        col.translation(),
+        col.rotation(),
+        col.shape,
+        (other) => {
+          const c = col.contactCollider(other, 0);
+          // pavimento/terreno sotto il segmento (normale dal segmento verso il basso)
+          if (c && c.distance < 0 && c.normal1.y < -0.7) lift = Math.max(lift, -c.distance);
+          return true;
+        },
+        flags,
+        PASSIVE_COLLISION_GROUPS
+      );
     }
     lift = Math.min(lift, 0.15);
     if (import.meta.env.DEV) lastLiftRef.current = lift;
@@ -642,7 +727,8 @@ export function useRagdollActive(
     const list = Object.values(entries).filter((e) => e.body.numColliders() > 0);
     for (let i = 0; i < list.length; i++) {
       for (let j = i + 1; j < list.length; j++) {
-        const a = SEGMENT_INDEX[list[i].segment.name], b = SEGMENT_INDEX[list[j].segment.name];
+        const a = SEGMENT_INDEX[list[i].segment.name],
+          b = SEGMENT_INDEX[list[j].segment.name];
         const key = pairKey(a, b);
         if (excluded.has(key)) continue;
         const c = list[i].body.collider(0).contactCollider(list[j].body.collider(0), SELF_OVERLAP_M);
@@ -664,7 +750,8 @@ export function useRagdollActive(
     const segs = ACTIVE_RAGDOLL_SEGMENTS;
     for (let i = pending.length - 1; i >= 0; i--) {
       const [a, b] = pending[i];
-      const ea = entries[segs[a].name], eb = entries[segs[b].name];
+      const ea = entries[segs[a].name],
+        eb = entries[segs[b].name];
       if (!ea || !eb) continue;
       const c = ea.body.collider(0).contactCollider(eb.body.collider(0), SELF_RELEASE_M);
       if (!c) {
@@ -690,7 +777,9 @@ export function useRagdollActive(
       index: SEGMENT_INDEX,
       pairKey,
     };
-    return () => { delete reg[key]; };
+    return () => {
+      delete reg[key];
+    };
   }, [world, rapier, ownerId]);
 
   useFilterContactPair((c1, c2) => {
@@ -708,124 +797,317 @@ export function useRagdollActive(
     // evitare (vedi ALIVE_COLLISION_GROUPS).
     if (!passiveRef.current) {
       const other = world.getCollider(a === undefined ? c1 : c2);
-      if (other && (other.collisionGroups() >>> 16) === 0xffff) return rapier.SolverFlags.EMPTY;
+      if (other && other.collisionGroups() >>> 16 === 0xffff) return rapier.SolverFlags.EMPTY;
+    }
+    // KO: il rotore dell'arena lo spinge ancora per un attimo -- e' quella
+    // spinta a sbalzarlo nella direzione del colpo -- poi non lo tocca piu'
+    // (niente trascinamento in tondo, vedi ragdoll/sweepers.ts)
+    if (passiveRef.current && sweeperColliders.has(a === undefined ? c1 : c2)) {
+      const grace = (import.meta.env.DEV && (window as any).__sweeperGraceS) ?? SWEEPER_GRACE_S;
+      if (performance.now() - passiveSinceRef.current > grace * 1000) return rapier.SolverFlags.EMPTY;
     }
     return rapier.SolverFlags.COMPUTE_IMPULSE;
   });
 
-  // ------------------------------------------------------ modalita' e motori
-  const setMode = useCallback((passive: boolean, pinHips: boolean, aliveGravity: number) => {
+  // Rete di sicurezza per il corpo KO: velocita' oltre ogni urto possibile
+  // (un'auto lanciata, un pendolo) sono solo il solutore che esplode --
+  // si tagliano prima che diventino un tremolio senza fine.
+  useBeforePhysicsStep((w) => {
+    if (!passiveRef.current) {
+      settledForRef.current = 0;
+      return;
+    }
     const entries = activeBodiesRef.current;
-    const gravity = passive ? 1 : aliveGravity;
-    const modeChanged = passive !== passiveRef.current;
-    if (modeChanged || gravityScaleRef.current !== gravity) {
+    // "quando e' a terra ha un piccolo tremolio residuo": fermo, il corpo
+    // non dormiva mai (i giunti lo tengono in micro-movimento: mani e piedi
+    // a 0.2-0.6 rad/s, si vede). Quasi fermo per un attimo -> si addormenta
+    // tutto insieme: immobile finche' qualcosa non lo tocca o non si rialza.
+    let still = true;
+    let asleep = true;
+    for (const key of Object.keys(entries)) {
+      const b = entries[key].body;
+      if (!b.isSleeping()) asleep = false;
+      const v = b.linvel();
+      const av = b.angvel();
+      if (
+        v.x * v.x + v.y * v.y + v.z * v.z > SETTLE_LIN * SETTLE_LIN ||
+        av.x * av.x + av.y * av.y + av.z * av.z > SETTLE_ANG * SETTLE_ANG
+      ) {
+        still = false;
+      }
+    }
+    if (asleep) return;
+    settledForRef.current = still ? settledForRef.current + ((w as any).timestep ?? 1 / 120) : 0;
+    if (settledForRef.current > SETTLE_S) {
       for (const key of Object.keys(entries)) {
         const b = entries[key].body;
-        b.setGravityScale(gravity, true);
-        b.setLinearDamping(passive ? PASSIVE_LINEAR_DAMPING : ALIVE_LINEAR_DAMPING);
-        b.setAngularDamping(passive ? PASSIVE_ANGULAR_DAMPING : ALIVE_ANGULAR_DAMPING);
-        if (b.numColliders() > 0) {
-          const col = b.collider(0);
-          col.setFriction(passive ? PASSIVE_FRICTION : ALIVE_FRICTION);
-          col.setCollisionGroups(passive ? PASSIVE_COLLISION_GROUPS : ALIVE_COLLISION_GROUPS);
-          // filtro coppie (vedi useFilterContactPair sotto)
-          col.setActiveHooks(rapier.ActiveHooks.FILTER_CONTACT_PAIRS);
-        }
-        if (PASSIVE_CCD) b.enableCcd(passive);
+        b.setLinvel({ x: 0, y: 0, z: 0 }, false);
+        b.setAngvel({ x: 0, y: 0, z: 0 }, false);
+        b.sleep();
       }
-      if (modeChanged && passive) {
-        liftOutOfGround();
-        beginSelfCollision();
-      }
-      gravityScaleRef.current = gravity;
-      passiveRef.current = passive;
+      settledForRef.current = 0;
+      return;
     }
-    const wantPinned = pinHips && !passive;
-    const hips = entries.Hips;
-    if (hips && wantPinned !== hipsPinnedRef.current) {
-      hips.body.setBodyType(
-        wantPinned ? rapier.RigidBodyType.KinematicPositionBased : rapier.RigidBodyType.Dynamic,
-        true
-      );
-      if (!wantPinned) {
-        hips.body.setGravityScale(gravity, true);
-      }
-      hipsPinnedRef.current = wantPinned;
-    }
-  }, [rapier]);
-
-  const driveActiveRagdoll = useCallback((delta: number, passive: boolean) => {
-    const entries = activeBodiesRef.current;
-    const bench = useStore.getState().ragdollBench;
-    setMode(passive, bench.pinHips, bench.aliveGravityScale);
-    if (passive) updateSelfCollision();
-    const decay = delta / Math.max(0.05, ACTIVE_RAGDOLL_HIT_RECOVERY_S);
-    staggerRef.current = Math.max(0, staggerRef.current - delta / Math.max(0.05, ACTIVE_RAGDOLL_HIT_RECOVERY_S * 1.25));
-
     for (const key of Object.keys(entries)) {
-      const e = entries[key];
-      e.hitWeakness = Math.max(0, e.hitWeakness - decay);
-      if (!e.joint || !e.limitsRad || !e.segment.parent) continue;
-      const p = entries[e.segment.parent];
-      if (!p) continue;
-      const raw = (e.joint as any).rawSet;
-      const h = e.joint.handle;
-
-      if (passive) {
-        const friction = ACTIVE_RAGDOLL_PASSIVE_JOINT_FRICTION * e.subtreeInertia;
-        for (let k = 0; k < 3; k++) {
-          raw.jointConfigureMotor(h, RAW_AXIS_ANG[k], 0, 0, 0, friction);
-        }
-        e.motorAnglesValid = false;
-        continue;
+      const b = entries[key].body;
+      const v = b.linvel();
+      const vm = Math.hypot(v.x, v.y, v.z);
+      if (vm > KO_MAX_LIN_SPEED) {
+        const k = KO_MAX_LIN_SPEED / vm;
+        b.setLinvel({ x: v.x * k, y: v.y * k, z: v.z * k }, true);
       }
-      if (!e.targetValid || !p.targetValid) continue;
-
-      s.q1.copy(p.targetQuat).invert().multiply(e.targetQuat);
-      jointAxisAngles(s.q1, e.targetJointAngles); // frame del personaggio (tabella)
-      const jf = jointFrameRef.current;
-      if (jf) s.q1.premultiply(jf.Finv).multiply(jf.F); // -> frame del giunto Rapier
-      jointAxisAngles(s.q1, s.ang2);
-      const rl = e.rapierLimitsRad ?? [[-Math.PI, Math.PI], [-Math.PI, Math.PI], [-Math.PI, Math.PI]];
-      const clampAxis = (v: number, l: [number, number]) =>
-        Math.min(l[1] - TARGET_LIMIT_MARGIN_RAD, Math.max(l[0] + TARGET_LIMIT_MARGIN_RAD, v));
-      e.motorJointAngles.set(clampAxis(s.ang2.x, rl[0]), clampAxis(s.ang2.y, rl[1]), clampAxis(s.ang2.z, rl[2]));
-
-      // Molla/smorzatore "force based" in unita' fisiche, dalla pulsazione
-      // voluta e dall'inerzia del sotto-albero: k = 2*w^2*I (il fattore 2
-      // perche' Rapier misura l'errore come sin(angolo/2)), c = 2*z*w*I.
-      // Verificato su un giunto isolato: w=25 -> bersaglio raggiunto in
-      // ~0.1s senza rimbalzo.
-      const freq = (ACTIVE_RAGDOLL_JOINT_FREQ[e.segment.name] ?? ACTIVE_RAGDOLL_JOINT_FREQ_DEFAULT) *
-        Math.sqrt(Math.max(0.01, bench.stiffnessMul * (1 - 0.97 * effWeakness(e))));
-      const I = e.subtreeInertia;
-      const k = 2 * freq * freq * I;
-      const c = 2 * bench.dampingRatio * freq * I + ACTIVE_RAGDOLL_PASSIVE_JOINT_FRICTION * I;
-      const vel = [0, 0, 0];
-      if (bench.motorFeedForward && e.motorAnglesValid && delta > 1e-4) {
-        vel[0] = (e.motorJointAngles.x - e.prevMotorJointAngles.x) / delta;
-        vel[1] = (e.motorJointAngles.y - e.prevMotorJointAngles.y) / delta;
-        vel[2] = (e.motorJointAngles.z - e.prevMotorJointAngles.z) / delta;
-        for (let i = 0; i < 3; i++) vel[i] = Math.max(-MAX_TARGET_JOINT_SPEED, Math.min(MAX_TARGET_JOINT_SPEED, vel[i]));
+      const w = b.angvel();
+      const wm = Math.hypot(w.x, w.y, w.z);
+      if (wm > KO_MAX_ANG_SPEED) {
+        const k = KO_MAX_ANG_SPEED / wm;
+        b.setAngvel({ x: w.x * k, y: w.y * k, z: w.z * k }, true);
       }
-      // Il passo di fisica di @react-three/rapier gira PRIMA di questo
-      // useFrame: i bersagli di questo frame verranno usati al passo del
-      // frame SUCCESSIVO. Si anticipa quindi il bersaglio di un frame con
-      // la sua velocita' (misurato: con un gancio il bacino ruota a quasi
-      // 1000 gradi/s -> un frame di ritardo = 16 gradi di errore).
-      const ahead = bench.motorFeedForward ? Math.min(delta, 0.05) : 0;
-      const tgt = [
-        clampAxis(e.motorJointAngles.x + vel[0] * ahead, rl[0]),
-        clampAxis(e.motorJointAngles.y + vel[1] * ahead, rl[1]),
-        clampAxis(e.motorJointAngles.z + vel[2] * ahead, rl[2]),
-      ];
-      for (let a = 0; a < 3; a++) {
-        raw.jointConfigureMotor(h, RAW_AXIS_ANG[a], tgt[a], vel[a], k, c);
-      }
-      e.prevMotorJointAngles.copy(e.motorJointAngles);
-      e.motorAnglesValid = true;
     }
-  }, [setMode, s]);
+  });
+
+  // ------------------------------------------------------ modalita' e motori
+  const setMode = useCallback(
+    (passive: boolean, pinHips: boolean, aliveGravity: number) => {
+      const entries = activeBodiesRef.current;
+      const gravity = passive ? 1 : aliveGravity;
+      const modeChanged = passive !== passiveRef.current;
+      if (modeChanged && passive) passiveSinceRef.current = performance.now();
+      if (modeChanged || gravityScaleRef.current !== gravity) {
+        for (const key of Object.keys(entries)) {
+          const b = entries[key].body;
+          b.setGravityScale(gravity, true);
+          b.setLinearDamping(passive ? PASSIVE_LINEAR_DAMPING : ALIVE_LINEAR_DAMPING);
+          b.setAngularDamping(passive ? PASSIVE_ANGULAR_DAMPING : ALIVE_ANGULAR_DAMPING);
+          if (b.numColliders() > 0) {
+            const col = b.collider(0);
+            col.setFriction(passive ? PASSIVE_FRICTION : ALIVE_FRICTION);
+            col.setCollisionGroups(passive ? PASSIVE_COLLISION_GROUPS : ALIVE_COLLISION_GROUPS);
+            // filtro coppie (vedi useFilterContactPair sotto)
+            col.setActiveHooks(rapier.ActiveHooks.FILTER_CONTACT_PAIRS);
+          }
+          if (PASSIVE_CCD) b.enableCcd(passive);
+        }
+        if (modeChanged && passive) {
+          liftOutOfGround();
+          beginSelfCollision();
+        }
+        gravityScaleRef.current = gravity;
+        passiveRef.current = passive;
+      }
+      const wantPinned = pinHips && !passive;
+      const hips = entries.Hips;
+      if (hips && wantPinned !== hipsPinnedRef.current) {
+        hips.body.setBodyType(wantPinned ? rapier.RigidBodyType.KinematicPositionBased : rapier.RigidBodyType.Dynamic, true);
+        if (!wantPinned) {
+          hips.body.setGravityScale(gravity, true);
+        }
+        hipsPinnedRef.current = wantPinned;
+      }
+    },
+    [rapier]
+  );
+
+  const driveActiveRagdoll = useCallback(
+    (delta: number, passive: boolean) => {
+      const entries = activeBodiesRef.current;
+      const bench = useStore.getState().ragdollBench;
+      setMode(passive, bench.pinHips, bench.aliveGravityScale);
+      if (passive) updateSelfCollision();
+      // KO alla GTA IV: all'istante del colpo i muscoli sono tesi (il corpo
+      // tiene la sua forma), poi calano piano (koRelaxS) fino a un tono
+      // minimo, e a koLimpS si spengono del tutto. Le braccia, per i primi
+      // istanti, vanno verso il suolo nella direzione della caduta (parata).
+      if (!passive) {
+        // "a volte quando cade scompare e poi riappare, sembra cadere sotto
+        // il suolo": al rialzo l'animazione passa in 3 frame da in piedi
+        // (Idle, che gira durante il KO) a sdraiata (LayToIdle) -- i
+        // bersagli scendono a ~15 m/s e i motori, che inseguono anche la
+        // velocita' (feed-forward), sparavano il corpo 40 cm SOTTO il
+        // pavimento (da vivo non collide col suolo; misurato: bacino -0.12,
+        // testa -0.23). Per un attimo dopo il risveglio si insegue solo la
+        // posa, non la velocita'.
+        if (koStartedRef.current) wakeGraceRef.current = WAKE_NO_FEEDFORWARD_S;
+        if (wakeGraceRef.current > 0) {
+          wakeGraceRef.current -= delta;
+          for (const key of Object.keys(entries)) {
+            entries[key].targetLinVel.set(0, 0, 0);
+            entries[key].targetAngVel.set(0, 0, 0);
+            entries[key].motorAnglesValid = false;
+          }
+        }
+        koTimeRef.current = 0;
+        koStartedRef.current = false;
+        koLimpRef.current = false;
+        koLandedAtRef.current = -1;
+      } else {
+        koTimeRef.current += delta;
+        if (!koStartedRef.current) {
+          koStartedRef.current = true;
+          for (const key of Object.keys(entries)) {
+            const e = entries[key];
+            const p = e.segment.parent ? entries[e.segment.parent] : null;
+            if (!p) continue;
+            const pr = p.body.rotation();
+            const cr = e.body.rotation();
+            const q = (koRelRef.current[key] ??= new THREE.Quaternion());
+            q.set(pr.x, pr.y, pr.z, pr.w)
+              .invert()
+              .multiply(s.kq1.set(cr.x, cr.y, cr.z, cr.w));
+          }
+          const hv = entries.Hips?.body.linvel();
+          koDirRef.current.set(hv?.x ?? 0, 0, hv?.z ?? 0);
+          const l = koDirRef.current.length();
+          if (l > 0.5) koDirRef.current.divideScalar(l);
+          else koDirRef.current.set(0, 0, 0);
+        }
+      }
+      const koT = koTimeRef.current;
+      if (passive && koLandedAtRef.current < 0 && koT > KO_LAND_MIN_S) {
+        const hv = entries.Hips?.body.linvel();
+        const cv = entries.SpineHigh?.body.linvel();
+        if (hv && cv && Math.max(Math.hypot(hv.x, hv.y, hv.z), Math.hypot(cv.x, cv.y, cv.z)) < KO_LAND_SPEED) koLandedAtRef.current = koT;
+      }
+      const koLanded = koLandedAtRef.current >= 0;
+      // a terra e addormentato: riconfigurare un motore SVEGLIA i corpi
+      // (era il tremolio residuo) -- non si tocca niente finche' dorme
+      const koAsleep = passive && !!entries.Hips?.body.isSleeping();
+      const koDone = passive && koLimpRef.current;
+      const koLimpAt = koLanded ? Math.min(bench.koLimpS, koLandedAtRef.current + KO_LANDED_LIMP_S) : bench.koLimpS;
+      const koGoLimp = passive && !koDone && !koAsleep && koT >= koLimpAt;
+      if (koGoLimp) koLimpRef.current = true;
+      const koEnv = Math.max(bench.koFloor, bench.koTone * Math.exp(-koT / Math.max(0.05, bench.koRelaxS)));
+      const koGive =
+        1 - Math.exp(-delta * (koLanded ? KO_GIVE_LANDED : KO_GIVE_RATE * Math.min(1, koT / Math.max(0.1, bench.koLimpS)) ** 2));
+      const reflexEnd = koLanded ? Math.min(bench.koReflexS, koLandedAtRef.current) : bench.koReflexS;
+      const koReflexW =
+        bench.koReflex <= 0
+          ? 0
+          : Math.min(Math.max(0, (koT - KO_REFLEX_DELAY_S) / KO_REFLEX_RAMP_S), Math.max(0, 1 - (koT - reflexEnd) / KO_REFLEX_FADE_S), 1);
+      const decay = delta / Math.max(0.05, ACTIVE_RAGDOLL_HIT_RECOVERY_S);
+      staggerRef.current = Math.max(0, staggerRef.current - delta / Math.max(0.05, ACTIVE_RAGDOLL_HIT_RECOVERY_S * 1.25));
+
+      for (const key of Object.keys(entries)) {
+        const e = entries[key];
+        e.hitWeakness = Math.max(0, e.hitWeakness - decay);
+        if (!e.joint || !e.limitsRad || !e.segment.parent) continue;
+        const p = entries[e.segment.parent];
+        if (!p) continue;
+        const raw = (e.joint as any).rawSet;
+        const h = e.joint.handle;
+
+        if (passive) {
+          e.motorAnglesValid = false;
+          if (koDone || koAsleep) continue;
+          const pr = p.body.rotation();
+          const cr = e.body.rotation();
+          const qp = s.kq1.set(pr.x, pr.y, pr.z, pr.w);
+          const qc = s.kq2.set(cr.x, cr.y, cr.z, cr.w);
+          // posa tenuta: verso la fine cede a quella vera del corpo
+          const hold = koRelRef.current[key];
+          if (!hold) continue;
+          const cur = s.kq3.copy(qp).invert().multiply(qc);
+          // fine: si ferma nella posa in cui e' (tono minimo, configurato UNA
+          // volta -- poi non si tocca piu' e il corpo si addormenta). Senza
+          // tono (solo attrito) gli arti si afflosciavano di nuovo per un
+          // secondo dopo essersi gia' fermati.
+          hold.slerp(cur, koGoLimp ? 1 : koGive);
+          let target = hold;
+          let tone = (ACTIVE_RAGDOLL_KO_TONE[key] ?? 0.7) * (koGoLimp ? bench.koFloor : koEnv);
+          // riflesso di parata: il braccio punta al suolo davanti alla caduta
+          // (e un po' in fuori), come chi cade e mette le mani avanti
+          if (!koGoLimp && koReflexW > 0 && KO_REFLEX_ARMS[key]) {
+            const t = e.body.translation();
+            const chest = entries.SpineHigh?.body.translation();
+            const d = s.kv1.set(0, -1, 0).addScaledVector(koDirRef.current, KO_REFLEX_FORWARD);
+            if (chest) {
+              const out = s.kv2.set(t.x - chest.x, 0, t.z - chest.z);
+              if (out.lengthSq() > 1e-6) d.addScaledVector(out.normalize(), KO_REFLEX_OUTWARD);
+            }
+            d.normalize();
+            // asse del segmento (dal giunto verso il centro della capsula)
+            const axis = s.kv3.copy(e.capsuleOffset);
+            if (axis.lengthSq() < 1e-8) axis.set(0, 1, 0).applyQuaternion(e.capsuleRot);
+            axis.normalize().applyQuaternion(qc);
+            // orientamento voluto = rotazione minima che porta l'asse su d
+            const want = s.q4.setFromUnitVectors(axis, d).multiply(qc);
+            // relativo al genitore, mescolato alla posa tenuta
+            s.q3.copy(qp).invert().multiply(want);
+            s.q3.slerp(hold, 1 - koReflexW);
+            target = s.q3;
+            tone = Math.max(tone, bench.koReflex * koReflexW);
+          }
+          // molla+smorzatore critico sul tono attuale (vedi sotto per k, c)
+          const freq = (ACTIVE_RAGDOLL_JOINT_FREQ[e.segment.name] ?? ACTIVE_RAGDOLL_JOINT_FREQ_DEFAULT) * tone;
+          const I = e.subtreeInertia;
+          const kk = 2 * freq * freq * I;
+          const cc = 2 * freq * I + ACTIVE_RAGDOLL_PASSIVE_JOINT_FRICTION * I;
+          s.q1.copy(target);
+          const jf = jointFrameRef.current;
+          if (jf) s.q1.premultiply(jf.Finv).multiply(jf.F);
+          jointAxisAngles(s.q1, s.ang2);
+          const rl = e.rapierLimitsRad;
+          const cl = (v: number, a: number) =>
+            rl ? Math.min(rl[a][1] - TARGET_LIMIT_MARGIN_RAD, Math.max(rl[a][0] + TARGET_LIMIT_MARGIN_RAD, v)) : v;
+          s.tgt[0] = cl(s.ang2.x, 0);
+          s.tgt[1] = cl(s.ang2.y, 1);
+          s.tgt[2] = cl(s.ang2.z, 2);
+          for (let a = 0; a < 3; a++) raw.jointConfigureMotor(h, RAW_AXIS_ANG[a], s.tgt[a], 0, kk, cc);
+          continue;
+        }
+        if (!e.targetValid || !p.targetValid) continue;
+
+        s.q1.copy(p.targetQuat).invert().multiply(e.targetQuat);
+        jointAxisAngles(s.q1, e.targetJointAngles); // frame del personaggio (tabella)
+        const jf = jointFrameRef.current;
+        if (jf) s.q1.premultiply(jf.Finv).multiply(jf.F); // -> frame del giunto Rapier
+        jointAxisAngles(s.q1, s.ang2);
+        const rl = e.rapierLimitsRad ?? [
+          [-Math.PI, Math.PI],
+          [-Math.PI, Math.PI],
+          [-Math.PI, Math.PI],
+        ];
+        const clampAxis = (v: number, l: [number, number]) =>
+          Math.min(l[1] - TARGET_LIMIT_MARGIN_RAD, Math.max(l[0] + TARGET_LIMIT_MARGIN_RAD, v));
+        e.motorJointAngles.set(clampAxis(s.ang2.x, rl[0]), clampAxis(s.ang2.y, rl[1]), clampAxis(s.ang2.z, rl[2]));
+
+        // Molla/smorzatore "force based" in unita' fisiche, dalla pulsazione
+        // voluta e dall'inerzia del sotto-albero: k = 2*w^2*I (il fattore 2
+        // perche' Rapier misura l'errore come sin(angolo/2)), c = 2*z*w*I.
+        // Verificato su un giunto isolato: w=25 -> bersaglio raggiunto in
+        // ~0.1s senza rimbalzo.
+        const freq =
+          (ACTIVE_RAGDOLL_JOINT_FREQ[e.segment.name] ?? ACTIVE_RAGDOLL_JOINT_FREQ_DEFAULT) *
+          Math.sqrt(Math.max(0.01, bench.stiffnessMul * (1 - 0.97 * effWeakness(e))));
+        const I = e.subtreeInertia;
+        const k = 2 * freq * freq * I;
+        const c = 2 * bench.dampingRatio * freq * I + ACTIVE_RAGDOLL_PASSIVE_JOINT_FRICTION * I;
+        const vel = [0, 0, 0];
+        if (bench.motorFeedForward && e.motorAnglesValid && delta > 1e-4) {
+          vel[0] = (e.motorJointAngles.x - e.prevMotorJointAngles.x) / delta;
+          vel[1] = (e.motorJointAngles.y - e.prevMotorJointAngles.y) / delta;
+          vel[2] = (e.motorJointAngles.z - e.prevMotorJointAngles.z) / delta;
+          for (let i = 0; i < 3; i++) vel[i] = Math.max(-MAX_TARGET_JOINT_SPEED, Math.min(MAX_TARGET_JOINT_SPEED, vel[i]));
+        }
+        // Il passo di fisica di @react-three/rapier gira PRIMA di questo
+        // useFrame: i bersagli di questo frame verranno usati al passo del
+        // frame SUCCESSIVO. Si anticipa quindi il bersaglio di un frame con
+        // la sua velocita' (misurato: con un gancio il bacino ruota a quasi
+        // 1000 gradi/s -> un frame di ritardo = 16 gradi di errore).
+        const ahead = bench.motorFeedForward ? Math.min(delta, 0.05) : 0;
+        const tgt = [
+          clampAxis(e.motorJointAngles.x + vel[0] * ahead, rl[0]),
+          clampAxis(e.motorJointAngles.y + vel[1] * ahead, rl[1]),
+          clampAxis(e.motorJointAngles.z + vel[2] * ahead, rl[2]),
+        ];
+        for (let a = 0; a < 3; a++) {
+          raw.jointConfigureMotor(h, RAW_AXIS_ANG[a], tgt[a], vel[a], k, c);
+        }
+        e.prevMotorJointAngles.copy(e.motorJointAngles);
+        e.motorAnglesValid = true;
+      }
+    },
+    [setMode, s]
+  );
 
   // Bacino: servo di velocita' verso posizione/orientamento mondo
   // dell'animazione, ad OGNI passo di fisica (1/120s) -- indipendente dal
@@ -920,7 +1202,9 @@ export function useRagdollActive(
       for (const key of Object.keys(entries)) {
         const body = entries[key].body;
         const bt = body.translation();
-        const rx = bt.x - t.x, ry = bt.y - t.y, rz = bt.z - t.z;
+        const rx = bt.x - t.x,
+          ry = bt.y - t.y,
+          rz = bt.z - t.z;
         const bv = body.linvel();
         const bw = body.angvel();
         body.setLinvel(
@@ -1013,85 +1297,88 @@ export function useRagdollActive(
   );
 
   // ------------------------------------------------------ fisica -> ossa
-  const syncActiveBonesBlended = useCallback((delta: number, isIdle: boolean, overrideWeight?: number) => {
-    const bench = useStore.getState().ragdollBench;
-    let weight: number;
-    if (overrideWeight !== undefined || bench.physicsOnlyRender) {
-      weight = bench.physicsOnlyRender ? 1 : (overrideWeight as number);
-      activeRagdollWeightRef.current = weight;
-    } else {
-      const targetWeight = isIdle ? ACTIVE_RAGDOLL_WEIGHT_IDLE : ACTIVE_RAGDOLL_WEIGHT_MOVING;
-      const rate = Math.min(1, Math.max(0, delta) * ACTIVE_RAGDOLL_WEIGHT_SMOOTH_RATE);
-      activeRagdollWeightRef.current += (targetWeight - activeRagdollWeightRef.current) * rate;
-      weight = activeRagdollWeightRef.current;
-    }
-    // Durante un colpo il modello mostra la fisica (anche se si sta
-    // muovendo e il blend normale darebbe piu' peso all'animazione),
-    // altrimenti l'incasso si vedrebbe solo a meta'.
-    weight = Math.max(weight, staggerRef.current);
-    const entries = activeBodiesRef.current;
+  const syncActiveBonesBlended = useCallback(
+    (delta: number, isIdle: boolean, overrideWeight?: number) => {
+      const bench = useStore.getState().ragdollBench;
+      let weight: number;
+      if (overrideWeight !== undefined || bench.physicsOnlyRender) {
+        weight = bench.physicsOnlyRender ? 1 : (overrideWeight as number);
+        activeRagdollWeightRef.current = weight;
+      } else {
+        const targetWeight = isIdle ? ACTIVE_RAGDOLL_WEIGHT_IDLE : ACTIVE_RAGDOLL_WEIGHT_MOVING;
+        const rate = Math.min(1, Math.max(0, delta) * ACTIVE_RAGDOLL_WEIGHT_SMOOTH_RATE);
+        activeRagdollWeightRef.current += (targetWeight - activeRagdollWeightRef.current) * rate;
+        weight = activeRagdollWeightRef.current;
+      }
+      // Durante un colpo il modello mostra la fisica (anche se si sta
+      // muovendo e il blend normale darebbe piu' peso all'animazione),
+      // altrimenti l'incasso si vedrebbe solo a meta'.
+      weight = Math.max(weight, staggerRef.current);
+      const entries = activeBodiesRef.current;
 
-    // contatti veri (con impulso) di ogni segmento in questo passo
-    let anyContact = false;
-    for (const seg of ACTIVE_RAGDOLL_SEGMENTS) {
-      const e = entries[seg.name];
-      if (!e || e.body.numColliders() === 0) continue;
-      const col = e.body.collider(0);
-      let touching = false;
-      if (weight < 0.999) {
-        world.contactPairsWith(col, (other) => {
-          if (touching) return;
-          // contatto VERO = con impulso (i contatti scartati dal filtro
-          // coppie restano elencati ma con impulso nullo)
-          world.contactPair(col, other, (m) => {
-            for (let i = 0; i < m.numContacts() && !touching; i++) {
-              if (m.contactImpulse(i) > 1e-4) touching = true;
-            }
+      // contatti veri (con impulso) di ogni segmento in questo passo
+      let anyContact = false;
+      for (const seg of ACTIVE_RAGDOLL_SEGMENTS) {
+        const e = entries[seg.name];
+        if (!e || e.body.numColliders() === 0) continue;
+        const col = e.body.collider(0);
+        let touching = false;
+        if (weight < 0.999) {
+          world.contactPairsWith(col, (other) => {
+            if (touching) return;
+            // contatto VERO = con impulso (i contatti scartati dal filtro
+            // coppie restano elencati ma con impulso nullo)
+            world.contactPair(col, other, (m) => {
+              for (let i = 0; i < m.numContacts() && !touching; i++) {
+                if (m.contactImpulse(i) > 1e-4) touching = true;
+              }
+            });
           });
-        });
+        }
+        e.contactLevel = touching ? 1 : Math.max(0, e.contactLevel - Math.max(0, delta) / CONTACT_SHOW_DECAY_S);
+        e.contactChain = e.contactLevel;
       }
-      e.contactLevel = touching ? 1 : Math.max(0, e.contactLevel - Math.max(0, delta) / CONTACT_SHOW_DECAY_S);
-      e.contactChain = e.contactLevel;
-    }
-    for (let i = ACTIVE_RAGDOLL_SEGMENTS.length - 1; i >= 0; i--) {
-      const seg = ACTIVE_RAGDOLL_SEGMENTS[i];
-      const e = entries[seg.name];
-      if (!e) continue;
-      if (e.contactChain > 0) anyContact = true;
-      if (!seg.parent || CONTACT_CHAIN_STOP.has(seg.parent)) continue;
-      const p = entries[seg.parent];
-      if (p) p.contactChain = Math.max(p.contactChain, e.contactChain);
-    }
-    if (weight <= 0.001 && !anyContact) return;
-    let first = true;
-    for (const seg of ACTIVE_RAGDOLL_SEGMENTS) {
-      const e = entries[seg.name];
-      if (!e) continue;
-      const bone = e.bone;
-      const parent = bone.parent;
-      if (!parent) continue;
-      if (first) {
-        parent.updateWorldMatrix(true, false);
-        first = false;
+      for (let i = ACTIVE_RAGDOLL_SEGMENTS.length - 1; i >= 0; i--) {
+        const seg = ACTIVE_RAGDOLL_SEGMENTS[i];
+        const e = entries[seg.name];
+        if (!e) continue;
+        if (e.contactChain > 0) anyContact = true;
+        if (!seg.parent || CONTACT_CHAIN_STOP.has(seg.parent)) continue;
+        const p = entries[seg.parent];
+        if (p) p.contactChain = Math.max(p.contactChain, e.contactChain);
       }
-      e.animLocalQuat.copy(bone.quaternion);
-      e.animLocalPos.copy(bone.position);
-      e.animSaved = true;
-      const r = e.body.rotation();
-      s.q1.set(r.x, r.y, r.z, r.w).multiply(e.bodyToBone); // osso mondo
-      parent.getWorldQuaternion(s.q2);
-      s.q2.invert().multiply(s.q1); // osso locale
-      const w = Math.max(weight, e.contactChain);
-      bone.quaternion.slerp(s.q2, w);
-      if (!seg.parent) {
-        const t = e.body.translation();
-        s.v1.set(t.x, t.y, t.z);
-        parent.worldToLocal(s.v1);
-        bone.position.lerp(s.v1, w);
+      if (weight <= 0.001 && !anyContact) return;
+      let first = true;
+      for (const seg of ACTIVE_RAGDOLL_SEGMENTS) {
+        const e = entries[seg.name];
+        if (!e) continue;
+        const bone = e.bone;
+        const parent = bone.parent;
+        if (!parent) continue;
+        if (first) {
+          parent.updateWorldMatrix(true, false);
+          first = false;
+        }
+        e.animLocalQuat.copy(bone.quaternion);
+        e.animLocalPos.copy(bone.position);
+        e.animSaved = true;
+        const r = e.body.rotation();
+        s.q1.set(r.x, r.y, r.z, r.w).multiply(e.bodyToBone); // osso mondo
+        parent.getWorldQuaternion(s.q2);
+        s.q2.invert().multiply(s.q1); // osso locale
+        const w = Math.max(weight, e.contactChain);
+        bone.quaternion.slerp(s.q2, w);
+        if (!seg.parent) {
+          const t = e.body.translation();
+          s.v1.set(t.x, t.y, t.z);
+          parent.worldToLocal(s.v1);
+          bone.position.lerp(s.v1, w);
+        }
+        bone.updateWorldMatrix(false, false);
       }
-      bone.updateWorldMatrix(false, false);
-    }
-  }, [s, world]);
+    },
+    [s, world]
+  );
 
   // "si muove tantissimo" (seconda causa, misurata dal vivo): se in un
   // frame NESSUNA azione del mixer scrive un certo osso (clip finita,
@@ -1146,7 +1433,9 @@ export function useRagdollActive(
     const hips = entries.Hips;
     if (hips && hips.targetValid && !passiveRef.current) {
       const t = hips.body.translation();
-      const dx = t.x - hips.targetPos.x, dy = t.y - hips.targetPos.y, dz = t.z - hips.targetPos.z;
+      const dx = t.x - hips.targetPos.x,
+        dy = t.y - hips.targetPos.y,
+        dz = t.z - hips.targetPos.z;
       if (dx * dx + dy * dy + dz * dz > RUNAWAY_DISTANCE_M * RUNAWAY_DISTANCE_M) return true;
     }
     return false;
@@ -1173,7 +1462,10 @@ export function useRagdollActive(
       const r = e.body.rotation();
       s.q1.set(r.x, r.y, r.z, r.w);
       // collider fisico
-      s.v1.copy(e.capsuleOffset).applyQuaternion(s.q1).add(s.v2.set(t.x, t.y, t.z));
+      s.v1
+        .copy(e.capsuleOffset)
+        .applyQuaternion(s.q1)
+        .add(s.v2.set(t.x, t.y, t.z));
       s.q2.copy(s.q1).multiply(e.capsuleRot);
       // collider bersaglio
       s.v3.copy(e.capsuleOffset).applyQuaternion(e.targetQuat).add(e.targetPos);
@@ -1212,10 +1504,20 @@ export function useRagdollActive(
       }
       out.push({
         name: seg.name,
-        x: s.v1.x, y: s.v1.y, z: s.v1.z,
-        qx: s.q2.x, qy: s.q2.y, qz: s.q2.z, qw: s.q2.w,
-        tx: s.v3.x, ty: s.v3.y, tz: s.v3.z,
-        tqx: s.q3.x, tqy: s.q3.y, tqz: s.q3.z, tqw: s.q3.w,
+        x: s.v1.x,
+        y: s.v1.y,
+        z: s.v1.z,
+        qx: s.q2.x,
+        qy: s.q2.y,
+        qz: s.q2.z,
+        qw: s.q2.w,
+        tx: s.v3.x,
+        ty: s.v3.y,
+        tz: s.v3.z,
+        tqx: s.q3.x,
+        tqy: s.q3.y,
+        tqz: s.q3.z,
+        tqw: s.q3.w,
         hasTarget: e.targetValid,
         radius: e.radius,
         halfHeight: e.halfHeight,

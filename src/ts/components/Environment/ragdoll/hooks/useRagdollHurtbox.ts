@@ -1,11 +1,9 @@
-import { useCallback, useEffect, useRef } from "react";
-import * as THREE from "three";
-import { useRapier } from "@react-three/rapier";
-import type {
-  RigidBody as RapierRigidBody,
-  Collider,
-} from "@dimforge/rapier3d-compat";
-import { HURTBOX_HEIGHT, HURTBOX_RADIUS, HURTBOX_GROUPS } from "../ragdollConfig";
+import { useCallback, useEffect, useRef } from 'react';
+import * as THREE from 'three';
+import { useRapier } from '@react-three/rapier';
+import type { RigidBody as RapierRigidBody, Collider } from '@dimforge/rapier3d-compat';
+import { HURTBOX_HEIGHT, HURTBOX_RADIUS, HURTBOX_GROUPS } from '../ragdollConfig';
+import { nextParkSpot } from './useRagdollSolidBodies';
 
 interface Hurtbox {
   body: RapierRigidBody;
@@ -22,12 +20,7 @@ export function useRagdollHurtbox(modelRootRef: React.RefObject<THREE.Object3D |
     const root = modelRootRef.current;
     if (!root) return null;
     root.getWorldPosition(_v1);
-    const bodyDesc =
-      rapier.RigidBodyDesc.kinematicPositionBased().setTranslation(
-        _v1.x,
-        _v1.y + HURTBOX_HEIGHT / 2,
-        _v1.z
-      );
+    const bodyDesc = rapier.RigidBodyDesc.kinematicPositionBased().setTranslation(_v1.x, _v1.y + HURTBOX_HEIGHT / 2, _v1.z);
     const body = world.createRigidBody(bodyDesc);
     const halfHeight = Math.max(0.01, HURTBOX_HEIGHT / 2 - HURTBOX_RADIUS);
     const colliderDesc = rapier.ColliderDesc.capsule(halfHeight, HURTBOX_RADIUS)
@@ -63,8 +56,17 @@ export function useRagdollHurtbox(modelRootRef: React.RefObject<THREE.Object3D |
     [world]
   );
 
+  // fuori dal mondo (personaggio "addormentato": lontano o non usato)
+  const parkSpot = useRef<{ x: number; z: number } | null>(null);
+  const parkHurtbox = useCallback(() => {
+    const entry = hurtboxRef.current;
+    const spot = (parkSpot.current ??= nextParkSpot());
+    if (entry) entry.body.setTranslation({ x: spot.x + 15, y: -1000, z: spot.z + 15 }, false);
+  }, []);
+
   return {
     syncHurtbox,
-    getHurtboxHandle: () => hurtboxRef.current ? hurtboxRef.current.collider.handle : null,
+    parkHurtbox,
+    getHurtboxHandle: () => (hurtboxRef.current ? hurtboxRef.current.collider.handle : null),
   };
 }

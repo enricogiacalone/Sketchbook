@@ -1,32 +1,20 @@
-import { useCallback, useEffect, useRef } from "react";
-import * as THREE from "three";
-import { useThree } from "@react-three/fiber";
-import { useRapier } from "@react-three/rapier";
-import { CollisionGroups, allocFighterBit } from "../../../enums/CollisionGroups";
-import { useStore } from "../../../store";
-import {
-  RAGDOLL_PULSE_NEARBY,
-  HURTBOX_HEIGHT,
-  HURTBOX_RADIUS,
-  HURTBOX_GROUPS,
-} from "./ragdollConfig";
+import { useCallback, useEffect, useRef } from 'react';
+import * as THREE from 'three';
+import { useThree } from '@react-three/fiber';
+import { useRapier } from '@react-three/rapier';
+import { CollisionGroups, allocFighterBit } from '../../../enums/CollisionGroups';
+import { useStore } from '../../../store';
+import { RAGDOLL_PULSE_NEARBY, HURTBOX_HEIGHT, HURTBOX_RADIUS, HURTBOX_GROUPS } from './ragdollConfig';
 
-import { useRagdollBones } from "./hooks/useRagdollBones";
-import { useRagdollHurtbox } from "./hooks/useRagdollHurtbox";
-import {
-  useRagdollSolidBodies,
-  type ObstacleContact,
-  type SolidBodySegmentDebug,
-} from "./hooks/useRagdollSolidBodies";
+import { useRagdollBones } from './hooks/useRagdollBones';
+import { useRagdollHurtbox } from './hooks/useRagdollHurtbox';
+import { useRagdollSolidBodies, type ObstacleContact, type SolidBodySegmentDebug } from './hooks/useRagdollSolidBodies';
 
 export type { SolidBodySegmentDebug };
-import { useRagdollTransient } from "./hooks/useRagdollTransient";
-import {
-  useRagdollActive,
-  type ActiveRagdollSegmentDebug,
-} from "./hooks/useRagdollActive";
-import type { JointRange } from "./activeRagdollFrames";
-import { registerFighterHitHandler } from "../weapons/shootableRegistry";
+import { useRagdollTransient } from './hooks/useRagdollTransient';
+import { useRagdollActive, type ActiveRagdollSegmentDebug } from './hooks/useRagdollActive';
+import type { JointRange } from './activeRagdollFrames';
+import { registerFighterHitHandler } from '../weapons/shootableRegistry';
 
 export type { ActiveRagdollSegmentDebug };
 
@@ -37,7 +25,19 @@ const HIT_MARKER_DURATION = 0.3;
 const HAND_QUERY_RADIUS = 0.06;
 const _identityRot = { x: 0, y: 0, z: 0, w: 1 };
 
+// quanta velocita' orizzontale propria resta al corpo quando un colpo forte lo manda KO
+const KNOCK_KEEP = 0.2;
+// girarsi sulla schiena: velocita' di rotazione (rad/s), durata massima
+// della spinta (s), quando e' "girato" (davanti verso l'alto) e un
+// piccolo sollevamento per staccare il fianco dal suolo (m/s)
+const ROLL_SPEED = 6;
+const ROLL_S = 0.8;
+const ROLL_DONE_NY = 0.35;
+const ROLL_LIFT = 1.2;
+
 export interface RagdollController {
+  // corpo fuori dal mondo (capsule solide e hurtbox), vedi park in fondo
+  park: () => void;
   isActive: () => boolean;
   isDeath: () => boolean;
   activateDeath: () => void;
@@ -56,13 +56,7 @@ export interface RagdollController {
   getLyingState: () => LyingState | null;
   // si gira sulla schiena (se e' caduto a pancia in giu')
   rollOver: () => void;
-  pulseHit: (
-    worldImpulseDir: THREE.Vector3,
-    magnitude: number,
-    atSegment?: string,
-    attackerX?: number,
-    attackerZ?: number
-  ) => void;
+  pulseHit: (worldImpulseDir: THREE.Vector3, magnitude: number, atSegment?: string, attackerX?: number, attackerZ?: number) => void;
   update: (delta: number, activeRagdollEnabled?: boolean, isIdle?: boolean, isPassive?: boolean) => void;
   // Da chiamare a INIZIO useFrame, prima di mixer.update() (vedi
   // restoreActiveAnimationPose in useRagdollActive.ts).
@@ -73,20 +67,13 @@ export interface RagdollController {
   deactivate: () => void;
   getBoneWorldPosition: (boneName: string, target: THREE.Vector3) => boolean;
   getHurtboxHandle: () => number | null;
-  pointIntersectsHurtbox: (
-    worldPos: THREE.Vector3,
-    targetHandle: number
-  ) => boolean;
-  applySpineLean: (pitchRad: number, yawRad: number) => void;
+  pointIntersectsHurtbox: (worldPos: THREE.Vector3, targetHandle: number) => boolean;
+  applySpineLean: (pitchRad: number, yawRad: number, weight?: number) => void;
   resolveBodyMovement: (
     desiredX: number,
     desiredZ: number,
     bagSolidHandle: number | null,
-    onBagBump?: (
-      worldPoint: THREE.Vector3,
-      worldDir: THREE.Vector3,
-      blockedAmount: number
-    ) => void
+    onBagBump?: (worldPoint: THREE.Vector3, worldDir: THREE.Vector3, blockedAmount: number) => void
   ) => { x: number; z: number };
   // ostacoli dell'arena: esce dalle compenetrazioni e dice chi lo sta
   // spingendo (vedi useRagdollSolidBodies.resolveObstacleContacts)
@@ -109,10 +96,10 @@ export interface RagdollController {
 // variazione di velocita' vera sul segmento colpito.
 const ACTIVE_HIT_SPEED_PER_MAGNITUDE = 40;
 
-const SPINE_LEAN_BONES = ["spine_02", "spine_03"];
+const SPINE_LEAN_BONES = ['spine_02', 'spine_03'];
 const SPINE_LEAN_CHILD_BONE: Record<string, string> = {
-  spine_02: "spine_03",
-  spine_03: "neck_01",
+  spine_02: 'spine_03',
+  spine_03: 'neck_01',
 };
 const SPINE_LEAN_MAX_RAD = THREE.MathUtils.degToRad(40);
 const SPINE_TWIST_MAX_RAD = THREE.MathUtils.degToRad(80);
@@ -131,10 +118,13 @@ export function useRagdoll(
   const fighterBitRef = useRef<number | null>(null);
   if (fighterBitRef.current === null) fighterBitRef.current = allocFighterBit();
   const fighterBit = fighterBitRef.current;
-  const { syncHurtbox, getHurtboxHandle: internalGetHurtboxHandle } =
-    useRagdollHurtbox(modelRootRef);
-  const { syncSolidBody, parkSolidBody, resolveBodyMovement, resolveObstacleContacts, getSolidBodySegments } =
-    useRagdollSolidBodies(modelRootRef, resolveBones, ownerId, fighterBit);
+  const { syncHurtbox, parkHurtbox, getHurtboxHandle: internalGetHurtboxHandle } = useRagdollHurtbox(modelRootRef);
+  const { syncSolidBody, parkSolidBody, resolveBodyMovement, resolveObstacleContacts, getSolidBodySegments } = useRagdollSolidBodies(
+    modelRootRef,
+    resolveBones,
+    ownerId,
+    fighterBit
+  );
   const {
     buildBodies,
     destroyBodies,
@@ -224,22 +214,36 @@ export function useRagdoll(
     };
   }, [buildBodies, destroyBodies]);
 
-  const knockDown = useCallback((dir: THREE.Vector3, speed: number): boolean => {
-    if (!hasActiveRig() || stateRef.current.isDeath) return false;
-    activeKnockedOutRef.current = true;
-    const entries = activeBodiesRef.current;
-    const upper = /^(Head|Spine|Torso|Clavicle|UpperArm|ForeArm)/;
-    for (const key of Object.keys(entries)) {
-      const b = entries[key].body;
-      const v = b.linvel();
-      // parte alta spinta di piu' della bassa: il corpo si ribalta
-      const k = upper.test(key) ? 1 : key === 'Hips' ? 0.8 : 0.55;
-      b.setLinvel({ x: v.x + dir.x * speed * k, y: v.y + Math.max(0, dir.y) * speed * k + 0.15 * speed, z: v.z + dir.z * speed * k }, true);
-    }
-    const head = entries.Head?.body.translation();
-    if (head) triggerHitMarker(new THREE.Vector3(head.x, head.y, head.z));
-    return true;
-  }, [triggerHitMarker]);
+  const knockDown = useCallback(
+    (dir: THREE.Vector3, speed: number): boolean => {
+      if (!hasActiveRig() || stateRef.current.isDeath) return false;
+      activeKnockedOutRef.current = true;
+      const entries = activeBodiesRef.current;
+      const upper = /^(Head|Spine|Torso|Clavicle|UpperArm|ForeArm)/;
+      for (const key of Object.keys(entries)) {
+        const b = entries[key].body;
+        const v = b.linvel();
+        // parte alta spinta di piu' della bassa: il corpo si ribalta
+        const k = upper.test(key) ? 1 : key === 'Hips' ? 0.8 : 0.55;
+        // "nn viene sbalzato in direzione di dove viene colpito": la velocita'
+        // orizzontale che aveva (correva CONTRO la pala, per esempio) si
+        // sommava alla spinta e la deviava o la annullava -- il colpo ora la
+        // sostituisce quasi tutta: il corpo parte dove lo manda il colpo
+        b.setLinvel(
+          {
+            x: v.x * KNOCK_KEEP + dir.x * speed * k,
+            y: v.y + Math.max(0, dir.y) * speed * k + 0.15 * speed,
+            z: v.z * KNOCK_KEEP + dir.z * speed * k,
+          },
+          true
+        );
+      }
+      const head = entries.Head?.body.translation();
+      if (head) triggerHitMarker(new THREE.Vector3(head.x, head.y, head.z));
+      return true;
+    },
+    [triggerHitMarker]
+  );
 
   const standUp = useCallback(() => {
     if (stateRef.current.isDeath) return;
@@ -253,15 +257,19 @@ export function useRagdoll(
     if (!import.meta.env.DEV || !ownerId) return;
     const reg = ((window as any).__ragdollApi ??= {});
     reg[ownerId] = { knockDown, standUp, isKnockedDown };
-    return () => { delete reg[ownerId]; };
+    return () => {
+      delete reg[ownerId];
+    };
   }, [ownerId, knockDown, standUp, isKnockedDown]);
 
   const _ly = useRef({ h: new THREE.Vector3(), s: new THREE.Vector3(), n: new THREE.Vector3() });
   const getLyingState = useCallback((): LyingState | null => {
     const e = activeBodiesRef.current;
     if (!e.Hips || !e.Head || !e.UpperArm_L || !e.UpperArm_R) return null;
-    const hp = e.Hips.body.translation(), hd = e.Head.body.translation();
-    const l = e.UpperArm_L.body.translation(), r = e.UpperArm_R.body.translation();
+    const hp = e.Hips.body.translation(),
+      hd = e.Head.body.translation();
+    const l = e.UpperArm_L.body.translation(),
+      r = e.UpperArm_R.body.translation();
     const { h, s: sh, n } = _ly.current;
     h.set(hd.x - hp.x, hd.y - hp.y, hd.z - hp.z);
     sh.set(r.x - l.x, r.y - l.y, r.z - l.z);
@@ -281,30 +289,83 @@ export function useRagdoll(
     };
   }, []);
 
+  // Girarsi sulla schiena (il rialzo parte solo da supini). Prima era UNA
+  // spinta di rotazione, sempre nello stesso verso: a volte il corpo
+  // girava dalla parte del braccio che aveva sotto, si fermava a meta' e
+  // si rialzava a pancia in giu' con la clip da supino -- le braccia
+  // passavano attraverso il pavimento per raggiungere la posa. Ora gira
+  // dalla parte giusta e la spinta dura finche' non e' girato (max ROLL_S).
+  const rollRef = useRef({ left: 0, sign: 1, lifted: false });
+  const _roll = useRef({ a: new THREE.Vector3(), n: new THREE.Vector3(), h: new THREE.Vector3(), sh: new THREE.Vector3() });
+  const frontNormal = (out: THREE.Vector3) => {
+    const e = activeBodiesRef.current;
+    const hp = e.Hips.body.translation(),
+      hd = e.Head.body.translation(),
+      l = e.UpperArm_L.body.translation(),
+      r = e.UpperArm_R.body.translation();
+    const { h, sh } = _roll.current;
+    h.set(hd.x - hp.x, hd.y - hp.y, hd.z - hp.z);
+    sh.set(r.x - l.x, r.y - l.y, r.z - l.z);
+    return out.crossVectors(h, sh).normalize();
+  };
   const rollOver = useCallback(() => {
     const e = activeBodiesRef.current;
-    if (!e.Hips || !e.Head) return;
-    const hp = e.Hips.body.translation(), hd = e.Head.body.translation();
-    // rotazione attorno all'asse bacino->testa: mezzo giro in ~0.4 s
-    const ax = new THREE.Vector3(hd.x - hp.x, 0, hd.z - hp.z).normalize().multiplyScalar(8);
+    if (!e.Hips || !e.Head || !e.UpperArm_L || !e.UpperArm_R) return;
+    const hp = e.Hips.body.translation(),
+      hd = e.Head.body.translation();
+    const { a, n } = _roll.current;
+    a.set(hd.x - hp.x, 0, hd.z - hp.z).normalize();
+    frontNormal(n);
+    // verso di rotazione che porta il davanti in su (d n / dt = w a x n)
+    const up = a.z * n.x - a.x * n.z;
+    rollRef.current.sign = up >= 0 ? 1 : -1;
+    rollRef.current.left = ROLL_S;
+    rollRef.current.lifted = false;
+  }, []);
+  const stepRollAssist = (dt: number) => {
+    const rr = rollRef.current;
+    if (rr.left <= 0) return;
+    rr.left -= dt;
+    const e = activeBodiesRef.current;
+    if (!e.Hips || !e.Head || !e.UpperArm_L || !e.UpperArm_R) return;
+    const { a, n } = _roll.current;
+    if (frontNormal(n).y > ROLL_DONE_NY) {
+      rr.left = 0;
+      return;
+    }
+    const hp = e.Hips.body.translation(),
+      hd = e.Head.body.translation();
+    a.set(hd.x - hp.x, 0, hd.z - hp.z).normalize();
+    // come un motore: porta la rotazione attorno all'asse bacino->testa
+    // almeno a ROLL_SPEED, da corpo rigido (velocita' lineari coerenti)
+    const w = e.Hips.body.angvel();
+    const cur = (w.x * a.x + w.y * a.y + w.z * a.z) * rr.sign;
+    const dw = Math.max(0, ROLL_SPEED - cur) * rr.sign;
+    const lift = rr.lifted ? 0 : ROLL_LIFT;
+    rr.lifted = true;
+    if (dw === 0 && lift === 0) return;
     for (const key of Object.keys(e)) {
       const b = e[key].body;
       const t = b.translation();
-      const r = new THREE.Vector3(t.x - hp.x, t.y - hp.y, t.z - hp.z);
-      const v = new THREE.Vector3().crossVectors(ax, r);
-      b.setLinvel({ x: v.x, y: v.y + 1.2, z: v.z }, true);
-      b.setAngvel({ x: ax.x, y: ax.y, z: ax.z }, true);
+      const rx = t.x - hp.x,
+        ry = t.y - hp.y,
+        rz = t.z - hp.z;
+      const v = b.linvel();
+      const bw = b.angvel();
+      b.setLinvel(
+        {
+          x: v.x + dw * (a.y * rz - a.z * ry),
+          y: v.y + dw * (a.z * rx - a.x * rz) + lift,
+          z: v.z + dw * (a.x * ry - a.y * rx),
+        },
+        true
+      );
+      b.setAngvel({ x: bw.x + dw * a.x, y: bw.y + dw * a.y, z: bw.z + dw * a.z }, true);
     }
-  }, []);
+  };
 
   const pulseHit = useCallback(
-    (
-      worldImpulseDir: THREE.Vector3,
-      magnitude: number,
-      atSegment: string = "Torso",
-      attackerX?: number,
-      attackerZ?: number
-    ) => {
+    (worldImpulseDir: THREE.Vector3, magnitude: number, atSegment: string = 'Torso', attackerX?: number, attackerZ?: number) => {
       if (stateRef.current.isDeath) return;
       // a terra (KO da colpo forte): il corpo e' gia' tutto fisica
       if (activeKnockedOutRef.current && hasActiveRig()) return;
@@ -338,9 +399,7 @@ export function useRagdoll(
       }
 
       const nearbyOptions = RAGDOLL_PULSE_NEARBY[atSegment] ?? [];
-      const nearby = nearbyOptions.length
-        ? nearbyOptions[Math.floor(Math.random() * nearbyOptions.length)]
-        : [];
+      const nearby = nearbyOptions.length ? nearbyOptions[Math.floor(Math.random() * nearbyOptions.length)] : [];
       const activeSegments = new Set<string>([atSegment, ...nearby]);
 
       if (!stateRef.current.active) {
@@ -386,12 +445,7 @@ export function useRagdoll(
   );
 
   const update = useCallback(
-    (
-      delta: number,
-      activeRagdollEnabled: boolean = false,
-      isIdle: boolean = false,
-      isPassive: boolean = false
-    ) => {
+    (delta: number, activeRagdollEnabled: boolean = false, isIdle: boolean = false, isPassive: boolean = false) => {
       if (markerRef.current && markerRef.current.visible) {
         markerElapsedRef.current += delta;
         const t = Math.min(1, markerElapsedRef.current / HIT_MARKER_DURATION);
@@ -412,6 +466,8 @@ export function useRagdoll(
           const passive = isPassive || activeKnockedOutRef.current;
           // Ordine: bersagli dall'animazione (gia' aggiornata da
           // mixer.update / skeleton.pose) -> motori -> ossa dalla fisica.
+          if (activeKnockedOutRef.current) stepRollAssist(delta);
+          else rollRef.current.left = 0;
           captureActiveTargets(delta);
           if (!passive && checkActiveRagdollRunaway()) {
             resyncActiveRagdollToBones();
@@ -541,20 +597,12 @@ export function useRagdoll(
   );
 
   const applySpineLean = useCallback(
-    (pitchRad: number, yawRad: number) => {
-      if (stateRef.current.active) return;
+    (pitchRad: number, yawRad: number, weight = 1) => {
+      if (stateRef.current.active || weight <= 0) return;
       const bones = resolveBones();
       if (!bones) return;
-      const clampedPitch = THREE.MathUtils.clamp(
-        pitchRad,
-        -SPINE_LEAN_MAX_RAD,
-        SPINE_LEAN_MAX_RAD
-      );
-      const clampedYaw = THREE.MathUtils.clamp(
-        yawRad,
-        -SPINE_TWIST_MAX_RAD,
-        SPINE_TWIST_MAX_RAD
-      );
+      const clampedPitch = THREE.MathUtils.clamp(pitchRad, -SPINE_LEAN_MAX_RAD, SPINE_LEAN_MAX_RAD);
+      const clampedYaw = THREE.MathUtils.clamp(yawRad, -SPINE_TWIST_MAX_RAD, SPINE_TWIST_MAX_RAD);
       const perBonePitch = -clampedPitch / SPINE_LEAN_BONES.length;
       const perBoneYaw = clampedYaw / SPINE_LEAN_BONES.length;
       for (const boneName of SPINE_LEAN_BONES) {
@@ -562,18 +610,14 @@ export function useRagdoll(
         if (!bone) continue;
         const child = bones[SPINE_LEAN_CHILD_BONE[boneName]];
         if (child && child.position.lengthSq() > 1e-8) {
-          const twistAxis = new THREE.Vector3()
-            .copy(child.position)
-            .normalize();
-          const pitchQuat = new THREE.Quaternion().setFromAxisAngle(
-            new THREE.Vector3(1, 0, 0),
-            perBonePitch
-          );
-          const twistQuat = new THREE.Quaternion().setFromAxisAngle(
-            twistAxis,
-            perBoneYaw
-          );
-          bone.quaternion.copy(twistQuat).multiply(pitchQuat);
+          const twistAxis = new THREE.Vector3().copy(child.position).normalize();
+          const pitchQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), perBonePitch);
+          const twistQuat = new THREE.Quaternion().setFromAxisAngle(twistAxis, perBoneYaw);
+          // SOSTITUISCE la rotazione animata della spina (le clip in piedi
+          // l'hanno quasi nulla); con peso < 1 si mescola all'animazione
+          twistQuat.multiply(pitchQuat);
+          if (weight >= 1) bone.quaternion.copy(twistQuat);
+          else bone.quaternion.slerp(twistQuat, weight);
         }
       }
     },
@@ -604,7 +648,14 @@ export function useRagdoll(
       applyActiveHit(segment, dir, speed, point);
       return;
     }
-    const fallback: Record<string, string> = { SpineMid: 'Torso', SpineHigh: 'Torso', ClavicleL: 'UpperArm_L', ClavicleR: 'UpperArm_R', Hand_L: 'ForeArm_L', Hand_R: 'ForeArm_R' };
+    const fallback: Record<string, string> = {
+      SpineMid: 'Torso',
+      SpineHigh: 'Torso',
+      ClavicleL: 'UpperArm_L',
+      ClavicleR: 'UpperArm_R',
+      Hand_L: 'ForeArm_L',
+      Hand_R: 'ForeArm_R',
+    };
     pulseHit(dir, speed / ACTIVE_HIT_SPEED_PER_MAGNITUDE, fallback[segment] ?? segment);
   };
   useEffect(() => {
@@ -625,6 +676,13 @@ export function useRagdoll(
   );
 
   return {
+    // corpo fuori dal mondo (capsule solide e hurtbox): per i personaggi
+    // lontani o fermi nel pool, che non devono costare ne' bloccare niente.
+    // Il prossimo update() li rimette sulle ossa.
+    park: () => {
+      parkSolidBody();
+      parkHurtbox();
+    },
     isActive: () => stateRef.current.active,
     isDeath: () => stateRef.current.isDeath,
     activateDeath,

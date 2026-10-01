@@ -1,36 +1,37 @@
-import React, { Suspense } from "react";
-import { useGLTF } from "@react-three/drei";
-import * as THREE from "three";
-import Ocean from "./components/Environment/Ocean";
-import Trees from "./components/Environment/Trees";
-import Terrain from "./components/Environment/Terrain";
-import Road from "./components/Environment/Road";
-import City from "./components/Environment/City";
-import Park from "./components/Environment/Park";
-import CityDetails from "./components/Environment/CityDetails";
-import Collectibles from "./components/Environment/Collectibles";
-import BuildingLeds from "./components/Environment/BuildingLeds";
-import BuildingLedGlow from "./components/Environment/BuildingLedGlow";
-import Airport, { RUNWAY_CENTER, HELIPORT_CENTER } from "./components/Environment/Airport";
-import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from "./components/Environment/RaceTrack";
-import DuelArena from "./components/Environment/DuelArena";
-import Planets from "./components/Environment/Planets";
-import Clouds from "./components/Environment/Clouds";
-import UFO from "./components/Environment/UFO";
-import MeteoriteSpawner from "./components/Environment/MeteoriteSpawner";
-import EnemySpawner from "./components/EnemySpawner";
-import SoldierSpawner from "./components/SoldierSpawner";
-import MissionManager from "./components/Missions/MissionManager";
-import Car from "./components/Vehicles/Car"; // Import Car
-import Airplane from "./components/Vehicles/Airplane"; // Import Airplane
-import Helicopter from "./components/Vehicles/Helicopter"; // Import Helicopter
-import { useStore } from "./store";
-
+import React, { Suspense } from 'react';
+import { useGLTF } from '@react-three/drei';
+import * as THREE from 'three';
+import Ocean from './components/Environment/Ocean';
+import Trees from './components/Environment/Trees';
+import Terrain from './components/Environment/Terrain';
+import Road from './components/Environment/Road';
+import City from './components/Environment/City';
+import Park from './components/Environment/Park';
+import { TreeBatches } from './components/Environment/ParkTrees';
+import CityDetails from './components/Environment/CityDetails';
+import Collectibles from './components/Environment/Collectibles';
+import BuildingLeds from './components/Environment/BuildingLeds';
+import BuildingLedGlow from './components/Environment/BuildingLedGlow';
+import Airport, { RUNWAY_CENTER, HELIPORT_CENTER } from './components/Environment/Airport';
+import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from './components/Environment/RaceTrack';
+import DuelArena from './components/Environment/DuelArena';
+import Planets from './components/Environment/Planets';
+import Clouds from './components/Environment/Clouds';
+import UFO from './components/Environment/UFO';
+import MeteoriteSpawner from './components/Environment/MeteoriteSpawner';
+import EnemySpawner from './components/EnemySpawner';
+import SoldierSpawner from './components/SoldierSpawner';
+import MissionManager from './components/Missions/MissionManager';
+import Car from './components/Vehicles/Car'; // Import Car
+import FarCars from './components/Vehicles/FarCars';
+import Airplane from './components/Vehicles/Airplane'; // Import Airplane
+import Helicopter from './components/Vehicles/Helicopter'; // Import Helicopter
+import { useStore } from './store';
 
 // Pre-caricamento intensivo
-useGLTF.preload("car.glb");
-useGLTF.preload("airplane.glb");
-useGLTF.preload("heli.glb");
+useGLTF.preload('car.glb');
+useGLTF.preload('airplane.glb');
+useGLTF.preload('heli.glb');
 
 // DEBUG: temporarily stripped cars/vehicles/enemies out of the scene to
 // isolate the periodic stutter -- it turned out to be MeteoriteSpawner's
@@ -127,6 +128,7 @@ const Scene: React.FC = () => {
                 absorb a small drop, matching how a real raycast vehicle
                 controller is meant to be used (see git history / chat, "cade
                 oltre il terrain e sparisce"). */}
+            <FarCars />
             <Car id="car-1" position={[10, 1.6, 0]} />
             <Car id="car-2" position={[60, 1.6, 0]} />
             <Car id="car-3" position={[0, 1.6, 60]} />
@@ -137,8 +139,18 @@ const Scene: React.FC = () => {
             {/* Police patrol cars -- rotation Math.PI/2 faces +X, matching
                 each route's first leg (see POLICE_ROUTE_INNER/OUTER above:
                 first waypoint -> second waypoint both run along +X). */}
-            <Car id="police-1" position={[POLICE_ROUTE_INNER[0][0], 1.6, POLICE_ROUTE_INNER[0][1]]} rotation={[0, Math.PI / 2, 0]} patrolRoute={POLICE_ROUTE_INNER} />
-            <Car id="police-2" position={[POLICE_ROUTE_OUTER[0][0], 1.6, POLICE_ROUTE_OUTER[0][1]]} rotation={[0, Math.PI / 2, 0]} patrolRoute={POLICE_ROUTE_OUTER} />
+            <Car
+              id="police-1"
+              position={[POLICE_ROUTE_INNER[0][0], 1.6, POLICE_ROUTE_INNER[0][1]]}
+              rotation={[0, Math.PI / 2, 0]}
+              patrolRoute={POLICE_ROUTE_INNER}
+            />
+            <Car
+              id="police-2"
+              position={[POLICE_ROUTE_OUTER[0][0], 1.6, POLICE_ROUTE_OUTER[0][1]]}
+              rotation={[0, Math.PI / 2, 0]}
+              patrolRoute={POLICE_ROUTE_OUTER}
+            />
           </>
         )}
 
@@ -207,6 +219,7 @@ const Scene: React.FC = () => {
           <BuildingLeds />
           <BuildingLedGlow />
           <Park />
+          <TreeBatches />
           <CityDetails />
           <Collectibles />
           <MissionManager />

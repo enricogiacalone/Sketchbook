@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useGLTF } from '@react-three/drei';
 import { useThree } from '@react-three/fiber';
+import { useRapier } from '@react-three/rapier';
+import { vehicleBodyHandles } from '../Vehicles/vehicleRegistry';
 import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 import { useRagdoll } from '../Environment/ragdoll/useRagdoll';
@@ -24,10 +26,15 @@ export const MANNEQUIN_URL = 'soldier-citizen.glb';
 export const MANNEQUIN_BASE_ANIMS_URL = 'soldier-citizen-base-animations.glb';
 export const MANNEQUIN_ADDON_ANIMS_URL = 'soldier-citizen-addon-animations.glb';
 
-// oltre questa distanza dal giocatore: animazione a scatti e niente fisica
-// del corpo (non lo vede nessuno da vicino, costa)
-const FAR_DIST = 70;
-const FAR_ANIM_STEP_S = 1 / 10;
+// "personaggi lontani che non calcolano ne' fisica ne' animazioni":
+// oltre FAR_DIST (dal giocatore e dalla telecamera) il corpo esce dal mondo
+// fisico (capsule solide e hurtbox parcheggiate, niente contatti) e
+// l'animazione va a scatti; oltre HIDE_DIST non si anima e non si disegna.
+const FAR_DIST = 45;
+const FAR_ANIM_STEP_S = 1 / 5;
+const HIDE_DIST = 160;
+// le collisioni con le auto si controllano solo con un'auto entro questa distanza
+const VEHICLE_CHECK_DIST = 9;
 // investito: sopra questa velocita' dell'auto nel punto d'urto e' morte
 const RUN_OVER_KILL_SPEED = 4;
 
@@ -58,6 +65,20 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   const { animations: baseAnims } = useGLTF(MANNEQUIN_BASE_ANIMS_URL);
   const { animations: addonAnims } = useGLTF(MANNEQUIN_ADDON_ANIMS_URL);
   const { camera } = useThree();
+  const { world } = useRapier();
+  const vehicleNear = (x: number, z: number) => {
+    for (const h of vehicleBodyHandles) {
+      const b = world.getRigidBody(h);
+      if (!b) continue;
+      const t = b.translation();
+      const dx = t.x - x,
+        dz = t.z - z;
+      if (dx * dx + dz * dz > VEHICLE_CHECK_DIST * VEHICLE_CHECK_DIST) continue;
+      const v = b.linvel();
+      if (v.x * v.x + v.z * v.z > 0.5) return true;
+    }
+    return false;
+  };
 
   const data: FighterData = useMemo(() => {
     const d = makeFighter(id, opts.name, opts.team, opts.x, opts.z, opts.rotation ?? 0);
@@ -142,20 +163,35 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   const deadRef = useRef(false);
   const deadForRef = useRef(0);
   const farAccRef = useRef(0);
+  const farParkedRef = useRef(false);
+  const dormantRef = useRef(false);
 
   // Da chiamare a ogni frame PRIMA di muovere il personaggio. Ritorna:
   // 'dead' (e' a terra, il chiamante non fa altro), 'hurt' (colpito in
   // questo frame), null.
   const beginFrame = (delta: number, pos: { x: number; z: number }): 'dead' | 'hurt' | null => {
-    const far = camera.position.distanceTo(_dir.set(pos.x, camera.position.y, pos.z)) > FAR_DIST;
-    ragdoll.beginFrame();
+    const pp = useStore.getState().playerPos;
+    const dist = Math.min(Math.hypot(camera.position.x - pos.x, camera.position.z - pos.z), Math.hypot(pp[0] - pos.x, pp[2] - pos.z));
+    const far = dist > FAR_DIST;
     if (far && !deadRef.current) {
+      if (!farParkedRef.current) {
+        farParkedRef.current = true;
+        ragdoll.park();
+      }
+      const hidden = dist > HIDE_DIST;
+      clone.visible = !hidden;
       farAccRef.current += delta;
-      if (farAccRef.current >= FAR_ANIM_STEP_S) {
+      if (!hidden && farAccRef.current >= FAR_ANIM_STEP_S) {
         mixer.update(farAccRef.current);
         farAccRef.current = 0;
       }
     } else {
+      if (farParkedRef.current) {
+        // di nuovo vicino: il prossimo update rimette le capsule sulle ossa
+        farParkedRef.current = false;
+        clone.visible = true;
+      }
+      ragdoll.beginFrame();
       mixer.update(delta + farAccRef.current);
       farAccRef.current = 0;
       if (!solidInitRef.current && !deadRef.current) {
@@ -166,8 +202,9 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     }
     data.hurtboxHandle = ragdoll.getHurtboxHandle();
 
-    if (!deadRef.current && !far) {
-      // investimenti (auto): spinta o morte, come il giocatore
+    if (!deadRef.current && !far && vehicleNear(pos.x, pos.z)) {
+      // investimenti (auto): spinta o morte, come il giocatore. Le query di
+      // contatto (15 capsule) solo se c'e' un'auto in movimento vicina.
       const ob = ragdoll.resolveObstacleContacts(null, delta);
       if (ob.hitSpeed >= RUN_OVER_KILL_SPEED) {
         data.hp = 0;
@@ -226,6 +263,29 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     return hurt ? 'hurt' : null;
   };
 
+  // Pool di personaggi (folla): "addormentato" = fuori dal mondo, non
+  // disegnato, non colpibile, nessun costo; "sveglio" in (x, z).
+  const sleep = () => {
+    if (dormantRef.current) return;
+    dormantRef.current = true;
+    ragdoll.park();
+    clone.visible = false;
+    removeCityOpponent(data);
+  };
+  const wake = (x: number, z: number) => {
+    dormantRef.current = false;
+    farParkedRef.current = false;
+    clone.visible = true;
+    data.position.set(x, 0, z);
+    curRef.current = null;
+    if (opts.targetable !== false && !data.isDead) addCityOpponent(data);
+  };
+  const setTint = (c: THREE.ColorRepresentation) => {
+    clone.traverse((child: any) => {
+      if (child.isSkinnedMesh) child.material.emissive.set(c);
+    });
+  };
+
   // rimette in vita (passante che torna al suo percorso)
   const revive = () => {
     if (!deadRef.current) return;
@@ -253,6 +313,10 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     clipDuration,
     beginFrame,
     revive,
+    sleep,
+    wake,
+    setTint,
+    isDormant: () => dormantRef.current,
     isDead: () => deadRef.current,
     deadFor: () => deadForRef.current,
     maxHp: () => maxHp.current,

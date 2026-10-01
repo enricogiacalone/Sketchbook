@@ -1,10 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { useStore } from '../../store';
+import { FarBuildings, type FarBuildingItem } from './FarBuildings';
 import * as THREE from 'three';
-import { RigidBody, CuboidCollider } from '@react-three/rapier';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { BuildingStairwell } from './BuildingStairwell';
+import { useStaticBoxes, type StaticBox } from './staticColliders';
 import {
   BUILDING_HOLE_LEN,
   BUILDING_HOLE_SIZE,
@@ -15,6 +18,7 @@ import {
 } from './buildingStairs';
 import { useTreeTemplates, TreeInstance, TreeTemplate, Flowers } from './ParkTrees';
 import { RealGrassPatch } from './RealGrass';
+import { StaticInstances } from './StaticInstances';
 
 const _windowDummy = new THREE.Object3D();
 const _windowColor = new THREE.Color();
@@ -31,7 +35,12 @@ const _windowColor = new THREE.Color();
 // through where a window or the entrance door is. The colored plane from
 // before is kept too (now semi-transparent) sitting inside the opening as
 // the "glass", but the wall itself now actually has a gap behind it.
-interface WallHole { cx: number; cy: number; hw: number; hh: number; }
+interface WallHole {
+  cx: number;
+  cy: number;
+  hw: number;
+  hh: number;
+}
 
 function buildWallGeometry(span: number, wallHeight: number, thickness: number, holes: WallHole[]): THREE.ExtrudeGeometry {
   const halfSpan = span / 2;
@@ -58,7 +67,12 @@ function buildWallGeometry(span: number, wallHeight: number, thickness: number, 
   return geo;
 }
 
-interface WallColliderBox { cx: number; cy: number; halfW: number; halfH: number; }
+interface WallColliderBox {
+  cx: number;
+  cy: number;
+  halfW: number;
+  halfH: number;
+}
 
 // "nn riesco a passarci attraverso" -- the walls above got real holes for
 // windows/the door, but the RigidBody underneath was still the old
@@ -114,22 +128,40 @@ function buildWallColliderBoxes(span: number, wallHeight: number, holes: WallHol
   }
 
   // Within each band: solid pillars filling everything that isn't a hole.
-  for (const band of bands) {
-    const halfH = (band.yHigh - band.yLow) / 2;
-    const cy = (band.yLow + band.yHigh) / 2;
+  // Le finestre sono in colonna da un piano all'altro: lo stesso pilastro
+  // in fasce consecutive diventa UN solo collider alto (attraversa anche le
+  // fasce piene tra un piano e l'altro, che sono comunque muro) -- da ~8
+  // collider per piano per muro a ~1 (caricamento a zone: un palazzo vicino
+  // si crea in pochi millisecondi invece di decine).
+  type Pillar = { xLow: number; xHigh: number; yLow: number; yHigh: number; band: number };
+  const open: Pillar[] = [];
+  const done: Pillar[] = [];
+  bands.forEach((band, bi) => {
     const sortedHoles = [...band.holes].sort((a, b) => a.xLow - b.xLow);
+    const spans: { xLow: number; xHigh: number }[] = [];
     let cursorX = -halfSpan;
     for (const hole of sortedHoles) {
-      if (hole.xLow > cursorX + EPS) {
-        const w = hole.xLow - cursorX;
-        boxes.push({ cx: cursorX + w / 2, cy, halfW: w / 2, halfH });
-      }
+      if (hole.xLow > cursorX + EPS) spans.push({ xLow: cursorX, xHigh: hole.xLow });
       cursorX = Math.max(cursorX, hole.xHigh);
     }
-    if (halfSpan > cursorX + EPS) {
-      const w = halfSpan - cursorX;
-      boxes.push({ cx: cursorX + w / 2, cy, halfW: w / 2, halfH });
+    if (halfSpan > cursorX + EPS) spans.push({ xLow: cursorX, xHigh: halfSpan });
+    for (const sp of spans) {
+      const prev = open.find((p) => p.band === bi - 1 && Math.abs(p.xLow - sp.xLow) < EPS && Math.abs(p.xHigh - sp.xHigh) < EPS);
+      if (prev) {
+        prev.yHigh = band.yHigh;
+        prev.band = bi;
+      } else {
+        open.push({ ...sp, yLow: band.yLow, yHigh: band.yHigh, band: bi });
+      }
     }
+    // chi non e' continuato in questa fascia e' finito
+    for (let k = open.length - 1; k >= 0; k--) {
+      if (open[k].band < bi) done.push(...open.splice(k, 1));
+    }
+  });
+  done.push(...open);
+  for (const p of done) {
+    boxes.push({ cx: (p.xLow + p.xHigh) / 2, cy: (p.yLow + p.yHigh) / 2, halfW: (p.xHigh - p.xLow) / 2, halfH: (p.yHigh - p.yLow) / 2 });
   }
 
   return boxes;
@@ -142,9 +174,14 @@ const footprintOverlapsRoad = (x: number, z: number, width: number, depth: numbe
   const halfD = depth / 2;
   const samplePoints: [number, number][] = [
     [x, z],
-    [x - halfW, z - halfD], [x + halfW, z - halfD],
-    [x - halfW, z + halfD], [x + halfW, z + halfD],
-    [x, z - halfD], [x, z + halfD], [x - halfW, z], [x + halfW, z],
+    [x - halfW, z - halfD],
+    [x + halfW, z - halfD],
+    [x - halfW, z + halfD],
+    [x + halfW, z + halfD],
+    [x, z - halfD],
+    [x, z + halfD],
+    [x - halfW, z],
+    [x + halfW, z],
   ];
   return samplePoints.some(([px, pz]) => getRoadOffset(px, pz) > 0);
 };
@@ -174,8 +211,13 @@ export const getBuildingNumFloors = (height: number): number =>
   Math.min(24, Math.max(1, Math.round(height / BUILDING_TARGET_FLOOR_HEIGHT)));
 
 export interface CityBuildingRecord {
-  x: number; z: number; w: number; d: number; h: number;
-  color: string; style: 'modern' | 'glass' | 'brick';
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  h: number;
+  color: string;
+  style: 'modern' | 'glass' | 'brick';
   corner: number; // 0-3, which footprint corner the stairwell shaft sits in
   numFloors: number;
   floorHeight: number;
@@ -270,7 +312,13 @@ export const CITY_LAYOUT: CityLayout = (() => {
           if (!overlapsBuilding && !footprintOverlapsRoad(x, z, w, d)) {
             const numFloors = getBuildingNumFloors(h);
             bArr.push({
-              x, z, w, d, h, color, style,
+              x,
+              z,
+              w,
+              d,
+              h,
+              color,
+              style,
               corner: Math.floor(Math.random() * 4),
               numFloors,
               floorHeight: h / numFloors,
@@ -287,8 +335,112 @@ export const CITY_LAYOUT: CityLayout = (() => {
   return { buildings: bArr, courtyards: cArr, plazas: pArr };
 })();
 
+// geometrie pesanti (muri estrusi coi buchi) e collider dei muri: calcolati
+// una volta per palazzo, riusati a ogni rimontaggio
+const wallGeoCache = new Map<number, unknown>();
+const colliderBoxCache = new Map<number, unknown>();
+function cached<T>(cache: Map<number, unknown>, key: number, make: () => T): T {
+  if (cache.has(key)) return cache.get(key) as T;
+  const v = make();
+  cache.set(key, v);
+  return v;
+}
 
-const Building: React.FC<{ x: number, z: number, width: number, depth: number, height: number, color: string, style: 'modern' | 'glass' | 'brick', corner: number, numFloors: number, floorHeight: number }> = ({ x, z, width, depth, height, color, style, corner, numFloors, floorHeight }) => {
+// Le scelte casuali di ogni palazzo (dettagli sul tetto, annesso,
+// pensilina, finestre accese) fatte UNA volta per palazzo e ricordate: il
+// palazzo dettagliato si monta e smonta quando ci si avvicina/allontana
+// (caricamento a zone, BuildingsStreamer) e deve tornare identico; il
+// modello semplificato da lontano (FarBuildings) usa lo stesso annesso.
+export interface BuildingDetails {
+  hasGreenRoof: boolean;
+  hasSetbackTier: boolean;
+  hasRoofUnits: boolean;
+  hasCanopy: boolean;
+  annex: { w: number; d: number; h: number; ox: number; oz: number } | null;
+  windowInstances: Array<{ x: number; y: number; z: number; rotationY: number; lit: boolean }>;
+}
+const detailsCache = new Map<number, BuildingDetails>();
+export function getBuildingDetails(index: number): BuildingDetails {
+  const hit = detailsCache.get(index);
+  if (hit) return hit;
+  const b = CITY_LAYOUT.buildings[index];
+  const width = b.w,
+    depth = b.d,
+    height = b.h,
+    style = b.style,
+    numFloors = b.numFloors,
+    floorHeight = b.floorHeight;
+  const hasGreenRoof = height > 40 && Math.random() > 0.5;
+  const hasSetbackTier = !hasGreenRoof && height > 70 && Math.random() > 0.4;
+  const hasRoofUnits = !hasGreenRoof && !hasSetbackTier && height > 25 && Math.random() > 0.55;
+  const hasCanopy = style !== 'glass' && width >= 14 && Math.random() > 0.4;
+  const hasAnnex = width >= 14 && depth >= 14 && height > 25 && Math.random() > 0.7;
+
+  let annex: { w: number; d: number; h: number; ox: number; oz: number } | null = null;
+  if (hasAnnex) {
+    const annexW = width * (0.35 + Math.random() * 0.15);
+    const annexD = depth * (0.35 + Math.random() * 0.15);
+    const annexH = height * (0.3 + Math.random() * 0.3);
+    const annexCorner = Math.floor(Math.random() * 4);
+    const asx = annexCorner % 2 === 0 ? 1 : -1;
+    const asz = annexCorner < 2 ? 1 : -1;
+    annex = {
+      w: annexW,
+      d: annexD,
+      h: annexH,
+      ox: asx * (width / 2 + annexW / 2 - 0.5),
+      oz: asz * (depth / 2 + annexD / 2 - 0.5),
+    };
+  }
+
+  // Real per-floor windows, punched into the two long faces (+/-Z) and
+  // two short faces (+/-X). Skipped for 'glass' towers -- a full glass
+  // curtain wall doesn't have individual punched windows, it gets a
+  // subtle mullion overlay instead (see the emissive wireframe below).
+  // Uses the SAME per-building floorHeight/numFloors as the real
+  // interior floors now, so window rows visually line up with them.
+  const windowInstances: Array<{ x: number; y: number; z: number; rotationY: number; lit: boolean }> = [];
+  if (style !== 'glass') {
+    const spacing = 3.4;
+    const countW = Math.min(6, Math.max(1, Math.floor(width / spacing) - 1));
+    const countD = Math.min(6, Math.max(1, Math.floor(depth / spacing) - 1));
+    // Same room-centered fix as wallGeometries above -- f+0.5 puts the
+    // window in the middle of room f's own floor-to-ceiling span rather
+    // than on the slab between room f-1 and room f. f=0 (ground floor)
+    // still skipped by starting at f=1.
+    for (let f = 1; f < numFloors; f++) {
+      const wy = (f + 0.5) * floorHeight;
+      for (let c = 0; c < countW; c++) {
+        const wx = (c - (countW - 1) / 2) * spacing;
+        windowInstances.push({ x: wx, y: wy, z: depth / 2 + 0.04, rotationY: 0, lit: Math.random() > 0.65 });
+        windowInstances.push({ x: wx, y: wy, z: -depth / 2 - 0.04, rotationY: Math.PI, lit: Math.random() > 0.65 });
+      }
+      for (let r = 0; r < countD; r++) {
+        const wz = (r - (countD - 1) / 2) * spacing;
+        windowInstances.push({ x: width / 2 + 0.04, y: wy, z: wz, rotationY: Math.PI / 2, lit: Math.random() > 0.65 });
+        windowInstances.push({ x: -width / 2 - 0.04, y: wy, z: wz, rotationY: -Math.PI / 2, lit: Math.random() > 0.65 });
+      }
+    }
+  }
+
+  const out = { hasGreenRoof, hasSetbackTier, hasRoofUnits, hasCanopy, annex, windowInstances };
+  detailsCache.set(index, out);
+  return out;
+}
+
+const Building: React.FC<{
+  cacheKey: number;
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  height: number;
+  color: string;
+  style: 'modern' | 'glass' | 'brick';
+  corner: number;
+  numFloors: number;
+  floorHeight: number;
+}> = ({ cacheKey, x, z, width, depth, height, color, style, corner, numFloors, floorHeight }) => {
   const y = getTerrainHeight(x, z);
   const halfW = width / 2;
   const halfD = depth / 2;
@@ -302,7 +454,6 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
   const pieceAWidth = pieceAMaxX - pieceAMinX;
   const pieceACenterX = (pieceAMinX + pieceAMaxX) / 2;
   const hasLintel = height > BUILDING_DOOR_HEIGHT + 0.5;
-
 
   // Torre di vetro: scatola unica come prima ma senza la faccia di sopra
   // (il tetto e' il coperchio a L sotto, col vano aperto).
@@ -374,33 +525,41 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
   // above) shrinks each hole slightly versus its 1.3x1.9 glass pane so
   // the pane's edge overlaps the punched opening instead of leaving a
   // sliver of daylight-colored gap.
-  const wallGeometries = useMemo(() => {
-    if (!wallHoles) return null;
-    const { holesW, holesD, doorHole } = wallHoles;
-    return {
-      // Front (-Z) is the door face -- windows AND the entrance opening.
-      front: buildWallGeometry(width, height, BUILDING_WALL_THICKNESS, [...holesW, doorHole]),
-      back: buildWallGeometry(width, height, BUILDING_WALL_THICKNESS, holesW),
-      // Left and right share one geometry -- identical window layout,
-      // just mirrored/repositioned via rotation below.
-      side: buildWallGeometry(depth, height, BUILDING_WALL_THICKNESS, holesD),
-    };
-  }, [wallHoles, width, depth, height]);
+  const wallGeometries = useMemo(
+    () =>
+      cached(wallGeoCache, cacheKey, () => {
+        if (!wallHoles) return null;
+        const { holesW, holesD, doorHole } = wallHoles;
+        return {
+          // Front (-Z) is the door face -- windows AND the entrance opening.
+          front: buildWallGeometry(width, height, BUILDING_WALL_THICKNESS, [...holesW, doorHole]),
+          back: buildWallGeometry(width, height, BUILDING_WALL_THICKNESS, holesW),
+          // Left and right share one geometry -- identical window layout,
+          // just mirrored/repositioned via rotation below.
+          side: buildWallGeometry(depth, height, BUILDING_WALL_THICKNESS, holesD),
+        };
+      }),
+    [cacheKey, wallHoles, width, depth, height]
+  );
 
   // "nn riesco a passarci attraverso" -- the physics counterpart of
   // wallGeometries above, built from the exact same wallHoles so a window
   // (or the door) is a real gap to WALK through, not just to see through.
   // null for glass towers, which fall back to the old simple door-only
   // collider set in the RigidBody below (see that block's comment for why).
-  const colliderBoxes = useMemo(() => {
-    if (!wallHoles) return null;
-    const { holesW, holesD, doorHole } = wallHoles;
-    return {
-      front: buildWallColliderBoxes(width, height, [...holesW, doorHole]),
-      back: buildWallColliderBoxes(width, height, holesW),
-      side: buildWallColliderBoxes(depth, height, holesD),
-    };
-  }, [wallHoles, width, depth, height]);
+  const colliderBoxes = useMemo(
+    () =>
+      cached(colliderBoxCache, cacheKey, () => {
+        if (!wallHoles) return null;
+        const { holesW, holesD, doorHole } = wallHoles;
+        return {
+          front: buildWallColliderBoxes(width, height, [...holesW, doorHole]),
+          back: buildWallColliderBoxes(width, height, holesW),
+          side: buildWallColliderBoxes(depth, height, holesD),
+        };
+      }),
+    [cacheKey, wallHoles, width, depth, height]
+  );
 
   const wallMaterialProps = useMemo(
     () => ({
@@ -424,65 +583,41 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
   //  - a darker ground-floor plinth band (retail/lobby facade)
   //  - an entrance canopy on wider, non-glass buildings
   //  - an occasional smaller side annex so not every building is one pure box
-  const details = useMemo(() => {
-    const hasGreenRoof = height > 40 && Math.random() > 0.5;
-    const hasSetbackTier = !hasGreenRoof && height > 70 && Math.random() > 0.4;
-    const hasRoofUnits = !hasGreenRoof && !hasSetbackTier && height > 25 && Math.random() > 0.55;
-    const hasCanopy = style !== 'glass' && width >= 14 && Math.random() > 0.4;
-    const hasAnnex = width >= 14 && depth >= 14 && height > 25 && Math.random() > 0.7;
-
-    let annex: { w: number; d: number; h: number; ox: number; oz: number } | null = null;
-    if (hasAnnex) {
-      const annexW = width * (0.35 + Math.random() * 0.15);
-      const annexD = depth * (0.35 + Math.random() * 0.15);
-      const annexH = height * (0.3 + Math.random() * 0.3);
-      const annexCorner = Math.floor(Math.random() * 4);
-      const asx = annexCorner % 2 === 0 ? 1 : -1;
-      const asz = annexCorner < 2 ? 1 : -1;
-      annex = {
-        w: annexW,
-        d: annexD,
-        h: annexH,
-        ox: asx * (width / 2 + annexW / 2 - 0.5),
-        oz: asz * (depth / 2 + annexD / 2 - 0.5),
-      };
-    }
-
-    // Real per-floor windows, punched into the two long faces (+/-Z) and
-    // two short faces (+/-X). Skipped for 'glass' towers -- a full glass
-    // curtain wall doesn't have individual punched windows, it gets a
-    // subtle mullion overlay instead (see the emissive wireframe below).
-    // Uses the SAME per-building floorHeight/numFloors as the real
-    // interior floors now, so window rows visually line up with them.
-    const windowInstances: Array<{ x: number; y: number; z: number; rotationY: number; lit: boolean }> = [];
-    if (style !== 'glass') {
-      const spacing = 3.4;
-      const countW = Math.min(6, Math.max(1, Math.floor(width / spacing) - 1));
-      const countD = Math.min(6, Math.max(1, Math.floor(depth / spacing) - 1));
-      // Same room-centered fix as wallGeometries above -- f+0.5 puts the
-      // window in the middle of room f's own floor-to-ceiling span rather
-      // than on the slab between room f-1 and room f. f=0 (ground floor)
-      // still skipped by starting at f=1.
-      for (let f = 1; f < numFloors; f++) {
-        const wy = (f + 0.5) * floorHeight;
-        for (let c = 0; c < countW; c++) {
-          const wx = (c - (countW - 1) / 2) * spacing;
-          windowInstances.push({ x: wx, y: wy, z: depth / 2 + 0.04, rotationY: 0, lit: Math.random() > 0.65 });
-          windowInstances.push({ x: wx, y: wy, z: -depth / 2 - 0.04, rotationY: Math.PI, lit: Math.random() > 0.65 });
-        }
-        for (let r = 0; r < countD; r++) {
-          const wz = (r - (countD - 1) / 2) * spacing;
-          windowInstances.push({ x: width / 2 + 0.04, y: wy, z: wz, rotationY: Math.PI / 2, lit: Math.random() > 0.65 });
-          windowInstances.push({ x: -width / 2 - 0.04, y: wy, z: wz, rotationY: -Math.PI / 2, lit: Math.random() > 0.65 });
-        }
-      }
-    }
-
-    return { hasGreenRoof, hasSetbackTier, hasRoofUnits, hasCanopy, annex, windowInstances };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const details = getBuildingDetails(cacheKey);
 
   const { hasGreenRoof, hasSetbackTier, hasRoofUnits, hasCanopy, annex, windowInstances } = details;
+
+  // Muri (e annesso) come collider fissi creati in blocco (staticColliders.ts):
+  // pezzi attorno a porta e finestre, oppure per le torri di vetro le pareti
+  // piene con solo la porta.
+  const wallBoxes = useMemo(() => {
+    const g = BUILDING_WALL_GROUPS;
+    const T = BUILDING_WALL_THICKNESS / 2;
+    const out: StaticBox[] = [];
+    if (colliderBoxes) {
+      for (const b of colliderBoxes.front) out.push({ half: [b.halfW, b.halfH, T], pos: [b.cx, b.cy, -halfD], groups: g });
+      for (const b of colliderBoxes.back) out.push({ half: [b.halfW, b.halfH, T], pos: [b.cx, b.cy, halfD], groups: g });
+      for (const b of colliderBoxes.side) {
+        out.push({ half: [T, b.halfH, b.halfW], pos: [-halfW, b.cy, b.cx], groups: g });
+        out.push({ half: [T, b.halfH, b.halfW], pos: [halfW, b.cy, b.cx], groups: g });
+      }
+    } else {
+      out.push({ half: [(halfW - doorHalf) / 2, height / 2, T], pos: [(-halfW - doorHalf) / 2, height / 2, -halfD], groups: g });
+      out.push({ half: [(halfW - doorHalf) / 2, height / 2, T], pos: [(doorHalf + halfW) / 2, height / 2, -halfD], groups: g });
+      if (hasLintel)
+        out.push({
+          half: [doorHalf, (height - BUILDING_DOOR_HEIGHT) / 2, T],
+          pos: [0, (BUILDING_DOOR_HEIGHT + height) / 2, -halfD],
+          groups: g,
+        });
+      out.push({ half: [halfW, height / 2, T], pos: [0, height / 2, halfD], groups: g });
+      out.push({ half: [T, height / 2, halfD], pos: [-halfW, height / 2, 0], groups: g });
+      out.push({ half: [T, height / 2, halfD], pos: [halfW, height / 2, 0], groups: g });
+    }
+    if (annex) out.push({ half: [annex.w / 2, annex.h / 2, annex.d / 2], pos: [annex.ox, annex.h / 2, annex.oz], groups: g });
+    return out;
+  }, [colliderBoxes, halfW, halfD, doorHalf, height, hasLintel, annex]);
+  useStaticBoxes([x, y, z], wallBoxes);
 
   return (
     <group>
@@ -492,70 +627,6 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           real door gap, a lintel above it, back/left/right full) so the
           interior is actually walkable in. Floors/stairs/roof: see
           BuildingStairwell. */}
-      <RigidBody
-        type="fixed"
-        colliders={false}
-        position={[x, y, z]}
-        collisionGroups={BUILDING_WALL_GROUPS}
-      >
-        {colliderBoxes ? (
-          <>
-            {colliderBoxes.front.map((b, i) => (
-              <CuboidCollider
-                key={`front-${i}`}
-                args={[b.halfW, b.halfH, BUILDING_WALL_THICKNESS / 2]}
-                position={[b.cx, b.cy, -halfD]}
-              />
-            ))}
-            {colliderBoxes.back.map((b, i) => (
-              <CuboidCollider
-                key={`back-${i}`}
-                args={[b.halfW, b.halfH, BUILDING_WALL_THICKNESS / 2]}
-                position={[b.cx, b.cy, halfD]}
-              />
-            ))}
-            {colliderBoxes.side.map((b, i) => (
-              <CuboidCollider
-                key={`left-${i}`}
-                args={[BUILDING_WALL_THICKNESS / 2, b.halfH, b.halfW]}
-                position={[-halfW, b.cy, b.cx]}
-              />
-            ))}
-            {colliderBoxes.side.map((b, i) => (
-              <CuboidCollider
-                key={`right-${i}`}
-                args={[BUILDING_WALL_THICKNESS / 2, b.halfH, b.halfW]}
-                position={[halfW, b.cy, b.cx]}
-              />
-            ))}
-          </>
-        ) : (
-          // Glass towers: wallGeometries/colliderBoxes are both null (no
-          // punched holes there -- see the mullion-overlay comment below),
-          // so this keeps the original simple door-only collider set:
-          // solid back/left/right, a real gap only at the door.
-          <>
-            <CuboidCollider
-              args={[(halfW - doorHalf) / 2, height / 2, BUILDING_WALL_THICKNESS / 2]}
-              position={[(-halfW - doorHalf) / 2, height / 2, -halfD]}
-            />
-            <CuboidCollider
-              args={[(halfW - doorHalf) / 2, height / 2, BUILDING_WALL_THICKNESS / 2]}
-              position={[(doorHalf + halfW) / 2, height / 2, -halfD]}
-            />
-            {hasLintel && (
-              <CuboidCollider
-                args={[doorHalf, (height - BUILDING_DOOR_HEIGHT) / 2, BUILDING_WALL_THICKNESS / 2]}
-                position={[0, (BUILDING_DOOR_HEIGHT + height) / 2, -halfD]}
-              />
-            )}
-            <CuboidCollider args={[halfW, height / 2, BUILDING_WALL_THICKNESS / 2]} position={[0, height / 2, halfD]} />
-            <CuboidCollider args={[BUILDING_WALL_THICKNESS / 2, height / 2, halfD]} position={[-halfW, height / 2, 0]} />
-            <CuboidCollider args={[BUILDING_WALL_THICKNESS / 2, height / 2, halfD]} position={[halfW, height / 2, 0]} />
-          </>
-        )}
-      </RigidBody>
-
 
       {/* Main Structure. Glass curtain-wall towers keep the original
           single solid box (no punched windows -- see the mullion-overlay
@@ -636,13 +707,8 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           continuous surface with thin frame lines, not individual holes. */}
       {style === 'glass' && (
         <mesh position={[x, y + height / 2, z]} scale={[1.005, 0.95, 1.005]}>
-           <boxGeometry args={[width, height, depth]} />
-           <meshStandardMaterial 
-              color="#111" 
-              emissive="#113344" 
-              emissiveIntensity={0.35}
-              wireframe 
-           />
+          <boxGeometry args={[width, height, depth]} />
+          <meshStandardMaterial color="#111" emissive="#113344" emissiveIntensity={0.35} wireframe />
         </mesh>
       )}
 
@@ -655,27 +721,46 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           entrance gap. */}
       <group position={[x, y, z]}>
         <mesh position={[(-halfW - 0.15 - doorHalf) / 2, BUILDING_DOOR_HEIGHT / 2, -halfD - 0.15]} castShadow receiveShadow>
-          <boxGeometry args={[(halfW + 0.15) - doorHalf, BUILDING_DOOR_HEIGHT, BUILDING_WALL_THICKNESS + 0.2]} />
-          <meshStandardMaterial color={style === 'brick' ? '#3d2c24' : '#1c1f22'} roughness={0.6} metalness={style === 'glass' ? 0.4 : 0.15} />
+          <boxGeometry args={[halfW + 0.15 - doorHalf, BUILDING_DOOR_HEIGHT, BUILDING_WALL_THICKNESS + 0.2]} />
+          <meshStandardMaterial
+            color={style === 'brick' ? '#3d2c24' : '#1c1f22'}
+            roughness={0.6}
+            metalness={style === 'glass' ? 0.4 : 0.15}
+          />
         </mesh>
         <mesh position={[(doorHalf + halfW + 0.15) / 2, BUILDING_DOOR_HEIGHT / 2, -halfD - 0.15]} castShadow receiveShadow>
-          <boxGeometry args={[(halfW + 0.15) - doorHalf, BUILDING_DOOR_HEIGHT, BUILDING_WALL_THICKNESS + 0.2]} />
-          <meshStandardMaterial color={style === 'brick' ? '#3d2c24' : '#1c1f22'} roughness={0.6} metalness={style === 'glass' ? 0.4 : 0.15} />
+          <boxGeometry args={[halfW + 0.15 - doorHalf, BUILDING_DOOR_HEIGHT, BUILDING_WALL_THICKNESS + 0.2]} />
+          <meshStandardMaterial
+            color={style === 'brick' ? '#3d2c24' : '#1c1f22'}
+            roughness={0.6}
+            metalness={style === 'glass' ? 0.4 : 0.15}
+          />
         </mesh>
         <mesh position={[0, BUILDING_DOOR_HEIGHT / 2, halfD + 0.15]} castShadow receiveShadow>
           <boxGeometry args={[width + 0.3, BUILDING_DOOR_HEIGHT, BUILDING_WALL_THICKNESS + 0.2]} />
-          <meshStandardMaterial color={style === 'brick' ? '#3d2c24' : '#1c1f22'} roughness={0.6} metalness={style === 'glass' ? 0.4 : 0.15} />
+          <meshStandardMaterial
+            color={style === 'brick' ? '#3d2c24' : '#1c1f22'}
+            roughness={0.6}
+            metalness={style === 'glass' ? 0.4 : 0.15}
+          />
         </mesh>
         <mesh position={[-halfW - 0.15, BUILDING_DOOR_HEIGHT / 2, 0]} castShadow receiveShadow>
           <boxGeometry args={[BUILDING_WALL_THICKNESS + 0.2, BUILDING_DOOR_HEIGHT, depth + 0.3]} />
-          <meshStandardMaterial color={style === 'brick' ? '#3d2c24' : '#1c1f22'} roughness={0.6} metalness={style === 'glass' ? 0.4 : 0.15} />
+          <meshStandardMaterial
+            color={style === 'brick' ? '#3d2c24' : '#1c1f22'}
+            roughness={0.6}
+            metalness={style === 'glass' ? 0.4 : 0.15}
+          />
         </mesh>
         <mesh position={[halfW + 0.15, BUILDING_DOOR_HEIGHT / 2, 0]} castShadow receiveShadow>
           <boxGeometry args={[BUILDING_WALL_THICKNESS + 0.2, BUILDING_DOOR_HEIGHT, depth + 0.3]} />
-          <meshStandardMaterial color={style === 'brick' ? '#3d2c24' : '#1c1f22'} roughness={0.6} metalness={style === 'glass' ? 0.4 : 0.15} />
+          <meshStandardMaterial
+            color={style === 'brick' ? '#3d2c24' : '#1c1f22'}
+            roughness={0.6}
+            metalness={style === 'glass' ? 0.4 : 0.15}
+          />
         </mesh>
       </group>
-
 
       {/* Entrance canopy -- thin overhang + two support posts over the
           main doors, only on wider non-glass buildings. */}
@@ -698,13 +783,7 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           one perfect extruded box. Purely exterior/decorative -- not part
           of the navigable interior above. */}
       {annex && (
-        <RigidBody
-          type="fixed"
-          colliders={false}
-          position={[x + annex.ox, y + annex.h / 2, z + annex.oz]}
-          collisionGroups={BUILDING_WALL_GROUPS}
-        >
-          <CuboidCollider args={[annex.w / 2, annex.h / 2, annex.d / 2]} />
+        <group position={[x + annex.ox, y + annex.h / 2, z + annex.oz]}>
           <mesh castShadow receiveShadow>
             <boxGeometry args={[annex.w, annex.h, annex.d]} />
             <meshStandardMaterial
@@ -713,21 +792,21 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
               metalness={style === 'glass' ? 0.9 : style === 'brick' ? 0.05 : 0.25}
             />
           </mesh>
-        </RigidBody>
+        </group>
       )}
 
       {/* Green Roof */}
       {hasGreenRoof && (
         <group position={[x + pieceACenterX, y + height + BUILDING_WALL_THICKNESS, z]}>
-            <mesh receiveShadow position={[0, 0.05, 0]}>
-                <boxGeometry args={[pieceAWidth * 0.9, 0.1, depth * 0.9]} />
-                <meshStandardMaterial color="#3a5a2a" />
-            </mesh>
-            {/* Small trees on roof */}
-            <mesh position={[0, 1, 0]}>
-                <cylinderGeometry args={[0, 1.5, 3, 4]} />
-                <meshStandardMaterial color="#2d4a1e" />
-            </mesh>
+          <mesh receiveShadow position={[0, 0.05, 0]}>
+            <boxGeometry args={[pieceAWidth * 0.9, 0.1, depth * 0.9]} />
+            <meshStandardMaterial color="#3a5a2a" />
+          </mesh>
+          {/* Small trees on roof */}
+          <mesh position={[0, 1, 0]}>
+            <cylinderGeometry args={[0, 1.5, 3, 4]} />
+            <meshStandardMaterial color="#2d4a1e" />
+          </mesh>
         </group>
       )}
 
@@ -735,18 +814,18 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           towers instead of every skyscraper being one plain extruded box. */}
       {hasSetbackTier && (
         <group position={[x + pieceACenterX, y + height, z]}>
-            <mesh castShadow receiveShadow position={[0, height * 0.06, 0]}>
-                <boxGeometry args={[pieceAWidth * 0.8, height * 0.12, depth * 0.6]} />
-                <meshStandardMaterial color={color} roughness={0.5} metalness={0.3} />
-            </mesh>
-            <mesh position={[0, height * 0.12 + height * 0.08, 0]}>
-                <cylinderGeometry args={[0.15, 0.3, height * 0.16, 6]} />
-                <meshStandardMaterial color="#999" roughness={0.4} metalness={0.6} />
-            </mesh>
-            <mesh position={[0, height * 0.12 + height * 0.16 + 0.4, 0]}>
-                <sphereGeometry args={[0.25, 8, 8]} />
-                <meshStandardMaterial color="#ff3333" emissive="#ff2222" emissiveIntensity={1.2} />
-            </mesh>
+          <mesh castShadow receiveShadow position={[0, height * 0.06, 0]}>
+            <boxGeometry args={[pieceAWidth * 0.8, height * 0.12, depth * 0.6]} />
+            <meshStandardMaterial color={color} roughness={0.5} metalness={0.3} />
+          </mesh>
+          <mesh position={[0, height * 0.12 + height * 0.08, 0]}>
+            <cylinderGeometry args={[0.15, 0.3, height * 0.16, 6]} />
+            <meshStandardMaterial color="#999" roughness={0.4} metalness={0.6} />
+          </mesh>
+          <mesh position={[0, height * 0.12 + height * 0.16 + 0.4, 0]}>
+            <sphereGeometry args={[0.25, 8, 8]} />
+            <meshStandardMaterial color="#ff3333" emissive="#ff2222" emissiveIntensity={1.2} />
+          </mesh>
         </group>
       )}
 
@@ -754,63 +833,68 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           buildings that get neither the green roof nor the setback tier. */}
       {hasRoofUnits && (
         <group position={[x + pieceACenterX, y + height + 0.1, z]}>
-            <mesh position={[pieceAWidth * 0.2, height * 0.05, depth * 0.2]} castShadow>
-                <cylinderGeometry args={[pieceAWidth * 0.15, pieceAWidth * 0.15, height * 0.1, 8]} />
-                <meshStandardMaterial color="#6b6b6b" roughness={0.7} metalness={0.3} />
-            </mesh>
-            <mesh position={[-pieceAWidth * 0.2, height * 0.025, -depth * 0.18]} castShadow>
-                <boxGeometry args={[pieceAWidth * 0.25, height * 0.05, depth * 0.18]} />
-                <meshStandardMaterial color="#444" roughness={0.6} />
-            </mesh>
+          <mesh position={[pieceAWidth * 0.2, height * 0.05, depth * 0.2]} castShadow>
+            <cylinderGeometry args={[pieceAWidth * 0.15, pieceAWidth * 0.15, height * 0.1, 8]} />
+            <meshStandardMaterial color="#6b6b6b" roughness={0.7} metalness={0.3} />
+          </mesh>
+          <mesh position={[-pieceAWidth * 0.2, height * 0.025, -depth * 0.18]} castShadow>
+            <boxGeometry args={[pieceAWidth * 0.25, height * 0.05, depth * 0.18]} />
+            <meshStandardMaterial color="#444" roughness={0.6} />
+          </mesh>
         </group>
       )}
     </group>
   );
 };
 
-const GreenCourtyard: React.FC<{ x: number, z: number, treeTemplates: TreeTemplate[] }> = ({ x, z, treeTemplates }) => {
-    const y = getTerrainHeight(x, z);
-    // Real ez-tree trees, same as Park.tsx's own -- "le aree verdi devono
-    // avere la vegetazione del parco". Placed here (world x/z = courtyard
-    // center + a small random offset) rather than nested inside the local
-    // <group> below, since TreeInstance looks its own ground height up by
-    // absolute world position (see ParkTrees.tsx). Stable per courtyard
-    // (keyed on x/z) so trees don't reshuffle every re-render.
-    const trees = useMemo(() => {
-        if (treeTemplates.length === 0) return [];
-        const count = 3 + Math.floor(Math.random() * 2); // 3-4 per courtyard
-        const result: Array<{ x: number; z: number; rotationY: number; scale: number; templateIndex: number }> = [];
-        for (let i = 0; i < count; i++) {
-            const angle = (i / count) * Math.PI * 2 + Math.random() * 0.6;
-            const dist = 5 + Math.random() * 2.5;
-            result.push({
-                x: x + Math.cos(angle) * dist,
-                z: z + Math.sin(angle) * dist,
-                rotationY: Math.random() * Math.PI * 2,
-                scale: 0.22 * (0.8 + Math.random() * 0.5),
-                templateIndex: Math.floor(Math.random() * treeTemplates.length),
-            });
-        }
-        return result;
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [x, z, treeTemplates.length]);
+// cespugli di cortili e piazze (sfere instanziate, raggio 1 scalato)
+const _bushGeo = new THREE.SphereGeometry(1, 10, 8);
+const _bushMat = new THREE.MeshStandardMaterial({ color: '#1d3a0e' });
+const _plazaBushMat = new THREE.MeshStandardMaterial({ color: '#2d4a1e' });
 
-    return (
-        <>
-            <group position={[x, y, z]}>
-                <mesh receiveShadow rotation={[-Math.PI/2, 0, 0]}>
-                    <planeGeometry args={[20, 20]} />
-                    <meshStandardMaterial color="#2d4a1e" />
-                </mesh>
-                {/* Some bushes */}
-                {[...Array(5)].map((_, i) => (
-                    <mesh key={i} position={[Math.sin(i) * 6, 0.5, Math.cos(i) * 6]}>
-                        <sphereGeometry args={[1, 8, 8]} />
-                        <meshStandardMaterial color="#1d3a0e" />
-                    </mesh>
-                ))}
-            </group>
-            {/* Real grass (same pmndrs shader-ported blades as Park.tsx,
+const GreenCourtyard: React.FC<{ x: number; z: number; treeTemplates: TreeTemplate[] }> = ({ x, z, treeTemplates }) => {
+  const y = getTerrainHeight(x, z);
+  // Real ez-tree trees, same as Park.tsx's own -- "le aree verdi devono
+  // avere la vegetazione del parco". Placed here (world x/z = courtyard
+  // center + a small random offset) rather than nested inside the local
+  // <group> below, since TreeInstance looks its own ground height up by
+  // absolute world position (see ParkTrees.tsx). Stable per courtyard
+  // (keyed on x/z) so trees don't reshuffle every re-render.
+  const trees = useMemo(() => {
+    if (treeTemplates.length === 0) return [];
+    const count = 3 + Math.floor(Math.random() * 2); // 3-4 per courtyard
+    const result: Array<{ x: number; z: number; rotationY: number; scale: number; templateIndex: number }> = [];
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.6;
+      const dist = 5 + Math.random() * 2.5;
+      result.push({
+        x: x + Math.cos(angle) * dist,
+        z: z + Math.sin(angle) * dist,
+        rotationY: Math.random() * Math.PI * 2,
+        scale: 0.22 * (0.8 + Math.random() * 0.5),
+        templateIndex: Math.floor(Math.random() * treeTemplates.length),
+      });
+    }
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [x, z, treeTemplates.length]);
+
+  return (
+    <>
+      <group position={[x, y, z]}>
+        <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[20, 20]} />
+          <meshStandardMaterial color="#2d4a1e" />
+        </mesh>
+      </group>
+      {/* cespugli, in blocco */}
+      <StaticInstances
+        name="bushes"
+        geometry={_bushGeo}
+        material={_bushMat}
+        items={[...Array(5)].map((_, i) => ({ x: x + Math.sin(i) * 6, y: y + 0.5, z: z + Math.cos(i) * 6 }))}
+      />
+      {/* Real grass (same pmndrs shader-ported blades as Park.tsx,
                 see RealGrass.tsx/GrassMaterial.ts for attribution) +
                 flowers, same deal as the trees above -- "le aree verdi
                 devono avere la vegetazione del parco" (and "hai
@@ -819,32 +903,169 @@ const GreenCourtyard: React.FC<{ x: number, z: number, treeTemplates: TreeTempla
                 posto dell'altro grass"). Bounds match the 20x20 courtyard
                 plane above; counts scaled down proportionally from Park's
                 own 51x51 area. */}
-            <RealGrassPatch
-                minX={x - 10}
-                maxX={x + 10}
-                minZ={z - 10}
-                maxZ={z + 10}
-                instances={700}
-            />
-            <Flowers
-                minX={x - 10}
-                maxX={x + 10}
-                minZ={z - 10}
-                maxZ={z + 10}
-                count={12}
-            />
-            {trees.map((t, i) => (
-                <TreeInstance
-                    key={i}
-                    x={t.x}
-                    z={t.z}
-                    rotationY={t.rotationY}
-                    scale={t.scale}
-                    template={treeTemplates[t.templateIndex]}
-                />
-            ))}
-        </>
-    );
+      <RealGrassPatch minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} instances={700} />
+      <Flowers minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} count={12} />
+      {trees.map((t, i) => (
+        <TreeInstance key={i} x={t.x} z={t.z} rotationY={t.rotationY} scale={t.scale} template={treeTemplates[t.templateIndex]} />
+      ))}
+    </>
+  );
+};
+
+// --- Caricamento a zone dei palazzi ---------------------------------------
+// Solo i palazzi vicini (al giocatore o alla telecamera) sono "veri":
+// muri coi buchi delle finestre, interni, scale, collider dettagliati. Gli
+// altri sono il modello semplificato instanziato (FarBuildings). Isteresi
+// tra le due distanze per non montare/smontare avanti e indietro sul
+// confine; al massimo un palazzo caricato per controllo (4 al secondo) per
+// spalmare il costo di creazione su piu' frame.
+const BUILDING_LOAD_DIST = 55;
+const BUILDING_UNLOAD_DIST = 75;
+const BUILDING_CHECK_S = 0.25;
+
+const footprintDist = (b: CityBuildingRecord, px: number, pz: number) => {
+  const dx = Math.max(0, Math.abs(px - b.x) - b.w / 2);
+  const dz = Math.max(0, Math.abs(pz - b.z) - b.d / 2);
+  return Math.hypot(dx, dz);
+};
+
+// modello da lontano di ogni palazzo: corpo + annesso + terrazzo in cima
+const farItemsFor = (b: CityBuildingRecord, i: number): FarBuildingItem[] => {
+  const det = getBuildingDetails(i);
+  const roughness = b.style === 'glass' ? 0.1 : b.style === 'brick' ? 0.85 : 0.6;
+  const metalness = b.style === 'glass' ? 0.9 : b.style === 'brick' ? 0.05 : 0.25;
+  const spacing = 3.4;
+  const base: Omit<FarBuildingItem, 'key' | 'x' | 'y' | 'z' | 'w' | 'h' | 'd' | 'kind' | 'collider'> = {
+    color: b.color,
+    countW: Math.min(6, Math.max(1, Math.floor(b.w / spacing) - 1)),
+    countD: Math.min(6, Math.max(1, Math.floor(b.d / spacing) - 1)),
+    floorHeight: b.floorHeight,
+    numFloors: b.numFloors,
+    roughness,
+    metalness,
+    plinth: b.style === 'brick' ? '#3d2c24' : '#1c1f22',
+    seed: i * 7.31,
+  };
+  const out: FarBuildingItem[] = [
+    {
+      ...base,
+      key: `b${i}`,
+      x: b.x,
+      y: b.by,
+      z: b.z,
+      w: b.w,
+      h: b.h + BUILDING_WALL_THICKNESS,
+      d: b.d,
+      kind: b.style === 'glass' ? 1 : 0,
+      collider: true,
+    },
+  ];
+  if (det.annex) {
+    const a = det.annex;
+    out.push({ ...base, key: `a${i}`, x: b.x + a.ox, y: b.by, z: b.z + a.oz, w: a.w, h: a.h, d: a.d, kind: 2, collider: true });
+  }
+  if (det.hasSetbackTier) {
+    const { holeMinX, holeMaxX, sx } = getHoleBounds(b.w, b.d, b.corner);
+    const aMin = sx < 0 ? holeMaxX : -b.w / 2;
+    const aMax = sx < 0 ? b.w / 2 : holeMinX;
+    out.push({
+      ...base,
+      key: `s${i}`,
+      x: b.x + (aMin + aMax) / 2,
+      y: b.by + b.h,
+      z: b.z,
+      w: (aMax - aMin) * 0.8,
+      h: b.h * 0.12,
+      d: b.d * 0.6,
+      kind: 2,
+      roughness: 0.5,
+      metalness: 0.3,
+      collider: false,
+    });
+  }
+  return out;
+};
+
+const MemoBuilding = React.memo(Building);
+
+const BuildingsStreamer: React.FC = () => {
+  const { buildings } = CITY_LAYOUT;
+  const allFar = useMemo(() => buildings.map((b, i) => farItemsFor(b, i)), [buildings]);
+  const nearest = (px: number, pz: number, qx: number, qz: number, b: CityBuildingRecord) =>
+    Math.min(footprintDist(b, px, pz), footprintDist(b, qx, qz));
+  const [near, setNear] = useState<number[]>(() => {
+    const pp = useStore.getState().playerPos;
+    return buildings.map((b, i) => (footprintDist(b, pp[0], pp[2]) < BUILDING_LOAD_DIST ? i : -1)).filter((i) => i >= 0);
+  });
+  const nearRef = useRef(new Set(near));
+  const acc = useRef(0);
+
+  useFrame((state, dt) => {
+    acc.current += dt;
+    if (acc.current < BUILDING_CHECK_S) return;
+    acc.current = 0;
+    const cam = state.camera.position;
+    const pp = useStore.getState().playerPos;
+    const cur = nearRef.current;
+    let changed = false;
+    for (const i of [...cur]) {
+      if (nearest(pp[0], pp[2], cam.x, cam.z, buildings[i]) > BUILDING_UNLOAD_DIST) {
+        cur.delete(i);
+        changed = true;
+      }
+    }
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < buildings.length; i++) {
+      if (cur.has(i)) continue;
+      const d = nearest(pp[0], pp[2], cam.x, cam.z, buildings[i]);
+      // dentro o quasi (teletrasporto, spawn): subito, senza aspettare il turno
+      if (d < 8) {
+        cur.add(i);
+        changed = true;
+        continue;
+      }
+      if (d < BUILDING_LOAD_DIST && d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best >= 0) {
+      cur.add(best);
+      changed = true;
+    }
+    if (changed) setNear([...cur].sort((a, b) => a - b));
+  });
+
+  if (import.meta.env.DEV) (window as any).__buildingsNear = near;
+
+  const nearSet = useMemo(() => new Set(near), [near]);
+  const farItems = useMemo(() => allFar.filter((_, i) => !nearSet.has(i)).flat(), [allFar, nearSet]);
+
+  return (
+    <>
+      <FarBuildings items={farItems} colliderGroups={BUILDING_WALL_GROUPS} />
+      {near.map((i) => {
+        const b = buildings[i];
+        return (
+          <MemoBuilding
+            key={i}
+            cacheKey={i}
+            x={b.x}
+            z={b.z}
+            width={b.w}
+            depth={b.d}
+            height={b.h}
+            color={b.color}
+            style={b.style}
+            corner={b.corner}
+            numFloors={b.numFloors}
+            floorHeight={b.floorHeight}
+          />
+        );
+      })}
+    </>
+  );
 };
 
 const City: React.FC = () => {
@@ -864,76 +1085,61 @@ const City: React.FC = () => {
       {plazas.map((p, i) => (
         <React.Fragment key={`plaza-${i}`}>
           <group position={[p.x, getTerrainHeight(p.x, p.z), p.z]}>
-              <mesh receiveShadow rotation={[-Math.PI/2, 0, 0]}>
-                  <planeGeometry args={[45, 45]} />
-                  <meshStandardMaterial color="#3a5a2a" />
-              </mesh>
-              {/* Plaza details */}
-              <mesh position={[0, 1, 0]}>
-                  <boxGeometry args={[4, 2, 4]} />
-                  <meshStandardMaterial color="#555" />
-              </mesh>
-              {[...Array(8)].map((_, i) => (
-                  <mesh key={i} position={[Math.sin(i * Math.PI/4) * 15, 2, Math.cos(i * Math.PI/4) * 15]}>
-                      <sphereGeometry args={[2, 12, 12]} />
-                      <meshStandardMaterial color="#2d4a1e" />
-                  </mesh>
-              ))}
+            <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[45, 45]} />
+              <meshStandardMaterial color="#3a5a2a" />
+            </mesh>
+            {/* Plaza details */}
+            <mesh position={[0, 1, 0]}>
+              <boxGeometry args={[4, 2, 4]} />
+              <meshStandardMaterial color="#555" />
+            </mesh>
           </group>
+          <StaticInstances
+            name="plaza-bushes"
+            geometry={_bushGeo}
+            material={_plazaBushMat}
+            items={[...Array(8)].map((_, i) => ({
+              x: p.x + Math.sin((i * Math.PI) / 4) * 15,
+              y: getTerrainHeight(p.x, p.z) + 2,
+              z: p.z + Math.cos((i * Math.PI) / 4) * 15,
+              s: 2,
+            }))}
+          />
           {/* Same real pmndrs-ported grass as the courtyards above +
               flowers -- bounds match the 45x45 plaza plane, avoiding the
               central monument box. Density closer to Park's own (51x51 /
               8000 grass / 60 flowers) since plazas are nearly as big. */}
           <RealGrassPatch
-              minX={p.x - 22}
-              maxX={p.x + 22}
-              minZ={p.z - 22}
-              maxZ={p.z + 22}
-              instances={3200}
-              avoid={[{ x: p.x, z: p.z, radius: 4 }]}
+            minX={p.x - 22}
+            maxX={p.x + 22}
+            minZ={p.z - 22}
+            maxZ={p.z + 22}
+            instances={3200}
+            avoid={[{ x: p.x, z: p.z, radius: 4 }]}
           />
-          <Flowers
-              minX={p.x - 22}
-              maxX={p.x + 22}
-              minZ={p.z - 22}
-              maxZ={p.z + 22}
-              count={45}
-              avoid={[{ x: p.x, z: p.z, radius: 4 }]}
-          />
+          <Flowers minX={p.x - 22} maxX={p.x + 22} minZ={p.z - 22} maxZ={p.z + 22} count={45} avoid={[{ x: p.x, z: p.z, radius: 4 }]} />
           {/* Real trees, same deal as GreenCourtyard above -- placed in
               absolute world coords (plaza center + offset), as siblings of
               the local group rather than nested inside it. */}
-          {treeTemplates.length > 0 && [...Array(6)].map((_, i) => {
+          {treeTemplates.length > 0 &&
+            [...Array(6)].map((_, i) => {
               const angle = (i / 6) * Math.PI * 2;
               const dist = 10 + (i % 2) * 4;
               return (
-                  <TreeInstance
-                      key={i}
-                      x={p.x + Math.cos(angle) * dist}
-                      z={p.z + Math.sin(angle) * dist}
-                      rotationY={(angle * 3) % (Math.PI * 2)}
-                      scale={0.22 * (0.8 + ((i * 37) % 10) / 10 * 0.5)}
-                      template={treeTemplates[i % treeTemplates.length]}
-                  />
+                <TreeInstance
+                  key={i}
+                  x={p.x + Math.cos(angle) * dist}
+                  z={p.z + Math.sin(angle) * dist}
+                  rotationY={(angle * 3) % (Math.PI * 2)}
+                  scale={0.22 * (0.8 + (((i * 37) % 10) / 10) * 0.5)}
+                  template={treeTemplates[i % treeTemplates.length]}
+                />
               );
-          })}
+            })}
         </React.Fragment>
       ))}
-      {buildings.map((b, i) => (
-        <Building
-          key={i}
-          x={b.x}
-          z={b.z}
-          width={b.w}
-          depth={b.d}
-          height={b.h}
-          color={b.color}
-          style={b.style}
-          corner={b.corner}
-          numFloors={b.numFloors}
-          floorHeight={b.floorHeight}
-        />
-      ))}
+      <BuildingsStreamer />
     </group>
   );
 };

@@ -1,3 +1,4 @@
+import { cameraFocus } from '../lib/cameraFocus';
 import { useRef, useEffect } from 'react';
 import { useThree, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -44,6 +45,9 @@ const VEHICLE_TARGET_Y_OFFSET = 0.5;
 // AIM_HEIGHT_OFFSET=1.5 already uses for the aim reticle), and the
 // combatSoldier-specific theta/phi/radius snap in the frame loop below.
 const FOOT_TARGET_Y_OFFSET = 1.3;
+// a terra la telecamera guarda poco sopra il bacino del ragdoll
+const FOCUS_Y_OFFSET = 0.4;
+const _focusTarget = new THREE.Vector3();
 // Entering the duel specifically gets its own slightly wider starting
 // radius than the base PLAYER_RADIUS (1.6) -- close enough to read as
 // combat, but with enough room in frame to see the opponent too (spawn
@@ -122,6 +126,7 @@ export const useThirdPersonCamera = () => {
   const prevControllable = useRef<string | null>(null);
   // 0 = niente pistola, 1 = pistola in mano; aimBlend 0..1 = mira
   const shoulderBlend = useRef(0);
+  const focusBlend = useRef(0);
   const aimBlend = useRef(0);
   const baseFov = useRef<number | null>(null);
 
@@ -137,10 +142,18 @@ export const useThirdPersonCamera = () => {
   useEffect(() => {
     if (import.meta.env.DEV) {
       (window as any).__camera = {
-        get theta() { return theta.current; },
-        get phi() { return phi.current; },
-        setTheta: (deg: number) => { theta.current = deg; },
-        setPhi: (deg: number) => { phi.current = THREE.MathUtils.clamp(deg, -85, 85); },
+        get theta() {
+          return theta.current;
+        },
+        get phi() {
+          return phi.current;
+        },
+        setTheta: (deg: number) => {
+          theta.current = deg;
+        },
+        setPhi: (deg: number) => {
+          phi.current = THREE.MathUtils.clamp(deg, -85, 85);
+        },
         // Point the camera so "forward" (W) walks from (fromX,fromZ)
         // toward (toX,toZ).
         lookTowards: (fromX: number, fromZ: number, toX: number, toZ: number) => {
@@ -152,9 +165,15 @@ export const useThirdPersonCamera = () => {
         // TEMP DEBUG (Claude): live camera position/quaternion readout for
         // automated-browser testing (verifying the drone chase-cam
         // distance/orientation without a real screenshot-only guess).
-        get camPos() { return camera.position.toArray(); },
-        get camQuat() { return camera.quaternion.toArray(); },
-        get target() { return target.current.toArray(); },
+        get camPos() {
+          return camera.position.toArray();
+        },
+        get camQuat() {
+          return camera.quaternion.toArray();
+        },
+        get target() {
+          return target.current.toArray();
+        },
       };
     }
   }, []);
@@ -185,11 +204,7 @@ export const useThirdPersonCamera = () => {
     };
 
     const handleWheel = (e: WheelEvent) => {
-      targetRadius.current = THREE.MathUtils.clamp(
-        targetRadius.current + e.deltaY * 0.005,
-        MIN_RADIUS,
-        MAX_RADIUS
-      );
+      targetRadius.current = THREE.MathUtils.clamp(targetRadius.current + e.deltaY * 0.005, MIN_RADIUS, MAX_RADIUS);
     };
 
     const handleClick = () => {
@@ -239,7 +254,10 @@ export const useThirdPersonCamera = () => {
     const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : [];
     let pad: Gamepad | null = null;
     for (let i = 0; i < pads.length; i++) {
-      if (pads[i]) { pad = pads[i] as Gamepad; break; }
+      if (pads[i]) {
+        pad = pads[i] as Gamepad;
+        break;
+      }
     }
     if (pad && !useStore.getState().weaponWheelOpen) {
       rx = pad.axes[2] ?? 0;
@@ -254,11 +272,7 @@ export const useThirdPersonCamera = () => {
       theta.current %= 360;
     }
     if (Math.abs(ry) > CAMERA_STICK_DEADZONE) {
-      phi.current = THREE.MathUtils.clamp(
-        phi.current + ry * CAMERA_STICK_PITCH_SPEED * delta,
-        -85,
-        85
-      );
+      phi.current = THREE.MathUtils.clamp(phi.current + ry * CAMERA_STICK_PITCH_SPEED * delta, -85, 85);
     }
 
     // Both 'player' and 'combatSoldier' are on-foot human characters --
@@ -268,11 +282,7 @@ export const useThirdPersonCamera = () => {
     const targetName = currentControllable === 'player' ? 'player' : controlledEntityId;
     if (!targetName) return;
 
-    if (
-      cachedTargetName.current !== targetName ||
-      !cachedTargetObj.current ||
-      !cachedTargetObj.current.parent
-    ) {
+    if (cachedTargetName.current !== targetName || !cachedTargetObj.current || !cachedTargetObj.current.parent) {
       cachedTargetObj.current = scene.getObjectByName(targetName) ?? null;
       cachedTargetName.current = targetName;
     }
@@ -324,6 +334,14 @@ export const useThirdPersonCamera = () => {
     // now get their own (smaller) chest-height offset here, same as
     // vehicles already got theirs.
     target.current.y += isFootController ? FOOT_TARGET_Y_OFFSET : VEHICLE_TARGET_Y_OFFSET;
+    // A terra (KO/morto) il corpo vola via in ragdoll mentre la radice resta
+    // dov'era: si segue il bacino (lib/cameraFocus.ts), con un passaggio
+    // morbido all'andata e al ritorno (quando si rialza la radice torna
+    // sotto il bacino).
+    const focusOn = isFootController && cameraFocus.id === targetName;
+    focusBlend.current += ((focusOn ? 1 : 0) - focusBlend.current) * (1 - Math.exp(-delta * 10));
+    if (focusOn) _focusTarget.set(cameraFocus.pos.x, cameraFocus.pos.y + FOCUS_Y_OFFSET, cameraFocus.pos.z);
+    if (focusBlend.current > 0.001) target.current.lerp(_focusTarget, focusBlend.current);
 
     // "faithful" drone flight (droneWorld): the mouse pilots the drone's
     // own orientation (see handleMouseMove above / Player.tsx's per-frame

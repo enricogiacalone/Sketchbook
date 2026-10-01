@@ -12,11 +12,7 @@ import Enemy from './Enemy';
 import Pedestrian from './Environment/Pedestrian';
 import WeaponEffects from './Environment/weapons/WeaponEffects';
 import { emitShotFx, onLocalShotFx } from './Environment/weapons/weaponFx';
-import {
-  applyFighterHit,
-  registerFighterDamageHandler,
-  registerFighterHitHandler,
-} from './Environment/weapons/shootableRegistry';
+import { applyFighterHit, registerFighterDamageHandler, registerFighterHitHandler } from './Environment/weapons/shootableRegistry';
 import { useStore } from '../store';
 import { OutgoingState, useMannequinNetwork } from './multiplayer/useMannequinNetwork';
 import NetworkMannequin, { REMOTE_BLOCK_ANIM } from './multiplayer/NetworkMannequin';
@@ -52,8 +48,13 @@ const OwnSpeechBubble: React.FC = () => {
   const message = useStore((s) => s.playerMessage);
   const ref = useRef<THREE.Group>(null);
   const { scene } = useThree();
+  // il manichino si cerca nella scena solo se non lo si ha gia' (cercarlo
+  // a ogni frame attraversava tutta la scena: ~1 ms)
+  const targetRef = useRef<THREE.Object3D | null>(null);
   useFrame(() => {
-    const target = scene.getObjectByName(CITY_PLAYER_ID);
+    if (!message) return;
+    let target = targetRef.current;
+    if (!target || !target.parent) target = targetRef.current = scene.getObjectByName(CITY_PLAYER_ID) ?? null;
     if (target && ref.current) target.getWorldPosition(ref.current.position);
   });
   return (
@@ -396,7 +397,13 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
       />
       <WeaponEffects />
       {testEnemies.map((e) => (
-        <Enemy key={e.id} id={e.id} initialPosition={e.pos} initialHp={e.hp} onGiveUp={(gid) => setTestEnemies((l) => l.filter((x) => x.id !== gid))} />
+        <Enemy
+          key={e.id}
+          id={e.id}
+          initialPosition={e.pos}
+          initialHp={e.hp}
+          onGiveUp={(gid) => setTestEnemies((l) => l.filter((x) => x.id !== gid))}
+        />
       ))}
       {testPeds
         .filter((p) => !testEnemies.some((e) => e.id === p.id))

@@ -1,0 +1,191 @@
+import { getTerrainHeight } from '../Environment/Terrain';
+import { getRoadOffset, ROAD_WIDTH, SIDEWALK_WIDTH } from '../Environment/Road';
+
+// "Folle disegnate in blocco": la folla della citta' e' fatta di AGENTI
+// leggeri (solo numeri: tratto di marciapiede, posizione, passo) che
+// camminano tutti, sempre, per pochi microsecondi l'uno. Solo i piu' vicini
+// al giocatore prendono un corpo vero -- un manichino completo con fisica,
+// animazioni, ragdoll -- da un pool fisso (Crowd.tsx / CrowdPedestrian.tsx);
+// tutti gli altri sono disegnati in blocco come sagome instanziate
+// (CrowdInstances.tsx), senza fisica e senza mixer di animazione.
+
+export const CROWD_FULL_SLOTS = 6; // corpi veri al massimo
+export const CROWD_ASSIGN_DIST = 26; // entro questa distanza un agente prende un corpo vero
+export const CROWD_RELEASE_DIST = 32; // oltre, lo restituisce al pool
+export const CROWD_DRAW_DIST = 190; // le sagome oltre non si disegnano
+
+const GRID_SPACING = 60;
+const GRID_RADIUS = 1;
+const BLOCK_HALF = GRID_SPACING / 2;
+const SIDEWALK_CENTER_OFFSET = ROAD_WIDTH / 2 + SIDEWALK_WIDTH / 2;
+const SIDE_HALF_LEN = BLOCK_HALF - 8; // lontano dagli incroci
+const AGENTS_PER_SIDE = 5;
+
+const isSkippedBlock = (i: number, j: number): boolean => (i === 0 && j === 0) || (i === -1 && j === 1) || (i === 1 && j === -1);
+
+export const CIVILIAN_COLORS = ['#8d6e63', '#607d8b', '#9e9d24', '#6d4c41', '#78909c', '#a1887f', '#5d4037', '#827717', '#455a64'];
+export const WALK_CLIPS = ['Walk', 'Walk_Formal', 'Walk_Female'];
+export const IDLE_CLIPS = ['Idle_A', 'Idle_TalkingPhone', 'Idle_FoldArms', 'Idle_Talking', 'Idle_Subtle'];
+// velocita' "a terra" delle camminate (m/s, per non far scivolare i piedi)
+export const WALK_BASE_SPEED: Record<string, number> = { Walk: 0.73, Walk_Formal: 0.8, Walk_Female: 0.75 };
+
+export interface CrowdAgent {
+  id: number;
+  x1: number;
+  z1: number;
+  x2: number;
+  z2: number;
+  len: number;
+  speed: number;
+  t: number;
+  dir: number;
+  pause: number;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  gait: number; // fase del ciclo del passo (0..1) per le sagome
+  color: string;
+  walkClip: string;
+  idleClip: string;
+  // passato al corpo vero e diventato nemico, o morto: lo gestisce il suo
+  // corpo (o il nemico); la folla non lo muove e non lo disegna
+  gone: boolean;
+  slot: number;
+  dist: number; // dal giocatore, aggiornata dal gestore
+}
+
+const rand = (a: number, b: number) => a + Math.random() * (b - a);
+
+function makeAgents(): CrowdAgent[] {
+  const out: CrowdAgent[] = [];
+  let id = 0;
+  for (let i = -GRID_RADIUS; i <= GRID_RADIUS; i++) {
+    for (let j = -GRID_RADIUS; j <= GRID_RADIUS; j++) {
+      if (isSkippedBlock(i, j)) continue;
+      const bx = i * GRID_SPACING + GRID_SPACING / 2;
+      const bz = j * GRID_SPACING + GRID_SPACING / 2;
+      // i quattro marciapiedi del blocco
+      const sides: Array<[number, number, number, number]> = [
+        [bx - BLOCK_HALF + SIDEWALK_CENTER_OFFSET, bz - SIDE_HALF_LEN, bx - BLOCK_HALF + SIDEWALK_CENTER_OFFSET, bz + SIDE_HALF_LEN],
+        [bx + BLOCK_HALF - SIDEWALK_CENTER_OFFSET, bz - SIDE_HALF_LEN, bx + BLOCK_HALF - SIDEWALK_CENTER_OFFSET, bz + SIDE_HALF_LEN],
+        [bx - SIDE_HALF_LEN, bz - BLOCK_HALF + SIDEWALK_CENTER_OFFSET, bx + SIDE_HALF_LEN, bz - BLOCK_HALF + SIDEWALK_CENTER_OFFSET],
+        [bx - SIDE_HALF_LEN, bz + BLOCK_HALF - SIDEWALK_CENTER_OFFSET, bx + SIDE_HALF_LEN, bz + BLOCK_HALF - SIDEWALK_CENTER_OFFSET],
+      ];
+      for (const [ax, az, cx, cz] of sides) {
+        for (let k = 0; k < AGENTS_PER_SIDE; k++) {
+          // un tratto a caso del marciapiede, un po' spostato di lato
+          const a = rand(0, 0.5);
+          const b = rand(a + 0.3, 1);
+          const lat = rand(-0.45, 0.45);
+          const vertical = ax === cx;
+          const x1 = ax + (cx - ax) * a + (vertical ? lat : 0);
+          const z1 = az + (cz - az) * a + (vertical ? 0 : lat);
+          const x2 = ax + (cx - ax) * b + (vertical ? lat : 0);
+          const z2 = az + (cz - az) * b + (vertical ? 0 : lat);
+          const h = id * 7919;
+          out.push({
+            id,
+            x1,
+            z1,
+            x2,
+            z2,
+            len: Math.hypot(x2 - x1, z2 - z1),
+            speed: rand(0.9, 1.35),
+            t: Math.random(),
+            dir: Math.random() < 0.5 ? 1 : -1,
+            pause: 0,
+            x: x1,
+            y: 0,
+            z: z1,
+            yaw: 0,
+            gait: Math.random(),
+            color: CIVILIAN_COLORS[h % CIVILIAN_COLORS.length],
+            walkClip: WALK_CLIPS[(h >> 2) % WALK_CLIPS.length],
+            idleClip: IDLE_CLIPS[(h >> 5) % IDLE_CLIPS.length],
+            gone: false,
+            slot: -1,
+            dist: Infinity,
+          });
+          id++;
+        }
+      }
+    }
+  }
+  return out;
+}
+
+export const crowdAgents: CrowdAgent[] = makeAgents();
+// agente assegnato a ciascun corpo vero del pool (null = libero)
+export const crowdSlots: (CrowdAgent | null)[] = Array.from({ length: CROWD_FULL_SLOTS }, () => null);
+
+// durata del ciclo della camminata delle sagome (s a velocita' base)
+export const CROWD_GAIT_CYCLE_S = 1.1;
+
+// Un passo di simulazione per tutti: pochi conti per agente.
+export function stepCrowd(dt: number, px: number, pz: number) {
+  for (const a of crowdAgents) {
+    a.dist = Math.hypot(a.x - px, a.z - pz);
+    if (a.gone) continue;
+    if (a.pause > 0) {
+      a.pause -= dt;
+    } else if (a.len > 0.01) {
+      a.t += (a.dir * a.speed * dt) / a.len;
+      if (a.t >= 1 || a.t <= 0) {
+        a.t = Math.min(1, Math.max(0, a.t));
+        a.dir = -a.dir;
+        a.pause = rand(1.5, 4);
+      }
+      a.gait = (a.gait + (dt * a.speed) / ((WALK_BASE_SPEED[a.walkClip] ?? 0.75) * CROWD_GAIT_CYCLE_S)) % 1;
+    }
+    const nx = a.x1 + (a.x2 - a.x1) * a.t;
+    const nz = a.z1 + (a.z2 - a.z1) * a.t;
+    a.x = nx;
+    a.z = nz;
+    // dove guarda: verso la meta del tratto
+    const fx = a.dir >= 0 ? a.x2 - a.x1 : a.x1 - a.x2;
+    const fz = a.dir >= 0 ? a.z2 - a.z1 : a.z1 - a.z2;
+    if (fx * fx + fz * fz > 1e-6) a.yaw = Math.atan2(fx, fz);
+    // la quota solo per chi si vede (il terreno costa qualche conto)
+    if (a.dist < CROWD_DRAW_DIST) a.y = getTerrainHeight(nx, nz) + getRoadOffset(nx, nz);
+  }
+}
+
+// Chi ha un corpo vero: i piu' vicini entro CROWD_ASSIGN_DIST. Se il pool e'
+// pieno e c'e' un agente parecchio piu' vicino dell'assegnato piu' lontano,
+// si scambiano.
+export function assignCrowdSlots() {
+  for (let s = 0; s < crowdSlots.length; s++) {
+    const a = crowdSlots[s];
+    // i corpi con un agente "andato" (nemico/morto) li libera il corpo stesso
+    if (a && !a.gone && a.dist > CROWD_RELEASE_DIST) {
+      a.slot = -1;
+      crowdSlots[s] = null;
+    }
+  }
+  const candidates = crowdAgents.filter((a) => !a.gone && a.slot < 0 && a.dist < CROWD_ASSIGN_DIST).sort((a, b) => a.dist - b.dist);
+  for (const c of candidates) {
+    let free = crowdSlots.indexOf(null);
+    if (free < 0) {
+      // il piu' lontano tra gli assegnati (non impegnato in qualcosa)
+      let worst = -1;
+      for (let s = 0; s < crowdSlots.length; s++) {
+        const a = crowdSlots[s];
+        if (a && !a.gone && (worst < 0 || a.dist > crowdSlots[worst]!.dist)) worst = s;
+      }
+      if (worst < 0 || crowdSlots[worst]!.dist < c.dist + 6) break;
+      crowdSlots[worst]!.slot = -1;
+      crowdSlots[worst] = null;
+      free = worst;
+    }
+    c.slot = free;
+    crowdSlots[free] = c;
+  }
+}
+
+// rimette l'agente sul suo tratto (dopo essere stato nemico o morto)
+export function reviveCrowdAgent(a: CrowdAgent) {
+  a.gone = false;
+  a.t = Math.random();
+  a.pause = rand(0.5, 2);
+}

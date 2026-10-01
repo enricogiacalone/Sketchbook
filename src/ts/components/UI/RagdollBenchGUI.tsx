@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { useStore } from '../../store';
-import type { RagdollBenchSettings } from '../Environment/ragdoll/ragdollBench';
+import { DEFAULT_RAGDOLL_BENCH, type RagdollBenchSettings } from '../Environment/ragdoll/ragdollBench';
 import { acquireDebugGui, releaseDebugGui } from '../../lib/debugGui';
+import { KO_SCENARIOS, copyKoValues, runKoScenario } from './koLab';
 
 // "metti il personaggio a T e sistema queste ossa della ragdoll attiva..
 // sistema l'ambiente per fare i test come si deve" -- pannello dedicato
@@ -30,40 +31,108 @@ const RagdollBenchGUI: React.FC = () => {
     const setBench = (p: Partial<RagdollBenchSettings>) => st().setRagdollBench(p);
 
     const bind = {
-      get ragdollAttivo() { return st().euphoriaRagdollEnabled; },
-      set ragdollAttivo(v: boolean) { st().setEuphoriaRagdollEnabled(v); },
-      get tPose() { return st().tPoseDebug; },
-      set tPose(v: boolean) { st().setTPoseDebug(v); },
-      get mostraCorpi() { return st().showActiveRagdollDebug; },
-      set mostraCorpi(v: boolean) { st().setShowActiveRagdollDebug(v); },
-      get mostraBersagli() { return bench().showTargets; },
-      set mostraBersagli(v: boolean) { setBench({ showTargets: v }); },
-      get tabella() { return bench().showOverlay; },
-      set tabella(v: boolean) { setBench({ showOverlay: v }); },
-      get passivo() { return st().ragdollPassive; },
-      set passivo(v: boolean) { st().setRagdollPassive(v); },
-      get bacinoAncorato() { return bench().pinHips; },
-      set bacinoAncorato(v: boolean) { setBench({ pinHips: v }); },
-      get gravita() { return bench().aliveGravityScale; },
-      set gravita(v: number) { setBench({ aliveGravityScale: v }); },
-      get rigidita() { return bench().stiffnessMul; },
-      set rigidita(v: number) { setBench({ stiffnessMul: v }); },
-      get smorzamento() { return bench().dampingRatio; },
-      set smorzamento(v: number) { setBench({ dampingRatio: v }); },
-      get servoMondo() { return bench().worldDriveFreq; },
-      set servoMondo(v: number) { setBench({ worldDriveFreq: v }); },
-      get feedForward() { return bench().motorFeedForward; },
-      set feedForward(v: boolean) { setBench({ motorFeedForward: v }); },
-      get soloFisica() { return bench().physicsOnlyRender; },
-      set soloFisica(v: boolean) { setBench({ physicsOnlyRender: v }); },
-      get clip() { return bench().benchClip ?? NO_CLIP; },
-      set clip(v: string) { setBench({ benchClip: v === NO_CLIP ? null : v }); },
-      get forzaColpo() { return bench().testHitSpeed; },
-      set forzaColpo(v: number) { setBench({ testHitSpeed: v }); },
-      get pausa() { return st().isPaused; },
-      set pausa(v: boolean) { st().setPaused(v); },
-      get cameraOrto() { return st().debugOrthoCamera; },
-      set cameraOrto(v: boolean) { st().setDebugOrthoCamera(v); },
+      get ragdollAttivo() {
+        return st().euphoriaRagdollEnabled;
+      },
+      set ragdollAttivo(v: boolean) {
+        st().setEuphoriaRagdollEnabled(v);
+      },
+      get tPose() {
+        return st().tPoseDebug;
+      },
+      set tPose(v: boolean) {
+        st().setTPoseDebug(v);
+      },
+      get mostraCorpi() {
+        return st().showActiveRagdollDebug;
+      },
+      set mostraCorpi(v: boolean) {
+        st().setShowActiveRagdollDebug(v);
+      },
+      get mostraBersagli() {
+        return bench().showTargets;
+      },
+      set mostraBersagli(v: boolean) {
+        setBench({ showTargets: v });
+      },
+      get tabella() {
+        return bench().showOverlay;
+      },
+      set tabella(v: boolean) {
+        setBench({ showOverlay: v });
+      },
+      get passivo() {
+        return st().ragdollPassive;
+      },
+      set passivo(v: boolean) {
+        st().setRagdollPassive(v);
+      },
+      get bacinoAncorato() {
+        return bench().pinHips;
+      },
+      set bacinoAncorato(v: boolean) {
+        setBench({ pinHips: v });
+      },
+      get gravita() {
+        return bench().aliveGravityScale;
+      },
+      set gravita(v: number) {
+        setBench({ aliveGravityScale: v });
+      },
+      get rigidita() {
+        return bench().stiffnessMul;
+      },
+      set rigidita(v: number) {
+        setBench({ stiffnessMul: v });
+      },
+      get smorzamento() {
+        return bench().dampingRatio;
+      },
+      set smorzamento(v: number) {
+        setBench({ dampingRatio: v });
+      },
+      get servoMondo() {
+        return bench().worldDriveFreq;
+      },
+      set servoMondo(v: number) {
+        setBench({ worldDriveFreq: v });
+      },
+      get feedForward() {
+        return bench().motorFeedForward;
+      },
+      set feedForward(v: boolean) {
+        setBench({ motorFeedForward: v });
+      },
+      get soloFisica() {
+        return bench().physicsOnlyRender;
+      },
+      set soloFisica(v: boolean) {
+        setBench({ physicsOnlyRender: v });
+      },
+      get clip() {
+        return bench().benchClip ?? NO_CLIP;
+      },
+      set clip(v: string) {
+        setBench({ benchClip: v === NO_CLIP ? null : v });
+      },
+      get forzaColpo() {
+        return bench().testHitSpeed;
+      },
+      set forzaColpo(v: number) {
+        setBench({ testHitSpeed: v });
+      },
+      get pausa() {
+        return st().isPaused;
+      },
+      set pausa(v: boolean) {
+        st().setPaused(v);
+      },
+      get cameraOrto() {
+        return st().debugOrthoCamera;
+      },
+      set cameraOrto(v: boolean) {
+        st().setDebugOrthoCamera(v);
+      },
     };
 
     folder.add(bind, 'ragdollAttivo').name('Ragdoll attivo').listen();
@@ -87,26 +156,26 @@ const RagdollBenchGUI: React.FC = () => {
     folder.add(bind, 'pausa').name('Pausa fisica').listen();
     folder.add({ f: () => (window as any).__physicsDebug?.step() }, 'f').name('Passo singolo (1/120s)');
     folder.add(bind, 'cameraOrto').name('Camera ortogonale').listen();
+    folder.add({ f: () => st().setDebugOrthoCameraAngleDeg((st().debugOrthoCameraAngleDeg + 90) % 360) }, 'f').name("Ruota vista 90'");
+    folder.add({ f: () => setBench({ rebuildNonce: bench().rebuildNonce + 1 }) }, 'f').name('Ricostruisci ragdoll');
     folder
-      .add({ f: () => st().setDebugOrthoCameraAngleDeg((st().debugOrthoCameraAngleDeg + 90) % 360) }, 'f')
-      .name("Ruota vista 90'");
-    folder
-      .add({ f: () => setBench({ rebuildNonce: bench().rebuildNonce + 1 }) }, 'f')
-      .name('Ricostruisci ragdoll');
-    folder
-      .add({
-        f: () => {
-          const res = (window as any).__ragdollBench?.measureClips();
-          (window as any).__ragdollBenchLastMeasure = res;
-          if (res) {
-            const rows: Record<string, string> = {};
-            for (const [name, r] of Object.entries<any>(res.all)) {
-              rows[name] = `X ${r.x[0].toFixed(0)}..${r.x[1].toFixed(0)} | Y ${r.y[0].toFixed(0)}..${r.y[1].toFixed(0)} | Z ${r.z[0].toFixed(0)}..${r.z[1].toFixed(0)}`;
+      .add(
+        {
+          f: () => {
+            const res = (window as any).__ragdollBench?.measureClips();
+            (window as any).__ragdollBenchLastMeasure = res;
+            if (res) {
+              const rows: Record<string, string> = {};
+              for (const [name, r] of Object.entries<any>(res.all)) {
+                rows[name] =
+                  `X ${r.x[0].toFixed(0)}..${r.x[1].toFixed(0)} | Y ${r.y[0].toFixed(0)}..${r.y[1].toFixed(0)} | Z ${r.z[0].toFixed(0)}..${r.z[1].toFixed(0)}`;
+              }
+              console.table(rows);
             }
-            console.table(rows);
-          }
+          },
         },
-      }, 'f')
+        'f'
+      )
       .name('Misura range animazioni');
 
     // L'elenco delle clip esiste solo dopo che il combattente del duello
@@ -114,14 +183,95 @@ const RagdollBenchGUI: React.FC = () => {
     const poll = window.setInterval(() => {
       const names: string[] | undefined = (window as any).__ragdollBench?.clipNames?.();
       if (names && names.length) {
-        clipCtrl = clipCtrl.options([NO_CLIP, ...names]).name('Animazione di prova').listen();
+        clipCtrl = clipCtrl
+          .options([NO_CLIP, ...names])
+          .name('Animazione di prova')
+          .listen();
         window.clearInterval(poll);
       }
     }, 1000);
 
     folder.close();
+
+    // "facciamo dei test e ti do dei feedback" -- KO alla GTA IV: scenari
+    // ripetibili (anche Alt+1..7) e i cursori del carattere dei muscoli.
+    const ko = gui.addFolder('Laboratorio KO');
+    const koBind = {
+      get tono() {
+        return bench().koTone;
+      },
+      set tono(v: number) {
+        setBench({ koTone: v });
+      },
+      get rilassamento() {
+        return bench().koRelaxS;
+      },
+      set rilassamento(v: number) {
+        setBench({ koRelaxS: v });
+      },
+      get tonoMinimo() {
+        return bench().koFloor;
+      },
+      set tonoMinimo(v: number) {
+        setBench({ koFloor: v });
+      },
+      get molleDopo() {
+        return bench().koLimpS;
+      },
+      set molleDopo(v: number) {
+        setBench({ koLimpS: v });
+      },
+      get riflesso() {
+        return bench().koReflex;
+      },
+      set riflesso(v: number) {
+        setBench({ koReflex: v });
+      },
+      get riflessoDurata() {
+        return bench().koReflexS;
+      },
+      set riflessoDurata(v: number) {
+        setBench({ koReflexS: v });
+      },
+    };
+    KO_SCENARIOS.forEach((sc, i) => ko.add({ f: () => runKoScenario(i) }, 'f').name(`${sc.label}  (Alt+${i + 1})`));
+    ko.add(koBind, 'tono', 0, 1, 0.01).name("Tono all'impatto").listen();
+    ko.add(koBind, 'rilassamento', 0.1, 3, 0.05).name('Rilassamento (s)').listen();
+    ko.add(koBind, 'tonoMinimo', 0, 0.5, 0.01).name('Tono minimo').listen();
+    ko.add(koBind, 'molleDopo', 0.5, 6, 0.1).name('Molle al massimo dopo (s)').listen();
+    ko.add(koBind, 'riflesso', 0, 1, 0.01).name('Riflesso braccia').listen();
+    ko.add(koBind, 'riflessoDurata', 0, 2, 0.05).name('Durata riflesso (s)').listen();
+    const copyCtrl = ko
+      .add(
+        {
+          f: () => {
+            copyKoValues();
+            copyCtrl.name('Copiato!');
+            window.setTimeout(() => copyCtrl.name('Copia valori'), 1200);
+          },
+        },
+        'f'
+      )
+      .name('Copia valori');
+    ko.add({ f: () => setBench(Object.fromEntries(Object.entries(DEFAULT_RAGDOLL_BENCH).filter(([k]) => k.startsWith('ko')))) }, 'f').name(
+      'Valori di partenza'
+    );
+
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      const m = /^Digit([1-9])$/.exec(e.code);
+      if (!m) return;
+      const i = Number(m[1]) - 1;
+      if (i >= KO_SCENARIOS.length) return;
+      e.preventDefault();
+      runKoScenario(i);
+    };
+    window.addEventListener('keydown', onKey);
+
     return () => {
       window.clearInterval(poll);
+      window.removeEventListener('keydown', onKey);
+      ko.destroy();
       folder.destroy();
       releaseDebugGui();
     };
