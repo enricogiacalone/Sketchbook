@@ -113,7 +113,7 @@
             text-align: center;
         }
 
-        /* Center: Pause Button Area */
+        /* Center: Pause & Zoom Button Area */
         .center-control-area {
             display: flex;
             flex-direction: column;
@@ -121,13 +121,23 @@
             justify-content: center;
             position: relative;
         }
-        .pause-btn {
-            width: 60px;
-            height: 60px;
+        .center-buttons-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        .center-btn-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .pause-btn, .select-btn {
+            width: 52px;
+            height: 52px;
             background: #d97706;
             border-radius: 50%;
             border: none;
-            font-size: 26px;
+            font-size: 22px;
             color: #fff;
             display: flex;
             align-items: center;
@@ -136,16 +146,19 @@
             cursor: pointer;
             outline: none;
         }
-        .pause-btn:active, .pause-btn.pressed {
+        .select-btn {
+            background: #2563eb;
+        }
+        .pause-btn:active, .pause-btn.pressed, .select-btn:active, .select-btn.pressed {
             transform: scale(0.92);
             filter: brightness(1.2);
         }
         .label-center {
-            font-size: 10px;
+            font-size: 9px;
             color: #aaa;
             letter-spacing: 1px;
             font-weight: bold;
-            margin-top: 8px;
+            margin-top: 6px;
         }
 
         /* Buttons (D-Pad & PlayStation Actions) */
@@ -217,10 +230,18 @@
             </div>
         </div>
 
-        <!-- Center: Pause Button -->
+        <!-- Center: Zoom (Select) & Pause Buttons -->
         <div class="center-control-area">
-            <button id="btn-pause" class="pause-btn">⏸</button>
-            <div class="label-center">PAUSA</div>
+            <div class="center-buttons-row">
+                <div class="center-btn-wrap">
+                    <button id="btn-select" class="pause-btn select-btn">🔍</button>
+                    <div class="label-center">ZOOM</div>
+                </div>
+                <div class="center-btn-wrap">
+                    <button id="btn-pause" class="pause-btn">⏸</button>
+                    <div class="label-center">PAUSA</div>
+                </div>
+            </div>
         </div>
 
         <!-- Right: Camera Orbit Stick with PlayStation Buttons Surrounding It -->
@@ -289,6 +310,7 @@
                 circle: false,
                 square: false,
                 triangle: false,
+                select: false,
                 pause: false,
                 dpadUp: false,
                 dpadDown: false,
@@ -398,6 +420,7 @@
             { id: 'btn-circle', key: 'circle' },
             { id: 'btn-square', key: 'square' },
             { id: 'btn-triangle', key: 'triangle' },
+            { id: 'btn-select', key: 'select' },
             { id: 'btn-pause', key: 'pause' },
             { id: 'btn-dpad-up', key: 'dpadUp' },
             { id: 'btn-dpad-down', key: 'dpadDown' },

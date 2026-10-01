@@ -1508,6 +1508,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
             return;
           }
           if (vs.mode === 'driving') {
+            if (publishPlayerInfo) st.setIsPlayerGrounded(true);
             seatPose(parts, _carTmp2, _carQ2);
             setGroupPose(_carTmp2, _carQ2);
             transitionToAnimation('Driving', 0.2, true);
@@ -1549,6 +1550,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         // R/F volano il drone (su/giu'): niente ricarica al ritorno a piedi
         input.consumeJustPressed('reload');
         input.consumeJustPressed('respawn');
+        // in volo col drone: niente "a terra" (fari missione, collezionabili)
+        if (publishPlayerInfo) st.setIsPlayerGrounded(false);
         if (!data.isDead && !kdRef.current.active && data.attackLock <= 0 && !traving()) {
           transitionToAnimation(idleName(), 0.25, true);
           data.state = idleState();
@@ -1557,6 +1560,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         return;
       }
       if (publishPlayerInfo && vehRef.current.mode === 'none') {
+        // "a terra" per il resto del gioco (fari delle missioni,
+        // collezionabili): lo pubblicava Player.tsx del boxman
+        const tm = travRef.current.mode;
+        st.setIsPlayerGrounded(!data.isDead && (tm === 'ground' || tm === 'land' || tm === 'bigLand' || tm === 'roll'));
         // il gruppo guarda verso il suo -Z (modello girato di PI): per lo
         // store "yaw" e' la direzione di +Z avanti, come boxman e auto
         const yaw = data.rotation + Math.PI;
@@ -1854,7 +1861,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
 
     // --- Block (held) --- (solo a mani nude: con la pistola il tasto
     // destro e' la mira)
-    if ((weaponRef.current === 'fists' || weaponRef.current === 'knife') && input.secondary) {
+    // (input.attackLeft: L2 a mani nude e' il pugno sinistro, non la parata)
+    if ((weaponRef.current === 'fists' || weaponRef.current === 'knife') && input.secondary && !input.attackLeft) {
       data.state = 'Parata';
       transitionToAnimation(animCatalog.block, 0.15, true);
       applyTransform();

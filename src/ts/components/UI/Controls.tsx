@@ -17,11 +17,11 @@ interface ControlRow {
 // mapping:"" instead of "standard", in which case these physical PS
 // button names may not actually line up with what the browser reads).
 const PAD_LEFT_STICK = ['Left Stick'];
-const PAD_JUMP = ['✕ Cross']; // button 0
+const PAD_JUMP = ['○ Circle']; // button 1
 const PAD_DODGE = ['L3']; // button 10
-const PAD_SHIFT = ['R1', 'L2']; // buttons 5 or 6
+const PAD_SHIFT = ['✕ Cross']; // button 0
 const PAD_PRIMARY = ['R2']; // button 7
-const PAD_SECONDARY = ['○ Circle']; // button 1
+const PAD_SECONDARY = ['L2', 'R1']; // buttons 6 or 5
 const PAD_ENTER = ['□ Square', '△ Triangle']; // buttons 2 or 3
 // Square and Triangle individually -- combatSoldier's Jab/Hook attacks
 // (see useInput.ts's gamepad section, where they ALSO still drive

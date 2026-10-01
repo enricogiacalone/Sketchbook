@@ -2,7 +2,7 @@ import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getTerrainHeight } from './Terrain';
-import { ROAD_OFFSETS } from './Road';
+import { ROAD_OFFSETS, getRoadOffset } from './Road';
 import { CITY_LAYOUT } from './City';
 import { useStore } from '../../store';
 
@@ -21,17 +21,18 @@ import { useStore } from '../../store';
 // position every frame (like every other "am I near X" check in this
 // game, e.g. Player.tsx's vehicle-entrance range) -- no RigidBody/collider
 // at all, since a pickup doesn't need to physically block anything.
-const PICKUP_RADIUS = 1.7;
-// "quando il personaggio entra si sente subito che prende un collectable
-// prima di toccare terra" / "ora ci cade sopra ma nn lo prende" -- a pure
-// 3D-distance check can't tell "resting at the right height" apart from
-// "passing through it mid-fall", and a fixed post-spawn timer can't win
-// either way (expires too early if still falling, or too late once the
-// player's already walked off from PICKUP_RADIUS=1.7 at normal move
-// speed). The actual fix needed real ground-state info: store.ts's
-// isPlayerGrounded now mirrors Player.tsx's own isGrounded ref every
-// frame (see there), so this can gate on the real thing instead of
-// guessing a duration.
+// "nn riesco a prenderli (ci passo attraverso)": il controllo vecchio
+// aspettava isPlayerGrounded, che pubblicava solo il boxman (Player.tsx) --
+// col manichino restava falso per sempre. Ora si prende quando il gioiello
+// tocca il CORPO: un cilindro verticale dai piedi alla testa (a piedi),
+// una sfera attorno all'auto o al drone (che quindi puo' prendere quelli
+// sui tetti).
+const PICKUP_RADIUS = 1.0; // m, orizzontale, a piedi
+const PICKUP_BODY_LOW = -0.3; // m sotto i piedi
+const PICKUP_BODY_HIGH = 2.1; // m sopra i piedi
+const PICKUP_VEHICLE_RADIUS = 2.2; // m, in auto o col drone
+// playerPos a piedi e' 0.5 m sopra i piedi (PlayerCombatSoldier.tsx)
+const PLAYER_POS_ABOVE_FEET = 0.5;
 const BOB_AMPLITUDE = 0.28;
 const BOB_SPEED = 2.2;
 const SPIN_SPEED = 1.6;
@@ -44,63 +45,39 @@ interface CollectibleSpot {
   z: number;
 }
 
-// Computed ONCE at import time, same module-level-IIFE trick as
-// Road.tsx's ROAD_OFFSETS / City.tsx's CITY_LAYOUT -- one canonical list of
-// every pickup in the world, independent of this component's own
-// mount/unmount.
-const ALL_SPOTS: CollectibleSpot[] = (() => {
+// "in piu posizionali randomicamente": posti nuovi a ogni partita. A terra
+// ovunque nella citta' (strade, marciapiedi, parco, piazze) tranne dentro
+// i palazzi, distanziati fra loro; qualcuno sui tetti (col drone).
+const GROUND_COUNT = 34;
+const ROOF_COUNT = 6;
+const MIN_SPACING = 9; // m fra due gioielli a terra
+const BUILDING_MARGIN = 1.2; // m fuori dal perimetro dei palazzi
+const HEIGHT_ABOVE_GROUND = 1.2;
+
+const insideBuilding = (x: number, z: number) => {
+  for (const b of CITY_LAYOUT.buildings) {
+    if (Math.abs(x - b.x) < b.w / 2 + BUILDING_MARGIN && Math.abs(z - b.z) < b.d / 2 + BUILDING_MARGIN) return true;
+  }
+  return false;
+};
+
+function randomSpots(): CollectibleSpot[] {
   const spots: CollectibleSpot[] = [];
-
-  // One per street intersection (7x7 grid, ROAD_OFFSETS) -- floating above
-  // the crosswalk, clear of the streetlight/traffic-light poles which sit
-  // at the diagonal corners, not the center.
-  for (const ox of ROAD_OFFSETS) {
-    for (const oz of ROAD_OFFSETS) {
-      spots.push({ id: `street-${ox}-${oz}`, x: ox, z: oz, y: getTerrainHeight(ox, oz) + 1.3 });
-    }
+  const min = Math.min(...ROAD_OFFSETS) - 4;
+  const max = Math.max(...ROAD_OFFSETS) + 4;
+  let tries = 0;
+  while (spots.length < GROUND_COUNT && tries++ < 5000) {
+    const x = min + Math.random() * (max - min);
+    const z = min + Math.random() * (max - min);
+    if (insideBuilding(x, z)) continue;
+    if (spots.some((p) => Math.hypot(p.x - x, p.z - z) < MIN_SPACING)) continue;
+    const y = getTerrainHeight(x, z) + getRoadOffset(x, z) + HEIGHT_ABOVE_GROUND;
+    spots.push({ id: `ground-${spots.length}`, x, z, y });
   }
-
-  // A handful inside the park (block (0,0), roughly x/z in [9,51] -- see
-  // Park.tsx's AREA_MIN/AREA_MAX), spaced away from the fountain at the
-  // center and from Park.tsx's own LAMP_POSITIONS.
-  const parkSpots: Array<[number, number]> = [
-    [18, 18], [42, 18], [18, 42], [42, 42],
-    [30, 16], [30, 44], [16, 30], [44, 30],
-  ];
-  for (const [x, z] of parkSpots) {
-    spots.push({ id: `park-${x}-${z}`, x, z, y: getTerrainHeight(x, z) + 1.2 });
-  }
-
-  // One on the roof of the tallest building in each courtyard block --
-  // reachable only by actually climbing the stairs (getBuildingHeightOffset
-  // in City.tsx), as a payoff for exploring buildings top to bottom.
-  for (const c of CITY_LAYOUT.courtyards) {
-    let tallest: (typeof CITY_LAYOUT.buildings)[number] | null = null;
-    for (const b of CITY_LAYOUT.buildings) {
-      if (Math.hypot(b.x - c.x, b.z - c.z) > 30) continue;
-      if (!tallest || b.h > tallest.h) tallest = b;
-    }
-    if (tallest) {
-      spots.push({
-        id: `roof-${c.x}-${c.z}`,
-        x: tallest.x,
-        z: tallest.z,
-        y: tallest.by + tallest.h + 1.0,
-      });
-    }
-  }
-
-  // A couple in each open plaza.
-  for (const p of CITY_LAYOUT.plazas) {
-    for (const [dx, dz] of [[-5, 0], [5, 0]] as const) {
-      const x = p.x + dx;
-      const z = p.z + dz;
-      spots.push({ id: `plaza-${p.x}-${p.z}-${dx}`, x, z, y: getTerrainHeight(x, z) + 1.2 });
-    }
-  }
-
+  const roofs = [...CITY_LAYOUT.buildings].sort(() => Math.random() - 0.5).slice(0, ROOF_COUNT);
+  roofs.forEach((b, i) => spots.push({ id: `roof-${i}`, x: b.x, z: b.z, y: b.by + b.h + 1.0 }));
   return spots;
-})();
+}
 
 const _dummy = new THREE.Object3D();
 
@@ -110,6 +87,7 @@ const Collectibles: React.FC = () => {
   // uncollected. Kept OUTSIDE React state -- this needs to change every
   // frame during the brief pop animation without triggering re-renders,
   // exactly like every other instancedMesh animation in Environment/.
+  const ALL_SPOTS = useMemo(() => randomSpots(), []);
   const collectedAt = useRef<Float32Array>(new Float32Array(ALL_SPOTS.length).fill(-1));
   const setCollectiblesTotal = useStore((state) => state.setCollectiblesTotal);
   const collectItem = useStore((state) => state.collectItem);
@@ -129,7 +107,8 @@ const Collectibles: React.FC = () => {
   // always correct before the very first pickup check can run.
   useLayoutEffect(() => {
     setCollectiblesTotal(ALL_SPOTS.length);
-  }, [setCollectiblesTotal]);
+    if (import.meta.env.DEV) (window as any).__collectibles = { spots: ALL_SPOTS, collectedAt: collectedAt.current };
+  }, [setCollectiblesTotal, ALL_SPOTS]);
 
   const playPickupSound = useMemo(
     () => () => {
@@ -164,49 +143,28 @@ const Collectibles: React.FC = () => {
     const t = state.clock.elapsedTime;
     const storeState = useStore.getState();
     const playerPos = storeState.playerPos;
-    const isGrounded = storeState.isPlayerGrounded;
+    const onFoot = storeState.currentControllable === 'player' || storeState.currentControllable === 'combatSoldier';
+    const feetY = playerPos[1] - PLAYER_POS_ABOVE_FEET;
     const times = collectedAt.current;
-
-    // TEMP DEBUG (Claude) -- "ci passo attraverso e nn lo raccoglie" but
-    // the pickup math here looks correct on paper (distance check against
-    // the exact same spot.x/y/z used for the render matrix below, so
-    // "passing through visually" should mean "within PICKUP_RADIUS"). Can't
-    // browser-test this myself (standing instruction), so exposing the
-    // live nearest-uncollected-spot distance for a console check instead
-    // of guessing further -- window.__collectibleDebug in devtools while
-    // standing on/near one. Remove once the real cause is found.
-    let __nearestId = "";
-    let __nearestDist = Infinity;
 
     for (let i = 0; i < ALL_SPOTS.length; i++) {
       const spot = ALL_SPOTS[i];
-      const collectedTime = times[i];
 
-      if (collectedTime < 0) {
+      if (times[i] < 0) {
         const dx = spot.x - playerPos[0];
-        const dy = spot.y - playerPos[1];
         const dz = spot.z - playerPos[2];
-        const distSq = dx * dx + dy * dy + dz * dz;
-        if (distSq < __nearestDist) {
-          __nearestDist = distSq;
-          __nearestId = spot.id;
+        let touching: boolean;
+        if (onFoot) {
+          const rel = spot.y - feetY;
+          touching = dx * dx + dz * dz < PICKUP_RADIUS * PICKUP_RADIUS && rel > PICKUP_BODY_LOW && rel < PICKUP_BODY_HIGH;
+        } else {
+          const dy = spot.y - playerPos[1];
+          touching = dx * dx + dy * dy + dz * dz < PICKUP_VEHICLE_RADIUS * PICKUP_VEHICLE_RADIUS;
         }
-        if (isGrounded && distSq < PICKUP_RADIUS * PICKUP_RADIUS) {
+        if (touching) {
           times[i] = t;
           collectItem();
           playPickupSound();
-          if (import.meta.env.DEV) {
-            // Direct instrumentation of the actual STORE values right after
-            // collectItem() -- the earlier __collectibleDebug's "totalSpots"
-            // was ALL_SPOTS.length (a local constant, always 43), NOT
-            // state.collectiblesTotal, so it couldn't actually reveal
-            // whether the store's own total/found were the real problem.
-            // This logs unconditionally, exactly once per real pickup --
-            // no proximity timing needed, just walk over one.
-            const s = useStore.getState();
-            // eslint-disable-next-line no-console
-            console.log('[collectible PICKED UP]', spot.id, 'store now: found=', s.collectiblesFound, 'total=', s.collectiblesTotal);
-          }
         }
       }
 
@@ -244,41 +202,13 @@ const Collectibles: React.FC = () => {
 
     mesh.instanceMatrix.needsUpdate = true;
 
-    if (import.meta.env.DEV) {
-      const s = useStore.getState();
-      const debugSnapshot = {
-        playerPos: [...playerPos],
-        nearestId: __nearestId,
-        nearestDist: Math.sqrt(__nearestDist),
-        pickupRadius: PICKUP_RADIUS,
-        // Real store values now (was ALL_SPOTS.length before, a local
-        // constant that's always 43 regardless of whether the STORE's own
-        // total ever actually got set -- couldn't tell us anything about
-        // the real bug).
-        storeFound: s.collectiblesFound,
-        storeTotal: s.collectiblesTotal,
-        isGrounded: s.isPlayerGrounded,
-      };
-      (window as any).__collectibleDebug = debugSnapshot;
-      // A single manual console read of __collectibleDebug is easy to miss
-      // by the time you've actually walked onto one (nearestDist was 9+
-      // last time -- nowhere near a pickup, so that snapshot just wasn't
-      // taken at the right instant). Auto-logging a few times a second
-      // ONLY while genuinely close means the real moment of passing
-      // through shows up in the console history on its own, no perfect
-      // timing needed -- just walk over one, then scroll back/search the
-      // console for "collectible debug".
-      if (debugSnapshot.nearestDist < 3 && t % 0.2 < 0.02) {
-        // eslint-disable-next-line no-console
-        console.log('[collectible debug]', debugSnapshot);
-      }
-    }
   });
 
   return (
     <instancedMesh
       ref={meshRef}
       args={[undefined as any, undefined as any, ALL_SPOTS.length]}
+      key={ALL_SPOTS.length}
       frustumCulled={false}
       castShadow
     >

@@ -236,6 +236,7 @@ export const useInput = () => {
         phoneInput.buttons.circle ||
         phoneInput.buttons.square ||
         phoneInput.buttons.triangle ||
+        phoneInput.buttons.select ||
         phoneInput.buttons.pause ||
         phoneInput.buttons.dpadUp ||
         phoneInput.buttons.dpadDown ||
@@ -256,7 +257,8 @@ export const useInput = () => {
             { pressed: phoneInput.buttons.circle, value: phoneInput.buttons.circle ? 1 : 0 }, // 1: Circle
             { pressed: phoneInput.buttons.square, value: phoneInput.buttons.square ? 1 : 0 }, // 2: Square
             { pressed: phoneInput.buttons.triangle, value: phoneInput.buttons.triangle ? 1 : 0 }, // 3: Triangle
-            {}, {}, {}, {}, {},
+            {}, {}, {}, {},
+            { pressed: phoneInput.buttons.select, value: phoneInput.buttons.select ? 1 : 0 }, // 8: Select (Zoom / Camera)
             { pressed: phoneInput.buttons.pause, value: phoneInput.buttons.pause ? 1 : 0 }, // 9: Pause
             {}, {},
             { pressed: phoneInput.buttons.dpadUp, value: phoneInput.buttons.dpadUp ? 1 : 0 }, // 12: D-pad Up (weapon change)
@@ -310,10 +312,14 @@ export const useInput = () => {
     g.backward = axisForward > STICK_DEADZONE;
     g.left = axisStrafe < -STICK_DEADZONE;
     g.right = axisStrafe > STICK_DEADZONE;
-    g.jump = !!pad.buttons[0]?.pressed; // A / Cross
-    g.shift = !!pad.buttons[5]?.pressed || !!pad.buttons[6]?.pressed; // RB or LT: run
+    // "per saltare usa cerchio, per correre usa x, come gta"
+    g.jump = !!pad.buttons[1]?.pressed; // B / Circle: salto
+    g.shift = !!pad.buttons[0]?.pressed; // A / Cross: corsa
     g.primary = !!pad.buttons[7]?.pressed; // RT: fire
-    g.secondary = !!pad.buttons[1]?.pressed; // B / Circle
+    // mira (armi) / parata (mani nude, coltello): L2 come in GTA, oppure R1.
+    // L2 resta anche il pugno sinistro a mani nude (attackLeft qui sotto):
+    // PlayerCombatSoldier non para quando L2 e' il pugno.
+    g.secondary = !!pad.buttons[6]?.pressed || !!pad.buttons[5]?.pressed; // L2 / R1
     // X/Square AND Y/Triangle both enter/exit a vehicle -- Triangle used to
     // drive the separate (and entirely unused -- nothing ever read
     // input.enter_passenger) 'enter_passenger' action; folded into 'enter'
@@ -330,10 +336,7 @@ export const useInput = () => {
     // attacks) actually gets read never overlaps with the others.
     g.yawLeft = !!pad.buttons[2]?.pressed; // X/Square
     g.yawRight = !!pad.buttons[3]?.pressed; // Y/Triangle
-    // L2 (button 6) already drives 'shift' above (RB/LT: run) -- this
-    // ADDS a second, independent action on the same physical button
-    // rather than replacing anything, so the existing L2-as-sprint
-    // behaviour is untouched. "con l2 usa il braccio sinistro e con r2
+    // L2 (button 6) also drives 'secondary' above (aim) -- "con l2 usa il braccio sinistro e con r2
     // quello destro" -- PlayerCombatSoldier.tsx's left-arm punch (Jab)
     // checks this alongside 'yawLeft' (Q/Square), so all three fire the
     // same strike.
