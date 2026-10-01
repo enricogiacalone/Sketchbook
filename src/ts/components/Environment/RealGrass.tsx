@@ -127,8 +127,11 @@ export const RealGrassPatch: React.FC<{
   maxZ,
   instances = 8000,
   avoid = [],
-  bladeWidth = 0.12,
-  bladeHeight = 1,
+  // "riduci un po la scala dell erba.. e' troppo grande": era 1 m (fino a
+  // 2.8 m coi fili allungati, piu' alta del manichino); ora 0.55 m (fino a
+  // ~1.5 m), larghezza in proporzione
+  bladeWidth = 0.075,
+  bladeHeight = 0.55,
   joints = 4,
 }) => {
   const materialRef = useRef<THREE.ShaderMaterial>(null);

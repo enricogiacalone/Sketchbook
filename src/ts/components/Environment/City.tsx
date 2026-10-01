@@ -4,19 +4,26 @@ import { RigidBody, CuboidCollider } from '@react-three/rapier';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
+import { BuildingStairwell } from './BuildingStairwell';
+import {
+  BUILDING_HOLE_LEN,
+  BUILDING_HOLE_SIZE,
+  BUILDING_SLAB_THICKNESS,
+  BUILDING_WALL_THICKNESS,
+  getHoleBounds,
+  getStairwell,
+} from './buildingStairs';
 import { useTreeTemplates, TreeInstance, TreeTemplate, Flowers } from './ParkTrees';
 import { RealGrassPatch } from './RealGrass';
 
 const _windowDummy = new THREE.Object3D();
 const _windowColor = new THREE.Color();
-const _slabDummy = new THREE.Object3D();
-const _stairDummy = new THREE.Object3D();
 
 // "le finestre devono essere veri buchi" -- the old windows were a flat
 // colored plane glued ~4cm in front of an otherwise UNBROKEN wall
 // surface: fine when buildings were just static exterior scenery, but
-// once the interior became walkable (see the big comment above
-// getBuildingHeightOffset) that reads as wrong from inside -- a solid
+// once the interior became walkable (see "Explorable interiors" below)
+// that reads as wrong from inside -- a solid
 // wall with no opening at all, since the decal plane is single-sided and
 // faces outward only. This builds an actual wall panel with rectangular
 // holes really cut through it (a 2D THREE.Shape with hole Paths, given
@@ -128,6 +135,8 @@ function buildWallColliderBoxes(span: number, wallHeight: number, holes: WallHol
   return boxes;
 }
 
+const BUILDING_GAP = 1.5; // spazio minimo tra due palazzi
+
 const footprintOverlapsRoad = (x: number, z: number, width: number, depth: number): boolean => {
   const halfW = width / 2;
   const halfD = depth / 2;
@@ -143,40 +152,18 @@ const footprintOverlapsRoad = (x: number, z: number, width: number, depth: numbe
 // --- Explorable interiors --------------------------------------------------
 // "rendi i palazzi esplorabili, piani e scale che portano fino al tetto".
 //
-// IMPORTANT architectural note (see git history / chat for the full
-// investigation): Player.tsx does NOT get its vertical position from real
-// Rapier contact response -- the character's ball collider excludes
-// TrimeshColliders and its Y is entirely scripted every frame from
-// `getTerrainHeight(x,z) + getRoadOffset(x,z)` (see Player.tsx's "2.
-// Precise Ground & Slope Analysis"). So a physical floor-slab collider
-// alone would NOT be walkable the way outdoor ground is -- the character
-// would just hover/sink relative to whatever getTerrainHeight+getRoadOffset
-// says, ignoring any collider underfoot. The only way to make building
-// floors/stairs feel exactly as responsive as walking outside (immediate
-// input response, working jump, no physics mushiness) is to teach that
-// SAME ground-height system about buildings, exactly like getRoadOffset
-// already extends it for roads/curbs.
-//
-// getBuildingHeightOffset(x, z, currentY) below is that extension: given
-// the player's (x,z) and current Y (needed to disambiguate WHICH stacked
-// floor applies, since a multi-story building has many valid Y values at
-// the same x,z), it returns the walkable surface height at that point, or
-// null if (x,z) isn't over a building (or is at ground-floor level, where
-// deferring to normal terrain+road keeps outdoor behavior byte-identical).
-// Player.tsx now calls this and prefers it over terrain+road when non-null.
-//
-// Only the WALLS get real Rapier colliders (to physically block walking
-// through them, same as before -- just split into pieces with a door gap
-// instead of one solid box). Floors/stairs/roof are pure height-field
-// math, same mechanism as terrain, deliberately NOT physical colliders --
-// consistent with the constraint above, and much cheaper (zero extra
-// physics bodies for floors/stairs regardless of building height).
-export const BUILDING_HOLE_SIZE = 2.4; // stairwell shaft footprint (square)
-export const BUILDING_STAIR_WIDTH = 2.0; // < BUILDING_HOLE_SIZE, centered in it
+// Pavimenti, scale e tetto sono collider Rapier veri (BuildingStairwell.tsx,
+// geometria in buildingStairs.ts): scala a due rampe con pianerottolo, come
+// nei palazzi veri, con rampe di collisione come la scala dell'arena. Il
+// manichino ci sale coi piedi (supportHeight); i MURI lo bloccano (gruppo
+// Characters, vedi BUILDING_WALL_GROUPS).
+export { BUILDING_HOLE_LEN, BUILDING_HOLE_SIZE, BUILDING_SLAB_THICKNESS, BUILDING_WALL_THICKNESS, getHoleBounds, getStairwell };
 export const BUILDING_DOOR_WIDTH = 2.4;
 export const BUILDING_DOOR_HEIGHT = 3.2;
-export const BUILDING_WALL_THICKNESS = 0.3;
-export const BUILDING_SLAB_THICKNESS = 0.15;
+// Muri (e annessi) dei palazzi: mondo (Default: proiettili, auto), corpi
+// dei combattenti (Characters: le capsule solide del manichino) e ragdoll
+// (RagdollWorld). Prima erano solo Default: il manichino ci passava dentro.
+const BUILDING_WALL_GROUPS = groupsExcluding([CollisionGroups.Default, CollisionGroups.Characters, CollisionGroups.RagdollWorld]);
 const BUILDING_TARGET_FLOOR_HEIGHT = 4.2;
 
 // Per-building floor count/spacing is derived (not a fixed 4.2 everywhere)
@@ -209,12 +196,8 @@ export interface CityLayout {
 
 // Moved out of the City component (used to be a component-local useMemo)
 // into a module-level constant computed once when this module first loads
-// -- same trick Road.tsx uses for ROAD_OFFSETS. This is what lets
-// getBuildingHeightOffset below be a plain, synchronous, hook-free function
-// Player.tsx can import and call every frame, exactly like getRoadOffset:
-// there's now one single canonical building layout, generated once,
-// consumed both by <City>'s JSX and by this height function, instead of
-// being trapped inside a React component's private render state.
+// -- same trick Road.tsx uses for ROAD_OFFSETS: one single canonical
+// building layout, generated once, readable outside the component.
 // Exported: Collectibles.tsx ("aggiungi oggetti da collezionare per
 // tutta la citta") needs the real building/courtyard/plaza layout to
 // scatter pickups through the streets, park-less blocks and building
@@ -273,13 +256,18 @@ export const CITY_LAYOUT: CityLayout = (() => {
         const palette = buildingColorsByStyle[style];
         const color = palette[Math.floor(Math.random() * palette.length)];
 
-        for (let attempt = 0; attempt < 12; attempt++) {
+        for (let attempt = 0; attempt < 30; attempt++) {
           const angle = Math.random() * Math.PI * 2;
           const dist = 18 + Math.random() * 7;
           const x = blockX + Math.cos(angle) * dist;
           const z = blockZ + Math.sin(angle) * dist;
 
-          if (!footprintOverlapsRoad(x, z, w, d)) {
+          // niente palazzi compenetrati: i muri di uno finivano dentro
+          // l'altro e le sue solette coprivano il vano scala dell'altro
+          const overlapsBuilding = bArr.some(
+            (o) => Math.abs(o.x - x) < (o.w + w) / 2 + BUILDING_GAP && Math.abs(o.z - z) < (o.d + d) / 2 + BUILDING_GAP
+          );
+          if (!overlapsBuilding && !footprintOverlapsRoad(x, z, w, d)) {
             const numFloors = getBuildingNumFloors(h);
             bArr.push({
               x, z, w, d, h, color, style,
@@ -299,71 +287,6 @@ export const CITY_LAYOUT: CityLayout = (() => {
   return { buildings: bArr, courtyards: cArr, plazas: pArr };
 })();
 
-// Returns the walkable stairwell-hole bounds (LOCAL to the building, i.e.
-// relative to its own x/z center) for a given corner index + footprint.
-// Shared between the height function below and the Building component's
-// own floor-slab/stair visuals -- both MUST agree exactly on this, or the
-// stairs would be climbable in a spot that doesn't visually line up (or
-// vice versa).
-export const getHoleBounds = (w: number, d: number, corner: number) => {
-  const sx = corner % 2 === 0 ? -1 : 1;
-  const sz = corner < 2 ? -1 : 1;
-  const holeMinX = sx < 0 ? -w / 2 : w / 2 - BUILDING_HOLE_SIZE;
-  const holeMinZ = sz < 0 ? -d / 2 : d / 2 - BUILDING_HOLE_SIZE;
-  return {
-    sx, sz,
-    holeMinX, holeMaxX: holeMinX + BUILDING_HOLE_SIZE,
-    holeMinZ, holeMaxZ: holeMinZ + BUILDING_HOLE_SIZE,
-  };
-};
-
-// The extension to Player.tsx's ground-height system described in the big
-// comment above. Deliberately mirrors getRoadOffset's shape (pure function
-// of world position, no React/hooks) so Player.tsx can call it the exact
-// same way. Returns null whenever the answer is "not applicable" (outside
-// every building's footprint, OR standing at plain ground-floor level) so
-// the caller falls back to its existing terrain+road logic unchanged.
-export const getBuildingHeightOffset = (x: number, z: number, currentY: number): number | null => {
-  for (const b of CITY_LAYOUT.buildings) {
-    const halfW = b.w / 2;
-    const halfD = b.d / 2;
-    const lx = x - b.x;
-    const lz = z - b.z;
-    // Small margin so walls (0.3 thick, centered on the footprint edge)
-    // don't create a dead band where neither "inside" nor "outside" logic
-    // applies.
-    if (lx < -halfW - 0.2 || lx > halfW + 0.2 || lz < -halfD - 0.2 || lz > halfD + 0.2) continue;
-
-    const { holeMinX, holeMaxX, holeMinZ, holeMaxZ } = getHoleBounds(b.w, b.d, b.corner);
-    const inHole = lx >= holeMinX && lx <= holeMaxX && lz >= holeMinZ && lz <= holeMaxZ;
-
-    let best = b.by; // ground floor -- returning this unchanged signals "defer to terrain/road" below
-    let bestDist = Math.abs(currentY - b.by);
-
-    if (inHole) {
-      // Continuous ramp: t=0 at the bottom of a flight (previous floor
-      // level), t=1 at the top (next floor level) -- same mechanism
-      // terrain slopes already use (a smooth function of position), so
-      // Player.tsx's existing ground-snap climbs it exactly like a hill,
-      // no dedicated "stair climbing" code needed.
-      const t = THREE.MathUtils.clamp((lx - holeMinX) / BUILDING_HOLE_SIZE, 0, 1);
-      for (let f = 0; f < b.numFloors; f++) {
-        const candidate = b.by + (f + t) * b.floorHeight;
-        const dist = Math.abs(currentY - candidate);
-        if (dist < bestDist) { bestDist = dist; best = candidate; }
-      }
-    } else {
-      for (let f = 1; f <= b.numFloors; f++) {
-        const candidate = b.by + f * b.floorHeight;
-        const dist = Math.abs(currentY - candidate);
-        if (dist < bestDist) { bestDist = dist; best = candidate; }
-      }
-    }
-
-    return best === b.by ? null : best;
-  }
-  return null;
-};
 
 const Building: React.FC<{ x: number, z: number, width: number, depth: number, height: number, color: string, style: 'modern' | 'glass' | 'brick', corner: number, numFloors: number, floorHeight: number }> = ({ x, z, width, depth, height, color, style, corner, numFloors, floorHeight }) => {
   const y = getTerrainHeight(x, z);
@@ -371,52 +294,25 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
   const halfD = depth / 2;
   const doorHalf = BUILDING_DOOR_WIDTH / 2;
 
-  // Stairwell hole + floor-slab piece geometry -- pure arithmetic (no
-  // randomness), same formula as getHoleBounds/getBuildingHeightOffset
-  // above, so what's rendered here always matches what's actually
-  // walkable. Cheap enough to just recompute each render (no useMemo
-  // needed, unlike the genuinely-random stuff below).
-  const { holeMinX, holeMaxX, holeMinZ, holeMaxZ, sx, sz } = getHoleBounds(width, depth, corner);
-  // Piece A: the big remainder of the floor plate, full depth, X range
-  // excluding the hole's X band entirely.
+  // Pezzo A della soletta (il grosso del piano, fuori dalla fascia X del
+  // vano scala): i dettagli sul tetto ci stanno sopra, lontano dal vano.
+  const { holeMinX, holeMaxX, sx } = getHoleBounds(width, depth, corner);
   const pieceAMinX = sx < 0 ? holeMaxX : -halfW;
   const pieceAMaxX = sx < 0 ? halfW : holeMinX;
   const pieceAWidth = pieceAMaxX - pieceAMinX;
   const pieceACenterX = (pieceAMinX + pieceAMaxX) / 2;
-  // Piece B: the strip alongside the hole (same X band as the hole, Z
-  // range covering whatever the hole doesn't).
-  const pieceBMinZ = sz < 0 ? holeMaxZ : -halfD;
-  const pieceBMaxZ = sz < 0 ? halfD : holeMinZ;
-  const pieceBDepth = pieceBMaxZ - pieceBMinZ;
-  const pieceBCenterZ = (pieceBMinZ + pieceBMaxZ) / 2;
-  const pieceBCenterX = (holeMinX + holeMaxX) / 2;
-  const stairCenterX = (holeMinX + holeMaxX) / 2;
-  const stairCenterZ = (holeMinZ + holeMaxZ) / 2;
   const hasLintel = height > BUILDING_DOOR_HEIGHT + 0.5;
 
-  // Shared stair-flight geometry for this building -- identical for every
-  // floor (only translated between floors), so ALL flights in this
-  // building share one BoxGeometry via instancing. floorHeight varies
-  // per-building (see getBuildingNumFloors), so this can't be shared
-  // globally across buildings, only within one.
-  // "sostituisci le scale con quelle di simulation-citta" -- that project's
-  // own Building() (its Hide & Seek demo) drew each flight as a stack of
-  // chunky individual boxGeometry(1.0, 0.2, 0.22) treads (see its
-  // src/App.js) instead of one continuous inclined plank. Ported as the
-  // same idea, generalized to whatever run (BUILDING_HOLE_SIZE) / rise
-  // (floorHeight) this building actually has: STAIR_STEP_COUNT treads per
-  // flight, each one a small flat box. IMPORTANT: this only changes what's
-  // DRAWN -- getBuildingHeightOffset above still returns a smooth
-  // continuous ramp inside the hole (unchanged), which is what Player.tsx
-  // actually climbs (see the big comment up top on why floors/stairs are
-  // height-field math, not physics). The step boxes below are laid out to
-  // sit right on top of that same ramp, tread by tread, purely for looks.
-  const STAIR_STEP_COUNT = 10;
-  const stairGeometry = useMemo(() => {
-    const stepRun = (BUILDING_HOLE_SIZE / STAIR_STEP_COUNT) * 1.1; // slight overlap so treads don't show a gap
-    const stepRise = floorHeight / STAIR_STEP_COUNT;
-    return new THREE.BoxGeometry(stepRun, stepRise, BUILDING_STAIR_WIDTH);
-  }, [floorHeight]);
+
+  // Torre di vetro: scatola unica come prima ma senza la faccia di sopra
+  // (il tetto e' il coperchio a L sotto, col vano aperto).
+  const glassMaterials = useMemo(() => {
+    if (style !== 'glass') return null;
+    const m = new THREE.MeshStandardMaterial({ color, roughness: 0.1, metalness: 0.9, side: THREE.DoubleSide });
+    const hidden = new THREE.MeshBasicMaterial({ visible: false });
+    // ordine facce BoxGeometry: +x, -x, +y, -y, +z, -z
+    return [m, m, hidden, m, m, m];
+  }, [style, color]);
 
   // Real punched-hole wall panels (front/back/left/right) replacing the
   // single solid box for anything that isn't a glass curtain-wall tower
@@ -594,16 +490,13 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           the whole volume (fine when buildings were just static scenery).
           Now split into wall-only pieces (front-left/front-right around a
           real door gap, a lintel above it, back/left/right full) so the
-          interior is actually walkable in -- floors/stairs/roof are NOT
-          physical colliders at all (see the big comment above
-          getBuildingHeightOffset for why), only these walls need to
-          physically block horizontal movement, and they do that for every
-          floor at once regardless of building height. */}
+          interior is actually walkable in. Floors/stairs/roof: see
+          BuildingStairwell. */}
       <RigidBody
         type="fixed"
         colliders={false}
         position={[x, y, z]}
-        collisionGroups={groupsExcluding(CollisionGroups.Default)}
+        collisionGroups={BUILDING_WALL_GROUPS}
       >
         {colliderBoxes ? (
           <>
@@ -663,6 +556,7 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
         )}
       </RigidBody>
 
+
       {/* Main Structure. Glass curtain-wall towers keep the original
           single solid box (no punched windows -- see the mullion-overlay
           comment below for why); everything else ('modern'/'brick') now
@@ -672,9 +566,9 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           buildWallGeometry's comment up top. DoubleSide throughout so the
           inner surface is visible once you're standing inside. */}
       {style === 'glass' || !wallGeometries ? (
-        <mesh castShadow receiveShadow position={[x, y + height / 2, z]}>
+        <mesh castShadow receiveShadow position={[x, y + height / 2, z]} material={glassMaterials ?? undefined}>
           <boxGeometry args={[width, height, depth]} />
-          <meshStandardMaterial color={color} roughness={0.1} metalness={0.9} side={THREE.DoubleSide} />
+          {!glassMaterials && <meshStandardMaterial color={color} roughness={0.1} metalness={0.9} side={THREE.DoubleSide} />}
         </mesh>
       ) : (
         <>
@@ -690,17 +584,23 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           <mesh geometry={wallGeometries.side} position={[x + halfW, y, z]} rotation={[0, -Math.PI / 2, 0]} castShadow receiveShadow>
             <meshStandardMaterial {...wallMaterialProps} />
           </mesh>
-          {/* Roof cap -- the punched wall panels above are just the 4
-              perimeter faces (each BUILDING_WALL_THICKNESS thick, not the
-              old full-depth solid box), so the volume needs its own lid;
-              the ground floor is intentionally left open (bare terrain,
-              same as before). */}
-          <mesh position={[x, y + height + BUILDING_WALL_THICKNESS / 2, z]} castShadow receiveShadow>
-            <boxGeometry args={[width, BUILDING_WALL_THICKNESS, depth]} />
-            <meshStandardMaterial {...wallMaterialProps} />
-          </mesh>
         </>
       )}
+
+      {/* Solette, tetto a L, scala a due rampe con pianerottolo, parapetto:
+          grafica e collider (BuildingStairwell.tsx). */}
+      <BuildingStairwell
+        x={x}
+        y={y}
+        z={z}
+        width={width}
+        depth={depth}
+        height={height}
+        corner={corner}
+        numFloors={numFloors}
+        floorHeight={floorHeight}
+        roofMaterial={{ color: wallMaterialProps.color, roughness: wallMaterialProps.roughness, metalness: wallMaterialProps.metalness }}
+      />
 
       {/* Windows (modern/brick) -- one instanced mesh per building, lit
           (warm) vs unlit (dark) per-instance color. This is the "glass"
@@ -776,74 +676,6 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
         </mesh>
       </group>
 
-      {/* Interior floor slabs -- visual only (see the big comment above
-          getBuildingHeightOffset for why these carry no collider), an
-          L-shaped pair of instanced boxes per floor level leaving the
-          stairwell hole open, stacked for every intermediate floor (the
-          ground floor is bare terrain, the top level is the roof -- both
-          already otherwise represented). */}
-      {numFloors > 1 && (
-        <>
-          <instancedMesh
-            args={[null as any, null as any, numFloors - 1]}
-            onUpdate={(self) => {
-              for (let f = 1; f < numFloors; f++) {
-                _slabDummy.position.set(x + pieceACenterX, y + f * floorHeight, z);
-                _slabDummy.updateMatrix();
-                self.setMatrixAt(f - 1, _slabDummy.matrix);
-              }
-              self.instanceMatrix.needsUpdate = true;
-            }}
-          >
-            <boxGeometry args={[pieceAWidth, BUILDING_SLAB_THICKNESS, depth]} />
-            <meshStandardMaterial color="#4a4a4a" roughness={0.85} />
-          </instancedMesh>
-          <instancedMesh
-            args={[null as any, null as any, numFloors - 1]}
-            onUpdate={(self) => {
-              for (let f = 1; f < numFloors; f++) {
-                _slabDummy.position.set(x + pieceBCenterX, y + f * floorHeight, z + pieceBCenterZ);
-                _slabDummy.updateMatrix();
-                self.setMatrixAt(f - 1, _slabDummy.matrix);
-              }
-              self.instanceMatrix.needsUpdate = true;
-            }}
-          >
-            <boxGeometry args={[BUILDING_HOLE_SIZE, BUILDING_SLAB_THICKNESS, pieceBDepth]} />
-            <meshStandardMaterial color="#4a4a4a" roughness={0.85} />
-          </instancedMesh>
-        </>
-      )}
-
-      {/* Interior stairs -- one straight flight per floor, stacked
-          directly above each other inside the stairwell shaft (a
-          simplification vs. a real switchback -- steeper than a real
-          staircase, but this game's ground-snap movement climbs any
-          continuous incline regardless of angle, so it's fully walkable).
-          All flights in this building share one instanced geometry. */}
-      <instancedMesh
-        args={[null as any, null as any, numFloors * STAIR_STEP_COUNT]}
-        onUpdate={(self) => {
-          self.geometry = stairGeometry;
-          for (let f = 0; f < numFloors; f++) {
-            for (let i = 0; i < STAIR_STEP_COUNT; i++) {
-              // tCenter mirrors getBuildingHeightOffset's own `t` (0 at
-              // holeMinX, 1 at holeMaxX) so each tread's world X lines up
-              // with the invisible ramp height it's meant to sit on.
-              const tCenter = (i + 0.5) / STAIR_STEP_COUNT;
-              const stepLocalX = holeMinX + tCenter * BUILDING_HOLE_SIZE;
-              const stepLocalY = f * floorHeight + tCenter * floorHeight;
-              _stairDummy.position.set(x + stepLocalX, y + stepLocalY, z + stairCenterZ);
-              _stairDummy.rotation.set(0, 0, 0);
-              _stairDummy.updateMatrix();
-              self.setMatrixAt(f * STAIR_STEP_COUNT + i, _stairDummy.matrix);
-            }
-          }
-          self.instanceMatrix.needsUpdate = true;
-        }}
-      >
-        <meshStandardMaterial color="#4f46e5" roughness={0.7} metalness={0.1} />
-      </instancedMesh>
 
       {/* Entrance canopy -- thin overhang + two support posts over the
           main doors, only on wider non-glass buildings. */}
@@ -870,7 +702,7 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
           type="fixed"
           colliders={false}
           position={[x + annex.ox, y + annex.h / 2, z + annex.oz]}
-          collisionGroups={groupsExcluding(CollisionGroups.Default)}
+          collisionGroups={BUILDING_WALL_GROUPS}
         >
           <CuboidCollider args={[annex.w / 2, annex.h / 2, annex.d / 2]} />
           <mesh castShadow receiveShadow>
@@ -886,9 +718,9 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
 
       {/* Green Roof */}
       {hasGreenRoof && (
-        <group position={[x, y + height + 0.1, z]}>
-            <mesh receiveShadow>
-                <boxGeometry args={[width * 0.9, 0.2, depth * 0.9]} />
+        <group position={[x + pieceACenterX, y + height + BUILDING_WALL_THICKNESS, z]}>
+            <mesh receiveShadow position={[0, 0.05, 0]}>
+                <boxGeometry args={[pieceAWidth * 0.9, 0.1, depth * 0.9]} />
                 <meshStandardMaterial color="#3a5a2a" />
             </mesh>
             {/* Small trees on roof */}
@@ -902,9 +734,9 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
       {/* Tiered setback + spire -- breaks up the silhouette of the tallest
           towers instead of every skyscraper being one plain extruded box. */}
       {hasSetbackTier && (
-        <group position={[x, y + height, z]}>
+        <group position={[x + pieceACenterX, y + height, z]}>
             <mesh castShadow receiveShadow position={[0, height * 0.06, 0]}>
-                <boxGeometry args={[width * 0.6, height * 0.12, depth * 0.6]} />
+                <boxGeometry args={[pieceAWidth * 0.8, height * 0.12, depth * 0.6]} />
                 <meshStandardMaterial color={color} roughness={0.5} metalness={0.3} />
             </mesh>
             <mesh position={[0, height * 0.12 + height * 0.08, 0]}>
@@ -921,13 +753,13 @@ const Building: React.FC<{ x: number, z: number, width: number, depth: number, h
       {/* Rooftop water tank / AC units -- cheap variety for mid-height
           buildings that get neither the green roof nor the setback tier. */}
       {hasRoofUnits && (
-        <group position={[x, y + height + 0.1, z]}>
-            <mesh position={[width * 0.25, height * 0.05, depth * 0.2]} castShadow>
-                <cylinderGeometry args={[width * 0.12, width * 0.12, height * 0.1, 8]} />
+        <group position={[x + pieceACenterX, y + height + 0.1, z]}>
+            <mesh position={[pieceAWidth * 0.2, height * 0.05, depth * 0.2]} castShadow>
+                <cylinderGeometry args={[pieceAWidth * 0.15, pieceAWidth * 0.15, height * 0.1, 8]} />
                 <meshStandardMaterial color="#6b6b6b" roughness={0.7} metalness={0.3} />
             </mesh>
-            <mesh position={[-width * 0.22, height * 0.025, -depth * 0.18]} castShadow>
-                <boxGeometry args={[width * 0.18, height * 0.05, depth * 0.18]} />
+            <mesh position={[-pieceAWidth * 0.2, height * 0.025, -depth * 0.18]} castShadow>
+                <boxGeometry args={[pieceAWidth * 0.25, height * 0.05, depth * 0.18]} />
                 <meshStandardMaterial color="#444" roughness={0.6} />
             </mesh>
         </group>
@@ -1021,8 +853,7 @@ const City: React.FC = () => {
   const treeTemplates = useTreeTemplates();
 
   // Buildings/courtyards/plazas now come from the shared module-level
-  // CITY_LAYOUT (see above) instead of a component-local useMemo, so
-  // getBuildingHeightOffset can read the exact same data Player.tsx needs.
+  // CITY_LAYOUT (see above) instead of a component-local useMemo.
   const { buildings, courtyards, plazas } = CITY_LAYOUT;
 
   return (
