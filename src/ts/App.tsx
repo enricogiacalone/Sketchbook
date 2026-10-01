@@ -1,48 +1,50 @@
-import React, { Suspense, useState, useEffect } from "react";
-import { Canvas } from "@react-three/fiber";
-import { Physics } from "@react-three/rapier";
-import Scene from "./Scene";
-import RagdollPhysicsDebugBridge from "./components/Environment/RagdollPhysicsDebugBridge";
-import Sky from "./components/Environment/Sky";
-import SunLight from "./components/Environment/SunLight";
-import WorldFog from "./components/Environment/WorldFog";
-import NightSky from "./components/Environment/NightSky";
-import StreetLampGlow from "./components/Environment/StreetLampGlow";
-import Ocean from "./components/Environment/Ocean";
-import StatusBars from "./components/UI/StatusBars";
-import CollectiblesCounter from "./components/UI/CollectiblesCounter";
-import MissionHUD from "./components/UI/MissionHUD";
-import Controls from "./components/UI/Controls";
-import GithubCorner from "./components/UI/GithubCorner";
-import WelcomeScreen from "./components/UI/WelcomeScreen";
-const FlyLab = React.lazy(() => import("./flyLab/FlyLab"));
-import LoadingScreen from "./components/UI/LoadingScreen";
-import ChatInput from "./components/UI/ChatInput";
-import Minimap from "./components/UI/Minimap";
-import Crosshair from "./components/UI/Crosshair";
-import DroneHUD from "./components/UI/DroneHUD";
-import WeaponWheel from "./components/UI/WeaponWheel";
-import GamepadDebug from "./components/UI/GamepadDebug";
-import ScenariosGUI from "./components/UI/ScenariosGUI";
-import CombatArenaGUI from "./components/UI/CombatArenaGUI";
-import RagdollBenchGUI from "./components/UI/RagdollBenchGUI";
-import RagdollBenchOverlay from "./components/UI/RagdollBenchOverlay";
-import DuelHUD from "./components/UI/DuelHUD";
-import { DUEL_PLAYER_ID } from "./components/Environment/DuelArena";
-import Loader from "./components/UI/Loader"; // Helper to track loading
+import React, { Suspense, useState, useEffect } from 'react';
+import { Canvas } from '@react-three/fiber';
+import { Physics } from '@react-three/rapier';
+import Scene from './Scene';
+import RagdollPhysicsDebugBridge from './components/Environment/RagdollPhysicsDebugBridge';
+import Sky from './components/Environment/Sky';
+import SunLight from './components/Environment/SunLight';
+import WorldFog from './components/Environment/WorldFog';
+import NightSky from './components/Environment/NightSky';
+import StreetLampGlow from './components/Environment/StreetLampGlow';
+import Ocean from './components/Environment/Ocean';
+import StatusBars from './components/UI/StatusBars';
+import CollectiblesCounter from './components/UI/CollectiblesCounter';
+import MissionHUD from './components/UI/MissionHUD';
+import Controls from './components/UI/Controls';
+import GithubCorner from './components/UI/GithubCorner';
+import WelcomeScreen from './components/UI/WelcomeScreen';
+import ToonStyle from './components/Environment/ToonStyle';
+import GraphicsGUI from './components/UI/GraphicsGUI';
+const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
+import LoadingScreen from './components/UI/LoadingScreen';
+import ChatInput from './components/UI/ChatInput';
+import Minimap from './components/UI/Minimap';
+import Crosshair from './components/UI/Crosshair';
+import DroneHUD from './components/UI/DroneHUD';
+import WeaponWheel from './components/UI/WeaponWheel';
+import GamepadDebug from './components/UI/GamepadDebug';
+import ScenariosGUI from './components/UI/ScenariosGUI';
+import CombatArenaGUI from './components/UI/CombatArenaGUI';
+import RagdollBenchGUI from './components/UI/RagdollBenchGUI';
+import RagdollBenchOverlay from './components/UI/RagdollBenchOverlay';
+import DuelHUD from './components/UI/DuelHUD';
+import { DUEL_PLAYER_ID } from './components/Environment/DuelArena';
+import Loader from './components/UI/Loader'; // Helper to track loading
 // "sostituire il personaggio boxman in playground con il nostro manichino"
-import CityPlayer from "./components/CityPlayer";
-import Drone from "./components/Drone";
-import ThirdPersonCamera from "./components/ThirdPersonCamera";
-import { useStore } from "./store";
-import { useShallow } from "zustand/react/shallow";
-import * as THREE from "three";
+import CityPlayer from './components/CityPlayer';
+import Drone from './components/Drone';
+import ThirdPersonCamera from './components/ThirdPersonCamera';
+import { useStore } from './store';
+import { useShallow } from 'zustand/react/shallow';
+import * as THREE from 'three';
 
 const App: React.FC = () => {
   const [isJoined, setIsJoined] = useState(false);
   // "Laboratorio cervello mosca" (WelcomeScreen): scena a parte, vedi src/ts/flyLab
   const [labMode, setLabMode] = useState(false);
-  const [userName, setUserName] = useState("");
+  const [userName, setUserName] = useState('');
   const { isLoading, setIsLoading, isPaused, setPaused, testScene, showGameplayHud } = useStore(
     useShallow((state) => ({
       isLoading: state.isLoading,
@@ -68,8 +70,8 @@ const App: React.FC = () => {
   const autoJoinName = React.useMemo(() => {
     if (!import.meta.env.DEV) return null;
     const params = new URLSearchParams(window.location.search);
-    if (!params.has("autojoin")) return null;
-    return params.get("autojoin") || "Claude";
+    if (!params.has('autojoin')) return null;
+    return params.get('autojoin') || 'Claude';
   }, []);
 
   const handleJoin = (name: string, controlMethod: string, mode: 'world' | 'duel' | 'flylab' = 'world') => {
@@ -105,16 +107,14 @@ const App: React.FC = () => {
     // three's own .d.ts mistypes getContext()'s return as the wrapper
     // class instead of the native AudioContext (its own JSDoc says
     // Window.AudioContext) -- cast to reach the real .resume().
-    (THREE.AudioContext.getContext() as unknown as globalThis.AudioContext)
-      .resume()
-      .catch(() => {});
+    (THREE.AudioContext.getContext() as unknown as globalThis.AudioContext).resume().catch(() => {});
   };
 
   useEffect(() => {
     if (!autoJoinName || isJoined) return;
     (window as any).__disableAutoPause = true;
     (window as any).__forceTimeOfDay = 12;
-    handleJoin(autoJoinName, "keyboard");
+    handleJoin(autoJoinName, 'keyboard');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoJoinName]);
 
@@ -158,24 +158,22 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.hidden && !(window as any).__disableAutoPause)
-        setPaused(true);
+      if (document.hidden && !(window as any).__disableAutoPause) setPaused(true);
     };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () =>
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [setPaused]);
 
   if (labMode) {
     return (
-      <Suspense fallback={<div style={{ color: "#aaa", padding: 20 }}>carico il laboratorio...</div>}>
+      <Suspense fallback={<div style={{ color: '#aaa', padding: 20 }}>carico il laboratorio...</div>}>
         <FlyLab onExit={() => setLabMode(false)} />
       </Suspense>
     );
   }
 
   return (
-    <div style={{ width: "100vw", height: "100vh", background: "#111" }}>
+    <div style={{ width: '100vw', height: '100vh', background: '#111' }}>
       {/* Show WelcomeScreen if not joined */}
       {!isJoined && !autoJoinName && <WelcomeScreen onJoin={handleJoin} />}
 
@@ -216,6 +214,8 @@ const App: React.FC = () => {
                 procedural sky, most noticeable on glass towers reflecting
                 a "city" that isn't the one around them. */}
             <SunLight />
+            {/* "stilizza il gioco in stile toon" (casella nel menu / pannello Grafica) */}
+            <ToonStyle />
             <StreetLampGlow />
 
             {/*
@@ -288,23 +288,23 @@ const App: React.FC = () => {
         <div
           id="ui-layer"
           style={{
-            position: "absolute",
+            position: 'absolute',
             top: 0,
             left: 0,
-            width: "100%",
-            height: "100%",
-            pointerEvents: "none",
+            width: '100%',
+            height: '100%',
+            pointerEvents: 'none',
           }}
         >
           {showGameplayHud && (
             <>
               <div
                 style={{
-                  pointerEvents: "auto",
-                  position: "absolute",
+                  pointerEvents: 'auto',
+                  position: 'absolute',
                   top: 20,
                   left: 20,
-                  color: "white",
+                  color: 'white',
                 }}
               >
                 <h1 className="sb-font" style={{ fontSize: 32, margin: 0 }}>
@@ -319,7 +319,7 @@ const App: React.FC = () => {
             </>
           )}
           {/* "deve essere visibile solo in playground": il mondo aperto, non duello/test */}
-          {testScene === "none" && <Minimap />}
+          {testScene === 'none' && <Minimap />}
           <ChatInput />
           <Crosshair />
           <DroneHUD />
@@ -328,31 +328,30 @@ const App: React.FC = () => {
           <ScenariosGUI />
           <CombatArenaGUI />
           <RagdollBenchGUI />
+          <GraphicsGUI />
           <RagdollBenchOverlay />
           <DuelHUD />
           {isPaused && (
             <div
               style={{
-                position: "absolute",
+                position: 'absolute',
                 top: 0,
                 left: 0,
-                width: "100%",
-                height: "100%",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "rgba(0,0,0,0.5)",
-                color: "white",
-                textAlign: "center",
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(0,0,0,0.5)',
+                color: 'white',
+                textAlign: 'center',
               }}
             >
               <div>
                 <h1 className="sb-font" style={{ fontSize: 48, margin: 0 }}>
                   Pausa
                 </h1>
-                <div style={{ fontSize: 16, opacity: 0.85 }}>
-                  Premi Start (o Esc) per riprendere
-                </div>
+                <div style={{ fontSize: 16, opacity: 0.85 }}>Premi Start (o Esc) per riprendere</div>
               </div>
             </div>
           )}

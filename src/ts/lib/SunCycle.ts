@@ -1,4 +1,5 @@
-import * as THREE from "three";
+import * as THREE from 'three';
+import { useStore } from '../store';
 
 // Shared day/night cycle math -- "sistemiamo il cielo... lo vorrei piu
 // realistico". Used to live only inline inside Sky.tsx's useFrame, with no
@@ -27,13 +28,7 @@ export const DAY_CYCLE_SECONDS = 360; // full day/night in 360s -- user clarifie
 const SUN_PATH_TILT = Math.PI * 0.12;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
 
-// "fai cominciare il gioco di giorno" -- elapsedTime starts at 0 the
-// moment the Canvas mounts, which without this offset maps to
-// timeOfDay=0 (midnight, sun straight down) -- the game always started
-// at night. Shifting by half a cycle makes elapsedTime=0 read as noon
-// instead; the cycle still runs at the same speed and still goes
-// through a full day/night after that, just phase-shifted.
-const DAY_START_OFFSET = DAY_CYCLE_SECONDS / 2;
+// (si parte di giorno: vedi FIXED_DAY_HOUR sotto)
 
 // TEMP DEBUG (Claude): browser-automation testing can't wait out a real
 // day/night cycle (or see anything useful at night), and switching desktop
@@ -43,10 +38,22 @@ const DAY_START_OFFSET = DAY_CYCLE_SECONDS / 2;
 // elapsedTime, consistently across every consumer of this function (Sky,
 // SunLight, WorldFog, NightSky all call getTimeOfDay, never compute their
 // own time), without touching the real day/night cycle for actual players.
+// "metti un checkbox per far cominciare la giornata, altrimenti deve
+// rimanere sempre giorno" -- casella spenta: il sole resta fermo a
+// FIXED_DAY_HOUR. Accesa: la giornata riparte DA QUELL'ORA (niente salti)
+// e scorre; rispenta: torna giorno.
+export const FIXED_DAY_HOUR = 10.5;
+let cycleStartElapsed: number | null = null;
+
 export const getTimeOfDay = (elapsedTime: number): number => {
   const forced = (window as any).__forceTimeOfDay;
   if (typeof forced === 'number') return forced;
-  return (((elapsedTime + DAY_START_OFFSET) / DAY_CYCLE_SECONDS) * 24) % 24;
+  if (!useStore.getState().dayCycle) {
+    cycleStartElapsed = null;
+    return FIXED_DAY_HOUR;
+  }
+  if (cycleStartElapsed === null) cycleStartElapsed = elapsedTime;
+  return (FIXED_DAY_HOUR + ((elapsedTime - cycleStartElapsed) / DAY_CYCLE_SECONDS) * 24) % 24;
 };
 
 // Unit vector pointing FROM the world origin TOWARD the sun. y > 0 means
@@ -66,11 +73,9 @@ export const getSunDirection = (elapsedTime: number): THREE.Vector3 => {
 // band around the horizon (sunDirY in [-0.12, 0.12]), instead of a hard
 // cutoff at y=0 -- avoids lighting/fog/stars all popping instantly the
 // moment the sun crosses the horizon.
-export const getDayFactor = (sunDirY: number): number =>
-  THREE.MathUtils.smoothstep(sunDirY, -0.12, 0.12);
+export const getDayFactor = (sunDirY: number): number => THREE.MathUtils.smoothstep(sunDirY, -0.12, 0.12);
 
 // Warm-near-horizon / neutral-near-zenith blend factor, 0..1, used to tint
 // both the sun light and the fog/horizon color toward orange at sunrise
 // and sunset without affecting the color at high noon.
-export const getWarmth = (sunDirY: number): number =>
-  1 - THREE.MathUtils.clamp(sunDirY, 0, 1);
+export const getWarmth = (sunDirY: number): number => 1 - THREE.MathUtils.clamp(sunDirY, 0, 1);

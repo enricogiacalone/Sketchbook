@@ -11,6 +11,7 @@ import { useInput } from '../../../hooks/useInput';
 import { acquireDebugGui, releaseDebugGui } from '../../../lib/debugGui';
 import { acquireAudioListener, releaseAudioListener } from '../../../lib/sharedAudioListener';
 import { CollisionGroups, groupsExcluding } from '../../../enums/CollisionGroups';
+import { toonCacheKey } from '../../../lib/toonStyle';
 
 // "Immersive 3D Audio and Visualization" -- porting nel duello della demo di
 // SimonDev (https://github.com/simondevyoutube/ThreeJS_Tutorial_3DSound,
@@ -246,8 +247,8 @@ const AudioArena: React.FC = () => {
 
   const mats = useMemo(() => {
     const an = Math.min(8, gl.capabilities.getMaxAnisotropy());
-    const floor = makePbr(tex, 'floor', (ROOM_HALF * 2) / 25 * 1.5, (ROOM_HALF * 2) / 25 * 1.5, an);
-    const wallLong = makePbr(tex, 'wall', (ROOM_HALF * 2 + WALL_T * 2) / 25 * 2, (WALL_H / 25) * 2, an);
+    const floor = makePbr(tex, 'floor', ((ROOM_HALF * 2) / 25) * 1.5, ((ROOM_HALF * 2) / 25) * 1.5, an);
+    const wallLong = makePbr(tex, 'wall', ((ROOM_HALF * 2 + WALL_T * 2) / 25) * 2, (WALL_H / 25) * 2, an);
     const speaker = makePbr(tex, 'spk', 1, 1, an);
     const cube = makePbr(tex, 'cube', 1, 1, an);
     // bagliore per-cubo: colore d'istanza * aGlow (l'emissive di un
@@ -263,7 +264,7 @@ const AudioArena: React.FC = () => {
           '#include <emissivemap_fragment>\n#ifdef USE_COLOR\ntotalEmissiveRadiance += vColor.rgb * vGlow;\n#endif'
         );
     };
-    cube.customProgramCacheKey = () => 'audioArenaCubes';
+    cube.customProgramCacheKey = () => 'audioArenaCubes' + toonCacheKey();
 
     const screenData = new Uint8Array(64);
     const screenTex = new THREE.DataTexture(screenData, 64, 1, THREE.RedFormat);
@@ -285,7 +286,7 @@ const AudioArena: React.FC = () => {
         .replace('void main() {', SCREEN_FS + '\nvoid main() {')
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += AudioVisualizer().xyz;');
     };
-    screen.customProgramCacheKey = () => 'audioArenaScreen';
+    screen.customProgramCacheKey = () => 'audioArenaScreen' + toonCacheKey();
     const screenBody = new THREE.MeshStandardMaterial({ color: 0x404040, roughness: 0.1, metalness: 0 });
     return { floor, wallLong, speaker, cube, screen, screenBody, screenTex, screenData, screenUniforms };
   }, [tex, gl]);
@@ -319,7 +320,14 @@ const AudioArena: React.FC = () => {
   // play/pausa indipendente per cassa
   // "la musica e' spenta all'inizio": si accende con M (tutte) o J/K
   const playingRef = useRef<Record<SpeakerId, boolean>>({ cubi: false, schermo: false });
-  const settingsRef = useRef({ 'suona cubi': false, 'suona schermo': false, volume: 1, attenuazione: DEFAULT_REF_DISTANCE, 'brano cubi': '-', 'brano schermo': '-' });
+  const settingsRef = useRef({
+    'suona cubi': false,
+    'suona schermo': false,
+    volume: 1,
+    attenuazione: DEFAULT_REF_DISTANCE,
+    'brano cubi': '-',
+    'brano schermo': '-',
+  });
 
   const playlists = { cubi: getPlaylist('cubi'), schermo: getPlaylist('schermo') };
   const playlistKey = playlists.cubi.tracks.map((t) => t.url).join('|') + '#' + playlists.schermo.tracks.map((t) => t.url).join('|');
@@ -460,15 +468,26 @@ const AudioArena: React.FC = () => {
     const folder = gui.addFolder('Musica (casse arena)');
     const s = settingsRef.current;
     folder.add({ f: () => togglePlay() }, 'f').name('Play / pausa tutte (M)');
-    folder.add(s, 'suona cubi').name('Cassa cubi: suona (J)').listen().onChange((v: boolean) => toggleSpeaker('cubi', v));
+    folder
+      .add(s, 'suona cubi')
+      .name('Cassa cubi: suona (J)')
+      .listen()
+      .onChange((v: boolean) => toggleSpeaker('cubi', v));
     folder.add({ f: () => next('cubi') }, 'f').name('Cassa cubi: brano successivo');
-    folder.add(s, 'suona schermo').name('Cassa schermo: suona (K)').listen().onChange((v: boolean) => toggleSpeaker('schermo', v));
+    folder
+      .add(s, 'suona schermo')
+      .name('Cassa schermo: suona (K)')
+      .listen()
+      .onChange((v: boolean) => toggleSpeaker('schermo', v));
     folder.add({ f: () => next('schermo') }, 'f').name('Cassa schermo: brano successivo');
     // solo la musica (l'ascoltatore e' condiviso anche con la pistola)
-    folder.add(s, 'volume', 0, 2, 0.05).name('Volume musica').onChange((v: number) => {
-      const a = audioRef.current;
-      if (a) for (const sp of Object.values(a.speakers)) sp.pa.setVolume(v);
-    });
+    folder
+      .add(s, 'volume', 0, 2, 0.05)
+      .name('Volume musica')
+      .onChange((v: number) => {
+        const a = audioRef.current;
+        if (a) for (const sp of Object.values(a.speakers)) sp.pa.setVolume(v);
+      });
     folder
       .add(s, 'attenuazione', 1, 30, 0.5)
       .name('Distanza piena (m)')
@@ -546,7 +565,13 @@ const AudioArena: React.FC = () => {
   return (
     <group>
       {/* pavimento: lastra visiva + collider per ragdoll/proiettili */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, AUDIO_ARENA_FLOOR_Y + 0.002, 0]} receiveShadow material={mats.floor} visible={scene.floor}>
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, AUDIO_ARENA_FLOOR_Y + 0.002, 0]}
+        receiveShadow
+        material={mats.floor}
+        visible={scene.floor}
+      >
         <planeGeometry args={[ROOM_HALF * 2, ROOM_HALF * 2]} />
       </mesh>
       {scene.floor && (
@@ -555,20 +580,44 @@ const AudioArena: React.FC = () => {
         </RigidBody>
       )}
       {scene.walls && (
-      <RigidBody type="fixed" colliders={false}>
-        {/* muri */}
-        <CuboidCollider args={[outer + WALL_T / 2, WALL_H / 2, WALL_T / 2]} position={[0, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, -outer]} collisionGroups={SOLID_GROUPS} />
-        <CuboidCollider args={[outer + WALL_T / 2, WALL_H / 2, WALL_T / 2]} position={[0, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, outer]} collisionGroups={SOLID_GROUPS} />
-        <CuboidCollider args={[WALL_T / 2, WALL_H / 2, outer + WALL_T / 2]} position={[-outer, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, 0]} collisionGroups={SOLID_GROUPS} />
-        <CuboidCollider args={[WALL_T / 2, WALL_H / 2, outer + WALL_T / 2]} position={[outer, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, 0]} collisionGroups={SOLID_GROUPS} />
-      </RigidBody>
+        <RigidBody type="fixed" colliders={false}>
+          {/* muri */}
+          <CuboidCollider
+            args={[outer + WALL_T / 2, WALL_H / 2, WALL_T / 2]}
+            position={[0, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, -outer]}
+            collisionGroups={SOLID_GROUPS}
+          />
+          <CuboidCollider
+            args={[outer + WALL_T / 2, WALL_H / 2, WALL_T / 2]}
+            position={[0, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, outer]}
+            collisionGroups={SOLID_GROUPS}
+          />
+          <CuboidCollider
+            args={[WALL_T / 2, WALL_H / 2, outer + WALL_T / 2]}
+            position={[-outer, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, 0]}
+            collisionGroups={SOLID_GROUPS}
+          />
+          <CuboidCollider
+            args={[WALL_T / 2, WALL_H / 2, outer + WALL_T / 2]}
+            position={[outer, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, 0]}
+            collisionGroups={SOLID_GROUPS}
+          />
+        </RigidBody>
       )}
       {scene.speakers && (
-      <RigidBody type="fixed" colliders={false}>
-        {/* casse */}
-        <CuboidCollider args={[SPEAKER_W / 2, SPEAKER_H / 2, SPEAKER_D / 2]} position={[-SPEAKER_X, SPEAKER_Y, 0]} collisionGroups={SOLID_GROUPS} />
-        <CuboidCollider args={[SPEAKER_W / 2, SPEAKER_H / 2, SPEAKER_D / 2]} position={[SPEAKER_X, SPEAKER_Y, 0]} collisionGroups={SOLID_GROUPS} />
-      </RigidBody>
+        <RigidBody type="fixed" colliders={false}>
+          {/* casse */}
+          <CuboidCollider
+            args={[SPEAKER_W / 2, SPEAKER_H / 2, SPEAKER_D / 2]}
+            position={[-SPEAKER_X, SPEAKER_Y, 0]}
+            collisionGroups={SOLID_GROUPS}
+          />
+          <CuboidCollider
+            args={[SPEAKER_W / 2, SPEAKER_H / 2, SPEAKER_D / 2]}
+            position={[SPEAKER_X, SPEAKER_Y, 0]}
+            collisionGroups={SOLID_GROUPS}
+          />
+        </RigidBody>
       )}
       <mesh position={[0, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, -outer]} {...wallProps}>
         <boxGeometry args={[(outer + WALL_T / 2) * 2, WALL_H, WALL_T]} />

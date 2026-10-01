@@ -1,4 +1,4 @@
-import { DEFAULT_RAGDOLL_BENCH, type RagdollBenchSettings } from "./components/Environment/ragdoll/ragdollBench";
+import { DEFAULT_RAGDOLL_BENCH, type RagdollBenchSettings } from './components/Environment/ragdoll/ragdollBench';
 import { create } from 'zustand';
 import type { GameMode } from './components/Environment/SquadArenaTypes';
 
@@ -246,6 +246,11 @@ interface GameState {
   // decorativi e arena rossi contro blu portati da simulation-citta
   // (SoldierSpawner.tsx), accesi solo dalla casella nel pannello Scenari
   showSimCitta: boolean;
+  // "stilizza il gioco in stile toon" (lib/toonStyle.ts) e "un checkbox per
+  // far cominciare la giornata, altrimenti sempre giorno" (lib/SunCycle.ts).
+  // Ricordate nel browser (localStorage) tra una partita e l'altra.
+  toonStyle: boolean;
+  dayCycle: boolean;
   // ruota delle armi (UI/WeaponWheel.tsx): aperta = camera e attacchi fermi
   weaponWheelOpen: boolean;
   // arma scelta dalla ruota, la indossa PlayerCombatSoldier al frame dopo
@@ -336,18 +341,34 @@ interface GameState {
   setTestScene: (scene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race' | 'duel') => void;
   setArenaGameMode: (mode: GameMode) => void;
   setArenaFighterCount: (count: number) => void;
-  setDuelStatus: (playerHp: number, enemyHp: number, result: 'none' | 'win' | 'lose', inRange: boolean, reticleX: number, reticleY: number) => void;
+  setDuelStatus: (
+    playerHp: number,
+    enemyHp: number,
+    result: 'none' | 'win' | 'lose',
+    inRange: boolean,
+    reticleX: number,
+    reticleY: number
+  ) => void;
   toggleDuelDummyMode: () => void;
   setDuelDummyMode: (active: boolean) => void;
   setShowPhysicsDebug: (active: boolean) => void;
   setShowActiveRagdollDebug: (active: boolean) => void;
   setTPoseDebug: (active: boolean) => void;
   addDuelEnemy: () => void;
-  setPlayerWeaponState: (partial: Partial<Pick<GameState, 'playerWeapon' | 'playerAiming' | 'pistolAmmo' | 'pistolReloading' | 'pistolHitAt' | 'pistolHitKill' | 'pistolHitHead'>>) => void;
+  setPlayerWeaponState: (
+    partial: Partial<
+      Pick<
+        GameState,
+        'playerWeapon' | 'playerAiming' | 'pistolAmmo' | 'pistolReloading' | 'pistolHitAt' | 'pistolHitKill' | 'pistolHitHead'
+      >
+    >
+  ) => void;
   clearDuelEnemies: () => void;
   setDebugOrthoCamera: (active: boolean) => void;
   setArenaScene: (partial: Partial<ArenaSceneToggles>) => void;
   setShowSimCitta: (on: boolean) => void;
+  setToonStyle: (on: boolean) => void;
+  setDayCycle: (on: boolean) => void;
   setWeaponWheelOpen: (open: boolean) => void;
   setRequestedWeapon: (w: 'fists' | 'pistol' | 'rifle' | 'knife' | null) => void;
   setDebugOrthoCameraAngleDeg: (deg: number) => void;
@@ -360,6 +381,27 @@ interface GameState {
   collectItem: () => void;
   updateEntity: (id: string, info: Partial<EntityInfo>) => void;
   removeEntity: (id: string) => void;
+}
+
+// impostazioni grafiche ricordate nel browser (puo' mancare/fallire:
+// finestra privata, dati bloccati -- si usa il valore di partenza)
+const SETTINGS_KEY = 'sketchbook-settings';
+function readSetting(key: string, fallback: boolean): boolean {
+  try {
+    const v = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}')[key];
+    return typeof v === 'boolean' ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writeSetting(key: string, value: boolean) {
+  try {
+    const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
+    all[key] = value;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(all));
+  } catch {
+    /* niente: resta solo per questa partita */
+  }
 }
 
 export const useStore = create<GameState>((set) => ({
@@ -412,6 +454,8 @@ export const useStore = create<GameState>((set) => ({
   debugOrthoCamera: false,
   arenaScene: { obstacles: true, walls: true, floor: true, speakers: true, course: true, car: true },
   showSimCitta: false,
+  toonStyle: readSetting('toonStyle', true),
+  dayCycle: readSetting('dayCycle', false),
   weaponWheelOpen: false,
   requestedWeapon: null,
   debugOrthoCameraAngleDeg: 0,
@@ -439,26 +483,29 @@ export const useStore = create<GameState>((set) => ({
   setMissionInfo: (title, briefing) => set({ missionTitle: title, missionBriefing: briefing }),
   setMissionTimeRemaining: (t) => set({ missionTimeRemaining: t }),
   setMissionTargetPos: (pos) => set({ missionTargetPos: pos }),
-  setCurrentControllable: (type, id = null, seatType = null, seatName = null) => set({
-    currentControllable: type,
-    controlledEntityId: id,
-    controlledSeatType: type === 'player' ? null : seatType,
-    controlledSeatName: type === 'player' ? null : seatName,
-  }),
-  setIsVehicleTransitioning: (transitioning, entityId = null, doorName = null) => set({
-    isVehicleTransitioning: transitioning,
-    transitioningEntityId: transitioning ? entityId : null,
-    transitioningDoorName: transitioning ? doorName : null,
-  }),
-  setDoorOpen: (vehicleId, doorName, open) => set((state) => {
-    const key = `${vehicleId}:${doorName}`;
-    const isOpen = !!state.openVehicleDoors[key];
-    if (isOpen === open) return state;
-    const next = { ...state.openVehicleDoors };
-    if (open) next[key] = true;
-    else delete next[key];
-    return { openVehicleDoors: next };
-  }),
+  setCurrentControllable: (type, id = null, seatType = null, seatName = null) =>
+    set({
+      currentControllable: type,
+      controlledEntityId: id,
+      controlledSeatType: type === 'player' ? null : seatType,
+      controlledSeatName: type === 'player' ? null : seatName,
+    }),
+  setIsVehicleTransitioning: (transitioning, entityId = null, doorName = null) =>
+    set({
+      isVehicleTransitioning: transitioning,
+      transitioningEntityId: transitioning ? entityId : null,
+      transitioningDoorName: transitioning ? doorName : null,
+    }),
+  setDoorOpen: (vehicleId, doorName, open) =>
+    set((state) => {
+      const key = `${vehicleId}:${doorName}`;
+      const isOpen = !!state.openVehicleDoors[key];
+      if (isOpen === open) return state;
+      const next = { ...state.openVehicleDoors };
+      if (open) next[key] = true;
+      else delete next[key];
+      return { openVehicleDoors: next };
+    }),
   togglePause: () => set((state) => ({ isPaused: !state.isPaused })),
   setIsDrone: (isDrone) => set({ isDrone }),
   // Separate from togglePause: the tab-hidden auto-pause always wants to
@@ -473,7 +520,8 @@ export const useStore = create<GameState>((set) => ({
   setTestScene: (testScene) => set({ testScene }),
   setArenaGameMode: (arenaGameMode) => set({ arenaGameMode }),
   setArenaFighterCount: (arenaFighterCount) => set({ arenaFighterCount }),
-  setDuelStatus: (duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY) => set({ duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY }),
+  setDuelStatus: (duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY) =>
+    set({ duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY }),
   toggleDuelDummyMode: () => set((state) => ({ duelDummyMode: !state.duelDummyMode })),
   setDuelDummyMode: (duelDummyMode) => set({ duelDummyMode }),
   setShowPhysicsDebug: (showPhysicsDebug) => set({ showPhysicsDebug }),
@@ -485,6 +533,14 @@ export const useStore = create<GameState>((set) => ({
   setDebugOrthoCamera: (debugOrthoCamera) => set({ debugOrthoCamera }),
   setArenaScene: (partial) => set((state) => ({ arenaScene: { ...state.arenaScene, ...partial } })),
   setShowSimCitta: (on) => set({ showSimCitta: on }),
+  setToonStyle: (toonStyle) => {
+    writeSetting('toonStyle', toonStyle);
+    set({ toonStyle });
+  },
+  setDayCycle: (dayCycle) => {
+    writeSetting('dayCycle', dayCycle);
+    set({ dayCycle });
+  },
   setWeaponWheelOpen: (open) => set((state) => (state.weaponWheelOpen === open ? state : { weaponWheelOpen: open })),
   setRequestedWeapon: (requestedWeapon) => set({ requestedWeapon }),
   setDebugOrthoCameraAngleDeg: (debugOrthoCameraAngleDeg) => set({ debugOrthoCameraAngleDeg }),
@@ -492,22 +548,24 @@ export const useStore = create<GameState>((set) => ({
   setShowGameplayHud: (showGameplayHud) => set({ showGameplayHud }),
   setRagdollPassive: (ragdollPassive) => set({ ragdollPassive }),
   setEuphoriaRagdollEnabled: (euphoriaRagdollEnabled) => set({ euphoriaRagdollEnabled }),
-  registerBagHit: (radialOffset, heightOffset, hand) => set((state) => ({
-    bagHitCount: state.bagHitCount + 1,
-    bagLastHitRadialOffset: radialOffset,
-    bagLastHitHeightOffset: heightOffset,
-    bagLastHitHand: hand,
-  })),
-  retryDuel: () => set((state) => ({
-    duelRound: state.duelRound + 1,
-    duelPlayerHp: 100,
-    duelEnemyHp: 100,
-    duelResult: 'none',
-    // Deliberately NOT reset here -- "attivare a piacimento" reads as a
-    // practice-session setting the player controls, not per-round combat
-    // state, so it should survive a retry same as e.g. audio/graphics
-    // settings would, until the player turns it off themselves.
-  })),
+  registerBagHit: (radialOffset, heightOffset, hand) =>
+    set((state) => ({
+      bagHitCount: state.bagHitCount + 1,
+      bagLastHitRadialOffset: radialOffset,
+      bagLastHitHeightOffset: heightOffset,
+      bagLastHitHand: hand,
+    })),
+  retryDuel: () =>
+    set((state) => ({
+      duelRound: state.duelRound + 1,
+      duelPlayerHp: 100,
+      duelEnemyHp: 100,
+      duelResult: 'none',
+      // Deliberately NOT reset here -- "attivare a piacimento" reads as a
+      // practice-session setting the player controls, not per-round combat
+      // state, so it should survive a retry same as e.g. audio/graphics
+      // settings would, until the player turns it off themselves.
+    })),
   collectItem: () => set((state) => ({ collectiblesFound: Math.min(state.collectiblesTotal, state.collectiblesFound + 1) })),
   // "serve ottimizzare ancora" -- every car/pedestrian/enemy calls this on
   // a fixed timer (Car.tsx ~10/s, Pedestrian.tsx ~5/s) regardless of
@@ -522,28 +580,30 @@ export const useStore = create<GameState>((set) => ({
   // incoming position/rotation/type match what's already stored, within a
   // small epsilon so ordinary physics/floating-point jitter on a
   // "resting" body doesn't defeat this.
-  updateEntity: (id, info) => set((state) => {
-    const existing = state.entities.get(id);
-    if (existing) {
-      const posSame =
-        !info.position ||
-        (Math.abs(info.position[0] - existing.position[0]) < 0.01 &&
-          Math.abs(info.position[1] - existing.position[1]) < 0.01 &&
-          Math.abs(info.position[2] - existing.position[2]) < 0.01);
-      const rotSame = info.rotation === undefined || Math.abs(info.rotation - existing.rotation) < 0.01;
-      const typeSame = info.type === undefined || info.type === existing.type;
-      if (posSame && rotSame && typeSame) return state;
-    }
-    const newEntities = new Map(state.entities);
-    const base = existing || { id, type: 'enemy', position: [0, 0, 0], rotation: 0 };
-    newEntities.set(id, { ...base, ...info } as EntityInfo);
-    return { entities: newEntities };
-  }),
-  removeEntity: (id) => set((state) => {
-    const newEntities = new Map(state.entities);
-    newEntities.delete(id);
-    return { entities: newEntities };
-  }),
+  updateEntity: (id, info) =>
+    set((state) => {
+      const existing = state.entities.get(id);
+      if (existing) {
+        const posSame =
+          !info.position ||
+          (Math.abs(info.position[0] - existing.position[0]) < 0.01 &&
+            Math.abs(info.position[1] - existing.position[1]) < 0.01 &&
+            Math.abs(info.position[2] - existing.position[2]) < 0.01);
+        const rotSame = info.rotation === undefined || Math.abs(info.rotation - existing.rotation) < 0.01;
+        const typeSame = info.type === undefined || info.type === existing.type;
+        if (posSame && rotSame && typeSame) return state;
+      }
+      const newEntities = new Map(state.entities);
+      const base = existing || { id, type: 'enemy', position: [0, 0, 0], rotation: 0 };
+      newEntities.set(id, { ...base, ...info } as EntityInfo);
+      return { entities: newEntities };
+    }),
+  removeEntity: (id) =>
+    set((state) => {
+      const newEntities = new Map(state.entities);
+      newEntities.delete(id);
+      return { entities: newEntities };
+    }),
 }));
 
 // TEMP DEBUG (Claude): expose store for live console inspection while

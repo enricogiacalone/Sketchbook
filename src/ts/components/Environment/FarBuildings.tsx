@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useStaticBoxes, type StaticBox } from './staticColliders';
+import { toonCacheKey } from '../../lib/toonStyle';
 
 // "Modelli semplificati da lontano": i palazzi fuori dalla zona caricata
 // attorno al giocatore sono UNA scatola ciascuno, tutte in poche draw call
@@ -118,7 +119,7 @@ metalnessFactor = vParams2.z;`
 totalEmissiveRadiance += fbEmissive;`
       );
   };
-  m.customProgramCacheKey = () => 'far-buildings-v1';
+  m.customProgramCacheKey = () => 'far-buildings-v1' + toonCacheKey();
   return m;
 })();
 

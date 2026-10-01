@@ -134,6 +134,9 @@ const SunLight: React.FC = () => {
         shadow-camera-near={1}
         shadow-camera-far={400}
         shadow-bias={-0.0006}
+        // "a strisce" sull'asfalto (acne delle ombre, piu' evidente con le
+        // ombre nette dello stile toon): spostamento lungo la normale
+        shadow-normalBias={0.04}
       />
       <directionalLight ref={moonLightRef} color="#aabfff" />
       <hemisphereLight ref={hemiRef} />
