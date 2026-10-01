@@ -33,14 +33,14 @@ const PAD_TRIANGLE = ['△ Triangle']; // button 3
 const PAD_JAB = ['□ Square', 'L2']; // button 2, or button 6
 // "guardare l'avversario se tengo premuto l1" -- held lock-on modifier
 // (see useInput.ts's 'lockOn' action).
-const PAD_LOCK_ON = ['L1']; // button 4
+const PAD_LOCK_ON = ['R3']; // button 11 (L1 = ruota delle armi)
 // Armi del duello (useInput.ts: 'weapon1' / 'weapon2' / 'reload'):
 // D-pad sinistra = pugni, destra = pistola, giu' = ricarica.
 const PAD_WEAPON_FISTS = ['D-pad ←']; // button 14
 const PAD_WEAPON_PISTOL = ['D-pad →']; // button 15
 const PAD_RELOAD = ['D-pad ↓']; // button 13
 const PAD_WEAPON_RIFLE = ['D-pad ↑']; // button 12
-const PAD_WEAPON_KNIFE = ['R3']; // button 11
+const PAD_WEAPON_KNIFE = ['L1 (ruota)']; // dalla ruota delle armi
 
 const Controls: React.FC = () => {
   const currentControllable = useStore((state) => state.currentControllable);
@@ -85,13 +85,15 @@ const Controls: React.FC = () => {
     switch (currentControllable) {
       case 'player':
       case 'combatSoldier': {
-        const cityRows: ControlRow[] =
-          currentControllable === 'player'
+        const cityRows: ControlRow[] = [
+          { keys: ['Tab', '(hold)'], pad: ['L1 (hold)'], desc: 'Ruota delle armi' },
+          ...(currentControllable === 'player'
             ? [
                 { keys: ['F'], pad: PAD_ENTER, desc: 'Sali in auto' },
                 { keys: ['B'], desc: 'Drone' },
               ]
-            : [];
+            : []),
+        ];
         if (playerWeapon === 'pistol' || playerWeapon === 'rifle') {
           const rifle = playerWeapon === 'rifle';
           return [

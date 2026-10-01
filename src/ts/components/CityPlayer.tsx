@@ -7,6 +7,7 @@ import { makeFighter } from './Environment/DuelArena';
 import type { FighterData } from './Environment/SquadArenaTypes';
 import { DRONE_ID } from './Drone';
 import SpeechBubble from './UI/SpeechBubble';
+import RadarCameraBridge from './UI/RadarCameraBridge';
 import Enemy from './Enemy';
 import Pedestrian from './Environment/Pedestrian';
 import WeaponEffects from './Environment/weapons/WeaponEffects';
@@ -411,6 +412,7 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
           />
         ))}
       <OwnSpeechBubble />
+      <RadarCameraBridge />
       {ids.map((id) => (
         <NetworkMannequin key={id} id={id} remotesRef={remotesRef} proxy={proxyFor(id)} message={messages[id]} />
       ))}

@@ -168,6 +168,8 @@ export const useThirdPersonCamera = () => {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (document.pointerLockElement !== gl.domElement) return;
+      // ruota delle armi aperta: il mouse sceglie l'arma, la camera sta ferma
+      if (useStore.getState().weaponWheelOpen) return;
       // "faithful" mode (droneWorld) -- the mouse pilots the drone itself
       // while flying, not the camera orbit; Player.tsx's own drone-flight
       // update drains this every frame (see lib/droneFlight.ts).
@@ -239,7 +241,7 @@ export const useThirdPersonCamera = () => {
     for (let i = 0; i < pads.length; i++) {
       if (pads[i]) { pad = pads[i] as Gamepad; break; }
     }
-    if (pad) {
+    if (pad && !useStore.getState().weaponWheelOpen) {
       rx = pad.axes[2] ?? 0;
       ry = pad.axes[3] ?? 0;
     } else if (phoneInput && phoneInput.axesRight) {

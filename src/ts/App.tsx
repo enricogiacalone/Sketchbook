@@ -21,6 +21,7 @@ import ChatInput from "./components/UI/ChatInput";
 import Minimap from "./components/UI/Minimap";
 import Crosshair from "./components/UI/Crosshair";
 import DroneHUD from "./components/UI/DroneHUD";
+import WeaponWheel from "./components/UI/WeaponWheel";
 import GamepadDebug from "./components/UI/GamepadDebug";
 import ScenariosGUI from "./components/UI/ScenariosGUI";
 import CombatArenaGUI from "./components/UI/CombatArenaGUI";
@@ -315,12 +316,14 @@ const App: React.FC = () => {
               <StatusBars />
               <CollectiblesCounter />
               <MissionHUD />
-              <Minimap />
             </>
           )}
+          {/* "deve essere visibile solo in playground": il mondo aperto, non duello/test */}
+          {testScene === "none" && <Minimap />}
           <ChatInput />
           <Crosshair />
           <DroneHUD />
+          <WeaponWheel />
           <GamepadDebug />
           <ScenariosGUI />
           <CombatArenaGUI />

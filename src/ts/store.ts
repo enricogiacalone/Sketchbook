@@ -246,6 +246,10 @@ interface GameState {
   // decorativi e arena rossi contro blu portati da simulation-citta
   // (SoldierSpawner.tsx), accesi solo dalla casella nel pannello Scenari
   showSimCitta: boolean;
+  // ruota delle armi (UI/WeaponWheel.tsx): aperta = camera e attacchi fermi
+  weaponWheelOpen: boolean;
+  // arma scelta dalla ruota, la indossa PlayerCombatSoldier al frame dopo
+  requestedWeapon: 'fists' | 'pistol' | 'rifle' | 'knife' | null;
   // Angolo (gradi) attorno al personaggio da cui la vista ortogonale
   // guarda -- 0 = frontale, 90/180/270 = laterale/retro/laterale
   // opposto. Cambiato dal pulsante "Ruota vista 90'" del pannello Arena,
@@ -344,6 +348,8 @@ interface GameState {
   setDebugOrthoCamera: (active: boolean) => void;
   setArenaScene: (partial: Partial<ArenaSceneToggles>) => void;
   setShowSimCitta: (on: boolean) => void;
+  setWeaponWheelOpen: (open: boolean) => void;
+  setRequestedWeapon: (w: 'fists' | 'pistol' | 'rifle' | 'knife' | null) => void;
   setDebugOrthoCameraAngleDeg: (deg: number) => void;
   setRagdollBench: (partial: Partial<RagdollBenchSettings>) => void;
   setShowGameplayHud: (active: boolean) => void;
@@ -406,6 +412,8 @@ export const useStore = create<GameState>((set) => ({
   debugOrthoCamera: false,
   arenaScene: { obstacles: true, walls: true, floor: true, speakers: true, course: true, car: true },
   showSimCitta: false,
+  weaponWheelOpen: false,
+  requestedWeapon: null,
   debugOrthoCameraAngleDeg: 0,
   ragdollBench: { ...DEFAULT_RAGDOLL_BENCH },
   showGameplayHud: false,
@@ -477,6 +485,8 @@ export const useStore = create<GameState>((set) => ({
   setDebugOrthoCamera: (debugOrthoCamera) => set({ debugOrthoCamera }),
   setArenaScene: (partial) => set((state) => ({ arenaScene: { ...state.arenaScene, ...partial } })),
   setShowSimCitta: (on) => set({ showSimCitta: on }),
+  setWeaponWheelOpen: (open) => set((state) => (state.weaponWheelOpen === open ? state : { weaponWheelOpen: open })),
+  setRequestedWeapon: (requestedWeapon) => set({ requestedWeapon }),
   setDebugOrthoCameraAngleDeg: (debugOrthoCameraAngleDeg) => set({ debugOrthoCameraAngleDeg }),
   setRagdollBench: (partial) => set((state) => ({ ragdollBench: { ...state.ragdollBench, ...partial } })),
   setShowGameplayHud: (showGameplayHud) => set({ showGameplayHud }),

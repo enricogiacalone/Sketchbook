@@ -344,12 +344,14 @@ export const useInput = () => {
     // "guardare l'avversario se tengo premuto l1" -- separate from
     // everything above, L1 (button 4) has never driven anything in
     // this app before now, so no reuse/overlap reasoning needed.
-    g.lockOn = !!pad.buttons[4]?.pressed; // L1
+    // L1 (button 4) e' la ruota delle armi, come in GTA (UI/WeaponWheel.tsx
+    // legge il pad da se'); l'aggancio passa a R3, dove prima c'era il
+    // coltello (ora si sceglie dalla ruota)
+    g.lockOn = !!pad.buttons[11]?.pressed; // R3
     g.weapon1 = !!pad.buttons[14]?.pressed; // croce sinistra: pugni
     g.weapon2 = !!pad.buttons[15]?.pressed; // croce destra: pistola
     g.reload = !!pad.buttons[13]?.pressed; // croce giu': ricarica
     g.weapon3 = !!pad.buttons[12]?.pressed; // croce su: fucile
-    g.weapon4 = !!pad.buttons[11]?.pressed; // R3 (levetta destra premuta): coltello
     g.dodge = !!pad.buttons[10]?.pressed; // L3 (levetta sinistra premuta): capriola
     // Back/Select: cycle the camera's 4 zoom presets (see ZOOM_LEVELS in
     // useThirdPersonCamera.ts). Reuses the 'camera' action, which already

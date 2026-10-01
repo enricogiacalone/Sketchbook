@@ -9,6 +9,7 @@ import { useRagdoll } from './ragdoll/useRagdoll';
 import SolidBodyDebugView from './SolidBodyDebugView';
 import ActiveRagdollDebugView from './ActiveRagdollDebugView';
 import { useInput } from '../../hooks/useInput';
+import WeaponWheelController from '../UI/WeaponWheelController';
 import { FighterData, AnimCatalog } from './SquadArenaTypes';
 import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
@@ -1027,6 +1028,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
     // Banco "Animazione di prova": una clip scelta dal pannello gira in
     // loop al posto della macchina a stati (vedi il return piu' sotto).
     const benchState = useStore.getState();
+    // ruota delle armi (UI/WeaponWheel.tsx): aperta = niente attacchi/spari;
+    // alla chiusura indossa l'arma scelta
+    const wheelOpen = benchState.weaponWheelOpen;
+    if (wheelOpen) {
+      for (const a of ['primary', 'yawLeft', 'yawRight', 'attackLeft', 'weapon1', 'weapon2', 'weapon3', 'weapon4', 'dodge']) input.consumeJustPressed(a);
+    }
     const tPoseBench = benchState.tPoseDebug;
     const benchClip = benchState.ragdollBench.benchClip;
     // Rimette nelle ossa la posa ANIMATA prima del mixer (vedi
@@ -1070,6 +1077,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
         if (input.consumeJustPressed('weapon2')) equipWeapon('pistol');
         if (input.consumeJustPressed('weapon3')) equipWeapon('rifle');
         if (input.consumeJustPressed('weapon4')) equipWeapon('knife');
+        if (benchState.requestedWeapon) {
+          equipWeapon(benchState.requestedWeapon);
+          benchState.setRequestedWeapon(null);
+        }
       }
       if (fireCooldownRef.current > 0) fireCooldownRef.current -= dtW;
       if (raiseLeftRef.current > 0) raiseLeftRef.current -= dtW;
@@ -1904,7 +1915,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
       // pistola: un colpo per pressione; fucile: automatico finche' tieni premuto
       const pressed = input.consumeJustPressed('primary');
       const wantFire = GUN_STATS[gunKind()].auto ? pressed || !!input.primary : pressed;
-      if (wantFire && reloadLeftRef.current <= 0 && fireCooldownRef.current <= 0) {
+      if (wantFire && !wheelOpen && reloadLeftRef.current <= 0 && fireCooldownRef.current <= 0) {
         fire();
       }
       // i pugni non partono con la pistola in mano
@@ -2069,6 +2080,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({ data, opponen
           purely from the Rapier bodies' own live world translations, so
           nesting them under groupRef would double the transform). */}
       <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />
+      {/* ruota delle armi: Tab / L1 tenuto */}
+      <WeaponWheelController footControllable={footControllable} isDead={() => data.isDead} />
       {/* "impostare la vista in modo da avere dei test empirici" --
           rosso quando un giunto del layer attivo sta sforando il
           proprio cono, vedi ActiveRagdollDebugView.tsx. */}
