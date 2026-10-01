@@ -6,7 +6,39 @@ const STICK_DEADZONE = 0.25;
 const ACTION_NAMES = [
   'forward', 'backward', 'left', 'right', 'jump', 'shift',
   'yawLeft', 'yawRight', 'enter', 'enter_passenger', 'seat_switch',
-  'camera', 'fly', 'respawn', 'primary', 'secondary', 'pause',
+  'camera', 'fly', 'respawn', 'primary', 'secondary', 'pause', 'headlights',
+  // Gamepad-only for now (L2/button 6) -- "con l2 usa il braccio
+  // sinistro" -- kept as its OWN action rather than folded into
+  // 'yawLeft'/'shift' (L2 already drives 'shift' too, see the gamepad
+  // section below) specifically so it doesn't double up with anything
+  // 'shift' does elsewhere (e.g. Helicopter.tsx reads input.shift every
+  // frame to ascend -- piling a second, unrelated meaning onto the same
+  // held button while flying would be a real conflict, unlike the
+  // edge-triggered 'enter' reuse Square/Triangle already share).
+  'attackLeft',
+  // "guardare l'avversario se tengo premuto l1" -- HELD lock-on
+  // modifier for PlayerCombatSoldier.tsx's leg/root facing (Ctrl
+  // sinistro on keyboard, L1 on gamepad -- see the gamepad section
+  // below). A brand-new action, not reused from anything else, since
+  // it needs to be read as a continuous held state (input.lockOn),
+  // not consumeJustPressed.
+  'lockOn',
+  // "estrai la pistola..." -- cambio arma nel duello (1 = pugni, 2 =
+  // pistola; croce direzionale sinistra/destra sul pad) e ricarica sul pad
+  // (croce giu'; da tastiera la ricarica e' R, che e' gia' 'respawn' --
+  // PlayerCombatSoldier.tsx legge entrambe).
+  'weapon1',
+  'weapon2',
+  // 3 = fucile, 4 = coltello (pad: croce su, pressione levetta destra)
+  'weapon3',
+  'weapon4',
+  'reload',
+  'music',
+  // play/pausa di una sola cassa: J = cassa cubi, K = cassa schermo
+  'musicCubi',
+  'musicSchermo',
+  // capriola del duello: Spazio adesso e' il salto (PlayerCombatSoldier)
+  'dodge',
 ] as const;
 type Action = (typeof ACTION_NAMES)[number];
 
@@ -28,6 +60,18 @@ const emptyActionMap = (): Record<Action, boolean> => ({
   primary: false,
   secondary: false,
   pause: false,
+  headlights: false,
+  attackLeft: false,
+  lockOn: false,
+  weapon1: false,
+  weapon2: false,
+  weapon3: false,
+  weapon4: false,
+  reload: false,
+  music: false,
+  musicCubi: false,
+  musicSchermo: false,
+  dodge: false,
 });
 
 export const useInput = () => {
@@ -62,7 +106,7 @@ export const useInput = () => {
     });
   };
 
-  const keys = {
+  const keys: Record<string, Action> = {
     KeyW: 'forward',
     KeyS: 'backward',
     KeyA: 'left',
@@ -77,7 +121,21 @@ export const useInput = () => {
     KeyB: 'fly',
     KeyQ: 'yawLeft',
     KeyR: 'respawn',
+    // "aggiungi dei fari veri alla macchina che accendo a comando" -- 'L'
+    // for "luci" (only actually read while driving, see Car.tsx's isCarActive
+    // gate on consumeJustPressed('headlights')).
+    KeyL: 'headlights',
     Escape: 'pause',
+    ControlLeft: 'lockOn',
+    Digit1: 'weapon1',
+    Digit2: 'weapon2',
+    Digit3: 'weapon3',
+    Digit4: 'weapon4',
+    // casse audio dell'arena (AudioArena.tsx): play/pausa
+    KeyM: 'music',
+    KeyJ: 'musicCubi',
+    KeyK: 'musicSchermo',
+    KeyV: 'dodge',
   };
 
   useEffect(() => {
@@ -166,6 +224,52 @@ export const useInput = () => {
       }
     }
 
+    const phoneInput = (window as any).__phoneControllerInput;
+    if (phoneInput) {
+      const axisForward = phoneInput.axes[1] ?? 0;
+      const axisStrafe = phoneInput.axes[0] ?? 0;
+
+      if (
+        Math.abs(axisForward) > 0.05 ||
+        Math.abs(axisStrafe) > 0.05 ||
+        phoneInput.buttons.x ||
+        phoneInput.buttons.circle ||
+        phoneInput.buttons.square ||
+        phoneInput.buttons.triangle ||
+        phoneInput.buttons.select ||
+        phoneInput.buttons.pause ||
+        phoneInput.buttons.dpadUp ||
+        phoneInput.buttons.dpadDown ||
+        phoneInput.buttons.dpadLeft ||
+        phoneInput.buttons.dpadRight
+      ) {
+        pad = {
+          id: 'PhoneController',
+          mapping: 'standard',
+          axes: [
+            axisStrafe,
+            axisForward,
+            phoneInput.axesRight?.[0] ?? 0,
+            phoneInput.axesRight?.[1] ?? 0,
+          ],
+          buttons: [
+            { pressed: phoneInput.buttons.x, value: phoneInput.buttons.x ? 1 : 0 }, // 0: X
+            { pressed: phoneInput.buttons.circle, value: phoneInput.buttons.circle ? 1 : 0 }, // 1: Circle
+            { pressed: phoneInput.buttons.square, value: phoneInput.buttons.square ? 1 : 0 }, // 2: Square
+            { pressed: phoneInput.buttons.triangle, value: phoneInput.buttons.triangle ? 1 : 0 }, // 3: Triangle
+            {}, {}, {}, {},
+            { pressed: phoneInput.buttons.select, value: phoneInput.buttons.select ? 1 : 0 }, // 8: Select (Zoom / Camera)
+            { pressed: phoneInput.buttons.pause, value: phoneInput.buttons.pause ? 1 : 0 }, // 9: Pause
+            {}, {},
+            { pressed: phoneInput.buttons.dpadUp, value: phoneInput.buttons.dpadUp ? 1 : 0 }, // 12: D-pad Up (weapon change)
+            { pressed: phoneInput.buttons.dpadDown, value: phoneInput.buttons.dpadDown ? 1 : 0 }, // 13: D-pad Down
+            { pressed: phoneInput.buttons.dpadLeft, value: phoneInput.buttons.dpadLeft ? 1 : 0 }, // 14: D-pad Left
+            { pressed: phoneInput.buttons.dpadRight, value: phoneInput.buttons.dpadRight ? 1 : 0 }, // 15: D-pad Right
+          ],
+        } as unknown as Gamepad;
+      }
+    }
+
     const g = gamepadActions.current;
 
     // Live snapshot for the on-screen calibration readout (GamepadDebug.tsx)
@@ -208,15 +312,47 @@ export const useInput = () => {
     g.backward = axisForward > STICK_DEADZONE;
     g.left = axisStrafe < -STICK_DEADZONE;
     g.right = axisStrafe > STICK_DEADZONE;
-    g.jump = !!pad.buttons[0]?.pressed; // A / Cross
-    g.shift = !!pad.buttons[5]?.pressed || !!pad.buttons[6]?.pressed; // RB or LT: run
+    // "per saltare usa cerchio, per correre usa x, come gta"
+    g.jump = !!pad.buttons[1]?.pressed; // B / Circle: salto
+    g.shift = !!pad.buttons[0]?.pressed; // A / Cross: corsa
     g.primary = !!pad.buttons[7]?.pressed; // RT: fire
-    g.secondary = !!pad.buttons[1]?.pressed; // B / Circle
+    // mira (armi) / parata (mani nude, coltello): L2 come in GTA, oppure R1.
+    // L2 resta anche il pugno sinistro a mani nude (attackLeft qui sotto):
+    // PlayerCombatSoldier non para quando L2 e' il pugno.
+    g.secondary = !!pad.buttons[6]?.pressed || !!pad.buttons[5]?.pressed; // L2 / R1
     // X/Square AND Y/Triangle both enter/exit a vehicle -- Triangle used to
     // drive the separate (and entirely unused -- nothing ever read
     // input.enter_passenger) 'enter_passenger' action; folded into 'enter'
     // per request so Triangle actually does something.
     g.enter = !!pad.buttons[2]?.pressed || !!pad.buttons[3]?.pressed; // Square or Triangle
+    // Square and Triangle ALSO independently drive yawLeft/yawRight --
+    // "ricordati del gamepad, ho quadrato e triangolo a disposizione".
+    // These two actions already exist (KeyQ/KeyE) but never had a
+    // gamepad binding. Firing them from the same buttons as 'enter' is
+    // harmless: only one controllable is ever active at a time, so
+    // whichever of 'enter' (Player.tsx, entering a vehicle),
+    // 'yawLeft'/'yawRight' (Helicopter/Airplane/Drone turning), or
+    // 'yawLeft'/'yawRight' (PlayerCombatSoldier.tsx's Cross/Hook
+    // attacks) actually gets read never overlaps with the others.
+    g.yawLeft = !!pad.buttons[2]?.pressed; // X/Square
+    g.yawRight = !!pad.buttons[3]?.pressed; // Y/Triangle
+    // L2 (button 6) also drives 'secondary' above (aim) -- "con l2 usa il braccio sinistro e con r2
+    // quello destro" -- PlayerCombatSoldier.tsx's left-arm punch (Jab)
+    // checks this alongside 'yawLeft' (Q/Square), so all three fire the
+    // same strike.
+    g.attackLeft = !!pad.buttons[6]?.pressed; // L2
+    // "guardare l'avversario se tengo premuto l1" -- separate from
+    // everything above, L1 (button 4) has never driven anything in
+    // this app before now, so no reuse/overlap reasoning needed.
+    // L1 (button 4) e' la ruota delle armi, come in GTA (UI/WeaponWheel.tsx
+    // legge il pad da se'); l'aggancio passa a R3, dove prima c'era il
+    // coltello (ora si sceglie dalla ruota)
+    g.lockOn = !!pad.buttons[11]?.pressed; // R3
+    g.weapon1 = !!pad.buttons[14]?.pressed; // croce sinistra: pugni
+    g.weapon2 = !!pad.buttons[15]?.pressed; // croce destra: pistola
+    g.reload = !!pad.buttons[13]?.pressed; // croce giu': ricarica
+    g.weapon3 = !!pad.buttons[12]?.pressed; // croce su: fucile
+    g.dodge = !!pad.buttons[10]?.pressed; // L3 (levetta sinistra premuta): capriola
     // Back/Select: cycle the camera's 4 zoom presets (see ZOOM_LEVELS in
     // useThirdPersonCamera.ts). Reuses the 'camera' action, which already
     // existed with a keyboard binding (KeyC) but, like enter_passenger

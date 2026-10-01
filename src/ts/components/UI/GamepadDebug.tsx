@@ -36,7 +36,12 @@ const panelStyle: React.CSSProperties = {
 const GamepadDebug: React.FC = () => {
   const [info, setInfo] = useState<GamepadDebugInfo | null>(null);
 
+  // Guard INSIDE the effect, not just on the render return below -- a
+  // return after hooks still lets React run the hooks themselves, so
+  // without this the rAF polling loop (setState every single frame) ran
+  // forever even when there was nothing to show it for, dev build or not.
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
     let raf: number;
     const tick = () => {
       setInfo((window as any).__gamepadDebug ?? null);

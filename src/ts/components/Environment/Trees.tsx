@@ -4,6 +4,13 @@ import { RigidBody, CylinderCollider } from '@react-three/rapier';
 import { Tree } from "@dgreenheck/ez-tree";
 import { getTerrainHeight } from './Terrain';
 
+interface TreeInstance {
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+  trunkHeight: number;
+}
+
 const TreeInstances: React.FC = () => {
     const treeCount = 30; // Reduced tree count
     const terrainSize = 400;
@@ -35,7 +42,7 @@ const TreeInstances: React.FC = () => {
         }
       }
   
-      const byTemplate: any[][] = templates.map(() => []);
+      const byTemplate: TreeInstance[][] = templates.map(() => []);
       
       if (templates.length > 0) {
           for (let i = 0; i < treeCount; i++) {
