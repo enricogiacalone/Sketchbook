@@ -373,11 +373,12 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
     };
   }, [data, opponents, rapierCtx]);
 
-  // auto guidabili: quelle della citta' (store) non guidate da altri
+  // veicoli guidabili: auto della citta' ed elicottero (store), non guidati da altri
   const cityCarIds = useMemo(
     () => () => {
       const out: string[] = [];
-      for (const [id, e] of useStore.getState().entities) if (e.type === 'car' && !isRemoteDriven(id)) out.push(id);
+      for (const [id, e] of useStore.getState().entities)
+        if ((e.type === 'car' || e.type === 'helicopter') && !isRemoteDriven(id)) out.push(id);
       return out;
     },
     []

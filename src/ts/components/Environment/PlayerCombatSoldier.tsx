@@ -169,6 +169,14 @@ const CAR_OPEN_S = 0.8;
 const CAR_ENTER_S = 1.2;
 const CAR_EXIT_S = 1.1;
 const CAR_EXIT_MAX_SPEED = 2.5;
+// portiera del guidatore per tipo di veicolo, e quota massima (m, dal punto
+// d'ingresso al suolo) per scendere dall'elicottero
+const VEH_DOOR = { car: 'door_1', helicopter: 'door_L' } as const;
+// radice del personaggio rispetto al nodo seat_1: l'elicottero ha il
+// pavimento piu' alto rispetto al sedile (con gli stessi numeri dell'auto i
+// piedi uscivano sotto la cabina)
+const VEH_SEAT = { car: { fwd: CAR_SEAT_FWD, down: CAR_SEAT_DOWN }, helicopter: { fwd: 0.24, down: 0.26 } } as const;
+const HELI_EXIT_MAX_HEIGHT = 1.2;
 const _carQuat = new THREE.Quaternion();
 const _carQ2 = new THREE.Quaternion();
 const _carQ3 = new THREE.Quaternion();
@@ -422,8 +430,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // posizione dell'auto al frame prima (velocita' per poter scendere)
     carPrev: THREE.Vector3;
     carSpeed: number;
+    // "fallo usare al nostro personaggio": auto o elicottero (stesso modo di
+    // salire: portiera del guidatore, sedile seat_1)
+    kind: 'car' | 'helicopter';
   }>({
     mode: 'none',
+    kind: 'car',
     carId: null,
     t: 0,
     from: new THREE.Vector3(),
@@ -1481,7 +1493,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
         parts.seat.getWorldPosition(outPos);
         _carFwd.set(0, 0, 1).applyQuaternion(_carQuat);
         _carUp.set(0, 1, 0).applyQuaternion(_carQuat);
-        outPos.addScaledVector(_carFwd, CAR_SEAT_FWD).addScaledVector(_carUp, -CAR_SEAT_DOWN);
+        const off = VEH_SEAT[vs.kind];
+        outPos.addScaledVector(_carFwd, off.fwd).addScaledVector(_carUp, -off.down);
         // il gruppo del personaggio guarda verso il suo -Z locale (vedi la
         // rotazione di PI del modello): auto * giro di 180 gradi
         outQuat.copy(_carQuat).multiply(_yawPi);
@@ -1516,6 +1529,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
             if (Math.hypot(_carTmp.x - data.position.x, _carTmp.z - data.position.z) < CAR_ENTER_RANGE) {
               vs.mode = 'toDoor';
               vs.carId = id;
+              vs.kind = st.entities.get(id)?.type === 'helicopter' ? 'helicopter' : 'car';
               vs.t = 0;
               data.state = "Va all'auto";
               break;
@@ -1559,7 +1573,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
             data.rotation = _carEuler.setFromQuaternion(_carQ3, 'YXZ').y;
             data.position.x = _carTmp2.x;
             data.position.z = _carTmp2.z;
-            if (vs.t > 0.3 && !st.isVehicleTransitioning) st.setIsVehicleTransitioning(true, vs.carId, 'door_1');
+            if (vs.t > 0.3 && !st.isVehicleTransitioning) st.setIsVehicleTransitioning(true, vs.carId, VEH_DOOR[vs.kind]);
             applyTransform();
             if (vs.t >= CAR_OPEN_S) {
               vs.mode = 'entering';
@@ -1583,7 +1597,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
               if (vs.mode === 'entering') {
                 vs.mode = 'driving';
                 st.setIsVehicleTransitioning(false);
-                st.setCurrentControllable('car', vs.carId, 'driver', 'seat_1');
+                st.setCurrentControllable(vs.kind, vs.carId, 'driver', 'seat_1');
                 transitionToAnimation('Driving', 0.2, true);
                 data.state = 'Guida';
               } else {
@@ -1617,12 +1631,16 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
             vs.carPrev.copy(_carTmp);
             // F: scende (solo a bassa velocita')
             if (input.consumeJustPressed('enter')) {
-              if (vs.carSpeed < CAR_EXIT_MAX_SPEED) {
+              // elicottero: solo posato (o quasi) -- in volo non si scende
+              const lowEnough =
+                vs.kind !== 'helicopter' ||
+                (parts.entrance.getWorldPosition(_carTmp), _carTmp.y - groundBase(_carTmp.x, _carTmp.z) < HELI_EXIT_MAX_HEIGHT);
+              if (vs.carSpeed < CAR_EXIT_MAX_SPEED && lowEnough) {
                 vs.mode = 'exiting';
                 vs.t = 0;
                 vs.from.copy(_carTmp2);
                 vs.fromQuat.copy(_carQ2);
-                st.setIsVehicleTransitioning(true, vs.carId, 'door_1');
+                st.setIsVehicleTransitioning(true, vs.carId, VEH_DOOR[vs.kind]);
                 transitionToAnimation('Sitting_Exit', 0.2, false, 1.29 / CAR_EXIT_S);
                 data.state = "Scende dall'auto";
               }

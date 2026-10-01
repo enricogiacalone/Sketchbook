@@ -1,6 +1,7 @@
 import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { RigidBody, CuboidCollider, RapierRigidBody, useRapier } from '@react-three/rapier';
+import { RigidBody, CuboidCollider, RapierRigidBody, useRapier, useBeforePhysicsStep, interactionGroups } from '@react-three/rapier';
+import { SketchbookRaycastVehicle } from './sketchbookRaycastVehicle';
 // CoefficientCombineRule isn't re-exported by @react-three/rapier's own
 // types (only as a TS type, not the runtime enum) -- pulled directly from
 // its underlying @dimforge/rapier3d-compat dependency instead (already in
@@ -26,6 +27,68 @@ const _planeVelVec = new THREE.Vector3();
 const _planePos = new THREE.Vector3();
 const _planeEuler = new THREE.Euler();
 const _planeQuat = new THREE.Quaternion();
+const _apQuat = new THREE.Quaternion();
+const _apUp = new THREE.Vector3();
+const _apRight = new THREE.Vector3();
+const _apForward = new THREE.Vector3();
+const _apVel = new THREE.Vector3();
+const _apAng = new THREE.Vector3();
+const _apLook = new THREE.Vector3();
+const _apStabQuat = new THREE.Quaternion();
+const _apStabEuler = new THREE.Euler();
+const _apSteerQ = new THREE.Quaternion();
+const _apSpinQ = new THREE.Quaternion();
+const AP_UP_AXIS = new THREE.Vector3(0, 1, 0);
+const AP_AXLE = new THREE.Vector3(-1, 0, 0);
+const AP_DOWN = new THREE.Vector3(0, -1, 0);
+
+// airplane.glb dell'originale: forme di collisione (box; le sfere
+// dell'originale toccavano solo il terreno a triangoli), carrello (3 ruote
+// a raggio, il ruotino anteriore sterza) e massa 50 kg con l'inerzia della
+// scatola che contiene tutte le forme (come cannon).
+const PLANE_BOXES: { pos: [number, number, number]; half: [number, number, number] }[] = [
+  { pos: [0, 0.295, -0.272], half: [0.293, 0.27, 1.113] },
+  { pos: [1.037, 0.276, 0.025], half: [0.744, 0.046, 0.243] },
+  { pos: [-1.037, 0.276, 0.025], half: [0.744, 0.046, 0.243] },
+  { pos: [0, 0.703, -1.015], half: [0.293, 0.138, 0.37] },
+  { pos: [0, 1.104, -1.111], half: [0.03, 0.262, 0.275] },
+  { pos: [0.521, 0.457, -1.123], half: [0.228, 0.024, 0.262] },
+  { pos: [-0.521, 0.457, -1.123], half: [0.228, 0.024, 0.262] },
+];
+const PLANE_WHEELS: { node: string; pos: [number, number, number]; steering: boolean }[] = [
+  { node: 'wheel_fl', pos: [0, -0.151, 0.492], steering: true },
+  { node: 'wheel_fl.001', pos: [0.206, -0.152, -0.287], steering: false },
+  { node: 'wheel_fl.002', pos: [-0.206, -0.152, -0.287], steering: false },
+];
+const PLANE_MASS = 50;
+const PLANE_AABB_HALF = [1.781, 0.6705, 1.1135];
+const PLANE_WHEEL_RAY_GROUPS = interactionGroups([CollisionGroups.Default], [CollisionGroups.Default, CollisionGroups.TrimeshColliders]);
+
+// SpringSimulator dell'originale (fotogrammi fissi a 60 Hz, interpolati)
+class FrameSpring {
+  pos = 0;
+  target = 0;
+  private offset = 0;
+  private a: [number, number] = [0, 0];
+  private b: [number, number] = [0, 0];
+  constructor(
+    private mass: number,
+    private damping: number
+  ) {}
+  simulate(dt: number) {
+    const frame = 1 / 60;
+    const total = this.offset + dt;
+    const n = Math.floor(total / frame);
+    this.offset = total % frame;
+    for (let i = 0; i < n; i++) {
+      let v = this.b[1] + (this.target - this.b[0]) / this.mass;
+      v *= this.damping;
+      this.a = this.b;
+      this.b = [this.b[0] + v, v];
+    }
+    this.pos = THREE.MathUtils.lerp(this.a[0], this.b[0], this.offset / frame);
+  }
+}
 
 const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'airplane-1' }) => {
   const { scene } = useGLTF('airplane.glb');
@@ -34,7 +97,7 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
   // debug/simDebug.ts. World.contactPairsWith needs the live Rapier
   // World + this body's own Collider handle, neither of which the
   // RigidBody ref alone exposes as conveniently.
-  const { world } = useRapier();
+  const { world, rapier } = useRapier();
 
   // car.glb's own "collision" helper meshes (boxes/spheres wrapping the
   // body, authored in Blender only to help build the physics hull, never
@@ -72,7 +135,6 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
   // groups (groupsExcluding(CollisionGroups.Default)) matches the old
   // collisionFilterMask: -1 -- a member of Default that collides with
   // everything.
-  const chassisHalfExtents: [number, number, number] = [0.75, 0.5, 2];
   const chassisRef = useRef<RapierRigidBody>(null);
 
   useEffect(() => {
@@ -87,6 +149,65 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
 
   const velocity = useRef([0, 0, 0]);
   const lastDrag = useRef(0);
+  const activeRef = useRef(false);
+  const isPausedRef = useRef(false);
+  isPausedRef.current = isPaused;
+  const lastTelemetry = useRef<Record<string, unknown>>({});
+  const gear = useRef<SketchbookRaycastVehicle | null>(null);
+  const springs = useMemo(
+    () => ({
+      steering: new FrameSpring(10, 0.6),
+      aileron: new FrameSpring(5, 0.6),
+      elevator: new FrameSpring(7, 0.6),
+      rudder: new FrameSpring(10, 0.6),
+    }),
+    []
+  );
+  const partsRef = useRef<{
+    aileronL?: THREE.Object3D;
+    aileronR?: THREE.Object3D;
+    elevators: THREE.Object3D[];
+    rudder?: THREE.Object3D;
+    wheels: (THREE.Object3D | undefined)[];
+  }>({
+    elevators: [],
+    wheels: [],
+  });
+
+  // massa/inerzia/gravita' dell'originale e carrello a raggi
+  useEffect(() => {
+    const body = chassisRef.current;
+    if (!body) return;
+    const e = PLANE_AABB_HALF;
+    const I = new THREE.Vector3(
+      (PLANE_MASS / 12) * (4 * e[1] * e[1] + 4 * e[2] * e[2]),
+      (PLANE_MASS / 12) * (4 * e[0] * e[0] + 4 * e[2] * e[2]),
+      (PLANE_MASS / 12) * (4 * e[1] * e[1] + 4 * e[0] * e[0])
+    );
+    body.setAdditionalMassProperties(PLANE_MASS, { x: 0, y: 0, z: 0 }, { x: I.x, y: I.y, z: I.z }, { x: 0, y: 0, z: 0, w: 1 }, true);
+    body.setGravityScale(9.81 / Math.max(0.1, Math.abs(world.gravity.y)), true);
+    const v = new SketchbookRaycastVehicle(world, rapier, body, I);
+    v.lagSeconds = 1 / 60;
+    for (const w of PLANE_WHEELS) {
+      v.addWheel({
+        connectionLocal: new THREE.Vector3(w.pos[0], w.pos[1] + 0.2, w.pos[2]),
+        directionLocal: AP_DOWN,
+        axleLocal: AP_AXLE,
+        radius: 0.12,
+        suspensionRestLength: 0.25,
+        maxSuspensionTravel: 1,
+        suspensionStiffness: 150,
+        dampingCompression: 5,
+        dampingRelaxation: 5,
+        frictionSlip: 1,
+        rollInfluence: 1,
+      });
+    }
+    gear.current = v;
+    return () => {
+      gear.current = null;
+    };
+  }, [world, rapier]);
 
   const enginePower = useRef(0);
   const rotorRef = useRef<THREE.Object3D | undefined>(undefined);
@@ -103,9 +224,18 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
     // muoversi"). Fixed by traversing clonedScene, same as the sibling
     // effect above.
     if (clonedScene) {
+      const parts = partsRef.current;
+      parts.elevators = [];
       clonedScene.traverse((child) => {
-        if (child.userData.data === 'rotor') rotorRef.current = child;
+        const d = child.userData.data;
+        if (d === 'rotor') rotorRef.current = child;
+        else if (d === 'aileron') {
+          if (child.userData.side === 'left') parts.aileronL = child;
+          else parts.aileronR = child;
+        } else if (d === 'elevator') parts.elevators.push(child);
+        else if (d === 'rudder') parts.rudder = child;
       });
+      parts.wheels = PLANE_WHEELS.map((w) => clonedScene.getObjectByName(w.node));
     }
   }, [clonedScene]);
 
@@ -114,10 +244,7 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
     const isAirplaneActive = currentControllable === 'airplane' && controlledEntityId === id && !isVehicleTransitioning;
 
     if (!body) return;
-    // Unlike Car.tsx, all of this vehicle's control logic (engine power,
-    // forces, rotation) lives in this plain useFrame rather than
-    // useBeforePhysicsStep, so <Physics paused> alone doesn't stop it --
-    // needs its own explicit check, same as Player.tsx/Car.tsx.
+    // (in pausa fermi anche motore, elica e superfici mobili)
     if (isPaused) return;
 
     // Synchronous Rapier read (no more worker-subscription lag -- see
@@ -161,7 +288,10 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
       const angvelT = body.angvel();
       const collider0 = body.collider(0);
       let numContacts = 0;
-      if (collider0) world.contactPairsWith(collider0, () => { numContacts += 1; });
+      if (collider0)
+        world.contactPairsWith(collider0, () => {
+          numContacts += 1;
+        });
       simDebug.registerVehicle('airplane', body, {
         id,
         active,
@@ -190,139 +320,151 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
       });
     };
 
-    if (!isAirplaneActive) {
-      if (enginePower.current > 0) enginePower.current = Math.max(0, enginePower.current - delta * 0.12);
-      if (import.meta.env.DEV) reportTelemetry(false);
-      return;
-    }
+    // motore (Airplane.update dell'originale): sale in 2.5 s ai comandi,
+    // scende piano senza; elica, sterzo del ruotino e superfici mobili
+    activeRef.current = isAirplaneActive;
+    if (isAirplaneActive) enginePower.current = Math.min(1, enginePower.current + delta * 0.4);
+    else enginePower.current = Math.max(0, enginePower.current - delta * 0.12);
+    if (rotorRef.current) rotorRef.current.rotateX(enginePower.current * delta * 60);
 
-    if (enginePower.current < 1) enginePower.current = Math.min(1, enginePower.current + delta * 0.4);
-
-    if (rotorRef.current) {
-        rotorRef.current.rotateX(enginePower.current * delta * 60);
-    }
-
-    const rot = body.rotation();
-    _planeQuat.set(rot.x, rot.y, rot.z, rot.w);
-
-    _planeForward.set(0, 0, 1).applyQuaternion(_planeQuat);
-    const forward = _planeForward;
-    _planeUp.set(0, 1, 0).applyQuaternion(_planeQuat);
-    const up = _planeUp;
-    _planeRight.set(1, 0, 0).applyQuaternion(_planeQuat);
-    const right = _planeRight;
-
-    _planeVelVec.set(velocity.current[0], velocity.current[1], velocity.current[2]);
-    const velVec = _planeVelVec;
-    const currentSpeed = velVec.dot(forward);
-    const flightModeInfluence = THREE.MathUtils.clamp(currentSpeed / 10, 0, 1);
-
-    // Legacy Airplane.ts (pre-React) drove the physics body directly every
-    // ~60Hz substep -- `body.velocity +=`, `body.angularVelocity +=`/`=lerp`
-    // -- entirely independent of the body's mass or inertia tensor. This
-    // port instead used applyImpulse/applyTorqueImpulse for thrust and
-    // pitch/roll/yaw, which divide by mass and by the (very uneven,
-    // box-shaped) inertia tensor: the same numeric constant produced wildly
-    // different actual responsiveness per axis (roll came out ~4x stronger
-    // than pitch/yaw). On top of that, roll's left/right (A/D) sign was
-    // flipped relative to legacy's rollLeft/rollRight -- backwards AND too
-    // strong at once ("l'aereoplano funziona a cazzo"). Fixed by reading
-    // the current linear/angular velocity once, accumulating every term
-    // into it exactly like legacy did (restoring legacy's exact per-axis
-    // constants, roll sign, and its rotation-self-leveling term), and
-    // writing the result back with a single setLinvel/setAngvel --
-    // mass/inertia-independent again.
-    // dt60 renormalizes legacy's implicit-60fps-per-step constants to the
-    // real frame delta (dt60 == 1 at exactly 60fps), clamped so a dropped/
-    // backgrounded frame can't apply a single huge jump.
-    const dt60 = Math.min(delta * 60, 3);
-
-    // Legacy also self-leveled the nose toward the current velocity
-    // direction, but only while the wheels-on-ground raycast said the plane
-    // was airborne (otherwise it would fight the plane resting on its
-    // landing gear). This port has no wheel/landing-gear collider -- the
-    // chassis is a single CuboidCollider -- so that guard can't be
-    // replicated; without it, the very first frames of gravity-fall before
-    // real airspeed builds up get read as "velocity direction" and pitch
-    // the nose straight into the ground (the plane never took off: "l'aereo
-    // nn si muove piu, nn parte"). Left out entirely rather than risk that
-    // again -- pitch/roll/yaw below are fully player-controlled instead.
-    const av = body.angvel();
-    let angX = av.x;
-    let angY = av.y;
-    let angZ = av.z;
-
-    // Pitch (W/S) -- legacy: angularVelocity += right * 0.04 * flightModeInfluence * enginePower (pitchDown/W), -= (pitchUp/S)
-    const pitchYawRollFactor = flightModeInfluence * enginePower.current * dt60;
-    if (input.forward) { angX += right.x * 0.04 * pitchYawRollFactor; angY += right.y * 0.04 * pitchYawRollFactor; angZ += right.z * 0.04 * pitchYawRollFactor; }
-    if (input.backward) { angX -= right.x * 0.04 * pitchYawRollFactor; angY -= right.y * 0.04 * pitchYawRollFactor; angZ -= right.z * 0.04 * pitchYawRollFactor; }
-
-    // Yaw (Q/E) -- legacy: angularVelocity += up * 0.02 * flightModeInfluence * enginePower (yawLeft/Q), -= (yawRight/E)
-    if (input.yawLeft) { angX += up.x * 0.02 * pitchYawRollFactor; angY += up.y * 0.02 * pitchYawRollFactor; angZ += up.z * 0.02 * pitchYawRollFactor; }
-    if (input.yawRight) { angX -= up.x * 0.02 * pitchYawRollFactor; angY -= up.y * 0.02 * pitchYawRollFactor; angZ -= up.z * 0.02 * pitchYawRollFactor; }
-
-    // Roll (A/D) -- legacy: angularVelocity -= forward * 0.055 * flightModeInfluence * enginePower (rollLeft/A), += (rollRight/D).
-    // (Previously flipped here: A applied +forward and D applied -forward --
-    // backwards relative to legacy, on top of being inertia-tensor-scaled
-    // and 1.5x too strong.)
-    if (input.left) { angX -= forward.x * 0.055 * pitchYawRollFactor; angY -= forward.y * 0.055 * pitchYawRollFactor; angZ -= forward.z * 0.055 * pitchYawRollFactor; }
-    if (input.right) { angX += forward.x * 0.055 * pitchYawRollFactor; angY += forward.y * 0.055 * pitchYawRollFactor; angZ += forward.z * 0.055 * pitchYawRollFactor; }
-
-    // Angular damping -- legacy: angularVelocity = lerp(angularVelocity, angularVelocity*0.98, flightModeInfluence),
-    // applied AFTER the controls above. Math.pow(base, dt60) generalizes the
-    // implicit-60fps 0.98 constant across frame rates.
-    const angDampBase = Math.pow(0.98, dt60);
-    angX = THREE.MathUtils.lerp(angX, angX * angDampBase, flightModeInfluence);
-    angY = THREE.MathUtils.lerp(angY, angY * angDampBase, flightModeInfluence);
-    angZ = THREE.MathUtils.lerp(angZ, angZ * angDampBase, flightModeInfluence);
-
-    body.setAngvel({ x: angX, y: angY, z: angZ }, true);
-
-    // Thrust -- legacy: speedModifier depends on throttle(Shift)/brake(Space)
-    // (no wheel-on-ground case here, since this port has no wheel raycast);
-    // velocity += forward * (velLength1*lastDrag + speedModifier) * enginePower
-    let speedModifier = 0.02;
-    if (input.shift && !input.jump) speedModifier = 0.06;
-    else if (!input.shift && input.jump) speedModifier = -0.05;
-
-    const curVel = body.linvel();
-    const vel = { x: curVel.x, y: curVel.y, z: curVel.z };
-    const velLength1 = velVec.length();
-    const thrust = (velLength1 * lastDrag.current + speedModifier) * enginePower.current * dt60;
-    vel.x += forward.x * thrust; vel.y += forward.y * thrust; vel.z += forward.z * thrust;
-
-    // Drag -- legacy: drag = velLength2 * 0.003 * enginePower; velocity -= velocity*drag; lastDrag saved for next frame's thrust term above
-    const velLength2 = Math.sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
-    const drag = velLength2 * 0.003 * enginePower.current * dt60;
-    vel.x -= vel.x * drag; vel.y -= vel.y * drag; vel.z -= vel.z * drag;
-    lastDrag.current = drag;
-
-    // Lift -- legacy: lift = clamp(velLength2*0.005*enginePower, 0, 0.05); velocity += up*lift
-    const lift = THREE.MathUtils.clamp(velLength2 * 0.005 * enginePower.current * dt60, 0, 0.05);
-    vel.x += up.x * lift; vel.y += up.y * lift; vel.z += up.z * lift;
-
-    body.setLinvel(vel, true);
-
-    if (import.meta.env.DEV) {
-      reportTelemetry(true, {
-        speedModifier, velLength1, thrust, drag, lift, lastDrag: lastDrag.current,
-        dt60, currentSpeed, flightModeInfluence, forward: [forward.x, forward.y, forward.z],
-        velAfterSet: [vel.x, vel.y, vel.z],
+    const on = isAirplaneActive;
+    const v = gear.current;
+    const grounded = !!v && v.numWheelsOnGround > 0;
+    const leftish = on && (input.yawLeft || input.left) && !input.yawRight && !input.right;
+    const rightish = on && (input.yawRight || input.right) && !input.yawLeft && !input.left;
+    springs.steering.target = grounded ? (leftish ? 0.8 : rightish ? -0.8 : 0) : 0;
+    springs.steering.simulate(delta);
+    if (v) PLANE_WHEELS.forEach((w, i) => w.steering && v.setWheelSteering(i, springs.steering.pos));
+    const PARTS = 0.7;
+    springs.aileron.target = on && input.left && !input.right ? PARTS : on && input.right && !input.left ? -PARTS : 0;
+    springs.elevator.target = on && input.backward && !input.forward ? PARTS : on && input.forward && !input.backward ? -PARTS : 0;
+    springs.rudder.target = on && input.yawLeft && !input.yawRight ? PARTS : on && input.yawRight && !input.yawLeft ? -PARTS : 0;
+    springs.aileron.simulate(delta);
+    springs.elevator.simulate(delta);
+    springs.rudder.simulate(delta);
+    const parts = partsRef.current;
+    if (parts.aileronL) parts.aileronL.rotation.y = springs.aileron.pos;
+    if (parts.aileronR) parts.aileronR.rotation.y = -springs.aileron.pos;
+    for (const e of parts.elevators) e.rotation.y = springs.elevator.pos;
+    if (parts.rudder) parts.rudder.rotation.y = springs.rudder.pos;
+    // ruote del carrello: dove le mette la sospensione, sterzo e rotazione
+    if (v) {
+      PLANE_WHEELS.forEach((w, i) => {
+        const node = parts.wheels[i];
+        if (!node) return;
+        node.position.set(w.pos[0], w.pos[1] + 0.2 - v.wheelSuspensionLength(i), w.pos[2]);
+        _apSteerQ.setFromAxisAngle(AP_UP_AXIS, v.wheelSteering(i));
+        _apSpinQ.setFromAxisAngle(AP_AXLE, v.wheelRotation(i));
+        node.quaternion.copy(_apSteerQ).multiply(_apSpinQ);
       });
     }
 
+    if (import.meta.env.DEV) reportTelemetry(isAirplaneActive, isAirplaneActive ? { ...lastTelemetry.current } : undefined);
+    if (!isAirplaneActive) return;
+
     const t = body.translation();
     _planePos.set(t.x, t.y, t.z);
-    const planePos = _planePos;
+    const r = body.rotation();
+    _planeQuat.set(r.x, r.y, r.z, r.w);
     _planeEuler.setFromQuaternion(_planeQuat, 'YXZ');
-    const planeEuler = _planeEuler;
+    setPlayerInfo([_planePos.x, _planePos.y, _planePos.z], _planeEuler.y);
+  });
 
-    // Update player info so camera/minimap follow the plane
-    setPlayerInfo([planePos.x, planePos.y, planePos.z], planeEuler.y);
+  // "anche gli altri veicoli aereo e elicottero" -- Airplane.physicsPreStep
+  // dell'originale a ogni passo di fisica (k = dt*60: incrementi per passo
+  // dell'originale a 60 Hz riportati al passo vero), con quello che mancava:
+  // stabilizzazione del muso verso la direzione di volo (senza, l'aereo
+  // non "segue" la traiettoria), niente spinta a terra senza gas, carrello
+  // vero (ruote a raggio, ruotino che sterza), gravita' 9.81 dell'originale.
+  useBeforePhysicsStep((w) => {
+    const body = chassisRef.current;
+    if (!body || isPausedRef.current) return;
+    const dt = w.timestep;
+    const k = dt * 60;
+    const ep = enginePower.current;
+    const on = activeRef.current;
+    const v = gear.current;
+    const wheelsOnGround = v ? v.numWheelsOnGround : 0;
 
-    // (Position/rotation for the store are now kept up to date
-    // unconditionally above, active or parked -- no need to duplicate it
-    // here.)
+    const rot = body.rotation();
+    _apQuat.set(rot.x, rot.y, rot.z, rot.w);
+    _apRight.set(1, 0, 0).applyQuaternion(_apQuat);
+    _apUp.set(0, 1, 0).applyQuaternion(_apQuat);
+    _apForward.set(0, 0, 1).applyQuaternion(_apQuat);
+    const lv = body.linvel();
+    const vel = _apVel.set(lv.x, lv.y, lv.z);
+    const velLength1 = vel.length();
+    const currentSpeed = vel.dot(_apForward);
+
+    const flightModeInfluence = THREE.MathUtils.clamp(currentSpeed / 10, 0, 1);
+    // l'originale "alleggerisce" l'aereo con la velocita' (collision.mass):
+    // cannon non ricalcola invMass, quindi lo sentono la gravita' (forza =
+    // massa * g: fino al 40% a 10 m/s) e le sospensioni, non gli urti
+    const lighter = 1 - THREE.MathUtils.clamp(currentSpeed / 10, 0, 1) * 0.6;
+    if (v) v.suspensionMassScale = lighter;
+    body.setGravityScale((9.81 / Math.max(0.1, Math.abs(w.gravity.y))) * lighter, false);
+
+    const throttle = on && input.shift;
+    const brake = on && input.jump;
+    const av = body.angvel();
+    const ang = _apAng.set(av.x, av.y, av.z);
+
+    // stabilizzazione: il muso gira piano verso dove sta andando l'aereo
+    if (velLength1 > 1e-4) {
+      _apLook.copy(vel).divideScalar(velLength1);
+      _apStabQuat.setFromUnitVectors(_apForward, _apLook);
+      _apStabQuat.x *= 0.3;
+      _apStabQuat.y *= 0.3;
+      _apStabQuat.z *= 0.3;
+      _apStabQuat.w *= 0.3;
+      _apStabEuler.setFromQuaternion(_apStabQuat);
+      let infl = THREE.MathUtils.clamp(velLength1 - 1, 0, 0.1);
+      if (wheelsOnGround > 0 && currentSpeed < 0) infl = 0; // retromarcia
+      const loopFix = throttle && currentSpeed > 0 ? 0 : 1;
+      ang.x += _apStabEuler.x * infl * loopFix * k;
+      ang.y += _apStabEuler.y * infl * k;
+      ang.z += _apStabEuler.z * infl * loopFix * k;
+    }
+
+    if (on) {
+      const f = flightModeInfluence * ep * k;
+      if (input.backward) ang.addScaledVector(_apRight, -0.04 * f); // S: cabra
+      if (input.forward) ang.addScaledVector(_apRight, 0.04 * f); // W: picchia
+      if (input.yawLeft) ang.addScaledVector(_apUp, 0.02 * f);
+      if (input.yawRight) ang.addScaledVector(_apUp, -0.02 * f);
+      if (input.left) ang.addScaledVector(_apForward, -0.055 * f);
+      if (input.right) ang.addScaledVector(_apForward, 0.055 * f);
+    }
+
+    // spinta: compensa la resistenza del passo prima piu' il gas
+    let speedModifier = 0.02;
+    if (throttle && !brake) speedModifier = 0.06;
+    else if (!throttle && brake) speedModifier = -0.05;
+    else if (wheelsOnGround > 0) speedModifier = 0;
+    vel.addScaledVector(_apForward, (velLength1 * lastDrag.current + speedModifier * k) * ep);
+
+    // resistenza e portanza
+    const velLength2 = vel.length();
+    const drag = velLength2 * 0.003 * ep * k;
+    vel.addScaledVector(vel, -drag);
+    lastDrag.current = drag;
+    const lift = THREE.MathUtils.clamp(velLength2 * 0.005 * ep, 0, 0.05) * k;
+    vel.addScaledVector(_apUp, lift);
+    body.setLinvel({ x: vel.x, y: vel.y, z: vel.z }, true);
+
+    // smorzamento angolare (solo in volo)
+    const damp = Math.pow(0.98, k);
+    ang.x = THREE.MathUtils.lerp(ang.x, ang.x * damp, flightModeInfluence);
+    ang.y = THREE.MathUtils.lerp(ang.y, ang.y * damp, flightModeInfluence);
+    ang.z = THREE.MathUtils.lerp(ang.z, ang.z * damp, flightModeInfluence);
+    body.setAngvel({ x: ang.x, y: ang.y, z: ang.z }, true);
+
+    // carrello (dopo le velocita' impostate sopra)
+    if (v) v.updateVehicle(dt, rapier.QueryFilterFlags.EXCLUDE_SENSORS, PLANE_WHEEL_RAY_GROUPS);
+
+    if (import.meta.env.DEV) {
+      lastTelemetry.current = { speedModifier, velLength1, drag, lift, currentSpeed, flightModeInfluence, wheelsOnGround, k };
+    }
   });
 
   return (
@@ -333,6 +475,8 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
       colliders={false}
       position={position}
       canSleep={false}
+      linearDamping={0.01}
+      angularDamping={0.01}
       collisionGroups={groupsExcluding(CollisionGroups.Default)}
     >
       {/* Unlike Car.tsx (which has a real RayCastVehicleController doing
@@ -345,11 +489,21 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
           friction at all ("l'aereo nn parte"). Low friction here mimics
           low-rolling-resistance landing gear, same spirit as Car.tsx's
           friction={0.3} on its own chassis. */}
-      <CuboidCollider args={chassisHalfExtents} mass={50} friction={0.05} restitution={0} frictionCombineRule={CoefficientCombineRule.Min} />
+      {PLANE_BOXES.map((b, i) => (
+        <CuboidCollider
+          key={i}
+          args={b.half}
+          position={b.pos}
+          density={0}
+          friction={0.05}
+          restitution={0}
+          frictionCombineRule={CoefficientCombineRule.Min}
+        />
+      ))}
       {/* Chassis box half-height is 0.5; the glb's lowest point (the
           landing gear) sits 0.265 below the model's own origin, so
           -0.24 aligns the wheels with the box's bottom face. */}
-      <primitive object={clonedScene} position={[0, -0.24, 0]} />
+      <primitive object={clonedScene} />
     </RigidBody>
   );
 };

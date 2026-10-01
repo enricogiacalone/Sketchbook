@@ -15,6 +15,8 @@ import { droneMouseDelta, droneShake, droneCamPose } from '../lib/droneFlight';
 const PLAYER_RADIUS = 1.6;
 const VEHICLE_RADIUS = 3;
 const DUEL_CAR_CAM_RADIUS = 6;
+// elicottero ingrandito (x1.5, vedi Helicopter.tsx): piu' lungo dell'auto
+const HELI_CAM_RADIUS = 9;
 // "siamo io che controllo un combat soldier" -- the 1v1 duel's player-
 // controlled fighter (see PlayerCombatSoldier.tsx/DuelArena.tsx) is an
 // on-foot human character, same silhouette/height as 'player', so it gets
@@ -311,7 +313,10 @@ export const useThirdPersonCamera = () => {
         phi.current = DUEL_START_PHI;
         targetRadius.current = DUEL_START_RADIUS;
         radius.current = DUEL_START_RADIUS;
-      } else if (currentControllable === 'car' && (prevControllable.current === 'combatSoldier' || prevControllable.current === 'player')) {
+      } else if (
+        (currentControllable === 'car' || currentControllable === 'helicopter') &&
+        (prevControllable.current === 'combatSoldier' || prevControllable.current === 'player')
+      ) {
         // "insegnare al personaggio ad entrarci e guidarla": salito in auto
         // nel duello, la camera va DIETRO l'auto (stessa convenzione di
         // theta del combattente: atan2(avanti) + PI)
@@ -321,8 +326,9 @@ export const useThirdPersonCamera = () => {
         phi.current = 15;
         // l'auto del duello e' ingrandita del 50% (DuelArena): a 3 m la
         // camera finiva dentro il lunotto
-        targetRadius.current = DUEL_CAR_CAM_RADIUS;
-        radius.current = DUEL_CAR_CAM_RADIUS;
+        const r = currentControllable === 'helicopter' ? HELI_CAM_RADIUS : DUEL_CAR_CAM_RADIUS;
+        targetRadius.current = r;
+        radius.current = r;
       }
       prevControllable.current = currentControllable;
     }
