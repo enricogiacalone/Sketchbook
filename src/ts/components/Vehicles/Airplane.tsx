@@ -7,7 +7,7 @@ import { SketchbookRaycastVehicle } from './sketchbookRaycastVehicle';
 // its underlying @dimforge/rapier3d-compat dependency instead (already in
 // node_modules via @react-three/rapier, just not a direct package.json dep).
 import { CoefficientCombineRule } from '@dimforge/rapier3d-compat';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF } from '../../lib/gltf';
 import * as THREE from 'three';
 import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { useGLTF, Html } from '@react-three/drei';
+import { Html } from '@react-three/drei';
+import { useGLTF } from '../../lib/gltf';
 import { SkeletonUtils } from 'three-stdlib';
 import { RigidBody, CapsuleCollider, RapierRigidBody, interactionGroups, useRapier } from '@react-three/rapier';
 import type { RigidBody as RRigidBody, Collider } from '@dimforge/rapier3d-compat';

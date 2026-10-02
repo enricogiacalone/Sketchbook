@@ -1,6 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useGLTF, useAnimations } from '@react-three/drei';
+import { useAnimations } from '@react-three/drei';
+import { useGLTF } from '../../lib/gltf';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { getTerrainHeight } from './Terrain';

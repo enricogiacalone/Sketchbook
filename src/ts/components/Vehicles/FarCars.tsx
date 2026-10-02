@@ -1,6 +1,6 @@
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF } from '../../lib/gltf';
 import { mergeBufferGeometries } from 'three-stdlib';
 import * as THREE from 'three';
 import { farCars } from './vehicleRegistry';

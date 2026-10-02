@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF } from '../../../lib/gltf';
 import { useThree } from '@react-three/fiber';
 import { acquireAudioListener, releaseAudioListener } from '../../../lib/sharedAudioListener';
 import { SkeletonUtils } from 'three-stdlib';

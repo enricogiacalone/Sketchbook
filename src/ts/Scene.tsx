@@ -1,5 +1,5 @@
 import React, { Suspense } from 'react';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF } from './lib/gltf';
 import * as THREE from 'three';
 import Ocean from './components/Environment/Ocean';
 import Trees from './components/Environment/Trees';

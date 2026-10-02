@@ -1,7 +1,8 @@
 import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RigidBody, CuboidCollider, RapierRigidBody, useRapier, useBeforePhysicsStep, interactionGroups } from '@react-three/rapier';
-import { useGLTF, Html } from '@react-three/drei';
+import { Html } from '@react-three/drei';
+import { useGLTF } from '../../lib/gltf';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { useInput } from '../../hooks/useInput';

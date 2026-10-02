@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF } from '../../lib/gltf';
 import { useThree } from '@react-three/fiber';
 import { useRapier } from '@react-three/rapier';
 import { vehicleBodyHandles } from '../Vehicles/vehicleRegistry';
