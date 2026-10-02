@@ -20,7 +20,10 @@ import { usePistolModel, useGunModel, RIFLE_SPEC, type GunModelApi } from './wea
 import { useKnifeModel } from './weapons/useKnifeModel';
 import { solveTwoBoneIK } from './weapons/twoBoneIK';
 import { newTravState, stepTraversal, followGround, isTraversing, hangHandTargets, type TravCtx } from './traversal/traversal';
-import { GETUP_CLIP, measureLyingPose, newKnockdown, stepKnockdown, getUpPlacement } from './ragdoll/knockdown';
+import { GETUP_CLIP } from './ragdoll/knockdown';
+import { useKnockdown } from './ragdoll/useKnockdown';
+import { K, KIMODO_ANIMS_URL } from '../../lib/kimodo';
+import { crowdPanic } from '../city/crowdSim';
 import { castShot, spreadDirection } from './weapons/hitscan';
 import { getShootableCollider, applyFighterHit } from './weapons/shootableRegistry';
 import { emitShotFx, type ShotSurface } from './weapons/weaponFx';
@@ -200,6 +203,20 @@ const BENCH_LOOPING_CLIP = /^(Walk|Run|Sprint|Jog|Strafe|Fighting Idle|Idle|Crou
 const MODEL_URL = 'soldier-citizen.glb';
 const BASE_ANIMS_URL = 'soldier-citizen-base-animations.glb';
 const ADDON_ANIMS_URL = 'soldier-citizen-addon-animations.glb';
+// "introduci kimodo così cominciamo con le animazioni custom": clip generate
+// da Kimodo (testo -> animazione) e adattate a questo scheletro da
+// tools/kimodo/kimodo.sh + scripts/kimodo-retarget.mjs (src/ts/lib/kimodo.ts).
+// Si chiamano Kimodo_<nome> e si provano dal pannello "Animazioni Kimodo".
+// "stati del personaggio": camminata da ferito sotto il 30% di vita,
+// fiatone dopo una lunga corsa, esultanza quando si mette KO l'ultimo nemico
+// vicino. Tutto solo se la clip c'e' e a mani nude (con un'arma in mano il
+// busto segue la posa dell'arma); muoversi interrompe fiatone ed esultanza.
+const INJURED_HP = 0.3;
+const INJURED_WALK_SPEED = 0.95; // m/s
+const TIRED_SPRINT_S = 4; // secondi di corsa di fila per avere il fiatone
+const OUT_OF_BREATH_S = 4;
+const CELEBRATE_DELAY_S = 0.8;
+const CELEBRATE_NO_ENEMY_DIST = 15;
 
 // Green -- visually distinct from CombatSoldier.tsx's RED/BLUE/amber-FFA
 // team palette, so the fighter YOU control always reads unambiguously at
@@ -239,9 +256,6 @@ const SPINE_LEAN_MAX = THREE.MathUtils.degToRad(40);
 const SPINE_TWIST_MAX = THREE.MathUtils.degToRad(80);
 // torsione del busto: quanto ci mette a sparire a terra / rientrare in piedi (s)
 const SPINE_LEAN_BLEND_S = 0.35;
-// rialzo da terra: alzata massima della clip (m) e in quanto torna a zero (s)
-const GETUP_LIFT_MAX = 0.25;
-const GETUP_LIFT_S = 0.9;
 // How much of the remaining facing-angle gap closes per frame -- same
 // convention/units as CombatSoldier.tsx's own duel-facing turn (there
 // 0.15); a touch snappier here since this is player-driven, not an
@@ -401,16 +415,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   // e pausa tra un colpo e l'altro dello stesso ostacolo
   const knockVelRef = useRef(new THREE.Vector3());
   const obstacleHitCooldownRef = useRef(0);
-  const kdRef = useRef(newKnockdown());
   const spineLeanWRef = useRef(1); // peso della torsione del busto (0 a terra)
-  // rialzo: di quanto e' alzata la clip sopra il suolo all'inizio, e da quanto
-  const getUpRef = useRef({ lift0: 0, t: 0 });
-  const getUpLift = () => {
-    const g = getUpRef.current;
-    if (data.state !== 'Si rialza' || g.lift0 <= 0) return 0;
-    const k = Math.max(0, 1 - g.t / GETUP_LIFT_S);
-    return g.lift0 * k * k * (3 - 2 * k);
-  };
   // salto / arrampicata (traversal/traversal.ts): quota dei piedi, modo...
   const travRef = useRef(
     newTravState(
@@ -449,7 +454,18 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   const inCarBody = () => vehRef.current.mode === 'entering' || vehRef.current.mode === 'driving' || vehRef.current.mode === 'exiting';
   const deadForRef = useRef(0);
   const maxHpRef = useRef(data.hp);
-  const isDown = () => kdRef.current.active || data.state === 'Si rialza';
+  // stati Kimodo (vedi INJURED_HP e seguenti)
+  const sprintTimeRef = useRef(0);
+  const breathLeftRef = useRef(0);
+  const celebrateRef = useRef<{ delay: number; left: number }>({ delay: 0, left: 0 });
+  const scheduleCelebration = (victim: FighterData) => {
+    const nearEnemy = opponents.some(
+      (o) =>
+        o !== victim && !o.isDead && Math.hypot(o.position.x - data.position.x, o.position.z - data.position.z) < CELEBRATE_NO_ENEMY_DIST
+    );
+    if (!nearEnemy) celebrateRef.current = { delay: CELEBRATE_DELAY_S, left: 0 };
+  };
+  const isDown = () => kd.isDown() || data.state === 'Si rialza';
   type Arm = { upper: THREE.Object3D; lower: THREE.Object3D; hand: THREE.Object3D };
   const armBonesRef = useRef<{ l: Arm; r: Arm } | null>(null);
   const rifleRaiseRef = useRef(0);
@@ -483,7 +499,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   const { scene } = useGLTF(MODEL_URL);
   const { animations: baseAnims } = useGLTF(BASE_ANIMS_URL);
   const { animations: addonAnims } = useGLTF(ADDON_ANIMS_URL);
-  const animations = useMemo(() => [...baseAnims, ...addonAnims], [baseAnims, addonAnims]);
+  const { animations: kimodoAnims } = useGLTF(KIMODO_ANIMS_URL);
+  const animations = useMemo(() => [...baseAnims, ...addonAnims, ...kimodoAnims], [baseAnims, addonAnims, kimodoAnims]);
 
   // Identical to CombatSoldier.tsx's own catalog-building useMemo (see
   // there for why each field is picked the way it is) -- duplicated
@@ -624,22 +641,23 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, animations, data]);
 
-  const lyingPose = useMemo(() => measureLyingPose(scene, clipsMap[GETUP_CLIP]), [scene, clipsMap]);
+  // KO fisico e rialzo: lo stesso pezzo dei nemici e della citta' (ragdoll/useKnockdown.ts)
+  const kd = useKnockdown(ragdoll, scene, clipsMap[GETUP_CLIP]);
+  // (l'alzata del rialzo vale solo mentre ci si rialza davvero)
+  const getUpLift = () => (data.state === 'Si rialza' ? kd.lift() : 0);
   // a terra (KO o morto): la telecamera segue il bacino del ragdoll, non la
   // radice rimasta dov'era (lib/cameraFocus.ts)
   const _focus = useMemo(() => new THREE.Vector3(), []);
   useFrame(() => {
-    const down = kdRef.current.active || data.isDead;
+    const down = kd.isDown() || data.isDead;
     if (down && ragdoll.getBoneWorldPosition('pelvis', _focus)) setCameraFocus(entityName, _focus);
     else clearCameraFocus(entityName);
   });
   React.useEffect(() => () => clearCameraFocus(entityName), [entityName]);
   // colpo forte: KO fisico (vedi ragdoll/knockdown.ts)
   const startKnockdown = (dirX: number, dirZ: number, speed: number, up = 0.3) => {
-    if (kdRef.current.active || data.isDead) return;
-    const dir = new THREE.Vector3(dirX, up, dirZ).normalize();
-    if (!ragdoll.knockDown(dir, speed)) return;
-    kdRef.current = { ...newKnockdown(), active: true };
+    if (kd.isDown() || data.isDead) return;
+    if (!kd.start(dirX, dirZ, speed, up)) return;
     data.state = 'A terra';
     data.attackLock = 0;
     isAttackingRef.current = false;
@@ -794,6 +812,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
           opponent.hp = 0;
           opponent.isDead = true;
           opponent.attackLock = 0;
+          scheduleCelebration(opponent);
         } else {
           opponent.triggerHit = Math.random() > 0.5 ? 'Hit_Chest' : 'Hit_Head';
           // "il colpo deve avvenire precisamente dove le mesh si sono
@@ -910,6 +929,37 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     return isEngaged() ? animCatalog.idle : relaxedIdle;
   };
   const idleState = () => (weaponRef.current === 'fists' && !isEngaged() ? 'Riposo' : 'In guardia');
+  // Fermi: esultanza o fiatone (clip Kimodo) al posto del riposo. true se ha
+  // scelto lei l'animazione di questo frame.
+  const kimodoIdle = (dt: number): boolean => {
+    if (weaponRef.current !== 'fists' || isEngaged()) {
+      celebrateRef.current = { delay: 0, left: 0 };
+      return false;
+    }
+    const c = celebrateRef.current;
+    if (c.delay > 0) {
+      c.delay -= dt;
+      const clips = K.victory.filter((n) => actions[n]);
+      if (c.delay <= 0 && clips.length) {
+        c.left = transitionToAnimation(clips[Math.floor(Math.random() * clips.length)], 0.25, false);
+        sprintTimeRef.current = 0;
+      }
+    }
+    if (c.left > 0) {
+      c.left -= dt;
+      data.state = 'Esulta!';
+      return true;
+    }
+    if (sprintTimeRef.current > TIRED_SPRINT_S && actions[K.outOfBreath]) breathLeftRef.current = OUT_OF_BREATH_S;
+    sprintTimeRef.current = 0;
+    if (breathLeftRef.current > 0) {
+      breathLeftRef.current -= dt;
+      transitionToAnimation(K.outOfBreath, 0.35, true);
+      data.state = 'Fiatone';
+      return true;
+    }
+    return false;
+  };
 
   // la parata che l'IA riconosce (animCatalog.block) segue l'arma in mano
   const fistsBlockRef = useRef(animCatalog.block);
@@ -993,6 +1043,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       return;
     }
     const aiming = aimingRef.current;
+    // "folla piu' viva": i passanti vicini scappano o si accucciano
+    crowdPanic(data.position.x, data.position.z);
     camera.getWorldDirection(_shotCamDir);
     spreadDirection(_shotCamDir, aiming ? st.spreadAim : st.spreadHip, _shotCamDir);
     // Il raggio camera parte all'altezza del personaggio lungo la linea di
@@ -1030,6 +1082,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
             target.isDead = true;
             target.attackLock = 0;
             kill = true;
+            scheduleCelebration(target);
           } else {
             target.triggerHit = head ? 'Hit_Head' : 'Hit_Chest';
             target.hitReactionHandled = true;
@@ -1243,7 +1296,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       },
       // Laboratorio KO (UI/koLab.ts): a terra / si sta rialzando, e KO vero
       // (stesso percorso di un colpo: rialzo automatico, telecamera)
-      down: kdRef.current.active || data.state === 'Si rialza',
+      down: kd.isDown() || data.state === 'Si rialza',
       knockDown: (dirX: number, dirZ: number, speed: number, up?: number) => startKnockdown(dirX, dirZ, speed, up),
       teleport: (x: number, z: number, rotation?: number, feetY?: number) => {
         data.position.x = x;
@@ -1322,7 +1375,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // dritto e girato verso la telecamera, e le braccia finivano 30-35 cm
     // sotto il pavimento (il corpo fisico le seguiva). A terra e mentre si
     // rialza niente torsione; poi rientra piano.
-    if (data.state === 'Si rialza') getUpRef.current.t += delta;
+    if (data.state === 'Si rialza') kd.tick(delta);
+    else kd.stopLift();
     spineLeanWRef.current = THREE.MathUtils.clamp(
       spineLeanWRef.current + (isDown() || data.isDead ? -1 : 1) * (delta / SPINE_LEAN_BLEND_S),
       0,
@@ -1419,7 +1473,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // appesi...); data.position.y resta "sopra il terreno" come prima.
     const applyTransform = () => {
       const tr = travRef.current;
-      if (data.isDead || kdRef.current.active) {
+      if (data.isDead || kd.isDown()) {
         // a terra per fisica: finito il KO si riparte da terra (followGround
         // riporta i piedi sull'appoggio del punto in cui ci si rialza)
         if (tr.mode !== 'ground') {
@@ -1433,7 +1487,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       }
       const groundY = groundBase(data.position.x, data.position.z);
       data.position.y = tr.feetY - groundY;
-      // (rialzo da terra: il modello parte alzato, vedi getUpRef)
+      // (rialzo da terra: il modello parte alzato, vedi useKnockdown)
       groupRef.current!.position.set(data.position.x, tr.feetY + getUpLift(), data.position.z);
       groupRef.current!.rotation.y = data.rotation;
     };
@@ -1521,7 +1575,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
         // F a piedi, fermi e liberi: auto vicina?
         const fPressed = input.consumeJustPressed('enter');
         const vehIds = typeof vehicleIds === 'function' ? vehicleIds() : vehicleIds;
-        if (fPressed && vehIds?.length && !data.isDead && !kdRef.current.active && !traving() && data.attackLock <= 0) {
+        if (fPressed && vehIds?.length && !data.isDead && !kd.isDown() && !traving() && data.attackLock <= 0) {
           for (const id of vehIds) {
             const parts = carParts(id);
             if (!parts) continue;
@@ -1667,7 +1721,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
         input.consumeJustPressed('respawn');
         // in volo col drone: niente "a terra" (fari missione, collezionabili)
         if (publishPlayerInfo) st.setIsPlayerGrounded(false);
-        if (!data.isDead && !kdRef.current.active && data.attackLock <= 0 && !traving()) {
+        if (!data.isDead && !kd.isDown() && data.attackLock <= 0 && !traving()) {
           transitionToAnimation(idleName(), 0.25, true);
           data.state = idleState();
         }
@@ -1689,14 +1743,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
           Math.atan2(Math.sin(yaw), Math.cos(yaw))
         );
       }
-      if (
-        droneId &&
-        vehRef.current.mode === 'none' &&
-        input.consumeJustPressed('fly') &&
-        !data.isDead &&
-        !kdRef.current.active &&
-        !traving()
-      ) {
+      if (droneId && vehRef.current.mode === 'none' && input.consumeJustPressed('fly') && !data.isDead && !kd.isDown() && !traving()) {
         st.setIsDrone(true);
         st.setCurrentControllable('drone', droneId);
       }
@@ -1716,13 +1763,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       // secondo a terra ci si rialza da dove si e' caduti, con la vita piena
       deadForRef.current += delta * globalSpeed;
       if (deadForRef.current >= PLAYER_REVIVE_S) {
-        const ly = ragdoll.getLyingState();
+        const place = kd.placeFromLying(travRef.current.feetY);
         data.isDead = false;
         data.hp = maxHpRef.current;
         data.triggerHit = null;
         ragdoll.deactivate();
-        if (ly && lyingPose && ly.pelvis.y < 1.2) {
-          const place = getUpPlacement(ly, lyingPose);
+        if (place) {
           data.position.x = place.x;
           data.position.z = place.z;
           data.rotation = place.rotation;
@@ -1749,32 +1795,26 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       startKnockdown(data.knockdown.dirX, data.knockdown.dirZ, data.knockdown.speed);
       data.knockdown = null;
     }
-    if (kdRef.current.active) {
+    if (kd.isDown()) {
       data.triggerHit = null;
-      const place = stepKnockdown(kdRef.current, delta * globalSpeed, ragdoll, lyingPose);
-      if (import.meta.env.DEV && !kdRef.current.active) {
+      const res = kd.step(delta * globalSpeed, travRef.current.feetY);
+      if (import.meta.env.DEV && res.done) {
         const ly = ragdoll.getLyingState();
         (window as any).__kdDebug = {
-          t: kdRef.current.t,
-          rolls: kdRef.current.rolls,
-          place,
+          t: kd.runtime().t,
+          rolls: kd.runtime().rolls,
+          place: res.place,
           lyPelvis: ly?.pelvis.toArray(),
           lyHead: ly?.headDir.toArray(),
           faceUp: ly?.faceUp,
           rootBefore: [data.position.x, data.position.z],
-          pose: lyingPose,
+          pose: kd.lyingPose,
         };
       }
-      if (!kdRef.current.active) {
+      if (res.done) {
+        const place = res.place;
         if (place) {
-          // la clip ha le articolazioni a filo del suolo (bacino a 4 cm), il
-          // corpo fisico ci sta sopra con il suo spessore (bacino a ~15):
-          // senza alzarla i motori tiravano gomiti e mani dentro il
-          // pavimento. Si parte alzati della differenza e si scende piano.
-          const ly = ragdoll.getLyingState();
-          getUpRef.current.t = 0;
-          getUpRef.current.lift0 =
-            ly && lyingPose ? THREE.MathUtils.clamp(ly.pelvis.y - (travRef.current.feetY + lyingPose.pelvisY), 0, GETUP_LIFT_MAX) : 0;
+          // (l'alzata iniziale del modello la calcola useKnockdown)
           data.position.x = place.x;
           data.position.z = place.z;
           data.rotation = place.rotation;
@@ -1806,7 +1846,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
         startKnockdown(ob.hitVX, ob.hitVZ, Math.min(ob.hitSpeed, 11));
         // finito il frame qui: prima proseguiva e la camminata/idle sotto
         // riscriveva stato e animazione ("Riposo" mentre si vola a terra)
-        if (kdRef.current.active) {
+        if (kd.isDown()) {
           applyTransform();
           return;
         }
@@ -2193,15 +2233,22 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
         loco = pickDirectionalLoco(input.shift, dirWalkTs(), '');
       } else if (input.shift) {
         loco = { clip: animCatalog.run, speed: LT.runSpeed, ts: timeScaleFor(animCatalog.run, LT.runSpeed), running: true };
+      } else if (data.hp < maxHpRef.current * INJURED_HP && actions[K.injuredWalk]) {
+        loco = { clip: K.injuredWalk, speed: INJURED_WALK_SPEED, ts: timeScaleFor(K.injuredWalk, INJURED_WALK_SPEED), running: false };
       } else {
         loco = { clip: animCatalog.walk, speed: LT.walkSpeed, ts: timeScaleFor(animCatalog.walk, LT.walkSpeed), running: false };
       }
+      // fiatone: secondi di corsa di fila (camminare li fa calare piano)
+      if (loco.running) sprintTimeRef.current += delta * globalSpeed;
+      else sprintTimeRef.current = Math.max(0, sprintTimeRef.current - delta * globalSpeed * 0.5);
+      breathLeftRef.current = 0;
+      celebrateRef.current = { delay: 0, left: 0 };
       resolveAndApplyMovement(_moveDir.x * loco.speed * delta * globalSpeed, _moveDir.z * loco.speed * delta * globalSpeed);
       data.state = loco.running ? 'Corre' : 'Si muove';
       transitionToAnimation(loco.clip, 0.15, true, loco.ts);
     } else {
       data.state = idleState();
-      transitionToAnimation(idleName(), 0.2, true);
+      if (!kimodoIdle(delta * globalSpeed)) transitionToAnimation(idleName(), 0.2, true);
     }
 
     applyTransform();
@@ -2240,3 +2287,4 @@ export default PlayerCombatSoldier;
 useGLTF.preload(MODEL_URL);
 useGLTF.preload(BASE_ANIMS_URL);
 useGLTF.preload(ADDON_ANIMS_URL);
+useGLTF.preload(KIMODO_ANIMS_URL);

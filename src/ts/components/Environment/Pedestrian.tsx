@@ -86,6 +86,12 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
       } else return;
     }
 
+    if (res === 'down') {
+      // KO: a terra e poi si rialza (poi 'hurt': si arrabbia)
+      actor.holdRoot(g);
+      return;
+    }
+
     if (res === 'hurt' && !becameEnemy.current) {
       becameEnemy.current = true;
       onBecomeEnemy(id, [data.position.x, g.position.y, data.position.z], (data.hp / actor.maxHp()) * 100);

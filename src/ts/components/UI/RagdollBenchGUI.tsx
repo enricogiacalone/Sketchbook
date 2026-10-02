@@ -180,6 +180,14 @@ const RagdollBenchGUI: React.FC = () => {
 
     // L'elenco delle clip esiste solo dopo che il combattente del duello
     // e' montato: lo si riempie appena disponibile.
+    // "introduci kimodo": le clip generate (tools/kimodo/kimodo.sh) in un
+    // pannello a parte, oltre che nell'elenco completo qui sopra. Scegliendone
+    // una il manichino la ripete (clip -> pausa in guardia -> clip).
+    const kimodo = gui.addFolder('Animazioni Kimodo');
+    let kimodoCtrl = kimodo.add(bind, 'clip', [NO_CLIP]).name('Animazione').listen();
+    const kimodoInfo = { n: 'nessuna: tools/kimodo/kimodo.sh gen ...' };
+    const kimodoInfoCtrl = kimodo.add(kimodoInfo, 'n').name('Clip').disable();
+
     const poll = window.setInterval(() => {
       const names: string[] | undefined = (window as any).__ragdollBench?.clipNames?.();
       if (names && names.length) {
@@ -187,6 +195,13 @@ const RagdollBenchGUI: React.FC = () => {
           .options([NO_CLIP, ...names])
           .name('Animazione di prova')
           .listen();
+        const k = names.filter((n) => n.startsWith('Kimodo_'));
+        kimodoCtrl = kimodoCtrl
+          .options([NO_CLIP, ...k])
+          .name('Animazione')
+          .listen();
+        kimodoInfo.n = k.length ? `${k.length}` : kimodoInfo.n;
+        kimodoInfoCtrl.updateDisplay();
         window.clearInterval(poll);
       }
     }, 1000);
@@ -272,6 +287,7 @@ const RagdollBenchGUI: React.FC = () => {
       window.clearInterval(poll);
       window.removeEventListener('keydown', onKey);
       ko.destroy();
+      kimodo.destroy();
       folder.destroy();
       releaseDebugGui();
     };

@@ -1,3 +1,4 @@
+import { K } from '../../lib/kimodo';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { getRoadOffset, ROAD_WIDTH, SIDEWALK_WIDTH } from '../Environment/Road';
 
@@ -25,7 +26,8 @@ const isSkippedBlock = (i: number, j: number): boolean => (i === 0 && j === 0) |
 
 export const CIVILIAN_COLORS = ['#8d6e63', '#607d8b', '#9e9d24', '#6d4c41', '#78909c', '#a1887f', '#5d4037', '#827717', '#455a64'];
 export const WALK_CLIPS = ['Walk', 'Walk_Formal', 'Walk_Female'];
-export const IDLE_CLIPS = ['Idle_A', 'Idle_TalkingPhone', 'Idle_FoldArms', 'Idle_Talking', 'Idle_Subtle'];
+// (le Kimodo_* solo se generate: CrowdPedestrian ripiega su Idle_A)
+export const IDLE_CLIPS = ['Idle_A', 'Idle_TalkingPhone', 'Idle_FoldArms', 'Idle_Talking', 'Idle_Subtle', ...K.crowdIdles];
 // velocita' "a terra" delle camminate (m/s, per non far scivolare i piedi)
 export const WALK_BASE_SPEED: Record<string, number> = { Walk: 0.73, Walk_Formal: 0.8, Walk_Female: 0.75 };
 
@@ -53,7 +55,19 @@ export interface CrowdAgent {
   gone: boolean;
   slot: number;
   dist: number; // dal giocatore, aggiornata dal gestore
+  // panico (crowdPanic): secondi rimasti e da dove e' venuto lo spavento
+  fear: number;
+  fearX: number;
+  fearZ: number;
 }
+
+// "folla piu' viva": uno sparo spaventa chi e' vicino. Si scappa lungo il
+// proprio marciapiede, dalla parte opposta allo sparo; arrivati in fondo (o
+// se lo sparo e' vicinissimo) ci si accuccia coprendosi la testa.
+export const PANIC_RADIUS = 30;
+export const PANIC_S = 9;
+export const PANIC_SPEED = 3.6; // m/s
+export const COWER_DIST = 5;
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
@@ -106,6 +120,9 @@ function makeAgents(): CrowdAgent[] {
             gone: false,
             slot: -1,
             dist: Infinity,
+            fear: 0,
+            fearX: 0,
+            fearZ: 0,
           });
           id++;
         }
@@ -127,7 +144,18 @@ export function stepCrowd(dt: number, px: number, pz: number) {
   for (const a of crowdAgents) {
     a.dist = Math.hypot(a.x - px, a.z - pz);
     if (a.gone) continue;
-    if (a.pause > 0) {
+    if (a.fear > 0) {
+      a.fear -= dt;
+      // verso quale capo del tratto ci si allontana dallo sparo
+      const away = (a.x2 - a.x1) * (a.x - a.fearX) + (a.z2 - a.z1) * (a.z - a.fearZ) >= 0 ? 1 : -1;
+      a.dir = away;
+      a.pause = 0;
+      if (!isCowering(a) && a.len > 0.01) {
+        a.t = Math.min(1, Math.max(0, a.t + (a.dir * PANIC_SPEED * dt) / a.len));
+        a.gait = (a.gait + (dt * PANIC_SPEED) / ((WALK_BASE_SPEED[a.walkClip] ?? 0.75) * CROWD_GAIT_CYCLE_S * 2.5)) % 1;
+      }
+      if (a.fear <= 0) a.pause = rand(2, 4); // si riprende un attimo
+    } else if (a.pause > 0) {
       a.pause -= dt;
     } else if (a.len > 0.01) {
       a.t += (a.dir * a.speed * dt) / a.len;
@@ -148,6 +176,25 @@ export function stepCrowd(dt: number, px: number, pz: number) {
     if (fx * fx + fz * fz > 1e-6) a.yaw = Math.atan2(fx, fz);
     // la quota solo per chi si vede (il terreno costa qualche conto)
     if (a.dist < CROWD_DRAW_DIST) a.y = getTerrainHeight(nx, nz) + getRoadOffset(nx, nz);
+  }
+}
+
+// accucciato: troppo vicino allo sparo, o in fondo al marciapiede
+export function isCowering(a: CrowdAgent): boolean {
+  if (a.fear <= 0) return false;
+  if (Math.hypot(a.x - a.fearX, a.z - a.fearZ) < COWER_DIST) return true;
+  return a.dir > 0 ? a.t >= 1 : a.t <= 0;
+}
+
+export function crowdPanic(x: number, z: number, radius = PANIC_RADIUS) {
+  for (const a of crowdAgents) {
+    if (a.gone || Math.hypot(a.x - x, a.z - z) > radius) continue;
+    // chi e' gia' spaventato non cambia direzione a ogni sparo
+    if (a.fear <= 0) {
+      a.fearX = x;
+      a.fearZ = z;
+    }
+    a.fear = PANIC_S;
   }
 }
 

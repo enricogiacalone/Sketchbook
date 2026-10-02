@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
+import { KIMODO_ANIMS_URL } from '../../lib/kimodo';
 import { useGLTF } from '../../lib/gltf';
 import { useThree } from '@react-three/fiber';
 import { useRapier } from '@react-three/rapier';
@@ -6,6 +7,10 @@ import { vehicleBodyHandles } from '../Vehicles/vehicleRegistry';
 import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 import { useRagdoll } from '../Environment/ragdoll/useRagdoll';
+import { useKnockdown } from '../Environment/ragdoll/useKnockdown';
+import { GETUP_CLIP } from '../Environment/ragdoll/knockdown';
+import { getTerrainHeight } from '../Environment/Terrain';
+import { getRoadOffset } from '../Environment/Road';
 import { makeFighter } from '../Environment/DuelArena';
 import type { FighterData } from '../Environment/SquadArenaTypes';
 import { registerFighterHitHandler } from '../Environment/weapons/shootableRegistry';
@@ -35,8 +40,20 @@ const FAR_ANIM_STEP_S = 1 / 5;
 const HIDE_DIST = 160;
 // le collisioni con le auto si controllano solo con un'auto entro questa distanza
 const VEHICLE_CHECK_DIST = 9;
-// investito: sopra questa velocita' dell'auto nel punto d'urto e' morte
+// investito: sopra questa velocita' dell'auto nel punto d'urto e' morte,
+// sopra quest'altra va KO (a terra e poi si rialza, come nell'arena)
 const RUN_OVER_KILL_SPEED = 4;
+const RUN_OVER_KO_SPEED = 1.5;
+// "allinea la ragdoll dei passanti con quella dei nemici nell'arena":
+// ragdoll attiva (muscoli, riflessi, KO alla GTA IV) come il nemico del
+// duello, ma solo da vicino (costa ~15 corpi fisici a personaggio); con
+// un margine tra accensione e spegnimento per non accenderla e spegnerla
+// di continuo sul confine. Segue la casella "ragdoll attivo" del pannello.
+const ACTIVE_ON_DIST = 18;
+const ACTIVE_OFF_DIST = 24;
+// zero dei giunti del ragdoll attivo: la stessa guardia del giocatore e del
+// nemico del duello (vedi captureClipPose in activeRagdollFrames.ts)
+const NEUTRAL_CLIP = 'Fighting Idle';
 
 export interface ActorHit {
   seg: string;
@@ -64,6 +81,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   const { scene } = useGLTF(MANNEQUIN_URL);
   const { animations: baseAnims } = useGLTF(MANNEQUIN_BASE_ANIMS_URL);
   const { animations: addonAnims } = useGLTF(MANNEQUIN_ADDON_ANIMS_URL);
+  const { animations: kimodoAnims } = useGLTF(KIMODO_ANIMS_URL);
   const { camera } = useThree();
   const { world } = useRapier();
   const vehicleNear = (x: number, z: number) => {
@@ -101,15 +119,54 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     });
     const m = new THREE.AnimationMixer(c);
     const map: Record<string, THREE.AnimationClip> = {};
-    for (const clip of [...baseAnims, ...addonAnims]) map[clip.name] = clip;
+    for (const clip of [...baseAnims, ...addonAnims, ...kimodoAnims]) map[clip.name] = clip;
     return { clone: c, mixer: m, clips: map };
-  }, [scene, baseAnims, addonAnims, color]);
+  }, [scene, baseAnims, addonAnims, kimodoAnims, color]);
 
   const modelRootRef = useRef<THREE.Object3D | null>(null);
   const ragdoll = useRagdoll(modelRootRef, id);
   useEffect(() => {
     modelRootRef.current = clone;
+    ragdoll.setNeutralClip(clips[NEUTRAL_CLIP] ?? clips['Idle_A'] ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clone]);
+  // KO fisico e rialzo: lo stesso pezzo del giocatore e del nemico del
+  // duello (Environment/ragdoll/useKnockdown.ts)
+  const kd = useKnockdown(ragdoll, scene, clips[GETUP_CLIP]);
+  const activeRef = useRef(false);
+  // la ragdoll attiva e' stata chiesta all'ultimo update (esiste il rig)
+  const rigOnRef = useRef(false);
+  const getUpLeftRef = useRef(0);
+  // colpito mentre andava KO: lo si dice al chiamante quando e' di nuovo in piedi
+  const pendingHurtRef = useRef(false);
+  const groundAt = (x: number, z: number) => getTerrainHeight(x, z) + getRoadOffset(x, z);
+  // via ragdoll attiva e KO (lontano, parcheggiato, rimesso in vita)
+  const dropActive = () => {
+    kd.cancel();
+    getUpLeftRef.current = 0;
+    pendingHurtRef.current = false;
+    activeRef.current = false;
+    // via il rig attivo (solo se c'e': update crea anche capsule e hurtbox,
+    // da non fare per un personaggio che non e' mai stato sveglio)
+    if (rigOnRef.current) {
+      rigOnRef.current = false;
+      ragdoll.update(0, false);
+    }
+  };
+  // a terra o mentre si rialza ('down'): la radice sta dove dice il KO
+  // (il modello non e' girato di PI nel gruppo, a differenza del giocatore)
+  const holdRoot = (g: THREE.Object3D) => {
+    g.position.set(data.position.x, groundAt(data.position.x, data.position.z) + kd.lift(), data.position.z);
+    g.rotation.y = data.rotation + Math.PI;
+  };
+  // KO: false se non c'e' la ragdoll attiva (lontano o spenta)
+  const startKO = (dirX: number, dirZ: number, speed: number, up = 0.3) => {
+    if (deadRef.current || kd.isDown() || !kd.start(dirX, dirZ, speed, up)) return false;
+    getUpLeftRef.current = 0;
+    pendingHurtRef.current = true;
+    data.triggerHit = null;
+    return true;
+  };
 
   // --- animazioni: azioni create quando servono -------------------------
   const actionsRef = useRef<Record<string, THREE.AnimationAction>>({});
@@ -167,15 +224,17 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   const dormantRef = useRef(false);
 
   // Da chiamare a ogni frame PRIMA di muovere il personaggio. Ritorna:
-  // 'dead' (e' a terra, il chiamante non fa altro), 'hurt' (colpito in
-  // questo frame), null.
-  const beginFrame = (delta: number, pos: { x: number; z: number }): 'dead' | 'hurt' | null => {
+  // 'dead' (e' a terra, il chiamante non fa altro), 'down' (KO o si sta
+  // rialzando: il chiamante chiama holdRoot e non fa altro), 'hurt'
+  // (colpito in questo frame, o appena rialzato da un KO), null.
+  const beginFrame = (delta: number, pos: { x: number; z: number }): 'dead' | 'down' | 'hurt' | null => {
     const pp = useStore.getState().playerPos;
     const dist = Math.min(Math.hypot(camera.position.x - pos.x, camera.position.z - pos.z), Math.hypot(pp[0] - pos.x, pp[2] - pos.z));
     const far = dist > FAR_DIST;
     if (far && !deadRef.current) {
       if (!farParkedRef.current) {
         farParkedRef.current = true;
+        dropActive();
         ragdoll.park();
       }
       const hidden = dist > HIDE_DIST;
@@ -198,7 +257,10 @@ export function useMannequinActor(opts: MannequinActorOptions) {
         solidInitRef.current = true;
         ragdoll.resolveBodyMovement(0, 0, null);
       }
-      ragdoll.update(delta, false, false, false);
+      const st = useStore.getState();
+      if (activeRef.current ? dist > ACTIVE_OFF_DIST : dist < ACTIVE_ON_DIST) activeRef.current = !activeRef.current;
+      rigOnRef.current = activeRef.current && st.euphoriaRagdollEnabled && !dormantRef.current;
+      ragdoll.update(delta, rigOnRef.current, false, st.ragdollPassive);
     }
     data.hurtboxHandle = ragdoll.getHurtboxHandle();
 
@@ -211,6 +273,8 @@ export function useMannequinActor(opts: MannequinActorOptions) {
         data.isDead = true;
         _dir.set(ob.hitVX, 0.35 * ob.hitSpeed, ob.hitVZ);
         lastHitRef.current = { seg: ob.segment ?? 'Hips', dir: _dir.clone().normalize(), speed: _dir.length() };
+      } else if (ob.hitSpeed >= RUN_OVER_KO_SPEED) {
+        startKO(ob.hitVX, ob.hitVZ, Math.min(ob.hitSpeed * 1.2, 8), 0.35);
       }
     }
 
@@ -219,12 +283,19 @@ export function useMannequinActor(opts: MannequinActorOptions) {
         deadRef.current = true;
         deadForRef.current = 0;
         data.hp = 0;
+        kd.cancel();
+        getUpLeftRef.current = 0;
         ragdoll.activateDeath();
+        // con la ragdoll attiva il morto e' lei che va KO (launchDeath vale
+        // solo per il rig di morte senza muscoli)
+        const launch = (vel: THREE.Vector3, seg: string, share?: number) => {
+          if (!ragdoll.knockDown(vel.clone().normalize(), vel.length())) ragdoll.launchDeath(vel, seg, share);
+        };
         const h = lastHitRef.current;
         if (h) {
           _dir.copy(h.dir).multiplyScalar(Math.min(h.speed, 12));
           _dir.y = Math.max(_dir.y, 0.4);
-          ragdoll.launchDeath(_dir, h.seg);
+          launch(_dir, h.seg);
         } else {
           // colpo mortale corpo a corpo: indietro, lontano da chi colpisce
           const pp = useStore.getState().playerPos;
@@ -232,12 +303,52 @@ export function useMannequinActor(opts: MannequinActorOptions) {
           if (_dir.lengthSq() < 1e-4) _dir.set(0, 0, 1);
           _dir.normalize().multiplyScalar(2.5);
           _dir.y = 0.8;
-          ragdoll.launchDeath(_dir, 'Torso', 0.6);
+          launch(_dir, 'Torso', 0.6);
         }
         removeCityOpponent(data);
       }
       deadForRef.current += delta;
       return 'dead';
+    }
+
+    // KO (colpo forte, auto lenta): a terra finche' si ferma, poi si rialza
+    if (data.knockdown) {
+      const k = data.knockdown;
+      data.knockdown = null;
+      if (!startKO(k.dirX, k.dirZ, k.speed)) {
+        // senza ragdoll attiva: solo una spinta forte, come prima
+        _dir.set(k.dirX, 0.4, k.dirZ).normalize();
+        ragdoll.pulseHit(_dir, 0.8, 'Torso');
+        lastHitRef.current = null;
+        return 'hurt';
+      }
+    }
+    if (kd.isDown()) {
+      data.triggerHit = null;
+      const res = kd.step(delta, groundAt(pos.x, pos.z));
+      if (res.done) {
+        if (res.place) {
+          data.position.x = res.place.x;
+          data.position.z = res.place.z;
+          data.rotation = res.place.rotation;
+          // senza dissolvenza: la clip parte gia' sdraiata sul corpo a terra
+          play(GETUP_CLIP, 0, false);
+          getUpLeftRef.current = clipDuration(GETUP_CLIP);
+        }
+      }
+      return 'down';
+    }
+    if (getUpLeftRef.current > 0) {
+      getUpLeftRef.current -= delta;
+      kd.tick(delta);
+      data.triggerHit = null;
+      if (getUpLeftRef.current > 0) return 'down';
+      kd.stopLift();
+    }
+    if (pendingHurtRef.current) {
+      pendingHurtRef.current = false;
+      lastHitRef.current = null;
+      return 'hurt';
     }
 
     let hurt = false;
@@ -252,13 +363,6 @@ export function useMannequinActor(opts: MannequinActorOptions) {
       data.hitReactionHandled = false;
       hurt = true;
     }
-    if (data.knockdown) {
-      // colpo forte (affondo di coltello): spinta piu' grande
-      _dir.set(data.knockdown.dirX, 0.4, data.knockdown.dirZ).normalize();
-      ragdoll.pulseHit(_dir, 0.8, 'Torso');
-      data.knockdown = null;
-      hurt = true;
-    }
     if (hurt) lastHitRef.current = null;
     return hurt ? 'hurt' : null;
   };
@@ -268,6 +372,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   const sleep = () => {
     if (dormantRef.current) return;
     dormantRef.current = true;
+    dropActive();
     ragdoll.park();
     clone.visible = false;
     removeCityOpponent(data);
@@ -290,6 +395,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   const revive = () => {
     if (!deadRef.current) return;
     ragdoll.deactivate();
+    dropActive();
     deadRef.current = false;
     data.isDead = false;
     data.hp = maxHp.current;
@@ -312,6 +418,8 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     hasClip,
     clipDuration,
     beginFrame,
+    holdRoot,
+    isDown: () => kd.isDown() || getUpLeftRef.current > 0,
     revive,
     sleep,
     wake,
@@ -328,3 +436,4 @@ export type MannequinActor = ReturnType<typeof useMannequinActor>;
 useGLTF.preload(MANNEQUIN_URL);
 useGLTF.preload(MANNEQUIN_BASE_ANIMS_URL);
 useGLTF.preload(MANNEQUIN_ADDON_ANIMS_URL);
+useGLTF.preload(KIMODO_ANIMS_URL);

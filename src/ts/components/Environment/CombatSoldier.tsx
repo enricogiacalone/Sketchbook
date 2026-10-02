@@ -13,7 +13,8 @@ import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
 import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode, AnimCatalog } from './SquadArenaTypes';
 import { locomotionTuning as LT, RUN_CLIP, timeScaleFor } from './locomotion';
-import { GETUP_CLIP, measureLyingPose, newKnockdown, stepKnockdown } from './ragdoll/knockdown';
+import { GETUP_CLIP } from './ragdoll/knockdown';
+import { useKnockdown } from './ragdoll/useKnockdown';
 
 // Velocita' dell'IA in m/s (prima erano spostamenti per FRAME: andavano al
 // doppio su uno schermo a 120 Hz). La corsa ora usa la clip Sprint e la
@@ -297,12 +298,13 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
   const knockVelRef = React.useRef(new THREE.Vector3());
   const obstacleHitCooldownRef = React.useRef(0);
   // colpo forte: KO fisico e poi si rialza (vedi ragdoll/knockdown.ts)
-  const kdRef = React.useRef(newKnockdown());
-  const lyingPose = useMemo(() => measureLyingPose(scene, clipsMap[GETUP_CLIP]), [scene, clipsMap]);
+  // KO fisico e rialzo: lo stesso pezzo del giocatore e della citta'
+  // (ragdoll/useKnockdown.ts) -- prima era una copia senza l'alzata del
+  // rialzo (gomiti e mani nel pavimento) e con la dissolvenza in entrata
+  const kd = useKnockdown(ragdoll, scene, clipsMap[GETUP_CLIP]);
   const startKnockdown = (dirX: number, dirZ: number, speed: number) => {
-    if (!enableRagdoll || kdRef.current.active || data.isDead) return;
-    if (!ragdoll.knockDown(new THREE.Vector3(dirX, 0.3, dirZ).normalize(), speed)) return;
-    kdRef.current = { ...newKnockdown(), active: true };
+    if (!enableRagdoll || kd.isDown() || data.isDead) return;
+    if (!kd.start(dirX, dirZ, speed)) return;
     data.state = 'A terra';
     data.attackLock = 0;
     knockVelRef.current.set(0, 0, 0);
@@ -349,9 +351,12 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     // value (0, or whatever a hit/dodge nudge left it at) -- all the
     // distance/duel math above assumes that; this only changes what it's
     // rendered ON TOP OF.
+    const groundY = () => getTerrainHeight(data.position.x, data.position.z) + getRoadOffset(data.position.x, data.position.z);
+    if (data.state === 'Si rialza') kd.tick(delta * globalSpeed);
+    else kd.stopLift();
     const applyTransform = () => {
-      const groundY = getTerrainHeight(data.position.x, data.position.z) + getRoadOffset(data.position.x, data.position.z);
-      groupRef.current!.position.set(data.position.x, groundY + data.position.y, data.position.z);
+      // (rialzo da terra: il modello parte alzato, vedi useKnockdown)
+      groupRef.current!.position.set(data.position.x, groundY() + data.position.y + kd.lift(), data.position.z);
       groupRef.current!.rotation.y = data.rotation;
     };
 
@@ -371,9 +376,7 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         desiredX,
         desiredZ,
         bagSolidHandle ?? null,
-        bagRef?.current
-          ? (point, dir, blocked) => bagRef.current!.applyBodyBump(point, dir, blocked)
-          : undefined
+        bagRef?.current ? (point, dir, blocked) => bagRef.current!.applyBodyBump(point, dir, blocked) : undefined
       );
       data.position.x += corrected.x;
       data.position.z += corrected.z;
@@ -399,15 +402,17 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       startKnockdown(data.knockdown.dirX, data.knockdown.dirZ, data.knockdown.speed);
       data.knockdown = null;
     }
-    if (kdRef.current.active) {
+    if (kd.isDown()) {
       data.triggerHit = null;
-      const place = stepKnockdown(kdRef.current, delta * globalSpeed, ragdoll, lyingPose);
-      if (!kdRef.current.active) {
+      const res = kd.step(delta * globalSpeed, groundY() + data.position.y);
+      if (res.done) {
+        const place = res.place;
         if (place) {
           data.position.x = place.x;
           data.position.z = place.z;
           data.rotation = place.rotation;
-          data.attackLock = transitionToAnimation(GETUP_CLIP, 0.05, false);
+          // senza dissolvenza: la clip parte gia' sdraiata sul corpo a terra
+          data.attackLock = transitionToAnimation(GETUP_CLIP, 0, false);
           data.state = 'Si rialza';
         } else {
           data.state = 'In guardia';
@@ -433,7 +438,13 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         if (obstacleHitCooldownRef.current <= 0) {
           obstacleHitCooldownRef.current = 0.6;
           _hitImpulseDir.set(ob.hitVX, 0.25 * ob.hitSpeed, ob.hitVZ).normalize();
-          ragdoll.pulseHit(_hitImpulseDir, THREE.MathUtils.clamp(ob.hitSpeed / 8, 0.25, 0.8), ob.segment ?? 'Torso', ob.hitX - _hitImpulseDir.x, ob.hitZ - _hitImpulseDir.z);
+          ragdoll.pulseHit(
+            _hitImpulseDir,
+            THREE.MathUtils.clamp(ob.hitSpeed / 8, 0.25, 0.8),
+            ob.segment ?? 'Torso',
+            ob.hitX - _hitImpulseDir.x,
+            ob.hitZ - _hitImpulseDir.z
+          );
           if (data.attackLock <= 0) {
             data.attackLock = HIT_STAGGER_DURATION;
             data.state = 'Colpito!';
@@ -692,7 +703,10 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
         if (Math.random() > 0.5) {
           data.state = 'Capriola';
           transitionToAnimation(animCatalog.dodge, 0.1, false);
-          resolveAndApplyMovement(toTarget.x * -AI_DODGE_BACK_SPEED * delta * globalSpeed, toTarget.z * -AI_DODGE_BACK_SPEED * delta * globalSpeed);
+          resolveAndApplyMovement(
+            toTarget.x * -AI_DODGE_BACK_SPEED * delta * globalSpeed,
+            toTarget.z * -AI_DODGE_BACK_SPEED * delta * globalSpeed
+          );
         } else {
           data.state = 'Parata';
           transitionToAnimation(animCatalog.block, 0.15, true);
@@ -708,11 +722,7 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
 
   return (
     <>
-      <group
-        ref={groupRef}
-        onPointerOver={() => setHovered(true)}
-        onPointerOut={() => setHovered(false)}
-      >
+      <group ref={groupRef} onPointerOver={() => setHovered(true)} onPointerOut={() => setHovered(false)}>
         <primitive object={clone} scale={1} rotation={[0, Math.PI, 0]} />
         {!data.isDead && (
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>

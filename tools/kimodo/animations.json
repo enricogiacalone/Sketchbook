@@ -1,0 +1,168 @@
+{
+  "_note": "Animazioni Kimodo del gioco. npm run kimodo -- batch genera quelle che mancano (assets-src/kimodo/<name>). seconds 2-5; inPlace (predefinito true) toglie l'avanzare; loop: { minSeconds } la rende ciclica. Cambiare inPlace/loop non richiede di rigenerare: basta npm run kimodo -- retarget. Cambiare prompt/seed/seconds si': cancella la cartella e rilancia batch.",
+  "animations": [
+    {
+      "group": "ragdoll",
+      "name": "getup_back",
+      "seconds": 5,
+      "seed": 11,
+      "prompt": "A person lying flat on their back on the ground gets up to a standing position."
+    },
+    {
+      "group": "ragdoll",
+      "name": "getup_front",
+      "seconds": 5,
+      "seed": 12,
+      "prompt": "A person lying face down on the ground pushes up with both arms and gets up to a standing position."
+    },
+    {
+      "group": "ragdoll",
+      "name": "getup_hurt",
+      "seconds": 5,
+      "seed": 13,
+      "prompt": "A person lying on their back slowly and painfully gets up, holding their stomach with one hand."
+    },
+    {
+      "group": "ragdoll",
+      "name": "stumble_back",
+      "seconds": 3,
+      "seed": 21,
+      "inPlace": false,
+      "prompt": "A person is shoved hard in the chest, stumbles backward a few steps and regains balance."
+    },
+    {
+      "group": "ragdoll",
+      "name": "stumble_forward",
+      "seconds": 3,
+      "seed": 22,
+      "inPlace": false,
+      "prompt": "A person is pushed from behind, stumbles forward a few steps and catches their balance."
+    },
+    {
+      "group": "ragdoll",
+      "name": "stumble_left",
+      "seconds": 3,
+      "seed": 23,
+      "inPlace": false,
+      "prompt": "A person is shoved from the right side, stumbles sideways to the left and recovers their balance."
+    },
+    {
+      "group": "ragdoll",
+      "name": "stumble_right",
+      "seconds": 3,
+      "seed": 24,
+      "inPlace": false,
+      "prompt": "A person is shoved from the left side, stumbles sideways to the right and recovers their balance."
+    },
+    {
+      "group": "ragdoll",
+      "name": "hit_back",
+      "seconds": 2,
+      "seed": 31,
+      "prompt": "A person is hit hard in the back and flinches forward, arching the back in pain."
+    },
+    {
+      "group": "ragdoll",
+      "name": "hit_left",
+      "seconds": 2,
+      "seed": 32,
+      "prompt": "A person is hit on the left side of the body and recoils to the right."
+    },
+    {
+      "group": "ragdoll",
+      "name": "hit_right",
+      "seconds": 2,
+      "seed": 33,
+      "prompt": "A person is hit on the right side of the body and recoils to the left."
+    },
+    {
+      "group": "ragdoll",
+      "name": "hit_stomach",
+      "seconds": 3,
+      "seed": 34,
+      "prompt": "A person is punched in the stomach, doubles over in pain and then straightens up."
+    },
+
+    {
+      "group": "folla",
+      "name": "look_around",
+      "seconds": 5,
+      "seed": 41,
+      "prompt": "A person stands still and looks around curiously, turning the head left and right."
+    },
+    {
+      "group": "folla",
+      "name": "wait_impatient",
+      "seconds": 5,
+      "seed": 42,
+      "prompt": "A person stands waiting impatiently, shifting weight from foot to foot and checking the watch on the left wrist."
+    },
+    {
+      "group": "folla",
+      "name": "stretch",
+      "seconds": 4,
+      "seed": 43,
+      "prompt": "A person stands and stretches both arms high above the head, then relaxes."
+    },
+    {
+      "group": "folla",
+      "name": "phone_talk",
+      "seconds": 5,
+      "seed": 44,
+      "prompt": "A person stands talking on a phone held to the right ear, gesturing with the left hand."
+    },
+    {
+      "group": "folla",
+      "name": "point_shout",
+      "seconds": 3,
+      "seed": 45,
+      "prompt": "A person points ahead with the right arm and shouts angrily."
+    },
+    {
+      "group": "folla",
+      "name": "cower",
+      "seconds": 4,
+      "seed": 46,
+      "prompt": "A person in fear crouches down and covers their head with both arms."
+    },
+    {
+      "group": "folla",
+      "name": "panic_run",
+      "seconds": 4,
+      "seed": 47,
+      "loop": { "minSeconds": 0.6 },
+      "prompt": "A person runs forward in panic, waving the arms and looking back over the shoulder."
+    },
+
+    {
+      "group": "stati",
+      "name": "injured_walk",
+      "seconds": 5,
+      "seed": 51,
+      "loop": { "minSeconds": 1 },
+      "prompt": "A person walks forward slowly, limping on the left leg and holding their side in pain."
+    },
+    {
+      "group": "stati",
+      "name": "out_of_breath",
+      "seconds": 5,
+      "seed": 52,
+      "loop": { "minSeconds": 2 },
+      "prompt": "A person stands bent over with hands on knees, breathing heavily after running."
+    },
+    {
+      "group": "stati",
+      "name": "victory",
+      "seconds": 4,
+      "seed": 53,
+      "prompt": "A person celebrates a victory, jumping and raising both fists in the air."
+    },
+    {
+      "group": "stati",
+      "name": "victory_dance",
+      "seconds": 4,
+      "seed": 54,
+      "prompt": "A person does a short joyful victory dance, pumping their fists."
+    }
+  ]
+}

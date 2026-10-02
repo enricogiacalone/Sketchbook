@@ -3,7 +3,9 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useStore } from '../../store';
 import { useMannequinActor } from './useMannequinActor';
-import { crowdSlots, reviveCrowdAgent, WALK_BASE_SPEED, type CrowdAgent } from './crowdSim';
+import { crowdSlots, reviveCrowdAgent, isCowering, WALK_BASE_SPEED, PANIC_SPEED, type CrowdAgent } from './crowdSim';
+import { K, KIMODO_CLIPS } from '../../lib/kimodo';
+import { CLIP_GROUND_SPEED } from '../Environment/locomotion';
 
 // Un corpo vero del pool della folla: il manichino completo (fisica,
 // animazioni, ragdoll, colpibile, investibile) prestato di volta in volta
@@ -91,6 +93,13 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
       deadAgent.current = a;
       return;
     }
+    if (res === 'down') {
+      // KO: il corpo resta a terra e si rialza dove e' caduto (poi 'hurt':
+      // si arrabbia e diventa un nemico li'); l'agente intanto non conta
+      a.pause = Math.max(a.pause, 1);
+      actor.holdRoot(g);
+      return;
+    }
     if (res === 'hurt' && !handled.current) {
       handled.current = true;
       a.gone = true;
@@ -99,8 +108,18 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
       return;
     }
 
-    if (a.pause > 0) {
-      actor.play(a.idleClip, 0.3);
+    if (a.fear > 0) {
+      // panico: accucciato (una volta, poi resta giu') o in fuga
+      if (isCowering(a)) {
+        if (actor.hasClip(K.cower)) actor.play(K.cower, 0.25, false);
+        else actor.play('Idle_A', 0.3);
+      } else {
+        const run = actor.hasClip(K.panicRun) ? K.panicRun : 'Run_Female';
+        const base = KIMODO_CLIPS[run]?.speed || CLIP_GROUND_SPEED[run] || 3.8;
+        actor.play(run, 0.2, true, PANIC_SPEED / base);
+      }
+    } else if (a.pause > 0) {
+      actor.play(actor.hasClip(a.idleClip) ? a.idleClip : 'Idle_A', 0.3);
     } else {
       actor.play(a.walkClip, 0.3, true, a.speed / (WALK_BASE_SPEED[a.walkClip] ?? 0.75));
     }

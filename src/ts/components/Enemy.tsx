@@ -1,15 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useFrame } from "@react-three/fiber";
-import * as THREE from "three";
-import { useStore } from "../store";
-import SpeechBubble from "./UI/SpeechBubble";
-import { getTerrainHeight } from "./Environment/Terrain";
-import { getRoadOffset } from "./Environment/Road";
-import Bullet from "./Bullet";
-import EnemyHealthBar from "./Environment/EnemyHealthBar";
-import { useMannequinActor } from "./city/useMannequinActor";
-import { usePistolModel } from "./Environment/weapons/usePistolModel";
-import { RUN_CLIP, timeScaleFor } from "./Environment/locomotion";
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
+import { useStore } from '../store';
+import SpeechBubble from './UI/SpeechBubble';
+import { getTerrainHeight } from './Environment/Terrain';
+import { getRoadOffset } from './Environment/Road';
+import Bullet from './Bullet';
+import EnemyHealthBar from './Environment/EnemyHealthBar';
+import { useMannequinActor } from './city/useMannequinActor';
+import { usePistolModel } from './Environment/weapons/usePistolModel';
+import { RUN_CLIP, timeScaleFor } from './Environment/locomotion';
 
 // Nemico della citta' -- "sostituisci i nemici della citta' con il nostro
 // manichino.. basta boxman": lo stesso manichino del giocatore
@@ -30,7 +30,7 @@ interface EnemyProps {
   initialHp?: number;
 }
 
-const ENEMY_COLOR = "#c62828";
+const ENEMY_COLOR = '#c62828';
 const MAX_HP = 100;
 const RUN_SPEED = 3.8; // m/s
 const FIRE_RANGE = 12; // oltre torna a inseguire
@@ -44,7 +44,7 @@ const CORPSE_S = 25;
 // playerPos e' 0.5 m sopra i piedi (PlayerCombatSoldier.tsx).
 const PLAYER_CHEST_HEIGHT = 1.25;
 
-const PHRASES = ["Fermo!", "Non scappi!", "Ti ho visto!", "Eccolo!", "Preso!"];
+const PHRASES = ['Fermo!', 'Non scappi!', 'Ti ho visto!', 'Eccolo!', 'Preso!'];
 
 const _muzzle = new THREE.Vector3();
 const _aim = new THREE.Vector3();
@@ -53,8 +53,8 @@ const _perp = new THREE.Vector3();
 const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp }) => {
   const actor = useMannequinActor({
     id,
-    name: "Nemico",
-    team: "CITY_ENEMY",
+    name: 'Nemico',
+    team: 'CITY_ENEMY',
     color: ENEMY_COLOR,
     hp: MAX_HP,
     x: initialPosition[0],
@@ -72,11 +72,11 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
   const removeBullet = useCallback((bulletId: string) => {
     setBullets((prev) => prev.filter((b) => b.id !== bulletId));
   }, []);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState('');
   const [gone, setGone] = useState(false);
 
   const st = useRef({
-    mode: "chase" as "chase" | "shoot",
+    mode: 'chase' as 'chase' | 'shoot',
     fireCd: 0.6 + Math.random() * 0.6,
     shootAnim: 0,
     giveUp: 0,
@@ -98,7 +98,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
     const s = st.current;
     const res = actor.beginFrame(delta, data.position);
 
-    if (res === "dead") {
+    if (res === 'dead') {
       if (!s.deadHandled) {
         s.deadHandled = true;
         pistol.setVisible(false);
@@ -112,6 +112,13 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
         setGone(true);
         onGiveUp(id);
       }
+      return;
+    }
+
+    if (res === 'down') {
+      // KO: a terra e poi si rialza, niente IA intanto
+      pistol.setVisible(false);
+      actor.holdRoot(g);
       return;
     }
 
@@ -129,14 +136,14 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
       const want = Math.atan2(dx, dz);
       let a = want - g.rotation.y;
       a = Math.atan2(Math.sin(a), Math.cos(a));
-      g.rotation.y += a * Math.min(1, delta * (s.mode === "shoot" ? 10 : 6));
+      g.rotation.y += a * Math.min(1, delta * (s.mode === 'shoot' ? 10 : 6));
     }
 
-    if (s.mode === "chase" && dist < STOP_RANGE) s.mode = "shoot";
-    else if (s.mode === "shoot" && dist > FIRE_RANGE) s.mode = "chase";
-    if (res === "hurt" && s.mode === "chase" && dist < FIRE_RANGE) s.mode = "shoot";
+    if (s.mode === 'chase' && dist < STOP_RANGE) s.mode = 'shoot';
+    else if (s.mode === 'shoot' && dist > FIRE_RANGE) s.mode = 'chase';
+    if (res === 'hurt' && s.mode === 'chase' && dist < FIRE_RANGE) s.mode = 'shoot';
 
-    if (s.mode === "chase" && dist > 0.01) {
+    if (s.mode === 'chase' && dist > 0.01) {
       const step = RUN_SPEED * delta;
       const c = actor.ragdoll.resolveBodyMovement((dx / dist) * step, (dz / dist) * step, null);
       data.position.x += c.x;
@@ -145,7 +152,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
     } else {
       s.fireCd -= delta;
       if (s.shootAnim > 0) s.shootAnim -= delta;
-      else actor.play(actor.hasClip("Pistol_Aim_Neutral") ? "Pistol_Aim_Neutral" : "Pistol_Idle", 0.2);
+      else actor.play(actor.hasClip('Pistol_Aim_Neutral') ? 'Pistol_Aim_Neutral' : 'Pistol_Idle', 0.2);
       // spara quando ha girato il busto verso il bersaglio
       const facingErr = Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - g.rotation.y), Math.cos(Math.atan2(dx, dz) - g.rotation.y)));
       // non si spara a un giocatore gia' a terra
@@ -153,7 +160,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
       if (s.fireCd <= 0 && facingErr < 0.35 && dist <= FIRE_RANGE && !playerDown) {
         s.fireCd = FIRE_COOLDOWN_S + Math.random() * 0.5;
         pistol.getMuzzleWorld(_muzzle);
-        const onFoot = store.currentControllable === "player";
+        const onFoot = store.currentControllable === 'player';
         const targetY = onFoot ? pp[1] - 0.5 + PLAYER_CHEST_HEIGHT : pp[1];
         _aim.set(pp[0], targetY, pp[2]).sub(_muzzle).normalize();
         // un po' di dispersione
@@ -170,9 +177,9 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
         ]);
         pistol.kick();
         pistol.playShot();
-        if (actor.hasClip("Pistol_Shoot")) {
-          actor.play("Pistol_Shoot", 0.05, false);
-          s.shootAnim = Math.min(0.45, actor.clipDuration("Pistol_Shoot"));
+        if (actor.hasClip('Pistol_Shoot')) {
+          actor.play('Pistol_Shoot', 0.05, false);
+          s.shootAnim = Math.min(0.45, actor.clipDuration('Pistol_Shoot'));
         }
       }
     }
@@ -190,7 +197,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
 
     if (Math.random() < 0.002 && !message) {
       setMessage(PHRASES[Math.floor(Math.random() * PHRASES.length)]);
-      setTimeout(() => setMessage(""), 2500);
+      setTimeout(() => setMessage(''), 2500);
     }
 
     const groundY = getTerrainHeight(data.position.x, data.position.z) + getRoadOffset(data.position.x, data.position.z);
@@ -202,7 +209,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
     if (s.entityT <= 0) {
       s.entityT = 0.2;
       store.updateEntity(id, {
-        type: "enemy",
+        type: 'enemy',
         position: [data.position.x, groundY + 1, data.position.z],
         rotation: g.rotation.y,
       });
