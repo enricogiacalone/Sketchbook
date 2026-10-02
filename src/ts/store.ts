@@ -251,6 +251,11 @@ interface GameState {
   // Ricordate nel browser (localStorage) tra una partita e l'altra.
   toonStyle: boolean;
   dayCycle: boolean;
+  // risoluzione che si adatta alla scheda video (Environment/AdaptiveResolution.tsx)
+  adaptiveResolution: boolean;
+  // risoluzione scelta da AdaptiveResolution (null = quella fissa, [1, 2]):
+  // passa dalla prop dpr del Canvas, che R3F rimette a ogni render di App
+  renderDpr: number | null;
   // ruota delle armi (UI/WeaponWheel.tsx): aperta = camera e attacchi fermi
   weaponWheelOpen: boolean;
   // arma scelta dalla ruota, la indossa PlayerCombatSoldier al frame dopo
@@ -369,6 +374,8 @@ interface GameState {
   setShowSimCitta: (on: boolean) => void;
   setToonStyle: (on: boolean) => void;
   setDayCycle: (on: boolean) => void;
+  setAdaptiveResolution: (on: boolean) => void;
+  setRenderDpr: (dpr: number | null) => void;
   setWeaponWheelOpen: (open: boolean) => void;
   setRequestedWeapon: (w: 'fists' | 'pistol' | 'rifle' | 'knife' | null) => void;
   setDebugOrthoCameraAngleDeg: (deg: number) => void;
@@ -456,6 +463,8 @@ export const useStore = create<GameState>((set) => ({
   showSimCitta: false,
   toonStyle: readSetting('toonStyle', true),
   dayCycle: readSetting('dayCycle', false),
+  adaptiveResolution: readSetting('adaptiveResolution', true),
+  renderDpr: null,
   weaponWheelOpen: false,
   requestedWeapon: null,
   debugOrthoCameraAngleDeg: 0,
@@ -541,6 +550,11 @@ export const useStore = create<GameState>((set) => ({
     writeSetting('dayCycle', dayCycle);
     set({ dayCycle });
   },
+  setAdaptiveResolution: (adaptiveResolution) => {
+    writeSetting('adaptiveResolution', adaptiveResolution);
+    set({ adaptiveResolution });
+  },
+  setRenderDpr: (renderDpr) => set((state) => (state.renderDpr === renderDpr ? state : { renderDpr })),
   setWeaponWheelOpen: (open) => set((state) => (state.weaponWheelOpen === open ? state : { weaponWheelOpen: open })),
   setRequestedWeapon: (requestedWeapon) => set({ requestedWeapon }),
   setDebugOrthoCameraAngleDeg: (debugOrthoCameraAngleDeg) => set({ debugOrthoCameraAngleDeg }),

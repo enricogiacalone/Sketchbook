@@ -1215,7 +1215,9 @@ const Car: React.FC<CarProps> = ({
     // nemici): le auto in pattuglia non devono sovrascriverne la posizione
     if (humanIsDriving) setPlayerInfo([_carPos.x, _carPos.y, _carPos.z], _carEuler.y);
 
-    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
+    // elapsedTime e non getElapsedTime(): quella chiama getDelta() e ruba
+    // tempo al delta del frame dopo per TUTTI i useFrame (fisica compresa)
+    if (state.clock.elapsedTime % 0.1 < 0.02) {
       updateEntity(id, {
         type: 'car',
         position: [_carPos.x, _carPos.y, _carPos.z],

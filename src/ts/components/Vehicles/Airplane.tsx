@@ -262,7 +262,9 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
     // mount-time snapshot, forever outside Player.tsx's
     // VEHICLE_SEARCH_RADIUS. Throttled the same way (~10Hz) as the old
     // active-only call it replaces.
-    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
+    // elapsedTime e non getElapsedTime(): quella chiama getDelta() e ruba
+    // tempo al delta del frame dopo per TUTTI i useFrame (fisica compresa)
+    if (state.clock.elapsedTime % 0.1 < 0.02) {
       const t0 = body.translation();
       const rot0 = body.rotation();
       _planeQuat.set(rot0.x, rot0.y, rot0.z, rot0.w);

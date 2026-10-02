@@ -16,6 +16,7 @@ import Controls from './components/UI/Controls';
 import GithubCorner from './components/UI/GithubCorner';
 import WelcomeScreen from './components/UI/WelcomeScreen';
 import ToonStyle from './components/Environment/ToonStyle';
+import AdaptiveResolution from './components/Environment/AdaptiveResolution';
 import GraphicsGUI from './components/UI/GraphicsGUI';
 const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 import LoadingScreen from './components/UI/LoadingScreen';
@@ -55,6 +56,7 @@ const App: React.FC = () => {
       showGameplayHud: state.showGameplayHud,
     }))
   );
+  const renderDpr = useStore((state) => state.renderDpr);
 
   // TEMP DEBUG (Claude) turned permanent test convenience: joining used to
   // mean clicking through WelcomeScreen (type a name, click "Enter
@@ -187,7 +189,8 @@ const App: React.FC = () => {
         // Cap the device pixel ratio -- with no dpr set, R3F defaults to
         // window.devicePixelRatio (2+ on Retina Macs), which is 4x the
         // fragment-shader work of dpr=1 on every single frame.
-        dpr={[1, 2]}
+        // (con la risoluzione adattiva la sceglie AdaptiveResolution)
+        dpr={renderDpr ?? [1, 2]}
         // TEMP DEBUG (Claude): expose the r3f root state (gl/scene/camera)
         // for live console profiling while chasing the perf complaints.
         // Dev-only, no-op in production builds.
@@ -216,6 +219,8 @@ const App: React.FC = () => {
             <SunLight />
             {/* "stilizza il gioco in stile toon" (casella nel menu / pannello Grafica) */}
             <ToonStyle />
+            {/* risoluzione che scende/sale per restare sui 60 fps (pannello Grafica) */}
+            <AdaptiveResolution />
             <StreetLampGlow />
 
             {/*

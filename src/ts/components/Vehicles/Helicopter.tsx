@@ -198,7 +198,9 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     // the first place, regardless of how close the player actually stood.
     // Throttled the same way (~10Hz) as the old active-only call it
     // replaces.
-    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
+    // elapsedTime e non getElapsedTime(): quella chiama getDelta() e ruba
+    // tempo al delta del frame dopo per TUTTI i useFrame (fisica compresa)
+    if (state.clock.elapsedTime % 0.1 < 0.02) {
       const t0 = body.translation();
       const rot0 = body.rotation();
       _heliQuat.set(rot0.x, rot0.y, rot0.z, rot0.w);
