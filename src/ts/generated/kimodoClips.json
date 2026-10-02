@@ -1,9 +1,163 @@
 {
+  "Kimodo_cower": {
+    "duration": 3.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.037,
+    "prompt": "A person in fear crouches down and covers their head with both arms."
+  },
+  "Kimodo_getup_back": {
+    "duration": 4.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.102,
+    "prompt": "A person lying flat on their back on the ground gets up to a standing position."
+  },
+  "Kimodo_getup_front": {
+    "duration": 4.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.2,
+    "prompt": "A person lying face down on the ground pushes up with both arms and gets up to a standing position."
+  },
+  "Kimodo_getup_hurt": {
+    "duration": 4.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.009,
+    "prompt": "A person lying on their back slowly and painfully gets up, holding their stomach with one hand."
+  },
+  "Kimodo_hit_back": {
+    "duration": 1.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.125,
+    "prompt": "A person is hit hard in the back and flinches forward, arching the back in pain."
+  },
+  "Kimodo_hit_left": {
+    "duration": 1.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.032,
+    "prompt": "A person is hit on the left side of the body and recoils to the right."
+  },
+  "Kimodo_hit_right": {
+    "duration": 1.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.053,
+    "prompt": "A person is hit on the right side of the body and recoils to the left."
+  },
+  "Kimodo_hit_stomach": {
+    "duration": 2.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.105,
+    "prompt": "A person is punched in the stomach, doubles over in pain and then straightens up."
+  },
+  "Kimodo_injured_walk": {
+    "duration": 1.233,
+    "loop": true,
+    "inPlace": true,
+    "speed": 0.483,
+    "prompt": "A person walks forward slowly, limping on the left leg and holding their side in pain."
+  },
+  "Kimodo_look_around": {
+    "duration": 4.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.063,
+    "prompt": "A person stands still and looks around curiously, turning the head left and right."
+  },
+  "Kimodo_out_of_breath": {
+    "duration": 2.167,
+    "loop": true,
+    "inPlace": true,
+    "speed": 0.201,
+    "prompt": "A person stands bent over with hands on knees, breathing heavily after running."
+  },
+  "Kimodo_panic_run": {
+    "duration": 0.6,
+    "loop": true,
+    "inPlace": true,
+    "speed": 1.91,
+    "prompt": "A person runs forward in panic, waving the arms and looking back over the shoulder."
+  },
+  "Kimodo_phone_talk": {
+    "duration": 4.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.021,
+    "prompt": "A person stands talking on a phone held to the right ear, gesturing with the left hand."
+  },
+  "Kimodo_point_shout": {
+    "duration": 2.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.049,
+    "prompt": "A person points ahead with the right arm and shouts angrily."
+  },
   "Kimodo_saluto": {
     "duration": 2.967,
     "loop": false,
     "inPlace": true,
     "speed": 0.013,
     "prompt": "a person waves hello with the right hand"
+  },
+  "Kimodo_stretch": {
+    "duration": 3.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.039,
+    "prompt": "A person stands and stretches both arms high above the head, then relaxes."
+  },
+  "Kimodo_stumble_back": {
+    "duration": 2.967,
+    "loop": false,
+    "inPlace": false,
+    "speed": 0.064,
+    "prompt": "A person is shoved hard in the chest, stumbles backward a few steps and regains balance."
+  },
+  "Kimodo_stumble_forward": {
+    "duration": 2.967,
+    "loop": false,
+    "inPlace": false,
+    "speed": 0.056,
+    "prompt": "A person is pushed from behind, stumbles forward a few steps and catches their balance."
+  },
+  "Kimodo_stumble_left": {
+    "duration": 2.967,
+    "loop": false,
+    "inPlace": false,
+    "speed": 0.306,
+    "prompt": "A person is shoved from the right side, stumbles sideways to the left and recovers their balance."
+  },
+  "Kimodo_stumble_right": {
+    "duration": 2.967,
+    "loop": false,
+    "inPlace": false,
+    "speed": 0.12,
+    "prompt": "A person is shoved from the left side, stumbles sideways to the right and recovers their balance."
+  },
+  "Kimodo_victory": {
+    "duration": 3.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.073,
+    "prompt": "A person celebrates a victory, jumping and raising both fists in the air."
+  },
+  "Kimodo_victory_dance": {
+    "duration": 3.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.043,
+    "prompt": "A person does a short joyful victory dance, pumping their fists."
+  },
+  "Kimodo_wait_impatient": {
+    "duration": 4.967,
+    "loop": false,
+    "inPlace": true,
+    "speed": 0.068,
+    "prompt": "A person stands waiting impatiently, shifting weight from foot to foot and checking the watch on the left wrist."
   }
 }
