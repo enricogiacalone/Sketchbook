@@ -267,11 +267,8 @@ export const CITY_LAYOUT: CityLayout = (() => {
   // independently.
   const LED_PALETTE = ['#00eaff', '#ff2fd0', '#7cff3a', '#ffb300', '#8a6bff', '#ff3b5c'];
 
-  // "fai la citta piu piccola" -- 2 -> 1: a 3x3 block grid (8 built
-  // blocks + the center park) instead of 5x5 (24 + park). Also directly
-  // helps the ongoing perf work: roughly a third of the buildings, LED
-  // trims/lights, parked cars and pedestrians as before.
-  const gridRadius = 1;
+  // Citta estesa a 5x5 blocchi (gridRadius = 2)
+  const gridRadius = 2;
   for (let i = -gridRadius; i <= gridRadius; i++) {
     for (let j = -gridRadius; j <= gridRadius; j++) {
       const blockX = i * gridSpacing + gridSpacing / 2;
@@ -279,10 +276,8 @@ export const CITY_LAYOUT: CityLayout = (() => {
 
       if (i === 0 && j === 0) continue;
 
-      // Plaza block coordinates must stay inside the (now smaller)
-      // [-gridRadius, gridRadius] range -- these two are picked to sit on
-      // opposite corners of the grid, same relative layout idea as before.
-      if ((i === -1 && j === 1) || (i === 1 && j === -1)) {
+      // Plaza block coordinates on opposite corners of the 5x5 grid
+      if ((i === -2 && j === 2) || (i === 2 && j === -2)) {
         pArr.push({ x: blockX, z: blockZ });
         continue;
       }
