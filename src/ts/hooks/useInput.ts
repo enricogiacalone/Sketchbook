@@ -136,9 +136,16 @@ export const useInput = () => {
     KeyJ: 'musicCubi',
     KeyK: 'musicSchermo',
     KeyV: 'dodge',
+    KeyZ: 'secondary',
+    KeyN: 'secondary',
+    ControlRight: 'secondary',
   };
 
   useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('contextmenu', handleContextMenu);
     const handleKeyDown = (e: KeyboardEvent) => {
       const action = keys[e.code];
       if (action) {
@@ -200,6 +207,7 @@ export const useInput = () => {
     window.addEventListener('gamepaddisconnected', handleGamepadDisconnected);
 
     return () => {
+      window.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousedown', handleMouseDown);
