@@ -19,8 +19,9 @@ const GRID_SPACING = 60;
 const GRID_RADIUS = 1;
 const BLOCK_HALF = GRID_SPACING / 2;
 const SIDEWALK_CENTER_OFFSET = ROAD_WIDTH / 2 + SIDEWALK_WIDTH / 2;
-const SIDE_HALF_LEN = BLOCK_HALF - 8; // lontano dagli incroci
+const SIDE_HALF_LEN = BLOCK_HALF - 12; // lascia spazio tra i passanti e le strisce agli incroci
 const AGENTS_PER_SIDE = 5;
+const CROSSWALK_OFFSET = ROAD_WIDTH / 2 + 2;
 
 const isSkippedBlock = (i: number, j: number): boolean => (i === 0 && j === 0) || (i === -1 && j === 1) || (i === 1 && j === -1);
 
@@ -59,6 +60,7 @@ export interface CrowdAgent {
   fear: number;
   fearX: number;
   fearZ: number;
+  turnAxis: 'horizontal' | 'vertical' | null;
 }
 
 // "folla piu' viva": uno sparo spaventa chi e' vicino. Si scappa lungo il
@@ -70,6 +72,60 @@ export const PANIC_SPEED = 3.6; // m/s
 export const COWER_DIST = 5;
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
+
+function randomRouteTarget(current: number, previous: number, extent: number): number {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const target = rand(-extent, extent);
+    if (Math.abs(target - current) >= 24 && Math.abs(target - previous) >= 24) return target;
+  }
+
+  const alternatives = [-extent, -extent / 2, 0, extent / 2, extent].filter(
+    (target) => Math.abs(target - current) >= 24 && Math.abs(target - previous) >= 24
+  );
+  return alternatives[Math.floor(Math.random() * alternatives.length)] ?? (current < 0 ? extent : -extent);
+}
+
+function randomTurnTarget(current: number, extent: number): number | null {
+  const points: number[] = [];
+  for (let offset = -extent; offset <= extent; offset += GRID_SPACING) {
+    for (const side of [-1, 1]) {
+      const target = offset + side * SIDEWALK_CENTER_OFFSET;
+      if (Math.abs(target - current) >= 24) points.push(target);
+    }
+  }
+  return points.length > 0 ? points[Math.floor(Math.random() * points.length)] : null;
+}
+
+function makeAgent(id: number, x1: number, z1: number, x2: number, z2: number): CrowdAgent {
+  const h = id * 7919;
+  return {
+    id,
+    x1,
+    z1,
+    x2,
+    z2,
+    len: Math.hypot(x2 - x1, z2 - z1),
+    speed: rand(0.9, 1.35),
+    t: Math.random(),
+    dir: Math.random() < 0.5 ? 1 : -1,
+    pause: 0,
+    x: x1,
+    y: 0,
+    z: z1,
+    yaw: 0,
+    gait: Math.random(),
+    color: CIVILIAN_COLORS[h % CIVILIAN_COLORS.length],
+    walkClip: WALK_CLIPS[(h >> 2) % WALK_CLIPS.length],
+    idleClip: IDLE_CLIPS[(h >> 5) % IDLE_CLIPS.length],
+    gone: false,
+    slot: -1,
+    dist: Infinity,
+    fear: 0,
+    fearX: 0,
+    fearZ: 0,
+    turnAxis: null,
+  };
+}
 
 function makeAgents(): CrowdAgent[] {
   const out: CrowdAgent[] = [];
@@ -91,44 +147,34 @@ function makeAgents(): CrowdAgent[] {
           // un tratto a caso del marciapiede, un po' spostato di lato
           const a = rand(0, 0.5);
           const b = rand(a + 0.3, 1);
-          const lat = rand(-0.45, 0.45);
+          const lat = rand(-0.25, 0.25);
           const vertical = ax === cx;
           const x1 = ax + (cx - ax) * a + (vertical ? lat : 0);
           const z1 = az + (cz - az) * a + (vertical ? 0 : lat);
           const x2 = ax + (cx - ax) * b + (vertical ? lat : 0);
           const z2 = az + (cz - az) * b + (vertical ? 0 : lat);
-          const h = id * 7919;
-          out.push({
-            id,
-            x1,
-            z1,
-            x2,
-            z2,
-            len: Math.hypot(x2 - x1, z2 - z1),
-            speed: rand(0.9, 1.35),
-            t: Math.random(),
-            dir: Math.random() < 0.5 ? 1 : -1,
-            pause: 0,
-            x: x1,
-            y: 0,
-            z: z1,
-            yaw: 0,
-            gait: Math.random(),
-            color: CIVILIAN_COLORS[h % CIVILIAN_COLORS.length],
-            walkClip: WALK_CLIPS[(h >> 2) % WALK_CLIPS.length],
-            idleClip: IDLE_CLIPS[(h >> 5) % IDLE_CLIPS.length],
-            gone: false,
-            slot: -1,
-            dist: Infinity,
-            fear: 0,
-            fearX: 0,
-            fearZ: 0,
-          });
-          id++;
+          out.push(makeAgent(id++, x1, z1, x2, z2));
         }
       }
     }
   }
+
+  // Aggiunge passanti che attraversano da un marciapiede all'altro,
+  // seguendo i passaggi segnati alle intersezioni della griglia cittadina.
+  for (let i = -GRID_RADIUS; i <= GRID_RADIUS + 1; i++) {
+    for (let j = -GRID_RADIUS; j <= GRID_RADIUS + 1; j++) {
+      const ox = i * GRID_SPACING;
+      const oz = j * GRID_SPACING;
+      for (const side of [-1, 1]) {
+        const crosswalkZ = oz + side * CROSSWALK_OFFSET;
+        out.push(makeAgent(id++, ox - SIDEWALK_CENTER_OFFSET, crosswalkZ, ox + SIDEWALK_CENTER_OFFSET, crosswalkZ));
+
+        const crosswalkX = ox + side * CROSSWALK_OFFSET;
+        out.push(makeAgent(id++, crosswalkX, oz - SIDEWALK_CENTER_OFFSET, crosswalkX, oz + SIDEWALK_CENTER_OFFSET));
+      }
+    }
+  }
+
   return out;
 }
 
@@ -161,8 +207,34 @@ export function stepCrowd(dt: number, px: number, pz: number) {
       a.t += (a.dir * a.speed * dt) / a.len;
       if (a.t >= 1 || a.t <= 0) {
         a.t = Math.min(1, Math.max(0, a.t));
-        a.dir = -a.dir;
-        a.pause = rand(1.5, 4);
+        const reachedX = a.x1 + (a.x2 - a.x1) * a.t;
+        const reachedZ = a.z1 + (a.z2 - a.z1) * a.t;
+        const horizontal = Math.abs(a.x2 - a.x1) >= Math.abs(a.z2 - a.z1);
+        const extent = (GRID_RADIUS + 1) * GRID_SPACING;
+        const currentAxis = horizontal ? 'horizontal' : 'vertical';
+        const nextAxis = a.turnAxis ?? currentAxis;
+        a.turnAxis = null;
+        const previousTarget = nextAxis === 'horizontal' ? (a.t === 0 ? a.x2 : a.x1) : a.t === 0 ? a.z2 : a.z1;
+        let nextTarget: number;
+        if (nextAxis === currentAxis && Math.random() < 0.35) {
+          const turn = randomTurnTarget(horizontal ? reachedX : reachedZ, extent);
+          if (turn !== null) {
+            nextTarget = turn;
+            a.turnAxis = horizontal ? 'vertical' : 'horizontal';
+          } else {
+            nextTarget = randomRouteTarget(horizontal ? reachedX : reachedZ, previousTarget, extent);
+          }
+        } else {
+          nextTarget = randomRouteTarget(nextAxis === 'horizontal' ? reachedX : reachedZ, previousTarget, extent);
+        }
+        a.x1 = reachedX;
+        a.z1 = reachedZ;
+        a.x2 = nextAxis === 'horizontal' ? nextTarget : reachedX;
+        a.z2 = nextAxis === 'horizontal' ? reachedZ : nextTarget;
+        a.t = 0;
+        a.dir = 1;
+        a.len = Math.abs(nextTarget - (nextAxis === 'horizontal' ? reachedX : reachedZ));
+        a.pause = rand(0.3, 1.2);
       }
       a.gait = (a.gait + (dt * a.speed) / ((WALK_BASE_SPEED[a.walkClip] ?? 0.75) * CROWD_GAIT_CYCLE_S)) % 1;
     }

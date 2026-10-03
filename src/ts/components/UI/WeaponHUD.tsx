@@ -3,15 +3,13 @@ import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { PISTOL_MAG_SIZE, RIFLE_MAG_SIZE } from '../Environment/weapons/weaponConfig';
 
-// HUD della pistola nel duello: mirino al centro dello schermo (la camera
+// HUD delle armi del personaggio: mirino al centro dello schermo (la camera
 // sopra la spalla guarda esattamente li', vedi useThirdPersonCamera.ts),
-// che si stringe in mira, hit marker quando un colpo va a segno, e il
-// contatore del caricatore in basso a destra. A mani nude mostra solo
-// l'indicatore dell'arma (1 Pugni / 2 Pistola).
+// hit marker quando un colpo va a segno e contatore del caricatore.
 const HIT_MARKER_MS = 260;
 
 const WeaponHUD: React.FC = () => {
-  const { weapon, aiming, ammo, reloading, hitAt, hitKill, hitHead } = useStore(
+  const { weapon, aiming, ammo, reloading, hitAt, hitKill, hitHead, currentControllable, isDrone, testScene, duelResult } = useStore(
     useShallow((s) => ({
       weapon: s.playerWeapon,
       aiming: s.playerAiming,
@@ -20,6 +18,10 @@ const WeaponHUD: React.FC = () => {
       hitAt: s.pistolHitAt,
       hitKill: s.pistolHitKill,
       hitHead: s.pistolHitHead,
+      currentControllable: s.currentControllable,
+      isDrone: s.isDrone,
+      testScene: s.testScene,
+      duelResult: s.duelResult,
     }))
   );
   // ridisegna finche' l'hit marker e' visibile, poi si spegne da solo
@@ -41,21 +43,38 @@ const WeaponHUD: React.FC = () => {
     ['rifle', '3', 'Fucile'],
     ['knife', '4', 'Coltello'],
   ];
-  const gap = aiming ? 4 : 10;
-  const len = aiming ? 5 : 7;
+  const onFoot = currentControllable === 'player' || currentControllable === 'combatSoldier';
+  const gap = aiming ? 5 : 10;
+  const len = aiming ? 4 : 7;
   const color = reloading ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.9)';
   const tick: React.CSSProperties = {
     position: 'absolute',
     background: color,
-    boxShadow: '0 0 2px rgba(0,0,0,0.9)',
+    boxShadow: '0 0 2px #000, 0 0 4px rgba(0,0,0,0.8)',
     transition: 'all 0.1s ease-out',
   };
   const markerColor = hitKill ? '#ef4444' : hitHead ? '#facc15' : '#ffffff';
+
+  if (!onFoot || isDrone || (testScene === 'duel' && duelResult !== 'none')) return null;
 
   return (
     <>
       {pistol && (
         <div style={{ position: 'absolute', left: '50%', top: '50%', width: 0, height: 0, pointerEvents: 'none' }}>
+          {aiming && (
+            <div
+              style={{
+                position: 'absolute',
+                left: -3,
+                top: -3,
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: 'rgba(255,255,255,0.95)',
+                boxShadow: '0 0 0 1px rgba(0,0,0,0.9), 0 0 5px rgba(0,0,0,0.9)',
+              }}
+            />
+          )}
           <div style={{ ...tick, left: -1, top: -gap - len, width: 2, height: len }} />
           <div style={{ ...tick, left: -1, top: gap, width: 2, height: len }} />
           <div style={{ ...tick, top: -1, left: -gap - len, width: len, height: 2 }} />
@@ -110,7 +129,9 @@ const WeaponHUD: React.FC = () => {
           </div>
         )}
         {pistol && (
-          <div style={{ fontSize: 10, opacity: 0.6 }}>{weapon === 'rifle' ? 'LMB (tieni) raffica' : 'LMB spara'} · RMB mira · R ricarica</div>
+          <div style={{ fontSize: 10, opacity: 0.6 }}>
+            {weapon === 'rifle' ? 'LMB (tieni) raffica' : 'LMB spara'} · RMB mira · R ricarica
+          </div>
         )}
         {weapon === 'knife' && <div style={{ fontSize: 10, opacity: 0.6 }}>LMB fendente · Q fendente · E affondo · RMB para</div>}
       </div>

@@ -31,6 +31,7 @@ import CombatArenaGUI from './components/UI/CombatArenaGUI';
 import RagdollBenchGUI from './components/UI/RagdollBenchGUI';
 import RagdollBenchOverlay from './components/UI/RagdollBenchOverlay';
 import DuelHUD from './components/UI/DuelHUD';
+import WeaponHUD from './components/UI/WeaponHUD';
 import { DUEL_PLAYER_ID } from './components/Environment/DuelArena';
 import Loader from './components/UI/Loader'; // Helper to track loading
 // "sostituire il personaggio boxman in playground con il nostro manichino"
@@ -327,6 +328,7 @@ const App: React.FC = () => {
           {testScene === 'none' && <Minimap />}
           <ChatInput />
           <Crosshair />
+          <WeaponHUD />
           <DroneHUD />
           <WeaponWheel />
           <GamepadDebug />

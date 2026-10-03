@@ -59,13 +59,14 @@ const _focusTarget = new THREE.Vector3();
 const DUEL_START_RADIUS = 2.6;
 const DUEL_START_PHI = 10; // degrees
 
-// Pistola (PlayerCombatSoldier.tsx): camera sopra la spalla destra, che in
-// mira (tasto destro) si avvicina e stringe il campo visivo.
+// Armi da fuoco (PlayerCombatSoldier.tsx): camera sopra la spalla destra,
+// che in mira si stringe mantenendo il personaggio visibile.
 const SHOULDER_OFFSET_HIP = 0.45;
 const SHOULDER_OFFSET_AIM = 0.55;
 const SHOULDER_UP = 0.12;
-const AIM_RADIUS_FACTOR = 0.5;
-const AIM_FOV = 40;
+const AIM_RADIUS_FACTOR = 0.55;
+const MIN_AIM_RADIUS = 2.3;
+const AIM_FOV = 48;
 const _shoulderOffset = new THREE.Vector3();
 
 // Right-stick camera look. useInput.ts's poller only ever reads the LEFT
@@ -387,13 +388,14 @@ export const useThirdPersonCamera = () => {
 
     // Spalla/mira: blend esponenziale indipendente dal framerate.
     const ws = useStore.getState();
-    const pistolOn = isFootController && ws.playerWeapon === 'pistol';
+    const gunOn = isFootController && (ws.playerWeapon === 'pistol' || ws.playerWeapon === 'rifle');
     const k = 1 - Math.exp(-delta * 12);
-    shoulderBlend.current += ((pistolOn ? 1 : 0) - shoulderBlend.current) * k;
-    aimBlend.current += ((pistolOn && ws.playerAiming ? 1 : 0) - aimBlend.current) * k;
+    shoulderBlend.current += ((gunOn ? 1 : 0) - shoulderBlend.current) * k;
+    aimBlend.current += ((gunOn && ws.playerAiming ? 1 : 0) - aimBlend.current) * k;
     const sb = shoulderBlend.current;
     const ab = aimBlend.current;
-    const camRadius = radius.current * (1 - (1 - AIM_RADIUS_FACTOR) * ab);
+    const aimedRadius = Math.max(MIN_AIM_RADIUS, radius.current * AIM_RADIUS_FACTOR);
+    const camRadius = THREE.MathUtils.lerp(radius.current, aimedRadius, ab);
     if (sb > 0.001) {
       const side = THREE.MathUtils.lerp(SHOULDER_OFFSET_HIP, SHOULDER_OFFSET_AIM, ab) * sb;
       // destra dello schermo = (cos t, 0, -sin t) per una camera che guarda
