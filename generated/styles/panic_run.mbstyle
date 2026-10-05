@@ -1,0 +1,11 @@
+{
+  "id": "kimodo_panic_run",
+  "name": "panic_run",
+  "prompt": "A person runs forward in panic, waving the arms and looking back over the shoulder.",
+  "frames": 30,
+  "fps": 30,
+  "duration": 1,
+  "source": "kimodo",
+  "target_speed": 1,
+  "loop": true
+}

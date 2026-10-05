@@ -1,0 +1,11 @@
+{
+  "id": "kimodo_stumble_forward",
+  "name": "stumble_forward",
+  "prompt": "A person is pushed from behind, stumbles forward a few steps and catches their balance.",
+  "frames": 30,
+  "fps": 30,
+  "duration": 1,
+  "source": "kimodo",
+  "target_speed": 1,
+  "loop": true
+}

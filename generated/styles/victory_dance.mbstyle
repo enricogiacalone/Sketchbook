@@ -1,0 +1,11 @@
+{
+  "id": "kimodo_victory_dance",
+  "name": "victory_dance",
+  "prompt": "A person does a short joyful victory dance, pumping their fists.",
+  "frames": 30,
+  "fps": 30,
+  "duration": 1,
+  "source": "kimodo",
+  "target_speed": 1,
+  "loop": true
+}
