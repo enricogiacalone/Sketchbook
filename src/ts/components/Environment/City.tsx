@@ -898,7 +898,7 @@ const GreenCourtyard: React.FC<{ x: number; z: number; treeTemplates: TreeTempla
                 posto dell'altro grass"). Bounds match the 20x20 courtyard
                 plane above; counts scaled down proportionally from Park's
                 own 51x51 area. */}
-      <RealGrassPatch minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} instances={700} />
+      {/* <RealGrassPatch minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} instances={700} /> */}
       <Flowers minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} count={12} />
       {trees.map((t, i) => (
         <TreeInstance key={i} x={t.x} z={t.z} rotationY={t.rotationY} scale={t.scale} template={treeTemplates[t.templateIndex]} />
@@ -1105,14 +1105,14 @@ const City: React.FC = () => {
               flowers -- bounds match the 45x45 plaza plane, avoiding the
               central monument box. Density closer to Park's own (51x51 /
               8000 grass / 60 flowers) since plazas are nearly as big. */}
-          <RealGrassPatch
+          {/* <RealGrassPatch
             minX={p.x - 22}
             maxX={p.x + 22}
             minZ={p.z - 22}
             maxZ={p.z + 22}
             instances={3200}
             avoid={[{ x: p.x, z: p.z, radius: 4 }]}
-          />
+          /> */}
           <Flowers minX={p.x - 22} maxX={p.x + 22} minZ={p.z - 22} maxZ={p.z + 22} count={45} avoid={[{ x: p.x, z: p.z, radius: 4 }]} />
           {/* Real trees, same deal as GreenCourtyard above -- placed in
               absolute world coords (plaza center + offset), as siblings of

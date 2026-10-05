@@ -1,33 +1,30 @@
 import React, { Suspense } from 'react';
-import { useGLTF } from './lib/gltf';
-import * as THREE from 'three';
-import Ocean from './components/Environment/Ocean';
-import Trees from './components/Environment/Trees';
-import Terrain from './components/Environment/Terrain';
-import Road from './components/Environment/Road';
+import EnemySpawner from './components/EnemySpawner';
+import Airport, { HELIPORT_CENTER, RUNWAY_CENTER } from './components/Environment/Airport';
+import BuildingLedGlow from './components/Environment/BuildingLedGlow';
+import BuildingLeds from './components/Environment/BuildingLeds';
 import City from './components/Environment/City';
+import CityDetails from './components/Environment/CityDetails';
+import CityFlags from './components/Environment/CityFlags';
+import Clouds from './components/Environment/Clouds';
+import Collectibles from './components/Environment/Collectibles';
+import DuelArena from './components/Environment/DuelArena';
+import MeteoriteSpawner from './components/Environment/MeteoriteSpawner';
 import Park from './components/Environment/Park';
 import { TreeBatches } from './components/Environment/ParkTrees';
-import CityDetails from './components/Environment/CityDetails';
-import Collectibles from './components/Environment/Collectibles';
-import BuildingLeds from './components/Environment/BuildingLeds';
-import BuildingLedGlow from './components/Environment/BuildingLedGlow';
-import Airport, { RUNWAY_CENTER, HELIPORT_CENTER } from './components/Environment/Airport';
-import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from './components/Environment/RaceTrack';
-import DuelArena from './components/Environment/DuelArena';
 import Planets from './components/Environment/Planets';
-import Clouds from './components/Environment/Clouds';
-import UFO from './components/Environment/UFO';
-import MeteoriteSpawner from './components/Environment/MeteoriteSpawner';
-import EnemySpawner from './components/EnemySpawner';
-import SoldierSpawner from './components/SoldierSpawner';
 import PoliceWalkers from './components/Environment/PoliceWalkers';
-import CityFlags from './components/Environment/CityFlags';
+import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from './components/Environment/RaceTrack';
+import Road from './components/Environment/Road';
+import Terrain from './components/Environment/Terrain';
+import UFO from './components/Environment/UFO';
 import MissionManager from './components/Missions/MissionManager';
+import SoldierSpawner from './components/SoldierSpawner';
+import Airplane from './components/Vehicles/Airplane'; // Import Airplane
 import Car from './components/Vehicles/Car'; // Import Car
 import FarCars from './components/Vehicles/FarCars';
-import Airplane from './components/Vehicles/Airplane'; // Import Airplane
 import Helicopter from './components/Vehicles/Helicopter'; // Import Helicopter
+import { useGLTF } from './lib/gltf';
 import { useStore } from './store';
 
 // Pre-caricamento intensivo
@@ -86,34 +83,15 @@ const POLICE_ROUTE_CROSS2: [number, number][] = [
 ];
 
 const Scene: React.FC = () => {
-  // TEMP DEBUG (Claude): 'airplane'/'helicopter'/'car' test scenarios strip
-  // everything below that isn't the ground, the airport pads, or the
-  // vehicle actually being tested -- "senza citta e distrazioni" -- so a
-  // physics test isn't sharing frame budget or collision volume with 30
-  // parked cars, pedestrians, a UFO, meteorites, missions, etc. See
-  // store.ts's testScene and window.__sim.startTest()/endTest()
-  // (debug/simDebug.ts).
   const testScene = useStore((state) => state.testScene);
   const isCleanTest = testScene !== 'none';
   const isCarTest = testScene === 'car';
   const isRaceTest = testScene === 'race';
-  // "crea una sezione dedicata nel menu di avvio del gioco che mi fa
-  // entrare in un'arena" -- the 1v1 duel scenario, same isCleanTest
-  // family as the flight/car/race tests above (SoldierSpawner/City/
-  // Road/etc. are already stripped for ANY testScene !== 'none' -- see
-  // isCleanTest below); this just additionally mounts DuelArena.tsx.
   const isDuelTest = testScene === 'duel';
-  // "aggiungi il tasto retry" -- read fresh each render so a change
-  // (see store.ts's retryDuel) flows straight into the key below.
   const duelRound = useStore((state) => state.duelRound);
   const showSimCitta = useStore((state) => state.showSimCitta);
-  // "aggiungi ... gli ufo e [le meteoriti]" -- the race scenario wants
-  // some sci-fi atmosphere/spectacle overhead (it's a "gara", not a
-  // precision physics test), so UFO + MeteoriteSpawner get an exception to
-  // the clean-scenario strip-down specifically for testScene==='race'.
-  // The airplane/helicopter/car test scenarios stay exactly as
-  // distraction-free as before -- this doesn't touch those.
   const showSkyAtmosphere = !isCleanTest || isRaceTest || isDuelTest;
+
   return (
     <>
       <Terrain />
@@ -121,17 +99,12 @@ const Scene: React.FC = () => {
       {!isCleanTest && <Road />}
       {!isCleanTest && <PoliceWalkers />}
       {!isCleanTest && <CityFlags />}
-      {/* nuvole anche nel duello: la sala delle casse e' a cielo aperto */}
       {(!isCleanTest || isDuelTest) && <Clouds />}
-      <Ocean />
       <Planets />
       {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}
       {showSkyAtmosphere && <MeteoriteSpawner />}
       {!isCleanTest && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
-      {/* Soldati portati da simulation-citta (AgentSoldier + RiggedCitizen), decorativi come i pedoni.
-          Spenti di default: casella "simulation-citta" nel pannello Scenari */}
       {!isCleanTest && showSimCitta && <SoldierSpawner />}
-
       {/* Carichiamo i modelli in blocchi separati per non bloccare la fisica */}
       <Suspense fallback={null}>
         {!isCleanTest && !DEBUG_DISABLE_CARS_AND_ENEMIES && (
@@ -244,12 +217,6 @@ const Scene: React.FC = () => {
             useMemo(..., []). */}
         {isDuelTest && <DuelArena key={duelRound} />}
       </Suspense>
-
-      {/* Airport (runway/heliport pads + markings) stays in every scenario --
-          it's the ground truth the vehicles actually sit on/take off from,
-          not a "distrazione". Everything else here (city, park, LEDs,
-          collectibles, missions) is exactly the clutter the clean test
-          scenarios are meant to remove. */}
       <Airport />
       {!isCleanTest && (
         <Suspense fallback={null}>

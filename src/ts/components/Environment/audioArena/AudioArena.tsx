@@ -246,7 +246,7 @@ const AudioArena: React.FC = () => {
   const tex = useTexture(ARENA_TEXTURES) as unknown as Record<string, THREE.Texture>;
 
   const mats = useMemo(() => {
-    const an = Math.min(8, gl.capabilities.getMaxAnisotropy());
+    const an = Math.min(8, (gl as any).getMaxAnisotropy?.() ?? (gl as any).capabilities?.getMaxAnisotropy?.() ?? 4);
     const floor = makePbr(tex, 'floor', ((ROOM_HALF * 2) / 25) * 1.5, ((ROOM_HALF * 2) / 25) * 1.5, an);
     const wallLong = makePbr(tex, 'wall', ((ROOM_HALF * 2 + WALL_T * 2) / 25) * 2, (WALL_H / 25) * 2, an);
     const speaker = makePbr(tex, 'spk', 1, 1, an);

@@ -1,42 +1,25 @@
-import React, { useMemo, useRef } from "react";
+import React, { useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import { getTerrainHeight } from "./Terrain";
 import { AvoidZone } from "./ParkTrees";
+import { GRASS_TIP_COLOR, GRASS_BOTTOM_COLOR } from "./GrassMaterial";
 import {
-  grassBladeVertexShader,
-  grassBladeFragmentShader,
-  GRASS_TIP_COLOR,
-  GRASS_BOTTOM_COLOR,
-} from "./GrassMaterial";
-
-// "ruba il grass da qui https://pmndrs.github.io/examples/grass-shader/ e
-// mettilo nel parco" -- real per-blade instanced grass (proper tapered
-// blade geometry + simplex-noise wind sway + slerped bend), ported from
-// that example (see GrassMaterial.ts for the full license/attribution
-// chain: pmndrs/examples MIT, al-ro, Eddie Lee 2010, Ashima Arts
-// webgl-noise, geeks3d.com, Wikipedia). This deliberately only replaces
-// Park.tsx's own grass -- City.tsx's courtyards/plazas keep the cheaper
-// flat-plane mock-shader GrassPatch from ParkTrees.tsx, since this one is
-// meaningfully more expensive per-blade (tapered multi-joint geometry +
-// per-instance quaternion attributes vs. a flat plane + instanceMatrix)
-// and the user only asked for it "nel parco".
-//
-// Differences from the original example, deliberate:
-//  - Ground height comes from this project's own getTerrainHeight(x,z)
-//    (Terrain.tsx) instead of the example's own simplex-noise
-//    getYPosition -- there's already real, walkable terrain here, we don't
-//    want a second disconnected undulating ground plane under the park.
-//  - No separate ground <mesh> is rendered (the example draws its own
-//    height-displaced ground plane; here Terrain.tsx already owns the
-//    ground).
-//  - Exclusion zones (avoid) -- e.g. the fountain and paths -- are honored
-//    by resampling a blade's spot a few times instead of placing it, same
-//    idea as GrassPatch's own avoid handling.
-//  - Instance count is tuned down from the example's 50,000 (over a
-//    100-unit-wide open field with nothing else around) to fit a live
-//    physics-heavy multiplayer scene alongside traffic/pedestrians/etc.
+  uv,
+  Fn,
+  vec3,
+  vec4,
+  float,
+  uniform,
+  texture,
+  attribute,
+  mix,
+  cross,
+  normalize,
+  positionLocal,
+} from "three/tsl";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 
 const _tmpQ0 = new THREE.Vector4();
 const _tmpQ1 = new THREE.Vector4();
@@ -83,18 +66,15 @@ function buildAttributeData(
     offsets[i * 3 + 1] = y;
     offsets[i * 3 + 2] = z;
 
-    // Rotate around Y -- random growth-direction heading
     let angle = Math.PI - Math.random() * (2 * Math.PI);
     halfRootAngleSin[i] = Math.sin(0.5 * angle);
     halfRootAngleCos[i] = Math.cos(0.5 * angle);
     _tmpQ0.set(0, Math.sin(angle / 2), 0, Math.cos(angle / 2)).normalize();
 
-    // Small random tilt around X
     angle = Math.random() * (TILT_MAX - TILT_MIN) + TILT_MIN;
     _tmpQ1.set(Math.sin(angle / 2), 0, 0, Math.cos(angle / 2)).normalize();
     const q0 = multiplyQuaternions(_tmpQ0, _tmpQ1);
 
-    // Small random tilt around Z
     angle = Math.random() * (TILT_MAX - TILT_MIN) + TILT_MIN;
     _tmpQ1.set(0, 0, Math.sin(angle / 2), Math.cos(angle / 2)).normalize();
     const q1 = multiplyQuaternions(q0, _tmpQ1);
@@ -127,14 +107,10 @@ export const RealGrassPatch: React.FC<{
   maxZ,
   instances = 8000,
   avoid = [],
-  // "riduci un po la scala dell erba.. e' troppo grande": era 1 m (fino a
-  // 2.8 m coi fili allungati, piu' alta del manichino); ora 0.55 m (fino a
-  // ~1.5 m), larghezza in proporzione
   bladeWidth = 0.075,
   bladeHeight = 0.55,
   joints = 4,
 }) => {
-  const materialRef = useRef<THREE.ShaderMaterial>(null);
   const [map, alphaMap] = useTexture([
     "textures/grass/blade_diffuse.jpg",
     "textures/grass/blade_alpha.jpg",
@@ -142,8 +118,7 @@ export const RealGrassPatch: React.FC<{
 
   const attributeData = useMemo(
     () => buildAttributeData(instances, minX, maxX, minZ, maxZ, avoid),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [instances, minX, maxX, minZ, maxZ]
+    [instances, minX, maxX, minZ, maxZ, avoid]
   );
 
   const baseGeom = useMemo(
@@ -163,26 +138,70 @@ export const RealGrassPatch: React.FC<{
     return new THREE.Sphere(new THREE.Vector3(cx, 0, cz), radius);
   }, [minX, maxX, minZ, maxZ, bladeHeight]);
 
-  const uniforms = useMemo(
-    () => ({
-      time: { value: 0 },
-      bladeHeight: { value: bladeHeight },
-      map: { value: map },
-      alphaMap: { value: alphaMap },
-      tipColor: { value: GRASS_TIP_COLOR },
-      bottomColor: { value: GRASS_BOTTOM_COLOR },
-    }),
-    [bladeHeight, map, alphaMap]
-  );
+  const timeUniform = useMemo(() => uniform(0), []);
 
   useFrame((state) => {
-    if (materialRef.current) {
-      materialRef.current.uniforms.time.value = state.clock.elapsedTime / 4;
-    }
+    timeUniform.value = state.clock.elapsedTime / 4;
   });
 
+  const material = useMemo(() => {
+    const mat = new MeshBasicNodeMaterial() as any;
+    mat.side = THREE.DoubleSide;
+    mat.toneMapped = false;
+
+    const uBladeHeight = float(bladeHeight);
+
+    const rotateVectorByQuaternion = Fn(([v, q]: any) => {
+      const qxyz = q.xyz;
+      const term1 = v.mul(q.w).add(cross(qxyz, v));
+      const crossTerm = cross(qxyz, term1);
+      return crossTerm.mul(2.0).add(v);
+    });
+
+    const slerp = Fn(([v0, v1, t]: any) => {
+      const res = mix(v0, v1, t);
+      return normalize(res);
+    });
+
+    mat.vertexNode = Fn(() => {
+      const offset = attribute('offset', 'vec3');
+      const orientation = attribute('orientation', 'vec4');
+      const halfRootAngleSin = attribute('halfRootAngleSin', 'float');
+      const halfRootAngleCos = attribute('halfRootAngleCos', 'float');
+      const stretch = attribute('stretch', 'float');
+
+      const pos = positionLocal as any;
+      const frc = pos.y.div(uBladeHeight);
+
+      const direction = vec4(0.0, halfRootAngleSin, 0.0, halfRootAngleCos);
+      const interpolatedDir = slerp(direction, orientation, frc);
+
+      const vPosition = vec3(pos.x, pos.y.add(pos.y.mul(stretch)), pos.z);
+      const rotated = rotateVectorByQuaternion(vPosition, interpolatedDir);
+
+      const finalPos = offset.add(rotated);
+      return finalPos;
+    })();
+
+    mat.colorNode = Fn(() => {
+      const uvCoord = uv();
+      const alpha = texture(alphaMap, uvCoord).r;
+      alpha.lessThan(0.15).discard();
+
+      const col = texture(map, uvCoord);
+      const pos = positionLocal as any;
+      const frc = pos.y.div(uBladeHeight);
+      const colWithTip = mix(vec4(GRASS_TIP_COLOR, 1.0), col, frc);
+      const finalCol = mix(vec4(GRASS_BOTTOM_COLOR, 1.0), colWithTip, frc);
+
+      return finalCol;
+    })();
+
+    return mat;
+  }, [map, alphaMap, bladeHeight]);
+
   return (
-    <mesh>
+    <mesh material={material as any} frustumCulled={false}>
       <instancedBufferGeometry
         index={baseGeom.index}
         attributes-position={baseGeom.attributes.position}
@@ -195,14 +214,6 @@ export const RealGrassPatch: React.FC<{
         <instancedBufferAttribute attach="attributes-halfRootAngleSin" args={[attributeData.halfRootAngleSin, 1]} />
         <instancedBufferAttribute attach="attributes-halfRootAngleCos" args={[attributeData.halfRootAngleCos, 1]} />
       </instancedBufferGeometry>
-      <shaderMaterial
-        ref={materialRef}
-        vertexShader={grassBladeVertexShader}
-        fragmentShader={grassBladeFragmentShader}
-        uniforms={uniforms}
-        side={THREE.DoubleSide}
-        toneMapped={false}
-      />
     </mesh>
   );
 };
