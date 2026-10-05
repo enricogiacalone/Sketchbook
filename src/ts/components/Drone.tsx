@@ -766,17 +766,23 @@ const Drone: React.FC = () => {
     }
 
     // ============================ MISSILE ================================
-    if (input.consumeJustPressed('secondary') && f.lockLevel >= 1) {
+    if (input.consumeJustPressed('secondary')) {
       // selectNearestTargetInSight: il piu' vicino tra quelli nel cerchio
       let best: FighterData | null = null;
       let bestD = Infinity;
       for (const t of targets) {
         if (!t.inSight || t.distance >= bestD) continue;
         const d = cityOpponents.find((o) => o.id === t.id);
-        if (d) {
+        if (d && !d.isDead) {
           bestD = t.distance;
           best = d;
         }
+      }
+      if (!best) {
+        best = cityOpponents.find((o) => !o.isDead) ?? null;
+      }
+      if (!best && cityOpponents.length > 0) {
+        best = cityOpponents[0];
       }
       if (best) {
         const id = serial.current++;

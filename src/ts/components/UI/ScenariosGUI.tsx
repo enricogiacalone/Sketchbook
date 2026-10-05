@@ -70,6 +70,20 @@ const ScenariosGUI: React.FC = () => {
     scenari
       .add(simCitta, 'Mostra simulation-citta')
       .onChange((v: boolean) => useStore.getState().setShowSimCitta(v));
+
+    const meteoFolder = scenari.addFolder('Meteoriti');
+    const meteoConfig = {
+      'Attivi': useStore.getState().meteoritesEnabled,
+      'Frequenza (s)': useStore.getState().meteoriteFrequency,
+      'Raggio': useStore.getState().explosionRadius,
+      'Intensità': useStore.getState().explosionIntensity,
+    };
+    meteoFolder.add(meteoConfig, 'Attivi').onChange((v: boolean) => useStore.getState().setMeteoritesEnabled(v));
+    meteoFolder.add(meteoConfig, 'Frequenza (s)', 1, 20, 1).onChange((v: number) => useStore.getState().setMeteoriteFrequency(v));
+    meteoFolder.add(meteoConfig, 'Raggio', 5, 50, 1).onChange((v: number) => useStore.getState().setExplosionRadius(v));
+    meteoFolder.add(meteoConfig, 'Intensità', 0.2, 3.0, 0.1).onChange((v: number) => useStore.getState().setExplosionIntensity(v));
+    meteoFolder.close();
+
     // "le colonne devono essere retratte" -- lil-gui folders actually
     // default to OPEN (verified live), so this needs an explicit
     // .close() to start collapsed instead of always springing open the

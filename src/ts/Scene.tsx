@@ -21,6 +21,8 @@ import UFO from './components/Environment/UFO';
 import MeteoriteSpawner from './components/Environment/MeteoriteSpawner';
 import EnemySpawner from './components/EnemySpawner';
 import SoldierSpawner from './components/SoldierSpawner';
+import PoliceWalkers from './components/Environment/PoliceWalkers';
+import CityFlags from './components/Environment/CityFlags';
 import MissionManager from './components/Missions/MissionManager';
 import Car from './components/Vehicles/Car'; // Import Car
 import FarCars from './components/Vehicles/FarCars';
@@ -64,6 +66,24 @@ const POLICE_ROUTE_OUTER: [number, number][] = [
   [120, 120],
   [-120, 120],
 ];
+const POLICE_ROUTE_WIDE: [number, number][] = [
+  [-180, -180],
+  [180, -180],
+  [180, 180],
+  [-180, 180],
+];
+const POLICE_ROUTE_CROSS1: [number, number][] = [
+  [-120, 0],
+  [0, 120],
+  [120, 0],
+  [0, -120],
+];
+const POLICE_ROUTE_CROSS2: [number, number][] = [
+  [-180, -60],
+  [60, -180],
+  [180, 60],
+  [-60, 180],
+];
 
 const Scene: React.FC = () => {
   // TEMP DEBUG (Claude): 'airplane'/'helicopter'/'car' test scenarios strip
@@ -93,12 +113,14 @@ const Scene: React.FC = () => {
   // the clean-scenario strip-down specifically for testScene==='race'.
   // The airplane/helicopter/car test scenarios stay exactly as
   // distraction-free as before -- this doesn't touch those.
-  const showSkyAtmosphere = !isCleanTest || isRaceTest;
+  const showSkyAtmosphere = !isCleanTest || isRaceTest || isDuelTest;
   return (
     <>
       <Terrain />
       {isRaceTest && <RaceTrack />}
       {!isCleanTest && <Road />}
+      {!isCleanTest && <PoliceWalkers />}
+      {!isCleanTest && <CityFlags />}
       {/* nuvole anche nel duello: la sala delle casse e' a cielo aperto */}
       {(!isCleanTest || isDuelTest) && <Clouds />}
       <Ocean />
@@ -136,9 +158,7 @@ const Scene: React.FC = () => {
             <Car id="car-5" position={[60, 1.6, 60]} />
             <Car id="car-6" position={[-60, 1.6, -60]} />
 
-            {/* Police patrol cars -- rotation Math.PI/2 faces +X, matching
-                each route's first leg (see POLICE_ROUTE_INNER/OUTER above:
-                first waypoint -> second waypoint both run along +X). */}
+            {/* Police patrol cars */}
             <Car
               id="police-1"
               position={[POLICE_ROUTE_INNER[0][0], 1.6, POLICE_ROUTE_INNER[0][1]]}
@@ -150,6 +170,24 @@ const Scene: React.FC = () => {
               position={[POLICE_ROUTE_OUTER[0][0], 1.6, POLICE_ROUTE_OUTER[0][1]]}
               rotation={[0, Math.PI / 2, 0]}
               patrolRoute={POLICE_ROUTE_OUTER}
+            />
+            <Car
+              id="police-3"
+              position={[POLICE_ROUTE_WIDE[0][0], 1.6, POLICE_ROUTE_WIDE[0][1]]}
+              rotation={[0, Math.PI / 2, 0]}
+              patrolRoute={POLICE_ROUTE_WIDE}
+            />
+            <Car
+              id="police-4"
+              position={[POLICE_ROUTE_CROSS1[0][0], 1.6, POLICE_ROUTE_CROSS1[0][1]]}
+              rotation={[0, Math.PI / 2, 0]}
+              patrolRoute={POLICE_ROUTE_CROSS1}
+            />
+            <Car
+              id="police-5"
+              position={[POLICE_ROUTE_CROSS2[0][0], 1.6, POLICE_ROUTE_CROSS2[0][1]]}
+              rotation={[0, Math.PI / 2, 0]}
+              patrolRoute={POLICE_ROUTE_CROSS2}
             />
           </>
         )}

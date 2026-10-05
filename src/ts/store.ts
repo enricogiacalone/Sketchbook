@@ -346,6 +346,14 @@ interface GameState {
   setTestScene: (scene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race' | 'duel') => void;
   setArenaGameMode: (mode: GameMode) => void;
   setArenaFighterCount: (count: number) => void;
+  meteoritesEnabled: boolean;
+  meteoriteFrequency: number;
+  setMeteoritesEnabled: (enabled: boolean) => void;
+  setMeteoriteFrequency: (freq: number) => void;
+  explosionRadius: number;
+  explosionIntensity: number;
+  setExplosionRadius: (radius: number) => void;
+  setExplosionIntensity: (intensity: number) => void;
   setDuelStatus: (
     playerHp: number,
     enemyHp: number,
@@ -529,6 +537,14 @@ export const useStore = create<GameState>((set) => ({
   setTestScene: (testScene) => set({ testScene }),
   setArenaGameMode: (arenaGameMode) => set({ arenaGameMode }),
   setArenaFighterCount: (arenaFighterCount) => set({ arenaFighterCount }),
+  meteoritesEnabled: false,
+  meteoriteFrequency: 5,
+  setMeteoritesEnabled: (meteoritesEnabled) => set({ meteoritesEnabled }),
+  setMeteoriteFrequency: (meteoriteFrequency) => set({ meteoriteFrequency }),
+  explosionRadius: 15,
+  explosionIntensity: 1.0,
+  setExplosionRadius: (explosionRadius) => set({ explosionRadius }),
+  setExplosionIntensity: (explosionIntensity) => set({ explosionIntensity }),
   setDuelStatus: (duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY) =>
     set({ duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY }),
   toggleDuelDummyMode: () => set((state) => ({ duelDummyMode: !state.duelDummyMode })),

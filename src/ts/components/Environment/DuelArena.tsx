@@ -253,7 +253,13 @@ const DuelArena: React.FC = () => {
   // PlayerCombatSoldier's own `name={DUEL_PLAYER_ID}` below.
   useEffect(() => {
     useStore.getState().setCurrentControllable('combatSoldier', DUEL_PLAYER_ID);
-  }, []);
+    (window as any).__damageDuelPlayer = (amount: number) => {
+      playerData.hp = Math.max(0, playerData.hp - amount);
+    };
+    return () => {
+      delete (window as any).__damageDuelPlayer;
+    };
+  }, [playerData]);
 
   // Mirrors the two FighterData objects' hp/death into the store every
   // frame so DuelHUD.tsx (plain DOM, outside the R3F tree) can draw two HP

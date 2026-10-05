@@ -21,6 +21,7 @@ interface PedestrianProps {
   z2: number;
   speed?: number;
   phase?: number;
+  color?: string;
   onBecomeEnemy: (id: string, position: [number, number, number], hp?: number) => void;
 }
 
@@ -41,9 +42,9 @@ const hash = (s: string) => {
   return Math.abs(h);
 };
 
-const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2, phase = 0, onBecomeEnemy }) => {
+const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2, phase = 0, color: customColor, onBecomeEnemy }) => {
   const h = hash(id);
-  const color = CIVILIAN_COLORS[h % CIVILIAN_COLORS.length];
+  const color = customColor ?? CIVILIAN_COLORS[h % CIVILIAN_COLORS.length];
   const walkClip = WALK_CLIPS[h % WALK_CLIPS.length];
   const idleClip = IDLE_CLIPS[(h >> 3) % IDLE_CLIPS.length];
   // passo naturale: le camminate del rig sono lente, non accelerarle troppo
