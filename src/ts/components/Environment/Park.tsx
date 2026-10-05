@@ -271,18 +271,43 @@ const Park: React.FC = () => {
 
   // Same bounds/avoid-fountain settings as the old inline ParkGrass/flower
   // generation -- just delegated to the shared components now.
-  const grassAvoid = useMemo(() => [{ x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH }], []);
-  const flowerAvoid = useMemo(() => [{ x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH + 1 }], []);
+  const grassAvoid = useMemo(() => {
+    const zones = [{ x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH }];
+    for (let x = CENTER_X + FOUNTAIN_RADIUS; x <= AREA_MAX; x += 1.5) {
+      zones.push({ x, z: CENTER_Z, radius: PATH_WIDTH / 2 + 0.4 });
+    }
+    for (let x = AREA_MIN; x <= CENTER_X - FOUNTAIN_RADIUS; x += 1.5) {
+      zones.push({ x, z: CENTER_Z, radius: PATH_WIDTH / 2 + 0.4 });
+    }
+    for (let z = CENTER_Z + FOUNTAIN_RADIUS; z <= AREA_MAX; z += 1.5) {
+      zones.push({ x: CENTER_X, z, radius: PATH_WIDTH / 2 + 0.4 });
+    }
+    for (let z = AREA_MIN; z <= CENTER_Z - FOUNTAIN_RADIUS; z += 1.5) {
+      zones.push({ x: CENTER_X, z, radius: PATH_WIDTH / 2 + 0.4 });
+    }
+    return zones;
+  }, []);
+
+  const flowerAvoid = useMemo(() => {
+    const zones = [{ x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH + 1 }];
+    for (let x = CENTER_X + FOUNTAIN_RADIUS; x <= AREA_MAX; x += 2) {
+      zones.push({ x, z: CENTER_Z, radius: PATH_WIDTH / 2 + 0.8 });
+    }
+    for (let x = AREA_MIN; x <= CENTER_X - FOUNTAIN_RADIUS; x += 2) {
+      zones.push({ x, z: CENTER_Z, radius: PATH_WIDTH / 2 + 0.8 });
+    }
+    for (let z = CENTER_Z + FOUNTAIN_RADIUS; z <= AREA_MAX; z += 2) {
+      zones.push({ x: CENTER_X, z, radius: PATH_WIDTH / 2 + 0.8 });
+    }
+    for (let z = AREA_MIN; z <= CENTER_Z - FOUNTAIN_RADIUS; z += 2) {
+      zones.push({ x: CENTER_X, z, radius: PATH_WIDTH / 2 + 0.8 });
+    }
+    return zones;
+  }, []);
 
   return (
     <group>
-      {/* <RealGrassPatch
-        minX={AREA_MIN}
-        maxX={AREA_MAX}
-        minZ={AREA_MIN}
-        maxZ={AREA_MAX}
-        avoid={grassAvoid}
-      /> */}
+      <RealGrassPatch minX={AREA_MIN} maxX={AREA_MAX} minZ={AREA_MIN} maxZ={AREA_MAX} avoid={grassAvoid} />
       <Fountain />
       <Paths />
       {trees.map((t, i) => (

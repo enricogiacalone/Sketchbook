@@ -18,6 +18,8 @@ import {
   cross,
   normalize,
   positionLocal,
+  cameraProjectionMatrix,
+  modelViewMatrix,
 } from "three/tsl";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 
@@ -45,7 +47,8 @@ function buildAttributeData(
   maxX: number,
   minZ: number,
   maxZ: number,
-  avoid: AvoidZone[]
+  avoid: AvoidZone[],
+  baseY?: number
 ) {
   const offsets = new Float32Array(instances * 3);
   const orientations = new Float32Array(instances * 4);
@@ -61,7 +64,7 @@ function buildAttributeData(
       z = minZ + Math.random() * (maxZ - minZ);
       if (!isBlocked(x, z, avoid)) break;
     }
-    const y = getTerrainHeight(x, z);
+    const y = baseY !== undefined ? baseY : getTerrainHeight(x, z);
     offsets[i * 3 + 0] = x;
     offsets[i * 3 + 1] = y;
     offsets[i * 3 + 2] = z;
@@ -100,6 +103,7 @@ export const RealGrassPatch: React.FC<{
   bladeWidth?: number;
   bladeHeight?: number;
   joints?: number;
+  baseY?: number;
 }> = ({
   minX,
   maxX,
@@ -110,6 +114,7 @@ export const RealGrassPatch: React.FC<{
   bladeWidth = 0.075,
   bladeHeight = 0.55,
   joints = 4,
+  baseY,
 }) => {
   const [map, alphaMap] = useTexture([
     "textures/grass/blade_diffuse.jpg",
@@ -117,8 +122,8 @@ export const RealGrassPatch: React.FC<{
   ]);
 
   const attributeData = useMemo(
-    () => buildAttributeData(instances, minX, maxX, minZ, maxZ, avoid),
-    [instances, minX, maxX, minZ, maxZ, avoid]
+    () => buildAttributeData(instances, minX, maxX, minZ, maxZ, avoid, baseY),
+    [instances, minX, maxX, minZ, maxZ, avoid, baseY]
   );
 
   const baseGeom = useMemo(
@@ -179,8 +184,14 @@ export const RealGrassPatch: React.FC<{
       const vPosition = vec3(pos.x, pos.y.add(pos.y.mul(stretch)), pos.z);
       const rotated = rotateVectorByQuaternion(vPosition, interpolatedDir);
 
-      const finalPos = offset.add(rotated);
-      return finalPos;
+      // Wind sway using timeUniform and offset
+      const windAngle = timeUniform.sub(offset.x.div(20.0)).sin().mul(frc.mul(0.3));
+      const halfAngle = windAngle.mul(0.5);
+      const windRot = normalize(vec4(halfAngle.sin(), 0.0, halfAngle.negate().sin(), halfAngle.cos()));
+      const windRotated = rotateVectorByQuaternion(rotated, windRot);
+
+      const finalPos = offset.add(windRotated);
+      return cameraProjectionMatrix.mul(modelViewMatrix).mul(vec4(finalPos, 1.0));
     })();
 
     mat.colorNode = Fn(() => {
@@ -203,11 +214,14 @@ export const RealGrassPatch: React.FC<{
   return (
     <mesh material={material as any} frustumCulled={false}>
       <instancedBufferGeometry
-        index={baseGeom.index}
-        attributes-position={baseGeom.attributes.position}
-        attributes-uv={baseGeom.attributes.uv}
+        ref={(geom) => {
+          if (geom) geom.instanceCount = instances;
+        }}
         boundingSphere={boundingSphere}
       >
+        <bufferAttribute attach="index" args={[baseGeom.index!.array, 1]} />
+        <bufferAttribute attach="attributes-position" args={[baseGeom.attributes.position.array, 3]} />
+        <bufferAttribute attach="attributes-uv" args={[baseGeom.attributes.uv.array, 2]} />
         <instancedBufferAttribute attach="attributes-offset" args={[attributeData.offsets, 3]} />
         <instancedBufferAttribute attach="attributes-orientation" args={[attributeData.orientations, 4]} />
         <instancedBufferAttribute attach="attributes-stretch" args={[attributeData.stretches, 1]} />
