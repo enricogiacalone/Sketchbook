@@ -4,6 +4,31 @@ import { useTexture } from '@react-three/drei';
 import { RigidBody, CuboidCollider, interactionGroups } from '@react-three/rapier';
 import { useStore } from '../../../store';
 import * as THREE from 'three';
+import { MeshStandardNodeMaterial } from 'three/webgpu';
+import {
+  Fn,
+  attribute,
+  instanceColor, // <--- Nodo nativo TSL per InstancedMesh
+  texture,
+  uv,
+  vec2,
+  vec3,
+  vec4,
+  float,
+  mix,
+  smoothstep,
+  clamp,
+  min,
+  abs,
+  sqrt,
+  dot,
+  cos,
+  sin,
+  mat2,
+  distance,
+  saturate,
+  Loop,
+} from 'three/tsl';
 import { SimplexNoise } from 'three-stdlib';
 import { getPlaylist, type SpeakerId, type Track } from './musicLibrary';
 import { setFlatGroundOverride } from '../Road';
@@ -11,65 +36,43 @@ import { useInput } from '../../../hooks/useInput';
 import { acquireDebugGui, releaseDebugGui } from '../../../lib/debugGui';
 import { acquireAudioListener, releaseAudioListener } from '../../../lib/sharedAudioListener';
 import { CollisionGroups, groupsExcluding } from '../../../enums/CollisionGroups';
-import { toonCacheKey } from '../../../lib/toonStyle';
 
-// "Immersive 3D Audio and Visualization" -- porting nel duello della demo di
-// SimonDev (https://github.com/simondevyoutube/ThreeJS_Tutorial_3DSound,
-// MIT (c) 2022 simondevyoutube; video https://www.youtube.com/watch?v=1S7ke6F8sV4):
-//  - sala con pavimento in ferro arrugginito e muri di cemento (texture
-//    freepbr.com di Emil Persson, CC BY 3.0 -- public/audio-arena/CREDITS.txt);
-//  - cassa OVEST: muro di 11x16 cubetti che fa da spettrogramma a scorrimento
-//    (FFT a 16 bande, bassi al centro, colonne = ultimi 11 frame), cubi che
-//    escono dalla cassa + colore blu->rosso->giallo + bagliore;
-//  - cassa EST: schermo con 64 barre circolari disegnate nello shader
-//    (FFT a 64 bande in una DataTexture), come l'originale;
-//  - audio POSIZIONALE 3D (THREE.PositionalAudio, ascoltatore sulla camera):
-//    ogni cassa suona il suo brano e lo senti da dove sta la cassa.
-// Differenze volute rispetto all'originale: i brani vengono dalle cartelle
-// musica/cassa-cubi e musica/cassa-schermo (playlist, vedi musicLibrary.ts)
-// via <audio> in streaming invece di decodificare tutto in memoria, e le FFT
-// leggono il segnale PRIMA dell'attenuazione con la distanza, cosi' i
-// visualizzatori reagiscono uguale da vicino e da lontano.
-
-export const AUDIO_ARENA_FLOOR_Y = 0.15; // = altezza della strada al centro del duello
+export const AUDIO_ARENA_FLOOR_Y = 0.15;
 const ROOM_HALF = 30;
 const WALL_H = 12;
 const WALL_T = 2;
 const SPEAKER_X = 14;
-const SPEAKER_W = 1; // spessore (x)
+const SPEAKER_W = 1;
 const SPEAKER_H = 8;
-const SPEAKER_D = 4; // larghezza (z)
+const SPEAKER_D = 4;
 const SPEAKER_Y = AUDIO_ARENA_FLOOR_Y + SPEAKER_H / 2;
 const DEFAULT_REF_DISTANCE = 4;
 const TEX = '/audio-arena/textures/';
 
-// muri e casse bloccano anche i combattenti (gruppo Characters, vedi
-// SOLID_BODY_GROUPS), il pavimento no (i piedi ci poggiano sopra)
 const SOLID_GROUPS = groupsExcluding([CollisionGroups.Default, CollisionGroups.Characters, CollisionGroups.RagdollWorld]);
-// Pavimento: appartiene ai gruppi "storici" (0-6, come un collider di
-// default per tutto il resto del gioco) ma NON a quelli del ragdoll
-// attivo (RagdollWorld e i bit dei combattenti, 7-15): il ragdoll VIVO non
-// deve toccarlo (vedi aliveRagdollGroups in CollisionGroups.ts); da KO si'
-// (tramite Default).
 const FLOOR_GROUPS = interactionGroups(
   [0, 1, 2, 3, 4, 5, 6],
   Array.from({ length: 16 }, (_, i) => i)
 );
 
-// --- cassa a cubi (spettrogramma) ------------------------------------------
-const CUBE_COLS = 11; // x = -5..5 nell'originale: storia degli ultimi 11 frame
-const CUBE_ROWS = 16; // 16 bande (fftSize 32)
+// --- Cassa a cubi (Spettrogramma) ------------------------------------------
+const CUBE_COLS = 11;
+const CUBE_ROWS = 16;
 const CUBE_REMAP = [15, 13, 11, 9, 7, 5, 3, 1, 0, 2, 4, 6, 8, 10, 12, 14];
 const _m = new THREE.Matrix4();
 const _p = new THREE.Vector3();
 const _q = new THREE.Quaternion();
 const _s = new THREE.Vector3();
 const _c = new THREE.Color();
+
+// Palette cromatica satura
 const SPLINE: [number, THREE.Color][] = [
-  [0.0, new THREE.Color(0x4040ff)],
-  [0.25, new THREE.Color(0xff4040)],
-  [1.0, new THREE.Color(0xffff80)],
+  [0.0, new THREE.Color(0x0011ff)], // Blu saturo
+  [0.35, new THREE.Color(0xff0055)], // Magenta / Rosso vivace
+  [0.7, new THREE.Color(0xff5500)], // Arancio intenso
+  [1.0, new THREE.Color(0xffaa00)], // Giallo-Arancio caldo
 ];
+
 function splineColor(t: number, out: THREE.Color) {
   for (let i = 0; i < SPLINE.length - 1; i++) {
     const [t0, c0] = SPLINE[i];
@@ -83,7 +86,6 @@ function splineColor(t: number, out: THREE.Color) {
 }
 const smootherstep = (x: number) => x * x * x * (x * (x * 6 - 15) + 10);
 
-// fbm come noise.js dell'originale (octaves 3, persistence .5, lacunarity 1.6, scale .1)
 function mulberry32(seed: number) {
   return () => {
     seed |= 0;
@@ -109,63 +111,79 @@ function fbm(x: number, y: number, z: number) {
   return total / norm;
 }
 
-// --- schermo a barre circolari (shader dell'originale, Inigo Quilez SDF) ----
-const SCREEN_FS = /* glsl */ `
-uniform sampler2D audioDataTexture;
-uniform vec2 iResolution;
-uniform float iTime;
-varying vec2 vVisUv;
-#define M_PI 3.14159
-#define NUM_BARS 64.0
-#define CIRCLE_RADIUS 0.15
-#define BAR_HEIGHT 0.125
-vec3 pal( in float t, in vec3 a, in vec3 b, in vec3 c, in vec3 d) { return a + b*cos( 6.28318*(c*t+d) ); }
-float dot2v(in vec2 v ) { return dot(v,v); }
-float sdfTrapezoid(in vec2 p, in float r1, float r2, float he) {
-  vec2 k1 = vec2(r2,he);
-  vec2 k2 = vec2(r2-r1,2.0*he);
-  p.x = abs(p.x);
-  vec2 ca = vec2(p.x-min(p.x,(p.y<0.0)?r1:r2), abs(p.y)-he);
-  vec2 cb = p - k1 + k2*clamp( dot(k1-p,k2)/dot2v(k2), 0.0, 1.0 );
-  float s = (cb.x<0.0 && ca.y<0.0) ? -1.0 : 1.0;
-  return s*sqrt( min(dot2v(ca),dot2v(cb)) );
-}
-float sdfBar(vec2 position, vec2 dimensions, vec2 uv, float frequencySample) {
-  float w = mix(dimensions.x * 0.5, dimensions.x, smoothstep(0.0, 1.0, frequencySample));
-  vec2 basePosition = uv - position + vec2(0.0, -dimensions.y * 0.5 - frequencySample * 0.05);
-  float d = sdfTrapezoid(basePosition, dimensions.x * 0.5, w, dimensions.y * 0.5);
-  return (d > 0.0 ? 0.0 : 1.0);
-}
-vec2 rotate2D(vec2 pt, float a) { float c = cos(a); float s = sin(a); return mat2(c, s, -s, c) * pt; }
-vec4 DrawBars(vec2 center, vec2 uv) {
-  float barWidth = 2.0 * M_PI * CIRCLE_RADIUS / (NUM_BARS * 1.25);
-  vec4 resultColour = vec4(1.0, 1.0, 1.0, 0.0);
-  vec2 position = vec2(center.x, center.y + CIRCLE_RADIUS);
-  for (int i = 0; i < int(NUM_BARS); i++) {
-    float frequencyUV = float(i) >= NUM_BARS * 0.5
-      ? 1.0 - ((float(i) - (NUM_BARS * 0.5)) / (NUM_BARS * 0.5))
-      : float(i) / (NUM_BARS * 0.5);
-    float frequencyData = texture2D(audioDataTexture, vec2(frequencyUV, 0.0)).x;
-    float barFinalHeight = BAR_HEIGHT * (0.1 + 0.9 * frequencyData);
-    vec2 barDimensions = vec2(barWidth, barFinalHeight);
-    vec2 barUvs = rotate2D(uv - center, (2.0 * M_PI * float(i)) / NUM_BARS) + center;
-    resultColour.w += sdfBar(position, barDimensions, barUvs, frequencyData);
-  }
-  float d = saturate(1.1 * ((distance(uv, center) - CIRCLE_RADIUS) / BAR_HEIGHT));
-  d = smoothstep(0.0, 1.0, d);
-  d = 0.45 + 0.55 * d;
-  resultColour.xyz *= pal(d, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.20, 0.30));
-  resultColour.xyz *= resultColour.w;
-  return saturate(resultColour);
-}
-vec4 AudioVisualizer() {
-  float aspect = iResolution.x / iResolution.y;
-  vec2 uv = vVisUv * vec2(aspect, 1.0);
-  return DrawBars(vec2(aspect * 0.5, 0.5), uv);
-}
-`;
+// --- Schermo a barre circolari (Nodi TSL / WebGPU) -----------------------
+const pal = Fn(([t, a, b, c, d]: any[]) => {
+  return a.add(b.mul(cos(float(6.28318).mul(c.mul(t).add(d)))));
+});
 
-// --- audio ------------------------------------------------------------------
+const rotate2D = Fn(([pt, angle]: any[]) => {
+  const c = cos(angle);
+  const s = sin(angle);
+  const m = mat2(c, s, s.negate(), c);
+  return m.mul(pt);
+});
+
+const sdfTrapezoid = Fn(([p_in, r1, r2, he]: any[]) => {
+  const p = vec2(abs(p_in.x), p_in.y);
+  const k1 = vec2(r2, he);
+  const k2 = vec2(r2.sub(r1), float(2.0).mul(he));
+
+  const ca = vec2(p.x.sub(min(p.x, p.y.lessThan(0.0).select(r1, r2))), abs(p.y).sub(he));
+  const cb = p.sub(k1).add(k2.mul(clamp(dot(k1.sub(p), k2).div(dot(k2, k2)), 0.0, 1.0)));
+  const s = cb.x.lessThan(0.0).and(ca.y.lessThan(0.0)).select(-1.0, 1.0);
+  return s.mul(sqrt(min(dot(ca, ca), dot(cb, cb))));
+});
+
+const createAudioVisualizerNode = (audioTex: THREE.DataTexture) => {
+  return Fn(() => {
+    const iResolution = vec2(128, 256);
+    const aspect = iResolution.x.div(iResolution.y);
+    const vVisUv = uv();
+    const currentUv = vVisUv.mul(vec2(aspect, 1.0));
+    const center = vec2(aspect.mul(0.5), 0.5);
+
+    const numBars = float(64);
+    const circleRadius = float(0.15);
+    const barHeight = float(0.125);
+    const barWidth = float(2.0 * Math.PI)
+      .mul(circleRadius)
+      .div(numBars.mul(1.25));
+
+    const resultColour = vec4(1.0, 1.0, 1.0, 0.0).toVar();
+    const position = vec2(center.x, center.y.add(circleRadius));
+
+    Loop(64, ({ i }: { i: any }) => {
+      const fi = float(i);
+      const freqUV = fi.greaterThanEqual(32.0).select(float(1.0).sub(fi.sub(32.0).div(32.0)), fi.div(32.0));
+
+      const frequencyData = texture(audioTex, vec2(freqUV, 0.0)).r;
+      const barFinalHeight = barHeight.mul(float(0.1).add(float(0.9).mul(frequencyData)));
+      const barDimensions = vec2(barWidth, barFinalHeight);
+
+      const barAngle = float(2.0 * Math.PI)
+        .mul(fi)
+        .div(numBars);
+      const barUvs = rotate2D(currentUv.sub(center), barAngle).add(center);
+
+      const basePos = barUvs.sub(position).add(vec2(0.0, barDimensions.y.mul(-0.5).sub(frequencyData.mul(0.05))));
+      const w = mix(barDimensions.x.mul(0.5), barDimensions.x, smoothstep(0.0, 1.0, frequencyData));
+      const d = sdfTrapezoid(basePos, barDimensions.x.mul(0.5), w, barDimensions.y.mul(0.5));
+      const barValue = d.greaterThan(0.0).select(0.0, 1.0);
+
+      resultColour.w.assign(resultColour.w.add(barValue));
+    });
+
+    const d = saturate(float(1.1).mul(distance(currentUv, center).sub(circleRadius).div(barHeight)));
+    const dSmooth = smoothstep(0.0, 1.0, d);
+    const dFinal = float(0.45).add(float(0.55).mul(dSmooth));
+
+    const colorPal = pal(dFinal, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.2, 0.3));
+
+    return colorPal.mul(resultColour.w);
+  })();
+};
+
+// --- Helper Materiali Node --------------------------------------------------
 interface SpeakerAudio {
   id: SpeakerId;
   el: HTMLAudioElement;
@@ -182,16 +200,15 @@ export interface AudioArenaApi {
   toggleSpeaker: (id: SpeakerId, force?: boolean) => void;
   next: (id: SpeakerId) => void;
 }
-// per il pannello e gli script di verifica
 export const audioArenaApi: { current: AudioArenaApi | null } = { current: null };
 
-function makePbr(
+function makePbrNode(
   t: Record<string, THREE.Texture>,
   prefix: string,
   repeatX: number,
   repeatY: number,
   anisotropy: number
-): THREE.MeshStandardMaterial {
+): MeshStandardNodeMaterial {
   const prep = (tex: THREE.Texture | undefined, srgb: boolean) => {
     if (!tex) return null;
     const c = tex.clone();
@@ -202,13 +219,13 @@ function makePbr(
     c.needsUpdate = true;
     return c;
   };
-  return new THREE.MeshStandardMaterial({
+  return new MeshStandardNodeMaterial({
     map: prep(t[prefix + 'Map'], true),
     normalMap: prep(t[prefix + 'Normal'], false),
     roughnessMap: prep(t[prefix + 'Rough'], false),
     metalnessMap: prep(t[prefix + 'Metal'], false),
-    metalness: 1,
-    roughness: 1,
+    metalness: 0.1,
+    roughness: 0.4,
   });
 }
 
@@ -239,59 +256,40 @@ const AudioArena: React.FC = () => {
   const { camera, gl } = useThree();
   const input = useInput();
 
-  // oggetto COSTANTE (modulo): con un oggetto letterale nuovo a ogni render
-  // useTexture restituisce una mappa nuova -> `mats` (useMemo su tex) veniva
-  // ricreato -> 20 materiali nuovi da compilare a OGNI tasto premuto
-  // (misurato: ~300 ms di blocco alla pressione e al rilascio di ogni tasto)
   const tex = useTexture(ARENA_TEXTURES) as unknown as Record<string, THREE.Texture>;
 
   const mats = useMemo(() => {
     const an = Math.min(8, (gl as any).getMaxAnisotropy?.() ?? (gl as any).capabilities?.getMaxAnisotropy?.() ?? 4);
-    const floor = makePbr(tex, 'floor', ((ROOM_HALF * 2) / 25) * 1.5, ((ROOM_HALF * 2) / 25) * 1.5, an);
-    const wallLong = makePbr(tex, 'wall', ((ROOM_HALF * 2 + WALL_T * 2) / 25) * 2, (WALL_H / 25) * 2, an);
-    const speaker = makePbr(tex, 'spk', 1, 1, an);
-    const cube = makePbr(tex, 'cube', 1, 1, an);
-    // bagliore per-cubo: colore d'istanza * aGlow (l'emissive di un
-    // MeshStandardMaterial e' uno solo per tutte le istanze)
-    cube.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float aGlow;\nvarying float vGlow;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vGlow;')
-        .replace(
-          '#include <emissivemap_fragment>',
-          '#include <emissivemap_fragment>\n#ifdef USE_COLOR\ntotalEmissiveRadiance += vColor.rgb * vGlow;\n#endif'
-        );
-    };
-    cube.customProgramCacheKey = () => 'audioArenaCubes' + toonCacheKey();
+    const floor = makePbrNode(tex, 'floor', ((ROOM_HALF * 2) / 25) * 1.5, ((ROOM_HALF * 2) / 25) * 1.5, an);
+    const wallLong = makePbrNode(tex, 'wall', ((ROOM_HALF * 2 + WALL_T * 2) / 25) * 2, (WALL_H / 25) * 2, an);
+    const speaker = makePbrNode(tex, 'spk', 1, 1, an);
 
+    // --- CUBI: Collegamento con il nodo integrato instanceColor ---------------
+    const cube = makePbrNode(tex, 'cube', 1, 1, an);
+    cube.metalness = 0.1;
+    cube.roughness = 0.3;
+
+    const aGlowNode = attribute('aGlow', 'float');
+
+    // Usiamo il nodo instanceColor fornito da TSL per leggere mesh.instanceColor
+    cube.colorNode = instanceColor;
+    cube.emissiveNode = instanceColor.rgb.mul(aGlowNode);
+
+    // Materiale Schermo
     const screenData = new Uint8Array(64);
     const screenTex = new THREE.DataTexture(screenData, 64, 1, THREE.RedFormat);
     screenTex.magFilter = THREE.LinearFilter;
     screenTex.needsUpdate = true;
-    const screenUniforms = {
-      audioDataTexture: { value: screenTex as THREE.Texture },
-      iResolution: { value: new THREE.Vector2(128, 256) },
-      iTime: { value: 0 },
-    };
-    const screen = makePbr(tex, 'screen', 1, 1, an);
+
+    const screen = makePbrNode(tex, 'screen', 1, 1, an);
     screen.metalness = 1;
-    screen.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, screenUniforms);
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec2 vVisUv;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvVisUv = uv;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('void main() {', SCREEN_FS + '\nvoid main() {')
-        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += AudioVisualizer().xyz;');
-    };
-    screen.customProgramCacheKey = () => 'audioArenaScreen' + toonCacheKey();
-    const screenBody = new THREE.MeshStandardMaterial({ color: 0x404040, roughness: 0.1, metalness: 0 });
-    return { floor, wallLong, speaker, cube, screen, screenBody, screenTex, screenData, screenUniforms };
+    screen.emissiveNode = createAudioVisualizerNode(screenTex);
+
+    const screenBody = new MeshStandardNodeMaterial({ color: 0x404040, roughness: 0.1, metalness: 0 });
+    return { floor, wallLong, speaker, cube, screen, screenBody, screenTex, screenData };
   }, [tex, gl]);
 
-  // --- cubi: InstancedMesh -------------------------------------------------
+  // --- InstancedMesh Cubi --------------------------------------------------
   const cubes = useMemo(() => {
     const geo = new THREE.BoxGeometry(0.25, 0.25, 0.25);
     const glow = new THREE.InstancedBufferAttribute(new Float32Array(CUBE_COLS * CUBE_ROWS), 1);
@@ -310,15 +308,14 @@ const AudioArena: React.FC = () => {
       }
     }
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    if (mesh.instanceColor) mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     return { mesh, glow, history: [] as Uint8Array[], timer: 0 };
   }, [mats]);
 
-  // --- audio -----------------------------------------------------------------
+  // --- Audio -----------------------------------------------------------------
   const cubiSpeakerRef = useRef<THREE.Group>(null);
   const schermoSpeakerRef = useRef<THREE.Group>(null);
   const audioRef = useRef<{ listener: THREE.AudioListener; speakers: Record<SpeakerId, SpeakerAudio> } | null>(null);
-  // play/pausa indipendente per cassa
-  // "la musica e' spenta all'inizio": si accende con M (tutte) o J/K
   const playingRef = useRef<Record<SpeakerId, boolean>>({ cubi: false, schermo: false });
   const settingsRef = useRef({
     'suona cubi': false,
@@ -349,15 +346,10 @@ const AudioArena: React.FC = () => {
       pa.setRolloffFactor(1);
       pa.setVolume(settingsRef.current.volume);
       parent?.add(pa);
-      // FFT sul segnale della sorgente (prima dell'attenuazione con la distanza)
+
       const analyser = ctx.createAnalyser();
       analyser.fftSize = fft;
       if (id === 'cubi') {
-        // L'originale misurava DOPO l'attenuazione (a 10-30 m dalla cassa
-        // il segnale e' 20-30 dB piu' basso): qui si legge la sorgente
-        // piena, quindi la finestra in dB e' spostata di ~20 dB per avere
-        // lo stesso aspetto (bassi gialli, medi rossi, acuti blu) invece
-        // di un muro tutto giallo. Misurato dal vivo sul brano demo.
         analyser.minDecibels = -85;
         analyser.maxDecibels = -10;
       }
@@ -418,7 +410,6 @@ const AudioArena: React.FC = () => {
     }
   };
 
-  // (ri)carica le playlist all'avvio e quando cambiano i file nelle cartelle
   useEffect(() => {
     const a = audioRef.current;
     if (!a) return;
@@ -431,7 +422,6 @@ const AudioArena: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playlistKey, camera]);
 
-  // una cassa sola
   const toggleSpeaker = (id: SpeakerId, force?: boolean) => {
     const on = force ?? !playingRef.current[id];
     playingRef.current[id] = on;
@@ -443,13 +433,13 @@ const AudioArena: React.FC = () => {
     if (on) sp.el.play().catch(() => {});
     else sp.el.pause();
   };
-  // tutte e due (tasto M): se almeno una suona le mette in pausa entrambe,
-  // altrimenti le fa ripartire entrambe
+
   const togglePlay = () => {
     const anyOn = playingRef.current.cubi || playingRef.current.schermo;
     toggleSpeaker('cubi', !anyOn);
     toggleSpeaker('schermo', !anyOn);
   };
+
   const next = (id: SpeakerId) => {
     const sp = audioRef.current?.speakers[id];
     if (sp) startTrack(sp, (sp.index + 1) % Math.max(1, sp.tracks.length));
@@ -462,7 +452,6 @@ const AudioArena: React.FC = () => {
     };
   });
 
-  // pannello "Musica"
   useEffect(() => {
     const gui = acquireDebugGui();
     const folder = gui.addFolder('Musica (casse arena)');
@@ -480,7 +469,6 @@ const AudioArena: React.FC = () => {
       .listen()
       .onChange((v: boolean) => toggleSpeaker('schermo', v));
     folder.add({ f: () => next('schermo') }, 'f').name('Cassa schermo: brano successivo');
-    // solo la musica (l'ascoltatore e' condiviso anche con la pistola)
     folder
       .add(s, 'volume', 0, 2, 0.05)
       .name('Volume musica')
@@ -504,7 +492,6 @@ const AudioArena: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // luci: due spot dall'alto puntati sulle casse, come nell'originale
   const spotTargets = useMemo(() => {
     const a = new THREE.Object3D();
     a.position.set(-SPEAKER_X, SPEAKER_Y, 0);
@@ -520,7 +507,7 @@ const AudioArena: React.FC = () => {
     const a = audioRef.current;
     const dt = Math.min(delta, 0.1);
 
-    // cassa a cubi
+    // Cassa a cubi
     const cub = cubes;
     const spC = a?.speakers.cubi;
     if (spC) {
@@ -528,7 +515,7 @@ const AudioArena: React.FC = () => {
       cub.history.push(spC.data.slice());
       if (cub.history.length > CUBE_COLS) cub.history.shift();
       cub.timer += dt * 0.1;
-      const colorAttr = cub.mesh.instanceColor!;
+
       for (let c = 0; c < cub.history.length; c++) {
         const d = cub.history[c];
         for (let r = 0; r < CUBE_ROWS; r++) {
@@ -540,31 +527,29 @@ const AudioArena: React.FC = () => {
           _m.compose(_p, _q, _s);
           cub.mesh.setMatrixAt(i, _m);
           cub.mesh.setColorAt(i, splineColor(f, _c));
-          cub.glow.setX(i, f * f * 1.5);
+          cub.glow.setX(i, f * 0.8);
         }
       }
       cub.mesh.instanceMatrix.needsUpdate = true;
-      colorAttr.needsUpdate = true;
+      if (cub.mesh.instanceColor) cub.mesh.instanceColor.needsUpdate = true;
       cub.glow.needsUpdate = true;
     }
 
-    // cassa a schermo
+    // Cassa a schermo
     const spS = a?.speakers.schermo;
     if (spS) {
       spS.analyser.getByteFrequencyData(spS.data);
       mats.screenData.set(spS.data.subarray(0, 64));
       mats.screenTex.needsUpdate = true;
     }
-    mats.screenUniforms.iTime.value += dt;
   });
 
-  // pannello Arena > Scenario: pezzi accesi/spenti (mesh + collider)
   const scene = useStore((st) => st.arenaScene);
   const wallProps = { castShadow: true, receiveShadow: true, material: mats.wallLong, visible: scene.walls };
   const outer = ROOM_HALF + WALL_T / 2;
+
   return (
     <group>
-      {/* pavimento: lastra visiva + collider per ragdoll/proiettili */}
       <mesh
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, AUDIO_ARENA_FLOOR_Y + 0.002, 0]}
@@ -581,7 +566,6 @@ const AudioArena: React.FC = () => {
       )}
       {scene.walls && (
         <RigidBody type="fixed" colliders={false}>
-          {/* muri */}
           <CuboidCollider
             args={[outer + WALL_T / 2, WALL_H / 2, WALL_T / 2]}
             position={[0, AUDIO_ARENA_FLOOR_Y + WALL_H / 2, -outer]}
@@ -606,7 +590,6 @@ const AudioArena: React.FC = () => {
       )}
       {scene.speakers && (
         <RigidBody type="fixed" colliders={false}>
-          {/* casse */}
           <CuboidCollider
             args={[SPEAKER_W / 2, SPEAKER_H / 2, SPEAKER_D / 2]}
             position={[-SPEAKER_X, SPEAKER_Y, 0]}
@@ -632,9 +615,6 @@ const AudioArena: React.FC = () => {
         <boxGeometry args={[(outer + WALL_T / 2) * 2, WALL_H, WALL_T]} />
       </mesh>
 
-      {/* cassa OVEST: spettrogramma a cubi, rivolta verso il centro (+X) */}
-      {/* spente dal pannello: si nascondono ma restano montate (l'audio
-          posizionale e' agganciato a questi gruppi) */}
       <group ref={cubiSpeakerRef} position={[-SPEAKER_X, SPEAKER_Y, 0]} visible={scene.speakers}>
         <mesh castShadow receiveShadow material={mats.speaker}>
           <boxGeometry args={[SPEAKER_W, SPEAKER_H, SPEAKER_D]} />
@@ -644,7 +624,6 @@ const AudioArena: React.FC = () => {
         </group>
       </group>
 
-      {/* cassa EST: schermo con barre circolari, rivolto verso il centro (-X) */}
       <group ref={schermoSpeakerRef} position={[SPEAKER_X, SPEAKER_Y, 0]} visible={scene.speakers}>
         <mesh castShadow receiveShadow material={mats.screenBody}>
           <boxGeometry args={[SPEAKER_W, SPEAKER_H, SPEAKER_D]} />
