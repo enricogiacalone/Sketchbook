@@ -1,0 +1,11 @@
+{
+  "id": "kimodo_getup_back",
+  "name": "getup_back",
+  "prompt": "A person lying flat on their back on the ground gets up to a standing position.",
+  "frames": 30,
+  "fps": 30,
+  "duration": 1,
+  "source": "kimodo",
+  "target_speed": 1,
+  "loop": true
+}

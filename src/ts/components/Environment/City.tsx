@@ -898,7 +898,7 @@ const GreenCourtyard: React.FC<{ x: number; z: number; treeTemplates: TreeTempla
                 posto dell'altro grass"). Bounds match the 20x20 courtyard
                 plane above; counts scaled down proportionally from Park's
                 own 51x51 area. */}
-      <RealGrassPatch minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} instances={700} />
+      <RealGrassPatch minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} instances={700} baseY={y} />
       <Flowers minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} count={12} />
       {trees.map((t, i) => (
         <TreeInstance key={i} x={t.x} z={t.z} rotationY={t.rotationY} scale={t.scale} template={treeTemplates[t.templateIndex]} />
@@ -1112,6 +1112,7 @@ const City: React.FC = () => {
             maxZ={p.z + 22}
             instances={3200}
             avoid={[{ x: p.x, z: p.z, radius: 4 }]}
+            baseY={getTerrainHeight(p.x, p.z)}
           />
           <Flowers minX={p.x - 22} maxX={p.x + 22} minZ={p.z - 22} maxZ={p.z + 22} count={45} avoid={[{ x: p.x, z: p.z, radius: 4 }]} />
           {/* Real trees, same deal as GreenCourtyard above -- placed in

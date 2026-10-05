@@ -2,18 +2,11 @@ import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getTerrainHeight } from './Terrain';
+import { uv, Fn, vec3, vec4, mix } from 'three/tsl';
+import { MeshBasicNodeMaterial } from 'three/webgpu';
 
 const Grass: React.FC = () => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
-  // "serve ottimizzare ancora" -- this is a blind uniform scatter across
-  // the WHOLE 400x400 map with no exclusion for roads or buildings (unlike
-  // ParkTrees.tsx's GrassPatch, added later for "hai dimenticato l'erba e
-  // i fiori", which is properly bounded to courtyards/park/plazas and now
-  // covers all the areas that actually need grass). A large fraction of
-  // these blades were rendering pointlessly under road surfaces and
-  // building footprints -- cut from 20000 to 6000, still enough for
-  // ground cover out past the city grid where GrassPatch has no reach, at
-  // a third of the vertex/shader cost.
   const count = 6000;
   
   const dummy = useMemo(() => new THREE.Object3D(), []);
@@ -44,42 +37,20 @@ const Grass: React.FC = () => {
     }
   }, [matrices]);
 
-  useFrame((state) => {
-    if (meshRef.current) {
-      (meshRef.current.material as THREE.ShaderMaterial).uniforms.uTime.value = state.clock.elapsedTime;
-    }
-  });
-
-  // Mock Shaders based on original files
-  const vertexShader = `
-    varying vec2 vUv;
-    uniform float uTime;
-    void main() {
-      vUv = uv;
-      vec3 pos = position;
-      float wave = sin(uTime + instanceMatrix[3][0] * 0.5) * 0.1 * (1.0 - uv.y);
-      pos.x += wave;
-      gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(pos, 1.0);
-    }
-  `;
-
-  const fragmentShader = `
-    varying vec2 vUv;
-    void main() {
-      vec3 color = mix(vec3(0.1, 0.4, 0.1), vec3(0.4, 0.7, 0.2), vUv.y);
-      gl_FragColor = vec4(color, 1.0);
-    }
-  `;
+  const material = useMemo(() => {
+    const mat = new MeshBasicNodeMaterial() as any;
+    mat.side = THREE.DoubleSide;
+    mat.colorNode = Fn(() => {
+      const uvCoord = uv();
+      const color = mix(vec3(0.1, 0.4, 0.1), vec3(0.4, 0.7, 0.2), uvCoord.y);
+      return vec4(color, 1.0);
+    })();
+    return mat;
+  }, []);
 
   return (
-    <instancedMesh ref={meshRef} args={[null as any, null as any, count]}>
+    <instancedMesh ref={meshRef} args={[null as any, null as any, count]} material={material as any}>
       <planeGeometry args={[0.2, 1, 1, 4]} />
-      <shaderMaterial 
-        vertexShader={vertexShader}
-        fragmentShader={fragmentShader}
-        uniforms={{ uTime: { value: 0 } }}
-        side={THREE.DoubleSide}
-      />
     </instancedMesh>
   );
 };

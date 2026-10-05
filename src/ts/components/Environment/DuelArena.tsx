@@ -15,7 +15,6 @@ import ArenaObstacles from './ArenaObstacles';
 import { useStore } from '../../store';
 import { FighterData } from './SquadArenaTypes';
 
-
 // "crea una sezione dedicata nel menu di avvio del gioco che mi fa entrare
 // in un'arena, siamo io che controllo un combat soldier contro un altro
 // combat soldier" -- the 1v1 duel scene. Mounted by Scene.tsx only while
@@ -95,7 +94,6 @@ const SHOULDER_OFFSET = 0.45;
 function facingToward(fromX: number, fromZ: number, toX: number, toZ: number): number {
   return Math.atan2(toX - fromX, toZ - fromZ) + Math.PI;
 }
-
 
 export function makeFighter(id: string, name: string, team: string, x: number, z: number, rotation: number): FighterData {
   return {
@@ -253,7 +251,13 @@ const DuelArena: React.FC = () => {
   // PlayerCombatSoldier's own `name={DUEL_PLAYER_ID}` below.
   useEffect(() => {
     useStore.getState().setCurrentControllable('combatSoldier', DUEL_PLAYER_ID);
-  }, []);
+    (window as any).__damageDuelPlayer = (amount: number) => {
+      playerData.hp = Math.max(0, playerData.hp - amount);
+    };
+    return () => {
+      delete (window as any).__damageDuelPlayer;
+    };
+  }, [playerData]);
 
   // Mirrors the two FighterData objects' hp/death into the store every
   // frame so DuelHUD.tsx (plain DOM, outside the R3F tree) can draw two HP
@@ -341,10 +345,7 @@ const DuelArena: React.FC = () => {
     // group has no `name` set, unlike DUEL_PLAYER_ID's). Cheap plain-object
     // writes, no allocation of note, safe to leave in as a standing debug
     // hook (same spirit as window.__gameStore/__r3fState).
-    const bagLivePos =
-      bagRef.current && typeof bagRef.current.getWorldPosition === 'function'
-        ? bagRef.current.getWorldPosition()
-        : null;
+    const bagLivePos = bagRef.current && typeof bagRef.current.getWorldPosition === 'function' ? bagRef.current.getWorldPosition() : null;
     (window as any).__duelDebug = {
       playerX: playerData.position.x,
       playerZ: playerData.position.z,
@@ -400,19 +401,8 @@ const DuelArena: React.FC = () => {
     // Barra avversario = il nemico piu' vicino ancora in piedi (quello che
     // stai combattendo); 0 se sono tutti a terra, piena se non ce n'e'
     // nessuno.
-    const enemyHpPct = target
-      ? (Math.max(0, target.hp) / DUEL_MAX_HP) * 100
-      : enemies.length > 0
-        ? 0
-        : 100;
-    setDuelStatus(
-      (Math.max(0, playerData.hp) / DUEL_MAX_HP) * 100,
-      enemyHpPct,
-      result,
-      inRange,
-      reticleX,
-      reticleY
-    );
+    const enemyHpPct = target ? (Math.max(0, target.hp) / DUEL_MAX_HP) * 100 : enemies.length > 0 ? 0 : 100;
+    setDuelStatus((Math.max(0, playerData.hp) / DUEL_MAX_HP) * 100, enemyHpPct, result, inRange, reticleX, reticleY);
   });
 
   return (
@@ -436,7 +426,7 @@ const DuelArena: React.FC = () => {
       <Suspense fallback={null}>
         <FlyBrainFighter />
       </Suspense>
-      <PlayerCombatSoldier
+      {/* <PlayerCombatSoldier
         data={playerData}
         opponents={enemies}
         entityName={DUEL_PLAYER_ID}
@@ -445,16 +435,11 @@ const DuelArena: React.FC = () => {
         bagSolidHandle={bagSolidHandle}
         bagRef={bagRef}
         vehicleIds={showCar ? [DUEL_CAR_ID] : []}
-      />
+      /> */}
       {/* "crea un sacco su cui allenarmi nell'arena.. mi serve per capire
           la precisione delle collisioni" -- see PunchingBag.tsx. Static,
           always there, completely independent of the fight above. */}
-      <PunchingBag
-        ref={bagRef}
-        positionXZ={bagPositionXZ}
-        onReady={setBagHurtboxHandle}
-        onSolidReady={setBagSolidHandle}
-      />
+      <PunchingBag ref={bagRef} positionXZ={bagPositionXZ} onReady={setBagHurtboxHandle} onSolidReady={setBagSolidHandle} />
       {/* Percorso ad ostacoli nell'arena (ostacoli oscillanti, pugni a molla e pale rotanti) */}
       {showObstacles && <ArenaObstacles />}
       {/* percorso per salto/scavalcare/aggrapparsi/scala (traversal/) */}

@@ -38,7 +38,18 @@ const extendLoader = (loader: { setKTX2Loader: (l: KTX2Loader) => unknown }) => 
 type DreiUseGLTF = typeof dreiUseGLTF;
 type Path = Parameters<DreiUseGLTF>[0];
 
-export const useGLTF = (<T extends Path>(path: T) => dreiUseGLTF(path, true, true, extendLoader as never)) as unknown as DreiUseGLTF;
+export const useGLTF = (<T extends Path>(path: T) => {
+  const gltf = dreiUseGLTF(path, true, true, extendLoader as never) as any;
+  if (gltf && gltf.scene) {
+    gltf.scene.traverse((child: any) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+  }
+  return gltf;
+}) as unknown as DreiUseGLTF;
 useGLTF.preload = (path: Path) => dreiUseGLTF.preload(path, true, true, extendLoader as never);
 useGLTF.clear = dreiUseGLTF.clear;
 useGLTF.setDecoderPath = dreiUseGLTF.setDecoderPath;

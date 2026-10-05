@@ -1,46 +1,46 @@
-import React, { Suspense, useState, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { Physics } from '@react-three/rapier';
+import React, { Suspense, useEffect, useState } from 'react';
+import * as THREE from 'three';
+import { WebGPURenderer } from 'three/webgpu';
+import { useShallow } from 'zustand/react/shallow';
 import Scene from './Scene';
-import RagdollPhysicsDebugBridge from './components/Environment/RagdollPhysicsDebugBridge';
-import Sky from './components/Environment/Sky';
-import SunLight from './components/Environment/SunLight';
-import WorldFog from './components/Environment/WorldFog';
-import NightSky from './components/Environment/NightSky';
-import StreetLampGlow from './components/Environment/StreetLampGlow';
-import Ocean from './components/Environment/Ocean';
-import StatusBars from './components/UI/StatusBars';
-import CollectiblesCounter from './components/UI/CollectiblesCounter';
-import MissionHUD from './components/UI/MissionHUD';
-import Controls from './components/UI/Controls';
-import GithubCorner from './components/UI/GithubCorner';
-import WelcomeScreen from './components/UI/WelcomeScreen';
-import ToonStyle from './components/Environment/ToonStyle';
-import AdaptiveResolution from './components/Environment/AdaptiveResolution';
-import GraphicsGUI from './components/UI/GraphicsGUI';
-const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
-import LoadingScreen from './components/UI/LoadingScreen';
-import ChatInput from './components/UI/ChatInput';
-import Minimap from './components/UI/Minimap';
-import Crosshair from './components/UI/Crosshair';
-import DroneHUD from './components/UI/DroneHUD';
-import WeaponWheel from './components/UI/WeaponWheel';
-import GamepadDebug from './components/UI/GamepadDebug';
-import ScenariosGUI from './components/UI/ScenariosGUI';
-import CombatArenaGUI from './components/UI/CombatArenaGUI';
-import RagdollBenchGUI from './components/UI/RagdollBenchGUI';
-import RagdollBenchOverlay from './components/UI/RagdollBenchOverlay';
-import DuelHUD from './components/UI/DuelHUD';
-import WeaponHUD from './components/UI/WeaponHUD';
-import { DUEL_PLAYER_ID } from './components/Environment/DuelArena';
-import Loader from './components/UI/Loader'; // Helper to track loading
-// "sostituire il personaggio boxman in playground con il nostro manichino"
 import CityPlayer from './components/CityPlayer';
 import Drone from './components/Drone';
+import AdaptiveResolution from './components/Environment/AdaptiveResolution';
+import { DUEL_PLAYER_ID } from './components/Environment/DuelArena';
+import NightSky from './components/Environment/NightSky';
+import RagdollPhysicsDebugBridge from './components/Environment/RagdollPhysicsDebugBridge';
+import Sky from './components/Environment/Sky';
+import StreetLampGlow from './components/Environment/StreetLampGlow';
+import SunLight from './components/Environment/SunLight';
+import ToonStyle from './components/Environment/ToonStyle';
+import WorldFog from './components/Environment/WorldFog';
 import ThirdPersonCamera from './components/ThirdPersonCamera';
+import ChatInput from './components/UI/ChatInput';
+import CollectiblesCounter from './components/UI/CollectiblesCounter';
+import CombatArenaGUI from './components/UI/CombatArenaGUI';
+import Controls from './components/UI/Controls';
+import Crosshair from './components/UI/Crosshair';
+import DroneHUD from './components/UI/DroneHUD';
+import DuelHUD from './components/UI/DuelHUD';
+import GamepadDebug from './components/UI/GamepadDebug';
+import GraphicsGUI from './components/UI/GraphicsGUI';
+import Loader from './components/UI/Loader'; // Helper to track loading
+import LoadingScreen from './components/UI/LoadingScreen';
+import MissionHUD from './components/UI/MissionHUD';
+import RagdollBenchGUI from './components/UI/RagdollBenchGUI';
+import RagdollBenchOverlay from './components/UI/RagdollBenchOverlay';
+import ScenariosGUI from './components/UI/ScenariosGUI';
+import StatusBars from './components/UI/StatusBars';
+import WeaponHUD from './components/UI/WeaponHUD';
+import WeaponWheel from './components/UI/WeaponWheel';
+import WelcomeScreen from './components/UI/WelcomeScreen';
 import { useStore } from './store';
-import { useShallow } from 'zustand/react/shallow';
-import * as THREE from 'three';
+import Ocean from './components/Environment/Ocean';
+import { motionBricksManager } from './lib/motionBricksRuntime';
+import MotionBricksHUD from './components/UI/MotionBricksHUD';
+const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 
 const App: React.FC = () => {
   const [isJoined, setIsJoined] = useState(false);
@@ -121,42 +121,20 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoJoinName]);
 
-  // Auto-pause when the tab is backgrounded. This isn't just a nicety: a
-  // hidden tab gets requestAnimationFrame throttled by the browser (down to
-  // a handful of frames a minute in the worst case), so whatever real
-  // wall-clock time passed while away shows up as one huge catch-up
-  // delta/physics burst the moment the tab comes back -- confirmed live as
-  // the player appearing to "pop up out of the floor" right after
-  // switching back to the tab (Rapier's fixed-timestep accumulator clamps
-  // any single frame to 0.5s and then runs dozens of physics substeps back
-  // to back to catch up, which is enough for the falling/landing sequence
-  // to visibly glitch through the floor collider before it settles).
-  // Pausing on hidden and requiring an explicit Start/Escape to resume
-  // (rather than auto-resuming on visible) avoids that burst entirely and
-  // matches how most games handle losing focus.
-  //
-  // Previously skipped in dev builds so switching to devtools/another app
-  // while developing wouldn't pause the game every time -- but that's
-  // exactly the gap that let real tab-switch testing hit this bug, so it
-  // now applies in dev too. Our own browser-automation testing can resume
-  // manually via `useStore.getState().setPaused(false)` if a background
-  // tab switch pauses it mid-test.
-  // TEMP DEBUG (Claude): browser-automation testing legitimately switches
-  // desktop Spaces/windows mid-test (a real player tab-switch doesn't), and
-  // this fires the exact same auto-pause every time, freezing the sim for
-  // any script driving the page from outside. window.__disableAutoPause
-  // lets a test session opt out from the console (`window.__disableAutoPause
-  // = true`) without touching the real behavior real players get.
   useEffect(() => {
-    import('socket.io-client').then(({ io }) => {
-      const socket = io(`${window.location.protocol}//${window.location.hostname}:3000/update`);
-      socket.on('phoneControllerInput', (data) => {
-        (window as any).__phoneControllerInput = data;
+    motionBricksManager.initialize().then(() => {
+      motionBricksManager.setStyle('victory');
+      const testFrame = motionBricksManager.planMotion({
+        style: 'victory',
+        movementDirection: [0, 0, 1],
+        facingDirection: [0, 0, 1],
+        targetSpeed: 1.0,
       });
-      return () => {
-        socket.disconnect();
-      };
+      console.log('[MotionBricks Test] Live test plan result:', testFrame);
     });
+    return () => {
+      motionBricksManager.dispose();
+    };
   }, []);
 
   useEffect(() => {
@@ -185,6 +163,26 @@ const App: React.FC = () => {
 
       {/* The game scene */}
       <Canvas
+        gl={(props: any) => {
+          const canvasElement =
+            props.canvas instanceof HTMLCanvasElement
+              ? props.canvas
+              : props instanceof HTMLCanvasElement
+                ? props
+                : props.canvas || props.domElement || (props.getState && props.getState().gl?.domElement);
+
+          const renderer = new WebGPURenderer({ canvas: canvasElement, antialias: true }) as any;
+          renderer.init().catch((err: any) => {
+            console.warn('WebGPU renderer initialization skipped (headless/unsupported environment):', err);
+          });
+          const origRender = renderer.render.bind(renderer);
+          renderer.render = function (scene: any, camera: any) {
+            if (this._initialized) {
+              origRender(scene, camera);
+            }
+          };
+          return renderer;
+        }}
         shadows={{ type: THREE.PCFShadowMap }}
         camera={{ position: [5, 5, 5], fov: 50 }}
         // Cap the device pixel ratio -- with no dpr set, R3F defaults to
@@ -206,7 +204,7 @@ const App: React.FC = () => {
             <Sky />
             <NightSky />
             <WorldFog />
-            <Ocean />
+            {/* <Ocean /> */}
             {/* Real sun-linked directional light + hemisphere ambient --
                 "sistemiamo il cielo... sole vero collegato alla luce".
                 Replaces the old fixed pointLight + flat ambientLight(0.5),
@@ -269,101 +267,47 @@ const App: React.FC = () => {
                   RigidBodies from the physics world for the duration of
                   the fight -- both remount fresh the moment testScene
                   leaves 'duel' (see DuelHUD.tsx's "Esci dal Duello"). */}
-              {testScene !== 'duel' && (
-                <>
-                  {/* Player needs userName for network identification */}
-                  <CityPlayer userName={userName} />
-                  {/* "il drone e' il compagno del player e gli fluttua
+
+              <CityPlayer userName={userName} />
+              {/* "il drone e' il compagno del player e gli fluttua
                       attorno" -- always mounted outside the duel, own
                       persistent entity (see Drone.tsx), not something
                       Player.tsx spawns/despawns on the fly toggle
                       anymore. */}
-                  <Drone />
-                </>
-              )}
+              <Drone />
             </Physics>
 
             <ThirdPersonCamera />
-            <Loader />
           </Suspense>
         )}
       </Canvas>
 
-      {/* UI Overlays */}
-      {isJoined && !isLoading && (
-        <div
-          id="ui-layer"
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100%',
-            height: '100%',
-            pointerEvents: 'none',
-          }}
-        >
-          {showGameplayHud && (
-            <>
-              <div
-                style={{
-                  pointerEvents: 'auto',
-                  position: 'absolute',
-                  top: 20,
-                  left: 20,
-                  color: 'white',
-                }}
-              >
-                <h1 className="sb-font" style={{ fontSize: 32, margin: 0 }}>
-                  Sketchbook
-                </h1>
-                <div style={{ fontSize: 14 }}>Welcome, {userName}!</div>
-              </div>
-              <Controls />
-              <StatusBars />
-              <CollectiblesCounter />
-              <MissionHUD />
-            </>
-          )}
-          {/* "deve essere visibile solo in playground": il mondo aperto, non duello/test */}
-          {testScene === 'none' && <Minimap />}
+      <CombatArenaGUI />
+      <Crosshair />
+      <DroneHUD />
+      <DuelHUD />
+      <GraphicsGUI />
+      <ScenariosGUI />
+      <WeaponWheel />
+      <RagdollBenchGUI />
+      <WeaponHUD />
+      <RagdollBenchOverlay />
+      {isJoined && <MotionBricksHUD />}
+
+      {/* UI overlays */}
+      {isJoined && showGameplayHud && (
+        <>
+          <CollectiblesCounter />
+          <Controls />
           <ChatInput />
-          <Crosshair />
-          <WeaponHUD />
-          <DroneHUD />
-          <WeaponWheel />
           <GamepadDebug />
-          <ScenariosGUI />
-          <CombatArenaGUI />
-          <RagdollBenchGUI />
-          <GraphicsGUI />
-          <RagdollBenchOverlay />
-          <DuelHUD />
-          {isPaused && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'rgba(0,0,0,0.5)',
-                color: 'white',
-                textAlign: 'center',
-              }}
-            >
-              <div>
-                <h1 className="sb-font" style={{ fontSize: 48, margin: 0 }}>
-                  Pausa
-                </h1>
-                <div style={{ fontSize: 16, opacity: 0.85 }}>Premi Start (o Esc) per riprendere</div>
-              </div>
-            </div>
-          )}
-        </div>
+          <MissionHUD />
+          <StatusBars />
+        </>
       )}
+
+      {/* Dev helper to track loading progress */}
+      <Loader />
     </div>
   );
 };
