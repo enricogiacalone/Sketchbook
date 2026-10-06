@@ -1,6 +1,6 @@
 import { DEFAULT_RAGDOLL_BENCH, type RagdollBenchSettings } from './components/Environment/ragdoll/ragdollBench';
 import { create } from 'zustand';
-import type { GameMode } from './components/Environment/SquadArenaTypes';
+import type { GameMode, FighterData } from './components/Environment/SquadArenaTypes';
 
 export type ControllableType = 'player' | 'car' | 'airplane' | 'helicopter' | 'drone' | 'combatSoldier';
 // Which kind of seat the player currently occupies inside a vehicle -- null
@@ -352,8 +352,23 @@ interface GameState {
   setMeteoriteFrequency: (freq: number) => void;
   explosionRadius: number;
   explosionIntensity: number;
+  cameraPlayerRadius: number;
+  cameraVehicleRadius: number;
+  cameraFootTargetY: number;
+  cameraVehicleTargetY: number;
+  duelArenaPlayer: FighterData | null;
+  duelArenaEnemies: FighterData[];
+  duelBagHurtboxHandle: number | null;
+  duelBagSolidHandle: number | null;
   setExplosionRadius: (radius: number) => void;
   setExplosionIntensity: (intensity: number) => void;
+  setCameraPlayerRadius: (r: number) => void;
+  setCameraVehicleRadius: (r: number) => void;
+  setCameraFootTargetY: (y: number) => void;
+  setCameraVehicleTargetY: (y: number) => void;
+  setDuelArenaPlayer: (player: FighterData | null) => void;
+  setDuelArenaEnemies: (enemies: FighterData[]) => void;
+  setDuelBagHandles: (hurtbox: number | null, solid: number | null) => void;
   setDuelStatus: (
     playerHp: number,
     enemyHp: number,
@@ -543,8 +558,23 @@ export const useStore = create<GameState>((set) => ({
   setMeteoriteFrequency: (meteoriteFrequency) => set({ meteoriteFrequency }),
   explosionRadius: 15,
   explosionIntensity: 1.0,
+  cameraPlayerRadius: 0.85,
+  cameraVehicleRadius: 2.6,
+  cameraFootTargetY: 1.3,
+  cameraVehicleTargetY: 0.5,
+  duelArenaPlayer: null,
+  duelArenaEnemies: [],
+  duelBagHurtboxHandle: null,
+  duelBagSolidHandle: null,
   setExplosionRadius: (explosionRadius) => set({ explosionRadius }),
   setExplosionIntensity: (explosionIntensity) => set({ explosionIntensity }),
+  setCameraPlayerRadius: (cameraPlayerRadius) => set({ cameraPlayerRadius }),
+  setCameraVehicleRadius: (cameraVehicleRadius) => set({ cameraVehicleRadius }),
+  setCameraFootTargetY: (cameraFootTargetY) => set({ cameraFootTargetY }),
+  setCameraVehicleTargetY: (cameraVehicleTargetY) => set({ cameraVehicleTargetY }),
+  setDuelArenaPlayer: (duelArenaPlayer) => set({ duelArenaPlayer }),
+  setDuelArenaEnemies: (duelArenaEnemies) => set({ duelArenaEnemies }),
+  setDuelBagHandles: (duelBagHurtboxHandle, duelBagSolidHandle) => set({ duelBagHurtboxHandle, duelBagSolidHandle }),
   setDuelStatus: (duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY) =>
     set({ duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY }),
   toggleDuelDummyMode: () => set((state) => ({ duelDummyMode: !state.duelDummyMode })),

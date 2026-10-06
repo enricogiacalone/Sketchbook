@@ -1,17 +1,19 @@
 import type { FighterData } from '../Environment/SquadArenaTypes';
 
-// Tutti i manichini della citta' che il giocatore puo' colpire (passanti,
-// nemici, giocatori remoti): e' la lista `opponents` di PlayerCombatSoldier
-// nel mondo aperto (CityPlayer.tsx) -- pugni, coltello e spari del
-// giocatore li colpiscono con lo stesso codice del duello (vita, reazione,
-// ragdoll). Stesso array per sempre, modificato sul posto.
 export const cityOpponents: FighterData[] = [];
+export let cityOpponentsVersion = 0;
 
 export function addCityOpponent(d: FighterData) {
-  if (!cityOpponents.includes(d)) cityOpponents.push(d);
+  if (!cityOpponents.includes(d)) {
+    cityOpponents.push(d);
+    cityOpponentsVersion++;
+  }
 }
 
 export function removeCityOpponent(d: FighterData) {
   const i = cityOpponents.indexOf(d);
-  if (i >= 0) cityOpponents.splice(i, 1);
+  if (i >= 0) {
+    cityOpponents.splice(i, 1);
+    cityOpponentsVersion++;
+  }
 }

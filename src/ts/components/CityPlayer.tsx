@@ -20,7 +20,7 @@ import { POSE_LEN, capturePose, poseBoneList } from './multiplayer/mannequinPose
 import type { MannequinExt, NetHit, NetShot, Vec3 } from './multiplayer/netTypes';
 import { remoteDrivenCars, isRemoteDriven } from './multiplayer/remoteVehicles';
 import { remoteGunFx } from './multiplayer/remoteRegistry';
-import { cityOpponents, addCityOpponent, removeCityOpponent } from './city/cityActors';
+import { cityOpponents, cityOpponentsVersion, addCityOpponent, removeCityOpponent } from './city/cityActors';
 
 // "sostituire il personaggio boxman in playground con il nostro manichino":
 // nel mondo aperto il giocatore e' lo stesso manichino del duello
@@ -150,10 +150,45 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
 
   // --- avversari remoti (proxy) ---------------------------------------------
   const proxiesRef = useRef(new Map<string, RemoteProxy>());
-  // lista stabile (stesso array, modificato sul posto): PlayerCombatSoldier
-  // la legge a ogni frame senza doversi ri-renderizzare. Condivisa con i
-  // manichini della citta' (passanti, nemici: city/cityActors.ts)
-  const opponents = cityOpponents;
+  const duelEnemies = useStore((s) => s.duelArenaEnemies);
+  const duelBagHurtbox = useStore((s) => s.duelBagHurtboxHandle);
+  const duelBagSolid = useStore((s) => s.duelBagSolidHandle);
+  const showCar = useStore((s) => s.arenaScene.car);
+
+  const [oppVersion, setOppVersion] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (oppVersion !== cityOpponentsVersion) {
+        setOppVersion(cityOpponentsVersion);
+      }
+    }, 100);
+    return () => clearInterval(interval);
+  }, [oppVersion]);
+
+  const opponents = useMemo(() => {
+    return [...cityOpponents, ...duelEnemies];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oppVersion, duelEnemies]);
+
+  useEffect(() => {
+    const st = useStore.getState();
+    st.setDuelArenaPlayer(data);
+    return () => {
+      useStore.getState().setDuelArenaPlayer(null);
+    };
+  }, [data]);
+
+  // veicoli guidabili: auto della citta', elicottero ed eventuali auto d'arena (store), non guidati da altri
+  const cityCarIds = useMemo(
+    () => () => {
+      const out: string[] = [];
+      if (showCar) out.push('duel-car');
+      for (const [id, e] of useStore.getState().entities)
+        if ((e.type === 'car' || e.type === 'helicopter') && !isRemoteDriven(id)) out.push(id);
+      return out;
+    },
+    [showCar]
+  );
 
   // --- rete -------------------------------------------------------------------
   const netRef = useRef<{ group: THREE.Object3D | null; bones: (THREE.Object3D | null)[]; buf: Int16Array; drone: THREE.Object3D | null }>({
@@ -373,17 +408,6 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
     };
   }, [data, opponents, rapierCtx]);
 
-  // veicoli guidabili: auto della citta' ed elicottero (store), non guidati da altri
-  const cityCarIds = useMemo(
-    () => () => {
-      const out: string[] = [];
-      for (const [id, e] of useStore.getState().entities)
-        if ((e.type === 'car' || e.type === 'helicopter') && !isRemoteDriven(id)) out.push(id);
-      return out;
-    },
-    []
-  );
-
   return (
     <>
       <PlayerCombatSoldier
@@ -394,6 +418,8 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
         vehicleIds={cityCarIds}
         footControllable="player"
         droneId={DRONE_ID}
+        bagHurtboxHandle={duelBagHurtbox}
+        bagSolidHandle={duelBagSolid}
         publishPlayerInfo
       />
       <WeaponEffects />

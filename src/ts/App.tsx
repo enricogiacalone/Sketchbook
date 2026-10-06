@@ -19,6 +19,7 @@ import WorldFog from './components/Environment/WorldFog';
 import ThirdPersonCamera from './components/ThirdPersonCamera';
 import ChatInput from './components/UI/ChatInput';
 import CollectiblesCounter from './components/UI/CollectiblesCounter';
+import CameraCalibrationGUI from './components/UI/CameraCalibrationGUI';
 import CombatArenaGUI from './components/UI/CombatArenaGUI';
 import Controls from './components/UI/Controls';
 import Crosshair from './components/UI/Crosshair';
@@ -40,6 +41,7 @@ import { useStore } from './store';
 import Ocean from './components/Environment/Ocean';
 import { motionBricksManager } from './lib/motionBricksRuntime';
 import MotionBricksHUD from './components/UI/MotionBricksHUD';
+import Minimap from './components/UI/Minimap';
 const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 
 const App: React.FC = () => {
@@ -282,12 +284,14 @@ const App: React.FC = () => {
         )}
       </Canvas>
 
+      <CameraCalibrationGUI />
       <CombatArenaGUI />
       <Crosshair />
       <DroneHUD />
       <DuelHUD />
       <GraphicsGUI />
       <ScenariosGUI />
+      <Minimap />
       <WeaponWheel />
       <RagdollBenchGUI />
       <WeaponHUD />
@@ -307,6 +311,30 @@ const App: React.FC = () => {
       )}
 
       {/* Dev helper to track loading progress */}
+      {isPaused && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0,0,0,0.5)',
+            color: 'white',
+            textAlign: 'center',
+          }}
+        >
+          <div>
+            <h1 className="sb-font" style={{ fontSize: 48, margin: 0 }}>
+              Pausa
+            </h1>
+            <div style={{ fontSize: 16, opacity: 0.85 }}>Premi Start (o Esc) per riprendere</div>
+          </div>
+        </div>
+      )}
       <Loader />
     </div>
   );
