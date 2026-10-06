@@ -78,7 +78,16 @@ const shouldIgnoreForCollision = (obj: THREE.Object3D, targetObj: THREE.Object3D
       nameLower.includes('streetlamp') ||
       nameLower.includes('post') ||
       nameLower.includes('column') ||
-      nameLower.includes('pillar')
+      nameLower.includes('pillar') ||
+      nameLower.includes('pendulum') ||
+      nameLower.includes('piston') ||
+      nameLower.includes('spinner') ||
+      nameLower.includes('blade') ||
+      nameLower.includes('bag') ||
+      nameLower.includes('punchingbag') ||
+      nameLower.includes('crate') ||
+      nameLower.includes('prop') ||
+      nameLower.includes('obstacle')
     ) {
       return true;
     }

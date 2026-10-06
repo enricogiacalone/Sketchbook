@@ -45,6 +45,7 @@ const _hitImpulseDir = new THREE.Vector3();
 // (useRagdoll.ts's pointIntersectsHurtbox), not distance math -- see the
 // identical setup in PlayerCombatSoldier.tsx.
 const _handPos = new THREE.Vector3();
+const _pelvisPos = new THREE.Vector3();
 const ATTACK_HAND_BONES = ['hand_l', 'hand_r'] as const;
 
 interface CombatSoldierProps {
@@ -405,6 +406,10 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     if (kd.isDown()) {
       data.triggerHit = null;
       const res = kd.step(delta * globalSpeed, groundY() + data.position.y);
+      if (ragdoll.getBoneWorldPosition('pelvis', _pelvisPos)) {
+        data.position.x = _pelvisPos.x;
+        data.position.z = _pelvisPos.z;
+      }
       if (res.done) {
         const place = res.place;
         if (place) {

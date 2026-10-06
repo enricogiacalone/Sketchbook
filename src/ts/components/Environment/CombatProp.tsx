@@ -15,14 +15,14 @@ const CombatProp: React.FC<{ prop: CombatPropData }> = ({ prop }) => {
   const pos: [number, number, number] = [prop.position.x, groundY + prop.position.y, prop.position.z];
   if (prop.kind === 'CRATE') {
     return (
-      <mesh position={pos} castShadow receiveShadow>
+      <mesh position={pos} castShadow receiveShadow name="crate">
         <boxGeometry args={[0.9, 0.9, 0.9]} />
         <meshStandardMaterial color="#854d0e" roughness={0.8} metalness={0.1} />
       </mesh>
     );
   }
   return (
-    <group position={pos}>
+    <group position={pos} name="prop">
       <mesh castShadow receiveShadow>
         <cylinderGeometry args={[0.4, 0.4, 1.0, 16]} />
         <meshStandardMaterial color="#475569" metalness={0.7} roughness={0.3} />

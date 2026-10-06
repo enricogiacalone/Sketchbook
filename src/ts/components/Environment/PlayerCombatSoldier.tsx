@@ -1142,6 +1142,11 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   };
 
   useFrame((_state, delta) => {
+    if (data.knockdown) {
+      startKnockdown(data.knockdown.dirX, data.knockdown.dirZ, data.knockdown.speed);
+      data.knockdown = null;
+    }
+
     // "cazzo metti il personaggio a T osservalo" -- quando attivo, NON
     // avanza l'animazione (l'idle/qualunque clip in corso resterebbe
     // comunque congelata al SUO frame corrente, non in T-pose) e forza
@@ -1382,7 +1387,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       0,
       1
     );
-    if (!tPoseBench && !benchClip && !traving())
+    if (!tPoseBench && !benchClip && !traving() && !inCarBody())
       ragdoll.applySpineLean(
         THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX),
         THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX),
@@ -1798,6 +1803,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     if (kd.isDown()) {
       data.triggerHit = null;
       const res = kd.step(delta * globalSpeed, travRef.current.feetY);
+      if (ragdoll.getBoneWorldPosition('pelvis', _focus)) {
+        data.position.x = _focus.x;
+        data.position.z = _focus.z;
+      }
       if (import.meta.env.DEV && res.done) {
         const ly = ragdoll.getLyingState();
         (window as any).__kdDebug = {

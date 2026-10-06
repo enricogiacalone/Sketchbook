@@ -38,6 +38,7 @@ export const MANNEQUIN_ADDON_ANIMS_URL = 'soldier-citizen-addon-animations.glb';
 const FAR_DIST = 45;
 const FAR_ANIM_STEP_S = 1 / 5;
 const HIDE_DIST = 160;
+const _pelvisPos = new THREE.Vector3();
 // le collisioni con le auto si controllano solo con un'auto entro questa distanza
 const VEHICLE_CHECK_DIST = 9;
 // investito: sopra questa velocita' dell'auto nel punto d'urto e' morte,
@@ -326,6 +327,12 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     if (kd.isDown()) {
       data.triggerHit = null;
       const res = kd.step(delta, groundAt(pos.x, pos.z));
+      if (ragdoll.getBoneWorldPosition('pelvis', _pelvisPos)) {
+        pos.x = _pelvisPos.x;
+        pos.z = _pelvisPos.z;
+        data.position.x = _pelvisPos.x;
+        data.position.z = _pelvisPos.z;
+      }
       if (res.done) {
         if (res.place) {
           data.position.x = res.place.x;
