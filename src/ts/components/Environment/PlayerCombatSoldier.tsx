@@ -1311,7 +1311,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
         travRef.current.lastX = x;
         travRef.current.lastZ = z;
       },
-      solidSegments: ragdoll.getSolidBodySegments(),
+      // solidSegments: ragdoll.getSolidBodySegments(),
       // "confronto layer per layer" -- richiesto dall'utente per
       // analizzare "i vari scheletri ad uno ad uno" (solid-body vs
       // active-ragdoll) dalla console live, senza dover accendere per
@@ -2280,7 +2280,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
           applied every frame via applyTransform -- these are driven
           purely from the Rapier bodies' own live world translations, so
           nesting them under groupRef would double the transform). */}
-      <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />
+      {/* <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} /> */}
       {/* ruota delle armi: Tab / L1 tenuto */}
       <WeaponWheelController footControllable={footControllable} isDead={() => data.isDead} />
       {/* "impostare la vista in modo da avere dei test empirici" --

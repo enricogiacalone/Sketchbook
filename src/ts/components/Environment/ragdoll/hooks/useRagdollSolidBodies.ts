@@ -413,7 +413,7 @@ export function useRagdollSolidBodies(
       const e = entries[name];
       const t = e.body.translation();
       const r = e.body.rotation();
-      out.push({ name, x: t.x, y: t.y, z: t.z, qx: r.x, qy: r.y, qz: r.z, qw: r.w, halfHeight: e.halfHeight, radius: e.radius });
+      // out.push({ name, x: t.x, y: t.y, z: t.z, qx: r.x, qy: r.y, qz: r.z, qw: r.w, halfHeight: e.halfHeight, radius: e.radius });
     }
     return out;
   }, []);

@@ -78,7 +78,7 @@ export interface RagdollController {
   // ostacoli dell'arena: esce dalle compenetrazioni e dice chi lo sta
   // spingendo (vedi useRagdollSolidBodies.resolveObstacleContacts)
   resolveObstacleContacts: (skipHandle: number | null, dt: number, ignoreBodyHandle?: number | null) => ObstacleContact;
-  getSolidBodySegments: () => SolidBodySegmentDebug[];
+  // getSolidBodySegments: () => SolidBodySegmentDebug[];
   // Vedi ActiveRagdollSegmentDebug in useRagdollActive.ts -- collider
   // fisico e collider bersaglio (animazione) di ogni corpo del layer
   // attivo, con errori e angoli dei giunti rispetto ai limiti.
@@ -703,7 +703,7 @@ export function useRagdoll(
     applySpineLean,
     resolveBodyMovement,
     resolveObstacleContacts,
-    getSolidBodySegments,
+    // getSolidBodySegments,
     getActiveRagdollDebugSegments,
     testActiveHit,
     measureClipRanges,

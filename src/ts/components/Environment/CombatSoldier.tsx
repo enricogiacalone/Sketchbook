@@ -757,7 +757,7 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
           when this instance actually opted into the real solid-body
           system (see enableRagdoll/resolveAndApplyMovement above) -- the
           120-fighter FFA arena never has any solid colliders to draw. */}
-      {enableRagdoll && <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />}
+      {/* {enableRagdoll && <SolidBodyDebugView getSegments={ragdoll.getSolidBodySegments} />} */}
       {enableRagdoll && <ActiveRagdollDebugView getSegments={ragdoll.getActiveRagdollDebugSegments} />}
     </>
   );
