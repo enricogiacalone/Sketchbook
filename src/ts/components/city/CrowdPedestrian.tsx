@@ -31,6 +31,7 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
     hp: 60,
     x: 0,
     z: -1000,
+    enableActiveRagdoll: false,
   });
   const { data } = actor;
   const groupRef = useRef<THREE.Group>(null);
@@ -121,7 +122,8 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
     } else if (a.pause > 0) {
       actor.play(actor.hasClip(a.idleClip) ? a.idleClip : 'Idle_A', 0.3);
     } else {
-      actor.play(a.walkClip, 0.3, true, a.speed / (WALK_BASE_SPEED[a.walkClip] ?? 0.75));
+      const clip = actor.hasClip(a.walkClip) ? a.walkClip : 'Walk';
+      actor.play(clip, 0.3, true, a.speed / (WALK_BASE_SPEED[clip] ?? 0.73));
     }
     let d = a.yaw - g.rotation.y;
     d = Math.atan2(Math.sin(d), Math.cos(d));

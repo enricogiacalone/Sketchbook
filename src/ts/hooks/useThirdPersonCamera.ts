@@ -302,6 +302,21 @@ export const useThirdPersonCamera = () => {
 
     target.current.y += isFootController ? cameraFootTargetY : cameraVehicleTargetY;
 
+    const ws = useStore.getState();
+    const gunOn = isFootController && (ws.playerWeapon === 'pistol' || ws.playerWeapon === 'rifle');
+
+    const thetaRad = (theta.current * Math.PI) / 180;
+    const phiRad = (phi.current * Math.PI) / 180;
+
+    if (isFootController && gunOn) {
+      const sb_val = shoulderBlend.current;
+      const ab_val = aimBlend.current;
+      const forwardLook = THREE.MathUtils.lerp(0.6, 1.3, ab_val);
+      const sideLook = THREE.MathUtils.lerp(0.35, 0.55, ab_val) * sb_val;
+      target.current.x += Math.sin(thetaRad) * forwardLook + Math.cos(thetaRad) * sideLook;
+      target.current.z += Math.cos(thetaRad) * forwardLook - Math.sin(thetaRad) * sideLook;
+    }
+
     const focusOn = isFootController && cameraFocus.id === targetName;
     focusBlend.current += ((focusOn ? 1 : 0) - focusBlend.current) * (1 - Math.exp(-delta * 10));
     if (focusOn) _focusTarget.set(cameraFocus.pos.x, cameraFocus.pos.y + FOCUS_Y_OFFSET, cameraFocus.pos.z);
@@ -323,8 +338,6 @@ export const useThirdPersonCamera = () => {
     }
 
     // 1. Soft Auto-Centering on Foot (GTA IV style)
-    const ws = useStore.getState();
-    const gunOn = isFootController && (ws.playerWeapon === 'pistol' || ws.playerWeapon === 'rifle');
     if (isFootController && !gunOn && performance.now() - lastManualInputTime.current > 1500) {
       const charHeadingDeg = THREE.MathUtils.radToDeg(targetObj.rotation.y);
       if (!isNaN(charHeadingDeg)) {
@@ -367,9 +380,6 @@ export const useThirdPersonCamera = () => {
     radius.current = THREE.MathUtils.clamp(radius.current, MIN_RADIUS, MAX_RADIUS);
     if (isNaN(radius.current)) radius.current = cameraPlayerRadius;
 
-    const thetaRad = (theta.current * Math.PI) / 180;
-    const phiRad = (phi.current * Math.PI) / 180;
-
     const k = 1 - Math.exp(-delta * 12);
     shoulderBlend.current += ((gunOn ? 1 : 0) - shoulderBlend.current) * k;
     aimBlend.current += ((gunOn && ws.playerAiming ? 1 : 0) - aimBlend.current) * k;
@@ -377,34 +387,17 @@ export const useThirdPersonCamera = () => {
     const ab = aimBlend.current;
     const aimedRadius = Math.max(MIN_AIM_RADIUS, radius.current * AIM_RADIUS_FACTOR);
     const camRadius = THREE.MathUtils.lerp(radius.current, aimedRadius, ab);
-    if (sb > 0.001) {
-      const side = THREE.MathUtils.lerp(SHOULDER_OFFSET_HIP, SHOULDER_OFFSET_AIM, ab) * sb;
-      _shoulderOffset.set(Math.cos(thetaRad) * side, SHOULDER_UP * sb, -Math.sin(thetaRad) * side);
-      target.current.add(_shoulderOffset);
-    }
-
-    if ((camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
-      const pc = camera as THREE.PerspectiveCamera;
-      if (baseFov.current === null) baseFov.current = pc.fov;
-      let targetFov = baseFov.current;
-      if (ab > 0.001) {
-        targetFov = THREE.MathUtils.lerp(baseFov.current, AIM_FOV, ab);
-      } else if (!isFootController) {
-        const speed = targetObj.position.clone().sub(_prevVehiclePos).length() / Math.max(delta, 0.001);
-        targetFov = baseFov.current + Math.min(speed * 0.6, 12);
-      }
-      const fov = THREE.MathUtils.lerp(pc.fov, targetFov, k);
-      if (!isNaN(fov) && Math.abs(pc.fov - fov) > 0.01) {
-        pc.fov = fov;
-        pc.updateProjectionMatrix();
-      }
-    }
-
     _idealCamPos.set(
       target.current.x + camRadius * Math.sin(thetaRad) * Math.cos(phiRad),
       target.current.y + camRadius * Math.sin(phiRad),
       target.current.z + camRadius * Math.cos(thetaRad) * Math.cos(phiRad)
     );
+
+    if (sb > 0.001) {
+      const side = THREE.MathUtils.lerp(SHOULDER_OFFSET_HIP, SHOULDER_OFFSET_AIM, ab) * sb;
+      _shoulderOffset.set(-Math.cos(thetaRad) * side, SHOULDER_UP * sb, Math.sin(thetaRad) * side);
+      _idealCamPos.add(_shoulderOffset);
+    }
 
     // 3. World Collision (Spherecast / Occlusion Probe) with exclusions
     _rayDir.copy(_idealCamPos).sub(target.current);
@@ -413,7 +406,9 @@ export const useThirdPersonCamera = () => {
 
     if (distToIdeal > 0.001) {
       _rayDir.normalize();
-      _raycaster.set(target.current, _rayDir, 0, distToIdeal);
+      _raycaster.set(target.current, _rayDir);
+      _raycaster.near = 0;
+      _raycaster.far = distToIdeal;
       _raycaster.camera = camera;
       const intersects = _raycaster.intersectObjects(scene.children, true);
 

@@ -82,6 +82,7 @@ export interface MannequinActorOptions {
   rotation?: number;
   // colpibile dal giocatore (entra nella lista degli avversari)
   targetable?: boolean;
+  enableActiveRagdoll?: boolean;
 }
 
 const _dir = new THREE.Vector3();
@@ -310,7 +311,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
       if (activeRef.current ? distSq > ACTIVE_OFF_DIST_SQ : distSq < ACTIVE_ON_DIST_SQ) {
         activeRef.current = !activeRef.current;
       }
-      rigOnRef.current = activeRef.current && st.euphoriaRagdollEnabled && !dormantRef.current;
+      rigOnRef.current = opts.enableActiveRagdoll !== false && activeRef.current && st.euphoriaRagdollEnabled && !dormantRef.current;
       ragdoll.update(delta, rigOnRef.current, false, st.ragdollPassive);
     }
     data.hurtboxHandle = ragdoll.getHurtboxHandle();

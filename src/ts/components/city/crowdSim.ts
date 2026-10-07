@@ -26,11 +26,11 @@ const CROSSWALK_OFFSET = ROAD_WIDTH / 2 + 2;
 const isSkippedBlock = (i: number, j: number): boolean => (i === 0 && j === 0) || (i === -1 && j === 1) || (i === 1 && j === -1);
 
 export const CIVILIAN_COLORS = ['#8d6e63', '#607d8b', '#9e9d24', '#6d4c41', '#78909c', '#a1887f', '#5d4037', '#827717', '#455a64'];
-export const WALK_CLIPS = ['Walk', 'Walk_Formal', 'Walk_Female'];
+export const WALK_CLIPS = ['Walk'];
 // (le Kimodo_* solo se generate: CrowdPedestrian ripiega su Idle_A)
 export const IDLE_CLIPS = ['Idle_A', 'Idle_TalkingPhone', 'Idle_FoldArms', 'Idle_Talking', 'Idle_Subtle', ...K.crowdIdles];
 // velocita' "a terra" delle camminate (m/s, per non far scivolare i piedi)
-export const WALK_BASE_SPEED: Record<string, number> = { Walk: 0.73, Walk_Formal: 0.8, Walk_Female: 0.75 };
+export const WALK_BASE_SPEED: Record<string, number> = { Walk: 0.73 };
 
 export interface CrowdAgent {
   id: number;
@@ -105,7 +105,7 @@ function makeAgent(id: number, x1: number, z1: number, x2: number, z2: number): 
     x2,
     z2,
     len: Math.hypot(x2 - x1, z2 - z1),
-    speed: rand(0.9, 1.35),
+    speed: rand(0.75, 1.05),
     t: Math.random(),
     dir: Math.random() < 0.5 ? 1 : -1,
     pause: 0,
@@ -200,7 +200,7 @@ export function stepCrowd(dt: number, px: number, pz: number) {
         a.t = Math.min(1, Math.max(0, a.t + (a.dir * PANIC_SPEED * dt) / a.len));
         a.gait = (a.gait + (dt * PANIC_SPEED) / ((WALK_BASE_SPEED[a.walkClip] ?? 0.75) * CROWD_GAIT_CYCLE_S * 2.5)) % 1;
       }
-      if (a.fear <= 0) a.pause = rand(2, 4); // si riprende un attimo
+      if (a.fear <= 0) a.pause = rand(0.5, 1.0); // si riprende un attimo
     } else if (a.pause > 0) {
       a.pause -= dt;
     } else if (a.len > 0.01) {
@@ -234,7 +234,7 @@ export function stepCrowd(dt: number, px: number, pz: number) {
         a.t = 0;
         a.dir = 1;
         a.len = Math.abs(nextTarget - (nextAxis === 'horizontal' ? reachedX : reachedZ));
-        a.pause = rand(0.3, 1.2);
+        a.pause = rand(0.0, 0.2);
       }
       a.gait = (a.gait + (dt * a.speed) / ((WALK_BASE_SPEED[a.walkClip] ?? 0.75) * CROWD_GAIT_CYCLE_S)) % 1;
     }
@@ -251,11 +251,10 @@ export function stepCrowd(dt: number, px: number, pz: number) {
   }
 }
 
-// accucciato: troppo vicino allo sparo, o in fondo al marciapiede
+// accucciato: solo se troppo vicino allo sparo (evita blocchi innaturali agli angoli)
 export function isCowering(a: CrowdAgent): boolean {
   if (a.fear <= 0) return false;
-  if (Math.hypot(a.x - a.fearX, a.z - a.fearZ) < COWER_DIST) return true;
-  return a.dir > 0 ? a.t >= 1 : a.t <= 0;
+  return Math.hypot(a.x - a.fearX, a.z - a.fearZ) < COWER_DIST;
 }
 
 export function crowdPanic(x: number, z: number, radius = PANIC_RADIUS) {

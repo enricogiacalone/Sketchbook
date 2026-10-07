@@ -79,7 +79,7 @@ class FixedTickSpring {
 
   public simulate(timeStep: number): void {
     const total = this.offset + timeStep;
-    const ticks = Math.floor(total / this.tickTime);
+    const ticks = Math.min(Math.floor(total / this.tickTime), 10);
     this.offset = total - ticks * this.tickTime;
     for (let i = 0; i < ticks; i++) {
       const acceleration = (this.target - this.position) / this.mass;
@@ -87,6 +87,8 @@ class FixedTickSpring {
       this.velocity *= this.damping;
       this.position += this.velocity;
     }
+    // "capping": if we reached the limit, discard leftover time
+    if (this.offset > this.tickTime) this.offset = 0;
   }
 }
 

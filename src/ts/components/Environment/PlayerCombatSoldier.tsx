@@ -1143,7 +1143,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
 
   useFrame((_state, delta) => {
     if (data.knockdown) {
-      startKnockdown(data.knockdown.dirX, data.knockdown.dirZ, data.knockdown.speed);
+      const kdData = data.knockdown as any;
+      startKnockdown(kdData.dirX, kdData.dirZ, kdData.speed);
       data.knockdown = null;
     }
 
@@ -1797,7 +1798,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // A terra dopo un colpo forte: niente comandi, il corpo e' fisica pura;
     // quando si e' fermato (e girato sulla schiena) si rialza da dov'e'.
     if (data.knockdown) {
-      startKnockdown(data.knockdown.dirX, data.knockdown.dirZ, data.knockdown.speed);
+      const kdData = data.knockdown as any;
+      startKnockdown(kdData.dirX, kdData.dirZ, kdData.speed);
       data.knockdown = null;
     }
     if (kd.isDown()) {

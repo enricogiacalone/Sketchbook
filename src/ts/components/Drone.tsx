@@ -741,8 +741,10 @@ const Drone: React.FC = () => {
     if (shooting) {
       f.bulletAcc += delta * BULLET_RATE;
       const gt = gunTarget as { d: FighterData; lead: THREE.Vector3 } | null;
-      while (f.bulletAcc >= 1) {
+      let steps = 0;
+      while (f.bulletAcc >= 1 && steps < 20) {
         f.bulletAcc -= 1;
+        steps++;
         // parte 5 unita' davanti al drone, verso l'anticipo del bersaglio
         // nel mirino se c'e', altrimenti dritto (un filo verso l'alto)
         const origin = _dronePos.clone().addScaledVector(camDir, 5 * DW);

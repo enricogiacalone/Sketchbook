@@ -149,10 +149,15 @@ export class SimpleClothCPU {
   update(delta: number) {
     const dt = 1 / this.cfg.stepsPerSecond;
     this.acc += Math.min(delta, 1 / 60);
-    while (this.acc >= dt) {
+    
+    let steps = 0;
+    while (this.acc >= dt && steps < 10) {
       this.acc -= dt;
       this.time += dt;
       this.step(dt);
+      steps++;
     }
+    // "capping": se siamo troppo lenti, buttiamo via il tempo avanzato
+    if (this.acc > dt) this.acc = 0;
   }
 }

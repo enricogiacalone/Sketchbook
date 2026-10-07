@@ -247,6 +247,8 @@ const App: React.FC = () => {
               numSolverIterations={15}
               // Matches cannon's old `stepSize` (fixed physics tick rate).
               timeStep={1 / 120}
+              // NOTE: @react-three/rapier internally clamps the frame delta to 0.5s 
+              // (max 60 steps at 120Hz) to prevent "spiral of death".
               // Stops the physics world from stepping at all -- see
               // isPaused's comment in store.ts for why Player.tsx/Car.tsx/
               // Airplane.tsx/Helicopter.tsx also each need their own
