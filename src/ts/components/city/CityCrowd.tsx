@@ -10,6 +10,7 @@ import NpcInspector from '../UI/NpcInspector';
 import { CITY_LAYOUT, getBuildingDetails } from '../Environment/City';
 import { ROAD_OFFSETS, ROAD_WIDTH } from '../Environment/Road';
 import { insideStatics, setCrowdStatics } from './crowdObstacles';
+import { AIM_CHEST_Y, registerAimTargets } from '../../lib/aimTargets';
 import {
   assignCrowdSlots,
   crowdAgents,
@@ -70,6 +71,19 @@ const Crowd: React.FC = () => {
   const acc = useRef(ASSIGN_EVERY_S);
   const { world } = useRapier();
   const obstacles = useRef<CrowdObstacle[]>([]);
+
+  // passanti disegnati come sagome: anche loro si agganciano con la mira
+  // (quelli col corpo vero sono gia' tra gli avversari, CityPlayer.tsx)
+  useEffect(
+    () =>
+      registerAimTargets((out) => {
+        for (const a of crowdAgents) {
+          if (a.gone || a.slot >= 0 || a.dist > 60) continue;
+          out.push({ id: `crowd-agent-${a.id}`, x: a.x, y: a.y + AIM_CHEST_Y, z: a.z });
+        }
+      }),
+    []
+  );
 
   useEffect(() => {
     buildCrowdStatics();

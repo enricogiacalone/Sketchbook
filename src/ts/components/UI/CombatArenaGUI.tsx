@@ -234,7 +234,8 @@ const CombatArenaGUI: React.FC = () => {
     // Velocita' di camminata/corsa: la clip si adatta da sola (locomotion.ts)
     const locoFolder = gui.addFolder('Locomozione');
     locoFolder.add(locomotionTuning, 'walkSpeed', 0.5, 3, 0.05).name('Camminata (m/s)');
-    locoFolder.add(locomotionTuning, 'runSpeed', 2.5, 8, 0.1).name('Corsa Shift (m/s)');
+    locoFolder.add(locomotionTuning, 'jogSpeed', 1.5, 6, 0.1).name('Corsa X/Shift tenuto (m/s)');
+    locoFolder.add(locomotionTuning, 'runSpeed', 2.5, 8, 0.1).name('Scatto X/Shift ripetuto (m/s)');
     locoFolder.add(locomotionTuning, 'aimWalkSpeed', 0.4, 2, 0.05).name('Camminata in mira (m/s)');
     locoFolder.add(locomotionTuning, 'aiChargeSpeed', 1, 8, 0.1).name('Carica nemici (m/s)');
     locoFolder.add({

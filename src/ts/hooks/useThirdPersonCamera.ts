@@ -7,6 +7,7 @@ import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { useInput } from './useInput';
 import { droneMouseDelta, droneShake, droneCamPose } from '../lib/droneFlight';
+import { aimLock, collectAimTargets, type AimTarget } from '../lib/aimTargets';
 
 const DUEL_CAR_CAM_RADIUS = 5;
 const HELI_CAM_RADIUS = 8;
@@ -26,6 +27,20 @@ const AIM_FOV = 48;
 const _shoulderOffset = new THREE.Vector3();
 
 const CAMERA_STICK_DEADZONE = 0.2;
+// aggancio della mira col pad (updateAimLock)
+const AIM_LOCK_RANGE = 45; // m
+const AIM_LOCK_CONE = THREE.MathUtils.degToRad(30); // dal centro dello schermo
+const AIM_SWITCH_CONE = THREE.MathUtils.degToRad(55);
+const AIM_SNAP = 14; // 1/s: quanto in fretta il mirino arriva sul bersaglio
+const AIM_FINE = 0.3; // sensibilita' della levetta intorno al bersaglio
+const AIM_OFF_YAW = 7; // gradi di correzione massima
+const AIM_OFF_PITCH = 6;
+const AIM_BREAK_S = 0.35; // spingendo oltre il margine per tanto si sgancia
+const AIM_FLICK = 0.85; // levetta oltre: cambio bersaglio
+const _aimTargets: AimTarget[] = [];
+const _aimFwd = new THREE.Vector3();
+const _aimV = new THREE.Vector3();
+const _aimDir = new THREE.Vector3();
 const CAMERA_STICK_YAW_SPEED = 140;
 const CAMERA_STICK_PITCH_SPEED = 110;
 
@@ -137,6 +152,9 @@ export const useThirdPersonCamera = () => {
   const target = useRef(new THREE.Vector3());
   const sensitivity = useRef(new THREE.Vector2(0.3, 0.24));
   const zoomIndex = useRef(0);
+  // aggancio della mira: gia' provato su questa pressione di L2, correzione
+  // fine (gradi), da quanto si spinge oltre il margine, levetta del frame prima
+  const lockRef = useRef({ tried: false, offYaw: 0, offPitch: 0, push: 0, prevRx: 0 });
 
   const prevControllable = useRef<string | null>(null);
   const shoulderBlend = useRef(0);
@@ -268,12 +286,14 @@ export const useThirdPersonCamera = () => {
       lastManualInputTime.current = performance.now();
     }
 
-    if (Math.abs(rx) > CAMERA_STICK_DEADZONE) {
+    // agganciati a un bersaglio (mira col pad, sotto): la levetta destra
+    // corregge la mira intorno al bersaglio invece di girare la camera
+    if (Math.abs(rx) > CAMERA_STICK_DEADZONE && !aimLock.id) {
       theta.current -= rx * CAMERA_STICK_YAW_SPEED * delta;
       if (isNaN(theta.current)) theta.current = 0;
       theta.current %= 360;
     }
-    if (Math.abs(ry) > CAMERA_STICK_DEADZONE) {
+    if (Math.abs(ry) > CAMERA_STICK_DEADZONE && !aimLock.id) {
       phi.current = THREE.MathUtils.clamp(phi.current + ry * CAMERA_STICK_PITCH_SPEED * delta, -85, 85);
       if (isNaN(phi.current)) phi.current = 0;
     }
@@ -323,7 +343,9 @@ export const useThirdPersonCamera = () => {
     const ws = useStore.getState();
     const gunOn = isFootController && (ws.playerWeapon === 'pistol' || ws.playerWeapon === 'rifle');
 
-    const thetaRad = (theta.current * Math.PI) / 180;
+    // R3 tenuto a piedi: guarda dietro (come in GTA), senza toccare la camera vera
+    const lookBack = isFootController && !!pad?.buttons[11]?.pressed && !ws.playerAiming;
+    const thetaRad = ((theta.current + (lookBack ? 180 : 0)) * Math.PI) / 180;
     const phiRad = (phi.current * Math.PI) / 180;
 
     if (isFootController && gunOn) {
@@ -339,6 +361,15 @@ export const useThirdPersonCamera = () => {
     focusBlend.current += ((focusOn ? 1 : 0) - focusBlend.current) * (1 - Math.exp(-delta * 10));
     if (focusOn) _focusTarget.set(cameraFocus.pos.x, cameraFocus.pos.y + FOCUS_Y_OFFSET, cameraFocus.pos.z);
     if (focusBlend.current > 0.001) target.current.lerp(_focusTarget, focusBlend.current);
+
+    // "sistema la mira, falla come gta" (aggancio morbido di GTA V): mirando
+    // col pad (L2 con un'arma) il mirino va sul petto del bersaglio piu'
+    // vicino al centro dello schermo e lo segue; la levetta destra sposta la
+    // mira di qualche grado intorno a lui (per la testa o le gambe), un colpo
+    // deciso di levetta passa al bersaglio accanto da quella parte, e
+    // spingendo oltre il margine per un attimo ci si sgancia e si mira
+    // libero. Col mouse la mira resta libera, come su PC.
+    updateAimLock(isFootController && gunOn && !!ws.playerAiming && !!pad?.buttons[6]?.pressed, rx, ry, delta);
 
     if (useStore.getState().isDrone) {
       camera.position.copy(droneCamPose.position);
@@ -508,4 +539,108 @@ export const useThirdPersonCamera = () => {
   });
 
   return { theta, phi, radius };
+
+  function updateAimLock(aimPad: boolean, rx: number, ry: number, delta: number) {
+    const lk = lockRef.current;
+    if (!aimPad) {
+      if (aimLock.id) aimLock.id = null;
+      lk.tried = false;
+      lk.prevRx = 0;
+      publishLock();
+      return;
+    }
+    collectAimTargets(_aimTargets);
+    camera.getWorldDirection(_aimFwd);
+    if (!aimLock.id && !lk.tried) {
+      // si aggancia solo appena si preme L2 (come in GTA: per riprovare si
+      // ripreme)
+      lk.tried = true;
+      const best = pickAimTarget(_aimFwd, null, 0);
+      if (best) {
+        aimLock.id = best.id;
+        lk.offYaw = 0;
+        lk.offPitch = 0;
+        lk.push = 0;
+      }
+    }
+    const cur = aimLock.id ? _aimTargets.find((t) => t.id === aimLock.id) : undefined;
+    if (aimLock.id && (!cur || Math.hypot(cur.x - camera.position.x, cur.z - camera.position.z) > AIM_LOCK_RANGE * 1.3)) aimLock.id = null;
+    if (aimLock.id && cur) {
+      // colpo deciso di levetta: bersaglio accanto da quella parte
+      if (Math.abs(rx) > AIM_FLICK && Math.abs(lk.prevRx) < 0.5) {
+        const next = pickAimTarget(_aimFwd, cur, Math.sign(rx));
+        if (next) {
+          aimLock.id = next.id;
+          lk.offYaw = 0;
+          lk.offPitch = 0;
+          lk.push = 0;
+        }
+      } else {
+        // correzione fine intorno al bersaglio; spingere oltre il margine
+        // per AIM_BREAK_S sgancia
+        if (Math.abs(rx) > CAMERA_STICK_DEADZONE) lk.offYaw -= rx * CAMERA_STICK_YAW_SPEED * AIM_FINE * delta;
+        if (Math.abs(ry) > CAMERA_STICK_DEADZONE) lk.offPitch += ry * CAMERA_STICK_PITCH_SPEED * AIM_FINE * delta;
+        const atEdge = Math.abs(lk.offYaw) > AIM_OFF_YAW || Math.abs(lk.offPitch) > AIM_OFF_PITCH;
+        lk.offYaw = THREE.MathUtils.clamp(lk.offYaw, -AIM_OFF_YAW, AIM_OFF_YAW);
+        lk.offPitch = THREE.MathUtils.clamp(lk.offPitch, -AIM_OFF_PITCH, AIM_OFF_PITCH);
+        lk.push = atEdge ? lk.push + delta : 0;
+        if (lk.push > AIM_BREAK_S) aimLock.id = null;
+      }
+    }
+    lk.prevRx = rx;
+    const t = aimLock.id ? _aimTargets.find((x) => x.id === aimLock.id) : undefined;
+    if (t) {
+      aimLock.x = t.x;
+      aimLock.y = t.y;
+      aimLock.z = t.z;
+      // camera, punto guardato e petto del bersaglio in fila: il mirino (al
+      // centro dello schermo) e' sul bersaglio
+      _aimDir.set(t.x - target.current.x, t.y - target.current.y, t.z - target.current.z).normalize();
+      const wantTheta = THREE.MathUtils.radToDeg(Math.atan2(-_aimDir.x, -_aimDir.z)) + lk.offYaw;
+      const wantPhi = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(Math.asin(-_aimDir.y)) + lk.offPitch, -85, 85);
+      const k = 1 - Math.exp(-delta * AIM_SNAP);
+      let dT = (wantTheta - theta.current) % 360;
+      if (dT > 180) dT -= 360;
+      if (dT < -180) dT += 360;
+      theta.current = (theta.current + dT * k) % 360;
+      phi.current += (wantPhi - phi.current) * k;
+    }
+    publishLock();
+  }
+
+  // il bersaglio migliore: dentro il cono davanti alla camera, il piu' vicino
+  // al centro (un po' preferiti i vicini). Con `from` e `side`: il primo
+  // dalla parte `side` (+1 destra dello schermo, -1 sinistra) rispetto a `from`.
+  function pickAimTarget(fwd: THREE.Vector3, from: AimTarget | undefined | null, side: number) {
+    const cp = camera.position;
+    const fromYaw = from ? Math.atan2(from.x - cp.x, from.z - cp.z) : 0;
+    let best: AimTarget | null = null;
+    let bestScore = Infinity;
+    for (const t of _aimTargets) {
+      if (from && t.id === from.id) continue;
+      _aimV.set(t.x - cp.x, t.y - cp.y, t.z - cp.z);
+      const d = _aimV.length();
+      if (d < 1 || d > AIM_LOCK_RANGE) continue;
+      const ang = Math.acos(THREE.MathUtils.clamp(_aimV.dot(fwd) / d, -1, 1));
+      if (ang > (from ? AIM_SWITCH_CONE : AIM_LOCK_CONE)) continue;
+      let score = ang + d * 0.004;
+      if (from) {
+        // a destra dello schermo = yaw che diminuisce (sistema di theta)
+        let dy = Math.atan2(t.x - cp.x, t.z - cp.z) - fromYaw;
+        dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+        if (-dy * side <= 0.01) continue;
+        score = Math.abs(dy) + d * 0.004;
+      }
+      if (score < bestScore) {
+        bestScore = score;
+        best = t;
+      }
+    }
+    return best;
+  }
+
+  function publishLock() {
+    const on = !!aimLock.id;
+    if (useStore.getState().aimLocked !== on) useStore.setState({ aimLocked: on });
+  }
 };

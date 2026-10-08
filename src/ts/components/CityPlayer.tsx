@@ -21,6 +21,9 @@ import type { MannequinExt, NetHit, NetShot, Vec3 } from './multiplayer/netTypes
 import { remoteDrivenCars, isRemoteDriven } from './multiplayer/remoteVehicles';
 import { remoteGunFx } from './multiplayer/remoteRegistry';
 import { cityOpponents, cityOpponentsVersion, addCityOpponent, removeCityOpponent } from './city/cityActors';
+import { AIM_CHEST_Y, registerAimTargets } from '../lib/aimTargets';
+import { getTerrainHeight } from './Environment/Terrain';
+import { getRoadOffset } from './Environment/Road';
 
 // "sostituire il personaggio boxman in playground con il nostro manichino":
 // nel mondo aperto il giocatore e' lo stesso manichino del duello
@@ -169,6 +172,22 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
     return [...cityOpponents, ...duelEnemies];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [oppVersion, duelEnemies]);
+
+  // bersagli per l'aggancio della mira col pad (lib/aimTargets.ts): nemici,
+  // passanti col corpo vero, avversari del duello
+  const opponentsRef = useRef(opponents);
+  opponentsRef.current = opponents;
+  useEffect(
+    () =>
+      registerAimTargets((out) => {
+        for (const o of opponentsRef.current) {
+          if (o.isDead || o === data) continue;
+          const p = o.position;
+          out.push({ id: o.id, x: p.x, y: getTerrainHeight(p.x, p.z) + getRoadOffset(p.x, p.z) + Math.max(0, p.y) + AIM_CHEST_Y, z: p.z });
+        }
+      }),
+    [data]
+  );
 
   useEffect(() => {
     const st = useStore.getState();

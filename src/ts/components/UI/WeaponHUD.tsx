@@ -9,21 +9,23 @@ import { PISTOL_MAG_SIZE, RIFLE_MAG_SIZE } from '../Environment/weapons/weaponCo
 const HIT_MARKER_MS = 260;
 
 const WeaponHUD: React.FC = () => {
-  const { weapon, aiming, ammo, reloading, hitAt, hitKill, hitHead, currentControllable, isDrone, testScene, duelResult } = useStore(
-    useShallow((s) => ({
-      weapon: s.playerWeapon,
-      aiming: s.playerAiming,
-      ammo: s.pistolAmmo,
-      reloading: s.pistolReloading,
-      hitAt: s.pistolHitAt,
-      hitKill: s.pistolHitKill,
-      hitHead: s.pistolHitHead,
-      currentControllable: s.currentControllable,
-      isDrone: s.isDrone,
-      testScene: s.testScene,
-      duelResult: s.duelResult,
-    }))
-  );
+  const { weapon, aiming, ammo, reloading, hitAt, hitKill, hitHead, currentControllable, isDrone, testScene, duelResult, locked } =
+    useStore(
+      useShallow((s) => ({
+        weapon: s.playerWeapon,
+        aiming: s.playerAiming,
+        ammo: s.pistolAmmo,
+        reloading: s.pistolReloading,
+        hitAt: s.pistolHitAt,
+        hitKill: s.pistolHitKill,
+        hitHead: s.pistolHitHead,
+        currentControllable: s.currentControllable,
+        isDrone: s.isDrone,
+        testScene: s.testScene,
+        duelResult: s.duelResult,
+        locked: s.aimLocked,
+      }))
+    );
   // ridisegna finche' l'hit marker e' visibile, poi si spegne da solo
   const [, setTick] = useState(0);
   const markerAge = performance.now() - hitAt;
@@ -46,7 +48,8 @@ const WeaponHUD: React.FC = () => {
   const onFoot = currentControllable === 'player' || currentControllable === 'combatSoldier';
   const gap = aiming ? 5 : 10;
   const len = aiming ? 4 : 7;
-  const color = reloading ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.9)';
+  // agganciato a un bersaglio (mira col pad): rosso, come in GTA
+  const color = reloading ? 'rgba(255,255,255,0.35)' : locked && aiming ? 'rgba(239,68,68,0.95)' : 'rgba(255,255,255,0.9)';
   const tick: React.CSSProperties = {
     position: 'absolute',
     background: color,
@@ -70,7 +73,7 @@ const WeaponHUD: React.FC = () => {
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                background: 'rgba(255,255,255,0.95)',
+                background: locked ? 'rgba(239,68,68,0.95)' : 'rgba(255,255,255,0.95)',
                 boxShadow: '0 0 0 1px rgba(0,0,0,0.9), 0 0 5px rgba(0,0,0,0.9)',
               }}
             />

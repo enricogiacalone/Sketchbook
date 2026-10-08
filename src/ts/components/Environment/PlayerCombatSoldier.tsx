@@ -163,6 +163,9 @@ const RELAXED_IDLE_CLIPS = ['Idle_A', 'Idle_Subtle', 'Idle'];
 // quasi pari: 11 cm), stesso stile.
 const STAIRS_IDLE_CLIPS = ['Idle_Subtle', 'Idle'];
 const PISTOL_FACE_TURN_RATE = 0.3;
+const HIP_FIRE_HOLD_S = 0.9;
+const HIP_FIRE_WAIT_S = 0.25;
+const HIP_FIRE_FACING = 0.35; // rad
 const PISTOL_SHOOT_ANIM_S = 0.22;
 const _shotCamDir = new THREE.Vector3();
 const _shotDir = new THREE.Vector3();
@@ -497,6 +500,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   const raiseLeftRef = useRef(0);
   const shootAnimLeftRef = useRef(0);
   const aimingRef = useRef(false);
+  // sparo dal fianco (senza mirare): per quanto si resta girati verso il
+  // mirino, e il colpo in attesa che il corpo sia girato
+  const hipFireRef = useRef(0);
+  const pendingHipShotRef = useRef(0);
   const upperActionRef = useRef<string | null>(null);
   const weaponStoreRef = useRef({ w: '', a: false, n: -1, r: false });
 
@@ -1071,7 +1078,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
           ? 'Pistol_Reload__upper'
           : shootAnimLeftRef.current > 0
             ? 'Pistol_Shoot__upper'
-            : aimingRef.current || raiseLeftRef.current > 0
+            : aimingRef.current || hipFireRef.current > 0 || raiseLeftRef.current > 0
               ? 'Pistol_Aim_Neutral__upper'
               : 'Pistol_Idle__upper';
     }
@@ -1338,7 +1345,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       rifle.setVisible(weaponRef.current === 'rifle' && !benchMode);
       // fucile: pronto basso -> in mira (anche subito dopo uno sparo)
       {
-        const want = aimingRef.current || raiseLeftRef.current > 0 || shootAnimLeftRef.current > 0 ? 1 : 0;
+        const want = aimingRef.current || hipFireRef.current > 0 || raiseLeftRef.current > 0 || shootAnimLeftRef.current > 0 ? 1 : 0;
         const k = Math.min(1, dtW * 8);
         rifleRaiseRef.current += (want - rifleRaiseRef.current) * k;
         rifle.setRaise(rifleRaiseRef.current);
@@ -2158,9 +2165,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // (la locomozione libera gira il corpo per conto suo, vedi sotto)
     const rotBeforeFacing = data.rotation;
     let targetRotation: number | null = null;
-    if (isGun()) {
-      // Con la pistola il corpo guarda sempre dove guarda la camera
-      // (terza persona sopra la spalla): si cammina/strafa mirando.
+    // "sistema la mira, falla come gta": con un'arma in mano il corpo guarda
+    // dove guarda la camera solo mirando (L2 / tasto destro) o appena dopo
+    // un colpo sparato senza mirare; per il resto si va dove si cammina,
+    // come a mani nude (prima con la pistola si camminava sempre di lato)
+    const gunFacingCam = isGun() && (aimingRef.current || hipFireRef.current > 0);
+    if (gunFacingCam) {
       targetRotation = camYaw;
     } else if (input.lockOn && _toOpponent.lengthSq() > 0.0001) {
       targetRotation = Math.atan2(_toOpponent.x, _toOpponent.z) + Math.PI;
@@ -2170,7 +2180,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     if (targetRotation !== null) {
       let angleDiff = targetRotation - data.rotation;
       angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff));
-      data.rotation += angleDiff * (isGun() ? PISTOL_FACE_TURN_RATE : FACE_TURN_RATE);
+      data.rotation += angleDiff * (gunFacingCam ? PISTOL_FACE_TURN_RATE : FACE_TURN_RATE);
     }
 
     // --- Block (held) --- (solo a mani nude: con la pistola il tasto
@@ -2218,7 +2228,26 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       // pistola: un colpo per pressione; fucile: automatico finche' tieni premuto
       const pressed = input.consumeJustPressed('primary');
       const wantFire = GUN_STATS[gunKind()].auto ? pressed || !!input.primary : pressed;
-      if (wantFire && !wheelOpen && reloadLeftRef.current <= 0 && fireCooldownRef.current <= 0) {
+      // sparare senza mirare (dal fianco, come in GTA): il personaggio si gira
+      // verso il mirino e il colpo parte appena e' girato (al massimo
+      // HIP_FIRE_WAIT_S dopo); resta girato HIP_FIRE_HOLD_S
+      hipFireRef.current = Math.max(0, hipFireRef.current - delta * globalSpeed);
+      if (wantFire && !aimingRef.current) {
+        hipFireRef.current = HIP_FIRE_HOLD_S;
+        if (pressed) pendingHipShotRef.current = HIP_FIRE_WAIT_S;
+      }
+      let shoot = wantFire;
+      if (!aimingRef.current) {
+        let face = camYaw - data.rotation;
+        face = Math.atan2(Math.sin(face), Math.cos(face));
+        const turned = Math.abs(face) < HIP_FIRE_FACING;
+        if (pendingHipShotRef.current > 0) {
+          pendingHipShotRef.current -= delta * globalSpeed;
+          shoot = turned || pendingHipShotRef.current <= 0;
+          if (shoot) pendingHipShotRef.current = 0;
+        } else shoot = wantFire && turned;
+      } else pendingHipShotRef.current = 0;
+      if (shoot && !wheelOpen && reloadLeftRef.current <= 0 && fireCooldownRef.current <= 0) {
         fire();
       }
       // i pugni non partono con la pistola in mano
@@ -2381,13 +2410,11 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     const stair = stepAt(data.position.x, data.position.z, travRef.current.feetY);
     const stairCycle = stair ? 2 * stair.tread : 0;
     const runWanted = input.shift && !injured;
-    const want = !hasDir
-      ? 0
-      : stair
-        ? (runWanted ? LT.runSpeed / (gR * dR) : walkSpeed / (gW * dW)) * stairCycle
-        : runWanted
-          ? LT.runSpeed
-          : walkSpeed;
+    // come in GTA: X (Shift) tenuto = corsa leggera, premuto piu' volte di
+    // fila = scatto (piu' in fretta si preme, piu' si va veloci)
+    const mash = injured ? 0 : input.sprintMash();
+    const flatWant = mash > 0 ? LT.jogSpeed + (LT.runSpeed - LT.jogSpeed) * mash : runWanted ? LT.jogSpeed : walkSpeed;
+    const want = !hasDir ? 0 : stair ? (runWanted || mash > 0 ? LT.runSpeed / (gR * dR) : walkSpeed / (gW * dW)) * stairCycle : flatWant;
     data.rotation = stepLoco(ls, rotBeforeFacing, hasDir ? Math.atan2(_moveDir.x, _moveDir.z) + Math.PI : null, want, LT.runSpeed, dtL);
     const running = ls.speed > (walkSpeed + LT.runSpeed) / 2;
     // fiatone: secondi di corsa di fila (camminare li fa calare piano)

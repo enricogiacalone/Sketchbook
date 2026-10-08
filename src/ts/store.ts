@@ -90,6 +90,9 @@ interface GameState {
   // (pannello combattimento / banco ragdoll: fisica ferma + passo singolo,
   // mentre la camera e il resto girano) e' questa, separata.
   physicsPaused: boolean;
+  // mira col pad agganciata a un bersaglio (useThirdPersonCamera.ts): il
+  // mirino diventa rosso (WeaponHUD.tsx)
+  aimLocked: boolean;
   // "il personaggio si trasforma nel drone ... ha le stesse funzioni di
   // volo" (droneWorld) -- global so both Player.tsx (which drives it) and
   // useThirdPersonCamera.ts (which needs to know whether the mouse should
@@ -459,6 +462,7 @@ export const useStore = create<GameState>((set) => ({
   openVehicleDoors: {},
   isPaused: false,
   physicsPaused: false,
+  aimLocked: false,
   isDrone: false,
   isLoading: false, // Set to false initially to show WelcomeScreen
   isCrosshairVisible: false,
