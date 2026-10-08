@@ -1,6 +1,15 @@
 import { K } from '../../lib/kimodo';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { getRoadOffset, ROAD_WIDTH, SIDEWALK_WIDTH } from '../Environment/Road';
+import {
+  pushOutOfStatics,
+  queryStatics,
+  segHitsBox,
+  segHitsCircle,
+  segHitsRect,
+  type StaticCircle,
+  type StaticRect,
+} from './crowdObstacles';
 
 // "Folle disegnate in blocco": la folla della citta' e' fatta di AGENTI
 // leggeri (solo numeri: tratto di marciapiede, posizione, passo) che
@@ -73,6 +82,12 @@ export interface CrowdAgent {
   // evitare gli altri: velocita' effettiva (m/s) e passo di lato voluto (m)
   curSpeed: number;
   avoid: number;
+  // spostamento laterale scelto per girare intorno a muri, pali e auto
+  // ferme (steerAround); NaN = nessun ostacolo, si usa corsia + avoid
+  steer: number;
+  // perche' rallenta/si ferma (per l'ispettore NPC e i test)
+  blockedBy: string;
+  stuckT: number; // s fermo davanti a un ostacolo senza via d'uscita
   // cosa fa da fermo: 'pause' (attimo), 'look' (si guarda intorno prima di
   // cambiare strada), 'linger' (si ferma a lungo: telefono, chiacchiere...)
   activity: 'walk' | 'pause' | 'look' | 'linger';
@@ -97,7 +112,7 @@ export interface CrowdPendingHit {
 // (telefono, braccia conserte, impaziente...).
 const LOOK_CHANCE = 0.35;
 const LOOK_S: [number, number] = [3, 5];
-const LINGER_CHANCE = 0.2;
+const LINGER_CHANCE = 0.3;
 const LINGER_S: [number, number] = [12, 35];
 const LINGER_START = 0.15; // quanti partono gia' fermi
 export const LOOK_CLIP = 'Kimodo_look_around';
@@ -122,8 +137,10 @@ const LINGER_SIDE = 0.5;
 export interface CrowdObstacle {
   x: number;
   z: number;
-  r: number; // raggio (m)
+  r: number; // raggio (m); per le auto quello che le contiene
   moving: boolean;
+  // auto: rettangolo orientato (assi locali X e Z a terra, mezze misure)
+  box?: { ux: number; uz: number; vx: number; vz: number; hx: number; hz: number };
 }
 const AVOID_RANGE = 1.3; // m davanti
 const FOLLOW_GAP = 0.6; // m: dietro a qualcuno ci si ferma a questa distanza
@@ -198,6 +215,9 @@ function makeAgent(id: number, x1: number, z1: number, x2: number, z2: number): 
     oz: 0,
     curSpeed: 0,
     avoid: 0,
+    steer: NaN,
+    blockedBy: '',
+    stuckT: 0,
     activity: 'walk',
     pendingHit: null,
   };
@@ -272,11 +292,18 @@ function onSidewalk(a: CrowdAgent): boolean {
 }
 
 // a fine tratto (o all'inizio): cosa fa da fermo
+// meta' delle soste lunghe sono al telefono, il resto le altre
+const PHONE_CLIPS = ['Kimodo_phone_talk', 'Idle_TalkingPhone'];
+function pickLingerClip() {
+  const pool = Math.random() < 0.5 ? PHONE_CLIPS : LINGER_CLIPS;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 function chooseStop(a: CrowdAgent) {
   const r = Math.random();
   if (onSidewalk(a) && r < LINGER_CHANCE) {
     a.activity = 'linger';
-    a.idleClip = LINGER_CLIPS[Math.floor(Math.random() * LINGER_CLIPS.length)];
+    a.idleClip = pickLingerClip();
     a.pause = rand(LINGER_S[0], LINGER_S[1]);
   } else if (r < LINGER_CHANCE + LOOK_CHANCE) {
     a.activity = 'look';
@@ -317,6 +344,8 @@ function avoidance(obstacles: CrowdObstacle[]): Map<CrowdAgent, number> {
     l.push(a);
   }
   for (const a of crowdAgents) {
+    a.steer = NaN;
+    a.blockedBy = '';
     if (a.gone || a.dist > AVOID_DIST || a.pause > 0 || isCowering(a)) continue;
     forwardOf(a, _fa);
     // destra della direzione di marcia
@@ -342,11 +371,20 @@ function avoidance(obstacles: CrowdObstacle[]): Map<CrowdAgent, number> {
           const same = _fa.x * _fb.x + _fa.z * _fb.z;
           if (same > 0.3 && b.pause <= 0) {
             // stessa direzione: dietro, alla sua velocita' se e' piu' lento
-            if (b.curSpeed < a.speed) k = Math.min(k, Math.max(0, (ahead - FOLLOW_GAP) / (AVOID_RANGE - FOLLOW_GAP)));
+            if (b.curSpeed < a.speed) {
+              const kf = Math.max(0, (ahead - FOLLOW_GAP) / (AVOID_RANGE - FOLLOW_GAP));
+              if (kf < k) {
+                k = kf;
+                a.blockedBy = `segue ${b.id}`;
+              }
+            }
           } else if (same > 0.3 || b.pause > 0) {
             // fermo davanti: si passa di lato
             avoid += lat >= 0 ? -SIDESTEP : SIDESTEP;
-            if (ahead < FOLLOW_GAP) k = Math.min(k, 0.3);
+            if (ahead < FOLLOW_GAP && k > 0.3) {
+              k = 0.3;
+              a.blockedBy = `fermo davanti ${b.id}`;
+            }
           } else {
             // viene incontro o attraversa: un passo di lato
             avoid += lat >= 0 ? -SIDESTEP : SIDESTEP;
@@ -354,23 +392,134 @@ function avoidance(obstacles: CrowdObstacle[]): Map<CrowdAgent, number> {
         }
       }
     for (const o of obstacles) {
+      if (!o.moving) continue;
       const dx = o.x - a.x;
       const dz = o.z - a.z;
       const ahead = dx * _fa.x + dz * _fa.z;
       const lat = dx * rx + dz * rz;
-      if (o.moving) {
-        // auto in movimento davanti (anche di poco di lato): si aspetta
-        if (ahead > -0.5 && ahead < CAR_LOOK && Math.abs(lat) < o.r + 0.6) k = 0;
-        continue;
+      // auto in movimento davanti (anche di poco di lato): si aspetta
+      if (ahead > -0.5 && ahead < CAR_LOOK && Math.abs(lat) < o.r + 0.6) {
+        k = 0;
+        a.blockedBy = 'auto in movimento';
       }
-      if (ahead <= 0 || ahead > o.r + AVOID_RANGE || Math.abs(lat) > o.r + 0.5) continue;
-      avoid += lat >= 0 ? -(o.r + 0.4) : o.r + 0.4;
-      if (ahead < o.r + 0.35) k = 0;
     }
     a.avoid = Math.max(-0.9, Math.min(0.9, avoid));
+    // muri, pali, auto ferme e giocatore: di quanto andare di lato
+    const ks = steerAround(a, a.fear > 0 ? 0 : a.lane + a.avoid, obstacles);
+    if (ks < k) {
+      k = ks;
+      a.blockedBy = 'ostacolo davanti';
+    }
     speedK.set(a, k);
   }
   return speedK;
+}
+
+// "nn riescono ad aggirare un'auto messa sul marciapiede e si formano code"
+// e "nn devono compenetrare i muri degli edifici o i pali": prima un
+// ostacolo fermo dava al massimo 0.9 m di passo di lato (un'auto ne occupa
+// 2 e il marciapiede e' largo 1.5) e chi non passava si fermava, con tutti
+// dietro in coda; muri e pali la folla non li conosceva proprio. Ora ogni
+// passante guarda il corridoio davanti a se' (STEER_LOOK) e, se e'
+// occupato, sceglie lo spostamento laterale libero piu' vicino alla sua
+// corsia, anche scendendo dal marciapiede (fino a STEER_MAX), e intanto
+// rallenta finche' la strada davanti non e' libera.
+const BODY_R = 0.28; // m, mezzo passante
+const YAW_RATE = 6; // rad/s: quanto in fretta ci si gira verso dove si va
+const STEER_LOOK = 2.6; // m di corridoio davanti da tenere libero
+const STEER_MAX = 3; // m di lato al massimo rispetto alla linea del tratto
+const STEER_STEP = 0.2;
+const STUCK_TURN_S = 2.5;
+const STEER_EASE = 1.3; // m/s di spostamento laterale quando si gira intorno
+const _sr: StaticRect[] = [];
+const _sc: StaticCircle[] = [];
+const _near: CrowdObstacle[] = [];
+
+function segBlocked(ax: number, az: number, bx: number, bz: number) {
+  for (const r of _sr) if (segHitsRect(ax, az, bx, bz, r, BODY_R)) return true;
+  for (const c of _sc) if (segHitsCircle(ax, az, bx, bz, c, BODY_R)) return true;
+  for (const o of _near) {
+    const b = o.box;
+    if (!b) {
+      if (segHitsCircle(ax, az, bx, bz, o, BODY_R)) return true;
+      continue;
+    }
+    const lax = (ax - o.x) * b.ux + (az - o.z) * b.uz;
+    const laz = (ax - o.x) * b.vx + (az - o.z) * b.vz;
+    const lbx = (bx - o.x) * b.ux + (bz - o.z) * b.uz;
+    const lbz = (bx - o.x) * b.vx + (bz - o.z) * b.vz;
+    if (segHitsBox(lax, laz, lbx, lbz, b.hx + BODY_R, b.hz + BODY_R)) return true;
+  }
+  return false;
+}
+
+// fuori da un'auto ferma (rettangolo orientato)
+function pushOutOfBox(x: number, z: number, o: CrowdObstacle): [number, number] {
+  const b = o.box!;
+  const dx = x - o.x;
+  const dz = z - o.z;
+  const lx = dx * b.ux + dz * b.uz;
+  const lz = dx * b.vx + dz * b.vz;
+  const hx = b.hx + BODY_R;
+  const hz = b.hz + BODY_R;
+  if (Math.abs(lx) >= hx || Math.abs(lz) >= hz) return [x, z];
+  // esce dal lato piu' vicino
+  let nx = lx;
+  let nz = lz;
+  if (hx - Math.abs(lx) < hz - Math.abs(lz)) nx = Math.sign(lx || 1) * hx;
+  else nz = Math.sign(lz || 1) * hz;
+  return [o.x + nx * b.ux + nz * b.vx, o.z + nx * b.uz + nz * b.vz];
+}
+
+// ritorna quanto puo' andare avanti (0..1); scrive a.steer
+function steerAround(a: CrowdAgent, pref: number, obstacles: CrowdObstacle[]): number {
+  const fx = _fa.x;
+  const fz = _fa.z;
+  const rx = -fz;
+  const rz = fx;
+  const reach = STEER_LOOK + STEER_MAX + 0.5;
+  queryStatics(a.x - reach, a.z - reach, a.x + reach, a.z + reach, _sr, _sc);
+  _near.length = 0;
+  for (const o of obstacles) if (!o.moving && Math.hypot(o.x - a.x, o.z - a.z) < reach + o.r) _near.push(o);
+  if (_sr.length === 0 && _sc.length === 0 && _near.length === 0) return 1;
+  const cur = a.ox * rx + a.oz * rz;
+  // corridoio dritto davanti con spostamento laterale `lat`
+  const clear = (lat: number, len: number) => {
+    const sx = a.x + rx * (lat - cur) + fx * 0.1;
+    const sz = a.z + rz * (lat - cur) + fz * 0.1;
+    return !segBlocked(sx, sz, sx + fx * len, sz + fz * len);
+  };
+  // per arrivarci: in diagonale da dove si e' adesso
+  const reachable = (lat: number) =>
+    Math.abs(lat - cur) < 0.05 || !segBlocked(a.x, a.z, a.x + rx * (lat - cur) + fx * 0.6, a.z + rz * (lat - cur) + fz * 0.6);
+  let best = NaN;
+  if (clear(pref, STEER_LOOK)) best = pref;
+  else {
+    const prev = cur;
+    let bestCost = Infinity;
+    const n = Math.round(STEER_MAX / STEER_STEP) * 2;
+    for (let i = 1; i <= n; i++) {
+      const d = i * STEER_STEP;
+      if (d > bestCost) break;
+      for (const sg of [1, -1]) {
+        const lat = pref + sg * d;
+        if (Math.abs(lat) > STEER_MAX) continue;
+        // vicino alla corsia, e senza cambiare lato a ogni frame
+        const cost = d + 0.5 * Math.abs(lat - prev);
+        if (cost >= bestCost) continue;
+        if (clear(lat, STEER_LOOK) && reachable(lat)) {
+          best = lat;
+          bestCost = cost;
+        }
+      }
+    }
+  }
+  a.steer = Number.isFinite(best) ? best : pref;
+  // avanti solo quanto e' libero dove si e' adesso
+  if (clear(cur, STEER_LOOK)) return 1;
+  if (clear(cur, 1.2)) return 0.85;
+  if (clear(cur, 0.6)) return 0.25;
+  return 0;
 }
 
 // Un passo di simulazione per tutti: pochi conti per agente.
@@ -398,6 +547,17 @@ export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdOb
     } else if (a.len > 0.01) {
       const v = a.speed * (speedK.get(a) ?? 1);
       a.curSpeed = v;
+      // strada chiusa del tutto (niente spazio di lato): dopo un po' ci si
+      // guarda intorno e si torna indietro, invece di restare li' con la
+      // coda dietro
+      a.stuckT = v < 0.05 && a.blockedBy === 'ostacolo davanti' ? a.stuckT + dt : 0;
+      if (a.stuckT > STUCK_TURN_S) {
+        a.stuckT = 0;
+        a.dir = a.dir >= 0 ? -1 : 1;
+        a.activity = 'look';
+        a.idleClip = LOOK_CLIP;
+        a.pause = rand(LOOK_S[0], LOOK_S[1]);
+      }
       a.t += (a.dir * v * dt) / a.len;
       if (a.t >= 1 || a.t <= 0) {
         a.t = Math.min(1, Math.max(0, a.t));
@@ -435,12 +595,14 @@ export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdOb
     }
     const nx = a.x1 + (a.x2 - a.x1) * a.t;
     const nz = a.z1 + (a.z2 - a.z1) * a.t;
-    // dove guarda: verso la meta del tratto
     forwardOf(a, _fa);
-    if (a.len > 0.01) a.yaw = Math.atan2(_fa.x, _fa.z);
+    const fwdV = a.curSpeed;
+    const pox = a.ox;
+    const poz = a.oz;
+    const steering = Number.isFinite(a.steer);
     // corsia (dalla propria destra) + passo di lato, avvicinati piano
     if (a.len > 0.01) {
-      const off = a.fear > 0 ? 0 : a.lane + a.avoid;
+      const off = steering ? a.steer : a.fear > 0 ? 0 : a.lane + a.avoid;
       let tx = -_fa.z * off;
       let tz = _fa.x * off;
       if (a.activity === 'linger' && a.pause > 0) {
@@ -457,7 +619,7 @@ export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdOb
       const dx = tx - a.ox;
       const dz = tz - a.oz;
       const d = Math.hypot(dx, dz);
-      const step = LANE_EASE * dt;
+      const step = (steering ? STEER_EASE : LANE_EASE) * dt;
       if (d <= step) {
         a.ox = tx;
         a.oz = tz;
@@ -468,6 +630,36 @@ export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdOb
     }
     a.x = nx + a.ox;
     a.z = nz + a.oz;
+    // mai dentro muri, pali o auto ferme (rete di sicurezza)
+    if (a.dist < AVOID_DIST) {
+      const p = pushOutOfStatics(a.x, a.z, BODY_R);
+      let qx = p.x;
+      let qz = p.z;
+      for (const o of obstacles) if (!o.moving && o.box) [qx, qz] = pushOutOfBox(qx, qz, o);
+      if (qx !== a.x || qz !== a.z) {
+        a.ox += qx - a.x;
+        a.oz += qz - a.z;
+        a.x = qx;
+        a.z = qz;
+      }
+    }
+    // velocita' vera (avanti + di lato) e sguardo dove si va davvero
+    if (dt > 0 && a.len > 0.01) {
+      const lvx = (a.ox - pox) / dt;
+      const lvz = (a.oz - poz) / dt;
+      const vx = _fa.x * fwdV + lvx;
+      const vz = _fa.z * fwdV + lvz;
+      const sp = Math.hypot(vx, vz);
+      if (sp > fwdV + 0.05 && a.fear <= 0) {
+        a.gait = (a.gait + (dt * (sp - fwdV)) / ((WALK_BASE_SPEED[a.walkClip] ?? 0.75) * CROWD_GAIT_CYCLE_S)) % 1;
+      }
+      a.curSpeed = Math.min(sp, Math.max(fwdV, 1.6));
+      const want = sp > 0.15 ? Math.atan2(vx, vz) : Math.atan2(_fa.x, _fa.z);
+      let dy = want - a.yaw;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      const maxTurn = YAW_RATE * dt;
+      a.yaw += Math.abs(dy) <= maxTurn ? dy : Math.sign(dy) * maxTurn;
+    }
     // la quota solo per chi si vede (il terreno costa qualche conto)
     if (a.dist < CROWD_DRAW_DIST) a.y = getTerrainHeight(a.x, a.z) + getRoadOffset(a.x, a.z);
   }
@@ -503,7 +695,10 @@ export function assignCrowdSlots() {
       crowdSlots[s] = null;
     }
   }
-  const candidates = crowdAgents.filter((a) => !a.gone && a.slot < 0 && a.dist < CROWD_ASSIGN_DIST).sort((a, b) => a.dist - b.dist);
+  // prima i colpiti in attesa di un corpo (a qualunque distanza), poi i piu' vicini
+  const candidates = crowdAgents
+    .filter((a) => !a.gone && a.slot < 0 && (a.pendingHit || a.dist < CROWD_ASSIGN_DIST))
+    .sort((a, b) => (a.pendingHit ? 0 : 1) - (b.pendingHit ? 0 : 1) || a.dist - b.dist);
   for (const c of candidates) {
     let free = crowdSlots.indexOf(null);
     if (free < 0) {
@@ -511,9 +706,10 @@ export function assignCrowdSlots() {
       let worst = -1;
       for (let s = 0; s < crowdSlots.length; s++) {
         const a = crowdSlots[s];
-        if (a && !a.gone && (worst < 0 || a.dist > crowdSlots[worst]!.dist)) worst = s;
+        if (a && !a.gone && !a.pendingHit && (worst < 0 || a.dist > crowdSlots[worst]!.dist)) worst = s;
       }
-      if (worst < 0 || crowdSlots[worst]!.dist < c.dist + 6) break;
+      if (worst < 0) break;
+      if (!c.pendingHit && crowdSlots[worst]!.dist < c.dist + 6) break;
       crowdSlots[worst]!.slot = -1;
       crowdSlots[worst] = null;
       free = worst;
@@ -537,7 +733,7 @@ export function reviveCrowdAgent(a: CrowdAgent) {
 for (const a of crowdAgents) {
   if (Math.random() < LINGER_START && onSidewalk(a)) {
     a.activity = 'linger';
-    a.idleClip = LINGER_CLIPS[Math.floor(Math.random() * LINGER_CLIPS.length)];
+    a.idleClip = pickLingerClip();
     a.pause = rand(2, LINGER_S[1]);
   } else a.idleClip = 'Idle_A';
 }
@@ -636,9 +832,9 @@ export function promoteCrowdAgent(a: CrowdAgent, hit: CrowdPendingHit) {
     let worst = -1;
     for (let s = 0; s < crowdSlots.length; s++) {
       const b = crowdSlots[s];
-      if (b && !b.gone && (worst < 0 || b.dist > crowdSlots[worst]!.dist)) worst = s;
+      if (b && !b.gone && !b.pendingHit && (worst < 0 || b.dist > crowdSlots[worst]!.dist)) worst = s;
     }
-    if (worst < 0) return; // tutti impegnati: il colpo si perde
+    if (worst < 0) return; // tutti impegnati: il colpo aspetta il primo corpo libero (assignCrowdSlots)
     crowdSlots[worst]!.slot = -1;
     free = worst;
   }
@@ -663,6 +859,13 @@ export function describeCrowdAgent(a: CrowdAgent): [string, string][] {
     ['clip di camminata', a.walkClip],
     ['clip da fermo', a.idleClip],
     ['tratto', `${(a.t * 100).toFixed(0)}% di ${a.len.toFixed(1)} m, verso ${a.dir > 0 ? 'avanti' : 'indietro'}`],
+    ['rallentato da', a.blockedBy || '-'],
+    [
+      'di lato',
+      Number.isFinite(a.steer) && Math.abs(a.steer - (a.lane + a.avoid)) > 0.05
+        ? `${a.steer.toFixed(2)} m (aggira un ostacolo)`
+        : 'corsia normale',
+    ],
   ];
 }
 

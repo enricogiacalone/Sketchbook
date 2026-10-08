@@ -40,6 +40,7 @@ import WelcomeScreen from './components/UI/WelcomeScreen';
 import { useStore } from './store';
 import Ocean from './components/Environment/Ocean';
 import Minimap from './components/UI/Minimap';
+import GameFreeze from './components/GameFreeze';
 const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 
 const App: React.FC = () => {
@@ -47,11 +48,12 @@ const App: React.FC = () => {
   // "Laboratorio cervello mosca" (WelcomeScreen): scena a parte, vedi src/ts/flyLab
   const [labMode, setLabMode] = useState(false);
   const [userName, setUserName] = useState('');
-  const { isLoading, setIsLoading, isPaused, setPaused, testScene, showGameplayHud } = useStore(
+  const { isLoading, setIsLoading, isPaused, physicsPaused, setPaused, testScene, showGameplayHud } = useStore(
     useShallow((state) => ({
       isLoading: state.isLoading,
       setIsLoading: state.setIsLoading,
       isPaused: state.isPaused,
+      physicsPaused: state.physicsPaused,
       setPaused: state.setPaused,
       testScene: state.testScene,
       showGameplayHud: state.showGameplayHud,
@@ -183,6 +185,7 @@ const App: React.FC = () => {
           }
         }}
       >
+        <GameFreeze />
         {isJoined && (
           <Suspense fallback={null}>
             <Sky />
@@ -235,7 +238,7 @@ const App: React.FC = () => {
               // isPaused's comment in store.ts for why Player.tsx/Car.tsx/
               // Airplane.tsx/Helicopter.tsx also each need their own
               // explicit pause check on top of this.
-              paused={isPaused}
+              paused={isPaused || physicsPaused}
             >
               {/* "impostare la vista in modo da avere dei test empirici" --
                   espone world/rapier/step su window per il pausa+passo-

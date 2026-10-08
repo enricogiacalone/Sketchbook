@@ -123,7 +123,7 @@ const Airplane: React.FC<AirplaneProps> = ({ position = [-10, 5, -10], id = 'air
       isVehicleTransitioning: state.isVehicleTransitioning,
       updateEntity: state.updateEntity,
       setPlayerInfo: state.setPlayerInfo,
-      isPaused: state.isPaused,
+      isPaused: state.isPaused || state.physicsPaused,
     }))
   );
 

@@ -54,7 +54,7 @@ const CombatArenaGUI: React.FC = () => {
       ragdollAttivo: useStore.getState().euphoriaRagdollEnabled,
       hudGioco: useStore.getState().showGameplayHud,
       ragdollPassivo: useStore.getState().ragdollPassive,
-      fisicaInPausa: useStore.getState().isPaused,
+      fisicaInPausa: useStore.getState().physicsPaused,
       tPose: useStore.getState().tPoseDebug,
       cameraOrtogonale: useStore.getState().debugOrthoCamera,
     };
@@ -154,7 +154,7 @@ const CombatArenaGUI: React.FC = () => {
     folder
       .add(settings, 'fisicaInPausa')
       .name('Pausa fisica')
-      .onChange((active: boolean) => useStore.getState().setPaused(active));
+      .onChange((active: boolean) => useStore.getState().setPhysicsPaused(active));
 
     folder
       .add({ passoSingolo: () => (window as any).__physicsDebug?.step() }, 'passoSingolo')

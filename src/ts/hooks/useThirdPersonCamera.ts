@@ -117,25 +117,17 @@ const shouldIgnoreForCollision = (obj: THREE.Object3D, targetObj: THREE.Object3D
 
 export const useThirdPersonCamera = () => {
   const { camera, gl, scene } = useThree();
-  const {
-    currentControllable,
-    controlledEntityId,
-    togglePause,
-    cameraPlayerRadius,
-    cameraVehicleRadius,
-    cameraFootTargetY,
-    cameraVehicleTargetY,
-  } = useStore(
-    useShallow((state) => ({
-      currentControllable: state.currentControllable,
-      controlledEntityId: state.controlledEntityId,
-      togglePause: state.togglePause,
-      cameraPlayerRadius: state.cameraPlayerRadius,
-      cameraVehicleRadius: state.cameraVehicleRadius,
-      cameraFootTargetY: state.cameraFootTargetY,
-      cameraVehicleTargetY: state.cameraVehicleTargetY,
-    }))
-  );
+  const { currentControllable, controlledEntityId, cameraPlayerRadius, cameraVehicleRadius, cameraFootTargetY, cameraVehicleTargetY } =
+    useStore(
+      useShallow((state) => ({
+        currentControllable: state.currentControllable,
+        controlledEntityId: state.controlledEntityId,
+        cameraPlayerRadius: state.cameraPlayerRadius,
+        cameraVehicleRadius: state.cameraVehicleRadius,
+        cameraFootTargetY: state.cameraFootTargetY,
+        cameraVehicleTargetY: state.cameraVehicleTargetY,
+      }))
+    );
   const input = useInput();
 
   const theta = useRef(0);
@@ -244,9 +236,9 @@ export const useThirdPersonCamera = () => {
     if (useStore.getState().debugOrthoCamera) return;
     if (isNaN(delta) || delta <= 0 || delta > 0.5) delta = 0.016;
 
-    if (input.consumeJustPressed('pause')) {
-      togglePause();
-    }
+    // Start/Esc: la pausa la gestisce GameFreeze.tsx (deve funzionare anche
+    // a gioco fermo, quando questo useFrame non gira); qui si scarta solo
+    input.consumeJustPressed('pause');
     if (input.consumeJustPressed('camera')) {
       zoomIndex.current = (zoomIndex.current + 1) % ZOOM_LEVELS.length;
       targetRadius.current = ZOOM_LEVELS[zoomIndex.current];

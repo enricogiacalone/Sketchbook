@@ -85,6 +85,11 @@ interface GameState {
   // the world is stepping, so anything still calling those every frame
   // would keep moving things even while "paused".
   isPaused: boolean;
+  // "pausa deve mettere tutto in pausa": isPaused ora ferma TUTTO (anche il
+  // ciclo dei frame, GameFreeze.tsx). La pausa dei soli strumenti di debug
+  // (pannello combattimento / banco ragdoll: fisica ferma + passo singolo,
+  // mentre la camera e il resto girano) e' questa, separata.
+  physicsPaused: boolean;
   // "il personaggio si trasforma nel drone ... ha le stesse funzioni di
   // volo" (droneWorld) -- global so both Player.tsx (which drives it) and
   // useThirdPersonCamera.ts (which needs to know whether the mouse should
@@ -341,6 +346,7 @@ interface GameState {
   togglePause: () => void;
   setIsDrone: (isDrone: boolean) => void;
   setPaused: (paused: boolean) => void;
+  setPhysicsPaused: (paused: boolean) => void;
   setIsLoading: (loading: boolean) => void;
   setIsCrosshairVisible: (visible: boolean) => void;
   setPlayerInfo: (pos: [number, number, number], yaw: number) => void;
@@ -452,6 +458,7 @@ export const useStore = create<GameState>((set) => ({
   transitioningDoorName: null,
   openVehicleDoors: {},
   isPaused: false,
+  physicsPaused: false,
   isDrone: false,
   isLoading: false, // Set to false initially to show WelcomeScreen
   isCrosshairVisible: false,
@@ -549,6 +556,7 @@ export const useStore = create<GameState>((set) => ({
   // Separate from togglePause: the tab-hidden auto-pause always wants to
   // force pause ON, never flip an already-paused game back to running.
   setPaused: (paused) => set({ isPaused: paused }),
+  setPhysicsPaused: (paused) => set({ physicsPaused: paused }),
   setIsLoading: (loading) => set({ isLoading: loading }),
   setIsCrosshairVisible: (visible) => set({ isCrosshairVisible: visible }),
   setPlayerInfo: (pos, yaw) => set({ playerPos: pos, playerYaw: yaw }),

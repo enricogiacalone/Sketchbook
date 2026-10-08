@@ -10,6 +10,7 @@ import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { vehicleBodyHandles, farCars } from './vehicleRegistry';
+import ExhaustSmoke from './ExhaustSmoke';
 import { MANNEQUIN_URL, MANNEQUIN_BASE_ANIMS_URL } from '../city/useMannequinActor';
 import { remoteDrivenCars, isRemoteDriven } from '../multiplayer/remoteVehicles';
 import { simDebug } from '../../debug/simDebug';
@@ -388,7 +389,7 @@ const Car: React.FC<CarProps> = ({
       openVehicleDoors: state.openVehicleDoors,
       updateEntity: state.updateEntity,
       setPlayerInfo: state.setPlayerInfo,
-      isPaused: state.isPaused,
+      isPaused: state.isPaused || state.physicsPaused,
     }))
   );
 
@@ -398,6 +399,18 @@ const Car: React.FC<CarProps> = ({
   // render's callback, so reading this same variable inside useFrame below
   // is exactly as fresh as recomputing it there every frame would be.
   const humanIsDriving = currentControllable === 'car' && controlledEntityId === id && controlledSeatType === 'driver';
+  // due tubi di scarico in fondo al paraurti posteriore (scatola bassa di
+  // car.glb), un po' sotto la sua meta' altezza
+  const exhaustPipes = useMemo<[number, number, number][]>(() => {
+    const b = CHASSIS_SHAPES[0];
+    const z = (b.position[2] - b.fullDimensions[2] / 2) * S - 0.12;
+    const y = (b.position[1] - b.fullDimensions[1] * 0.3) * S;
+    const x = b.fullDimensions[0] * 0.3 * S;
+    return [
+      [x, y, z],
+      [-x, y, z],
+    ];
+  }, [S]);
 
   // AI patrol state (see the useFrame block below) -- only ever advanced
   // when patrolRoute is set; harmless idle refs otherwise.
@@ -1257,6 +1270,8 @@ const Car: React.FC<CarProps> = ({
         />
       ))}
       <primitive object={clonedScene} scale={S} />
+      {/* fumo dello scarico (ExhaustSmoke.tsx): solo a motore acceso */}
+      {(humanIsDriving || (!!patrolRoute && patrolRoute.length >= 2)) && <ExhaustSmoke pipes={exhaustPipes} />}
 
       {/* Headlights -- conditionally mounted (see the big comment above):
           only exist in the scene graph at all while `headlightsOn`, so a

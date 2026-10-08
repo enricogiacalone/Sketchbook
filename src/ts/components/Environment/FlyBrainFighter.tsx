@@ -149,7 +149,7 @@ const FlyBrainFighter: React.FC = () => {
       createSim(S.task);
     }
     const sim = simRef.current;
-    if (!sim || useStore.getState().isPaused) return;
+    if (!sim || useStore.getState().isPaused || useStore.getState().physicsPaused) return;
     sim.acc += Math.min(delta, 0.1);
     sim.age += Math.min(delta, 0.1);
 

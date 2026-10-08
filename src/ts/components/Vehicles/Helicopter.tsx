@@ -101,7 +101,7 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
       transitioningDoorName: state.transitioningDoorName,
       updateEntity: state.updateEntity,
       setPlayerInfo: state.setPlayerInfo,
-      isPaused: state.isPaused,
+      isPaused: state.isPaused || state.physicsPaused,
     }))
   );
 

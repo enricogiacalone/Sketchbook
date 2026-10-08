@@ -376,16 +376,26 @@ export function getBuildingDetails(index: number): BuildingDetails {
     const annexW = width * (0.35 + Math.random() * 0.15);
     const annexD = depth * (0.35 + Math.random() * 0.15);
     const annexH = height * (0.3 + Math.random() * 0.3);
-    const annexCorner = Math.floor(Math.random() * 4);
-    const asx = annexCorner % 2 === 0 ? 1 : -1;
-    const asz = annexCorner < 2 ? 1 : -1;
-    annex = {
-      w: annexW,
-      d: annexD,
-      h: annexH,
-      ox: asx * (width / 2 + annexW / 2 - 0.5),
-      oz: asz * (depth / 2 + annexD / 2 - 0.5),
-    };
+    const firstCorner = Math.floor(Math.random() * 4);
+    // l'annesso sporge dall'impronta del palazzo: prima non si guardava
+    // dove, e quasi sempre finiva su marciapiede e strada (un blocco in
+    // mezzo alla via per auto e passanti) o dentro un altro palazzo. Si
+    // prova ogni angolo; se nessuno sta libero, niente annesso.
+    for (let c = 0; c < 4 && !annex; c++) {
+      const annexCorner = (firstCorner + c) % 4;
+      const asx = annexCorner % 2 === 0 ? 1 : -1;
+      const asz = annexCorner < 2 ? 1 : -1;
+      const ox = asx * (width / 2 + annexW / 2 - 0.5);
+      const oz = asz * (depth / 2 + annexD / 2 - 0.5);
+      const ax = b.x + ox;
+      const az = b.z + oz;
+      if (footprintOverlapsRoad(ax, az, annexW, annexD)) continue;
+      const hitsOther = CITY_LAYOUT.buildings.some(
+        (o, j) =>
+          j !== index && Math.abs(o.x - ax) < (o.w + annexW) / 2 + BUILDING_GAP && Math.abs(o.z - az) < (o.d + annexD) / 2 + BUILDING_GAP
+      );
+      if (!hitsOther) annex = { w: annexW, d: annexD, h: annexH, ox, oz };
+    }
   }
 
   // Real per-floor windows, punched into the two long faces (+/-Z) and

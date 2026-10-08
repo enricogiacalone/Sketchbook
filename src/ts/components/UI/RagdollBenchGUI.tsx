@@ -122,10 +122,10 @@ const RagdollBenchGUI: React.FC = () => {
         setBench({ testHitSpeed: v });
       },
       get pausa() {
-        return st().isPaused;
+        return st().physicsPaused;
       },
       set pausa(v: boolean) {
-        st().setPaused(v);
+        st().setPhysicsPaused(v);
       },
       get cameraOrto() {
         return st().debugOrthoCamera;

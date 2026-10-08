@@ -155,7 +155,7 @@ const Drone: React.FC = () => {
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
-      isPaused: state.isPaused,
+      isPaused: state.isPaused || state.physicsPaused,
       playerPos: state.playerPos,
       playerYaw: state.playerYaw,
       setIsDrone: state.setIsDrone,
