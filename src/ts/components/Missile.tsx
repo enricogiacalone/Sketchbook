@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { useStore } from '../store';
 import { CollisionGroups } from '../enums/CollisionGroups';
 import Explosion from './Environment/Explosion';
+import { explodeAt } from '../lib/explosions';
 
 // "stessa ... sparatoria" -- droneWorld's secondary-fire "missile"
 // (src/controls/index.js: a homing sphere toward selectNearestTargetInSight(),
@@ -49,6 +50,8 @@ const Missile: React.FC<MissileProps> = ({ id, position, initialVelocity, target
     if (exploded) return;
     const t = ref.current?.translation();
     if (t) explodePos.current = [t.x, t.y, t.z];
+    // danno, KO e spinta per chi e' vicino (lib/explosions.ts)
+    explodeAt(explodePos.current, { radius: 5, power: 1, damage: 45, source: 'missile' });
     setExploded(true);
   };
 

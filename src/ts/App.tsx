@@ -39,8 +39,6 @@ import WeaponWheel from './components/UI/WeaponWheel';
 import WelcomeScreen from './components/UI/WelcomeScreen';
 import { useStore } from './store';
 import Ocean from './components/Environment/Ocean';
-import { motionBricksManager } from './lib/motionBricksRuntime';
-import MotionBricksHUD from './components/UI/MotionBricksHUD';
 import Minimap from './components/UI/Minimap';
 const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 
@@ -122,22 +120,6 @@ const App: React.FC = () => {
     handleJoin(autoJoinName, 'keyboard');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoJoinName]);
-
-  useEffect(() => {
-    motionBricksManager.initialize().then(() => {
-      motionBricksManager.setStyle('victory');
-      const testFrame = motionBricksManager.planMotion({
-        style: 'victory',
-        movementDirection: [0, 0, 1],
-        facingDirection: [0, 0, 1],
-        targetSpeed: 1.0,
-      });
-      console.log('[MotionBricks Test] Live test plan result:', testFrame);
-    });
-    return () => {
-      motionBricksManager.dispose();
-    };
-  }, []);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -298,7 +280,6 @@ const App: React.FC = () => {
       <RagdollBenchGUI />
       <WeaponHUD />
       <RagdollBenchOverlay />
-      {isJoined && <MotionBricksHUD />}
 
       {/* UI overlays */}
       {isJoined && showGameplayHud && (

@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { useStore } from '../store';
 
 const STICK_DEADZONE = 0.25;
 
@@ -163,6 +164,8 @@ export const useInput = () => {
     };
 
     const handleMouseDown = (e: MouseEvent) => {
+        // ispettore NPC acceso (UI/NpcInspector.tsx): il clic sceglie, non colpisce
+        if (useStore.getState().npcInspector) return;
         const action = e.button === 0 ? 'primary' : (e.button === 2 ? 'secondary' : null);
         if (action) {
             keyboardActions.current[action] = true;

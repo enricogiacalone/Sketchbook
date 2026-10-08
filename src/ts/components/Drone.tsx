@@ -16,6 +16,7 @@ import { emitShotFx } from './Environment/weapons/weaponFx';
 import { getTerrainHeight } from './Environment/Terrain';
 import { getRoadOffset } from './Environment/Road';
 import Explosion from './Environment/Explosion';
+import { explodeAt } from '../lib/explosions';
 
 // "voglio che il drone in realta' e' il compagno del player e gli
 // fluttua attorno quando premo b ne prendo il controllo" -- entity sua,
@@ -80,6 +81,8 @@ const LOCK_DECAY_PER_S = 1.2;
 const MISSILE_SPEED = 600 * DW; // m/s (10 unita' a frame)
 const MISSILE_HIT = 10 * DW; // m
 const MISSILE_DAMAGE = 25;
+// raggio dell'esplosione del missile (m)
+const MISSILE_BLAST_RADIUS = 5;
 const MISSILE_LIFE = 5; // s
 const SHAKE = 1 * DW; // scuotimento camera mentre si spara (±0.5 unita')
 const TARGET_CHEST_Y = 1.2;
@@ -396,13 +399,9 @@ const Drone: React.FC = () => {
         if (dist < MISSILE_HIT || m.target.isDead) {
           addBoom(m.pos, 1);
           playAt(SOUND_URLS.explosions[Math.floor(Math.random() * 2)], m.pos, 40, 1);
-          if (!m.target.isDead) {
-            _v1.copy(_v2).normalize();
-            _v1.y = Math.max(_v1.y, 0.5);
-            _v1.normalize();
-            damage(m.target, MISSILE_DAMAGE, 'Torso', _v1.clone(), 30, _v3.clone());
-            if (!m.target.isDead) m.target.knockdown = { dirX: _v1.x, dirZ: _v1.z, speed: 6 };
-          }
+          // danno, KO o morte e spinta per tutti quelli vicini, non solo
+          // il bersaglio (lib/explosions.ts)
+          explodeAt(m.pos, { radius: MISSILE_BLAST_RADIUS, power: 1, damage: MISSILE_DAMAGE * 2, source: 'missile del drone' });
         }
         ms.splice(i, 1);
         missileMeshes.current.delete(m.id);

@@ -14,7 +14,8 @@ import WeaponWheelController from '../UI/WeaponWheelController';
 import { FighterData, AnimCatalog } from './SquadArenaTypes';
 import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
-import { locomotionTuning as LT, RUN_CLIP, timeScaleFor, speedFor, strafeClipFor } from './locomotion';
+import { locomotionTuning as LT, RUN_CLIP, timeScaleFor, speedFor, strafeClipFor, CLIP_GROUND_SPEED } from './locomotion';
+import { LEFT_CONTACT, newLocoState, stepLoco, locoWeights } from './gtaLocomotion';
 import { useRapier } from '@react-three/rapier';
 import { usePistolModel, useGunModel, RIFLE_SPEC, type GunModelApi } from './weapons/usePistolModel';
 import { useKnifeModel } from './weapons/useKnifeModel';
@@ -26,6 +27,9 @@ import { K, KIMODO_ANIMS_URL } from '../../lib/kimodo';
 import { crowdPanic } from '../city/crowdSim';
 import { castShot, spreadDirection } from './weapons/hitscan';
 import { getShootableCollider, applyFighterHit } from './weapons/shootableRegistry';
+import { registerFighterBlast, applyKnockdownBlast } from '../../lib/explosions';
+import { raycastProxies } from '../../lib/shotProxies';
+import { crowdAgents, promoteCrowdAgent } from '../city/crowdSim';
 import { emitShotFx, type ShotSurface } from './weapons/weaponFx';
 import {
   PISTOL_MAG_SIZE,
@@ -454,6 +458,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   const inCarBody = () => vehRef.current.mode === 'entering' || vehRef.current.mode === 'driving' || vehRef.current.mode === 'exiting';
   const deadForRef = useRef(0);
   const maxHpRef = useRef(data.hp);
+  // locomozione alla GTA IV (gtaLocomotion.ts): velocita' con inerzia,
+  // curve, inclinazione, e il "mixer" di fermo/camminata/corsa in fase
+  const locoRef = useRef(newLocoState());
+  const locoBlendRef = useRef<{ active: boolean; clips: string[]; blendIn: number }>({ active: false, clips: [], blendIn: 0 });
   // stati Kimodo (vedi INJURED_HP e seguenti)
   const sprintTimeRef = useRef(0);
   const breathLeftRef = useRef(0);
@@ -655,6 +663,21 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   });
   React.useEffect(() => () => clearCameraFocus(entityName), [entityName]);
   // colpo forte: KO fisico (vedi ragdoll/knockdown.ts)
+  // esplosioni (lib/explosions.ts): danno, KO o morte con la spinta; non
+  // dentro un veicolo o pilotando il drone
+  React.useEffect(
+    () =>
+      registerFighterBlast(data, ragdoll, () => kd.isDown(), {
+        present: () => {
+          const c = useStore.getState().currentControllable;
+          return c === 'player' || c === 'combatSoldier';
+        },
+        onDamage: (n) => useStore.getState().takeDamage(n),
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data]
+  );
+
   const startKnockdown = (dirX: number, dirZ: number, speed: number, up = 0.3) => {
     if (kd.isDown() || data.isDead) return;
     if (!kd.start(dirX, dirZ, speed, up)) return;
@@ -714,9 +737,32 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     };
   }, [clipsMap, ragdoll, camera]);
 
+  // fine del mescolamento della locomozione (qualunque altra animazione):
+  // le clip del passo si dissolvono, quella che resta (se e' tra loro) va a
+  // peso pieno
+  const endLocoBlend = (target: string, duration: number) => {
+    const lb = locoBlendRef.current;
+    if (!lb.active) return;
+    lb.active = false;
+    for (const c of lb.clips) {
+      const a = actions[c];
+      if (!a) continue;
+      if (c === target) {
+        a.stopFading();
+        a.setEffectiveTimeScale(1);
+        a.setEffectiveWeight(1);
+      } else a.fadeOut(duration);
+    }
+    clone.rotation.z = 0;
+    // un colpo, una schivata, la parata... fermano il passo
+    locoRef.current.speed = 0;
+    locoRef.current.lean = 0;
+  };
+
   const transitionToAnimation = (animName: string, duration = 0.15, shouldLoop = true, timeScale = 1.0, startAt = 0) => {
     const target = actions[animName] ? animName : animCatalog.idle;
     if (!target || !actions[target]) return 1.0;
+    endLocoBlend(target, duration);
 
     if (data.currentAnim === target) {
       actions[target].setEffectiveTimeScale(timeScale);
@@ -1055,6 +1101,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     const t0 = Math.max(0, _toAim.subVectors(_chest, _camPos).dot(_shotCamDir));
     _camPos.addScaledVector(_shotCamDir, t0);
     const camHit = castShot(world, rapier, _camPos, _shotCamDir, st.range, data.id);
+    // personaggi lontani senza fisica (sagome della folla, corpi parcheggiati):
+    // anche loro fermano la mira (lib/shotProxies.ts)
+    const camProxy = raycastProxies(_camPos, _shotCamDir, camHit.hit ? camHit.distance : st.range, data.id);
+    if (camProxy) camHit.point.copy(_camPos).addScaledVector(_shotCamDir, camProxy.distance);
 
     gun.getMuzzleWorld(_muzzle);
     _shotDir.subVectors(camHit.point, _muzzle);
@@ -1067,31 +1117,56 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
 
     let surface: ShotSurface = 'none';
     let decal = false;
-    if (hit.hit && hit.collider) {
+    // un personaggio colpito (dal raggio fisico o dalle forme a conti)
+    const hitFighter = (info: { ownerId: string; segment: string }, point: THREE.Vector3) => {
+      surface = 'body';
+      const seg = info.segment;
+      const target = opponents.find((o) => o.id === info.ownerId);
+      const head = seg === 'Head';
+      let kill = false;
+      if (target && !target.isDead) {
+        target.hp -= st.dmg[seg] ?? st.dmgLimb;
+        if (target.hp <= 0) {
+          target.hp = 0;
+          target.isDead = true;
+          target.attackLock = 0;
+          kill = true;
+          scheduleCelebration(target);
+        } else {
+          target.triggerHit = head ? 'Hit_Head' : 'Hit_Chest';
+          target.hitReactionHandled = true;
+          target.hitFromX = _muzzle.x;
+          target.hitFromZ = _muzzle.z;
+        }
+        useStore.getState().setPlayerWeaponState({ pistolHitAt: performance.now(), pistolHitKill: kill, pistolHitHead: head });
+      }
+      applyFighterHit(info.ownerId, seg, _shotDir, st.hitSpeed[seg] ?? st.hitSpeedLimb, point);
+    };
+    // prima del raggio fisico: personaggi lontani senza fisica
+    const proxy = raycastProxies(_muzzle, _shotDir, hit.hit ? hit.distance : st.range, data.id);
+    if (proxy) {
+      const point = _muzzle.clone().addScaledVector(_shotDir, proxy.distance);
+      if (proxy.crowdAgentId !== undefined) {
+        // sagoma della folla: prende subito un corpo vero e il colpo
+        surface = 'body';
+        const agent = crowdAgents.find((a) => a.id === proxy.crowdAgentId);
+        if (agent) {
+          promoteCrowdAgent(agent, {
+            seg: proxy.segment,
+            dir: [_shotDir.x, _shotDir.y, _shotDir.z],
+            point: [point.x, point.y, point.z],
+            speed: st.hitSpeed[proxy.segment] ?? st.hitSpeedLimb,
+            damage: st.dmg[proxy.segment] ?? st.dmgLimb,
+          });
+          useStore
+            .getState()
+            .setPlayerWeaponState({ pistolHitAt: performance.now(), pistolHitKill: false, pistolHitHead: proxy.segment === 'Head' });
+        }
+      } else hitFighter(proxy, point);
+    } else if (hit.hit && hit.collider) {
       const info = getShootableCollider(hit.collider.handle);
       if (info) {
-        surface = 'body';
-        const seg = info.segment;
-        const target = opponents.find((o) => o.id === info.ownerId);
-        const head = seg === 'Head';
-        let kill = false;
-        if (target && !target.isDead) {
-          target.hp -= st.dmg[seg] ?? st.dmgLimb;
-          if (target.hp <= 0) {
-            target.hp = 0;
-            target.isDead = true;
-            target.attackLock = 0;
-            kill = true;
-            scheduleCelebration(target);
-          } else {
-            target.triggerHit = head ? 'Hit_Head' : 'Hit_Chest';
-            target.hitReactionHandled = true;
-            target.hitFromX = _muzzle.x;
-            target.hitFromZ = _muzzle.z;
-          }
-          useStore.getState().setPlayerWeaponState({ pistolHitAt: performance.now(), pistolHitKill: kill, pistolHitHead: head });
-        }
-        applyFighterHit(info.ownerId, seg, _shotDir, st.hitSpeed[seg] ?? st.hitSpeedLimb, hit.point);
+        hitFighter(info, hit.point);
       } else if (bagSolidHandle !== null && bagSolidHandle !== undefined && hit.collider.handle === bagSolidHandle) {
         surface = 'bag';
         bagRef?.current?.registerShot(hit.point, _shotDir);
@@ -1143,8 +1218,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
 
   useFrame((_state, delta) => {
     if (data.knockdown) {
-      const kdData = data.knockdown as any;
-      startKnockdown(kdData.dirX, kdData.dirZ, kdData.speed);
+      const kdData = data.knockdown;
+      startKnockdown(kdData.dirX, kdData.dirZ, kdData.speed, kdData.up);
+      // esplosione: ogni pezzo del corpo dal centro (anche da morto)
+      applyKnockdownBlast(kdData, ragdoll);
       data.knockdown = null;
     }
 
@@ -1319,6 +1396,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       // forza la ActiveRagdollDebugView a schermo.
       // getter: calcolato solo quando qualcuno lo legge (script di debug),
       // non a ogni frame.
+      // locomozione alla GTA IV (gtaLocomotion.ts): velocita', fase, inclinazione
+      get loco() {
+        return { ...locoRef.current, blend: locoBlendRef.current.active, anim: data.currentAnim, rot: data.rotation };
+      },
       get activeSegments() {
         return ragdoll.getActiveRagdollDebugSegments();
       },
@@ -1495,7 +1576,13 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       data.position.y = tr.feetY - groundY;
       // (rialzo da terra: il modello parte alzato, vedi useKnockdown)
       groupRef.current!.position.set(data.position.x, tr.feetY + getUpLift(), data.position.z);
-      groupRef.current!.rotation.y = data.rotation;
+      // tutta la rotazione, non solo .y: in auto il gruppo prende il
+      // quaternione del sedile, e per un'imbardata oltre i 90 gradi three la
+      // scompone in Euler XYZ come (±PI, PI - imbardata, ±PI). Scesi
+      // dall'auto x e z restavano a ±PI e ".y = data.rotation" girava il
+      // personaggio a specchio: guardava da una parte e camminava
+      // dall'altra (misurato: rotazione del gruppo (-PI, 1.72, -PI)).
+      groupRef.current!.rotation.set(0, data.rotation, 0);
     };
 
     // "nn voglio che usi distanze per fermarlo.. ogni parte del corpo
@@ -1664,7 +1751,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
                 vs.mode = 'none';
                 st.setIsVehicleTransitioning(false);
                 st.setCurrentControllable(footControllable, entityName);
-                groupRef.current!.quaternion.setFromAxisAngle(_worldUp, data.rotation);
+                groupRef.current!.rotation.set(0, data.rotation, 0);
                 const tr = travRef.current;
                 tr.mode = 'ground';
                 tr.feetY = _carTmp2.y;
@@ -2050,6 +2137,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // on-foot movement uses), or simply keep their current heading while
     // standing still. Aiming punches stays entirely the torso's job
     // either way (the camYaw/yawDiff block up top, unaffected by this).
+    // (la locomozione libera gira il corpo per conto suo, vedi sotto)
+    const rotBeforeFacing = data.rotation;
     let targetRotation: number | null = null;
     if (isGun()) {
       // Con la pistola il corpo guarda sempre dove guarda la camera
@@ -2234,32 +2323,105 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // --- Movement: camera-relative, same technique Player.tsx uses --
     // _forward/_right/_moveDir were already computed above (the dodge
     // block needs them too).
-    if (_moveDir.lengthSq() > 0.0001) {
-      _moveDir.normalize();
-      // a mani nude il corpo gira verso dove cammina, quindi clip in avanti;
-      // col lock-on (Ctrl) guarda il nemico e le gambe usano la clip della
-      // direzione (indietro / di lato) -- velocita' sempre quella della clip
-      let loco: { clip: string; speed: number; ts: number; running: boolean };
-      if (input.lockOn && _toOpponent.lengthSq() > 0.0001) {
-        loco = pickDirectionalLoco(input.shift, dirWalkTs(), '');
-      } else if (input.shift) {
-        loco = { clip: animCatalog.run, speed: LT.runSpeed, ts: timeScaleFor(animCatalog.run, LT.runSpeed), running: true };
-      } else if (data.hp < maxHpRef.current * INJURED_HP && actions[K.injuredWalk]) {
-        loco = { clip: K.injuredWalk, speed: INJURED_WALK_SPEED, ts: timeScaleFor(K.injuredWalk, INJURED_WALK_SPEED), running: false };
+    const hasDir = _moveDir.lengthSq() > 0.0001;
+    if (hasDir) _moveDir.normalize();
+    if (input.lockOn && _toOpponent.lengthSq() > 0.0001) {
+      // col lock-on (Ctrl) si guarda il nemico e le gambe usano la clip
+      // della direzione (indietro / di lato): movimento da combattimento,
+      // diretto, come prima
+      locoRef.current.speed = 0;
+      if (hasDir) {
+        const loco = pickDirectionalLoco(input.shift, dirWalkTs(), '');
+        resolveAndApplyMovement(_moveDir.x * loco.speed * delta * globalSpeed, _moveDir.z * loco.speed * delta * globalSpeed);
+        data.state = loco.running ? 'Corre' : 'Si muove';
+        transitionToAnimation(loco.clip, 0.15, true, loco.ts);
       } else {
-        loco = { clip: animCatalog.walk, speed: LT.walkSpeed, ts: timeScaleFor(animCatalog.walk, LT.walkSpeed), running: false };
+        data.state = idleState();
+        if (!kimodoIdle(delta * globalSpeed)) transitionToAnimation(idleName(), 0.2, true);
       }
-      // fiatone: secondi di corsa di fila (camminare li fa calare piano)
-      if (loco.running) sprintTimeRef.current += delta * globalSpeed;
-      else sprintTimeRef.current = Math.max(0, sprintTimeRef.current - delta * globalSpeed * 0.5);
+      applyTransform();
+      return;
+    }
+
+    // Movimento libero alla GTA IV (gtaLocomotion.ts): inerzia, curve a
+    // velocita' angolare limitata, si va dove si guarda.
+    const dtL = delta * globalSpeed;
+    const ls = locoRef.current;
+    const injured = data.hp < maxHpRef.current * INJURED_HP && !!actions[K.injuredWalk];
+    const walkClip = injured ? K.injuredWalk : animCatalog.walk;
+    const walkSpeed = injured ? INJURED_WALK_SPEED : LT.walkSpeed;
+    const runClip = injured ? walkClip : animCatalog.run;
+    const want = hasDir ? (input.shift && !injured ? LT.runSpeed : walkSpeed) : 0;
+    data.rotation = stepLoco(ls, rotBeforeFacing, hasDir ? Math.atan2(_moveDir.x, _moveDir.z) + Math.PI : null, want, LT.runSpeed, dtL);
+    const running = ls.speed > (walkSpeed + LT.runSpeed) / 2;
+    // fiatone: secondi di corsa di fila (camminare li fa calare piano)
+    if (running) sprintTimeRef.current += dtL;
+    else sprintTimeRef.current = Math.max(0, sprintTimeRef.current - dtL * 0.5);
+
+    if (ls.speed > 0.02 || hasDir) {
       breathLeftRef.current = 0;
       celebrateRef.current = { delay: 0, left: 0 };
-      resolveAndApplyMovement(_moveDir.x * loco.speed * delta * globalSpeed, _moveDir.z * loco.speed * delta * globalSpeed);
-      data.state = loco.running ? 'Corre' : 'Si muove';
-      transitionToAnimation(loco.clip, 0.15, true, loco.ts);
+      _bodyFwd.set(-Math.sin(data.rotation), 0, -Math.cos(data.rotation));
+      resolveAndApplyMovement(_bodyFwd.x * ls.speed * dtL, _bodyFwd.z * ls.speed * dtL);
+      data.state = ls.skidding ? 'Frena' : running ? 'Corre' : 'Si muove';
+
+      // fermo / camminata / corsa mescolati, piedi in fase: le due clip del
+      // passo vanno alla stessa fase del ciclo (appoggio sinistro allineato)
+      // e la cadenza e' quella che fa avanzare i piedi alla velocita' vera
+      const idleClip = idleName();
+      const clips = [walkClip, runClip, idleClip].filter((c, i, arr) => !!actions[c] && arr.indexOf(c) === i);
+      const lb = locoBlendRef.current;
+      if (!lb.active) {
+        // entrata: da quello che c'era (un colpo, un idle Kimodo...)
+        const prev = actions[data.currentAnim];
+        if (prev && !clips.includes(data.currentAnim)) prev.fadeOut(0.2);
+        lb.active = true;
+        lb.blendIn = 0;
+        for (const c of clips) {
+          const a = actions[c];
+          a.stopFading();
+          a.reset();
+          a.setLoop(THREE.LoopRepeat, Infinity);
+          a.setEffectiveWeight(0);
+          a.play();
+        }
+      }
+      lb.clips = clips;
+      lb.blendIn = Math.min(1, lb.blendIn + dtL / 0.2);
+      const w = locoWeights(ls.speed, walkSpeed, LT.runSpeed);
+      const wWalk = runClip === walkClip ? w.walk + w.run : w.walk;
+      const wRun = runClip === walkClip ? 0 : w.run;
+      const dW = clipsMap[walkClip]?.duration ?? 1;
+      const dR = clipsMap[runClip]?.duration ?? 1;
+      const gW = CLIP_GROUND_SPEED[walkClip] ?? walkSpeed / Math.max(0.1, timeScaleFor(walkClip, walkSpeed));
+      const gR = CLIP_GROUND_SPEED[runClip] ?? gW;
+      const moving = wWalk + wRun;
+      if (moving > 1e-3) {
+        // metri per ciclo del passo mescolato
+        const perCycle = (wWalk * gW * dW + wRun * gR * dR) / moving;
+        ls.phase = (ls.phase + (ls.speed / Math.max(0.05, perCycle)) * dtL) % 1;
+      }
+      const set = (c: string, weight: number, synced: boolean) => {
+        const a = actions[c];
+        if (!a) return;
+        if (!a.isRunning()) a.play();
+        a.setEffectiveWeight(weight * lb.blendIn);
+        if (synced) {
+          a.setEffectiveTimeScale(0);
+          a.time = ((((ls.phase + (LEFT_CONTACT[c] ?? 0)) % 1) + 1) % 1) * (clipsMap[c]?.duration ?? 1);
+        } else a.setEffectiveTimeScale(1);
+      };
+      if (runClip !== walkClip) set(runClip, wRun, true);
+      set(walkClip, wWalk, true);
+      if (idleClip !== walkClip && idleClip !== runClip) set(idleClip, w.idle, false);
+      // la clip "di riferimento" (chi legge data.currentAnim)
+      data.currentAnim = wRun > wWalk ? runClip : wWalk >= w.idle ? walkClip : idleClip;
+      // inclinazione nelle curve (rollio del modello intorno al suo avanti)
+      clone.rotation.z = -ls.lean;
     } else {
+      ls.lean = 0;
       data.state = idleState();
-      if (!kimodoIdle(delta * globalSpeed)) transitionToAnimation(idleName(), 0.2, true);
+      if (!kimodoIdle(dtL)) transitionToAnimation(idleName(), 0.2, true);
     }
 
     applyTransform();

@@ -16,6 +16,10 @@ import type { FighterData } from '../Environment/SquadArenaTypes';
 import { registerFighterHitHandler } from '../Environment/weapons/shootableRegistry';
 import { addCityOpponent, removeCityOpponent } from './cityActors';
 import { useStore } from '../../store';
+import { registerInspectable, mixerAnims } from '../../lib/npcInspect';
+import { registerFighterBlast, applyKnockdownBlast } from '../../lib/explosions';
+import { registerShotProxy } from '../../lib/shotProxies';
+import { HIT_SHAPES, rayVsVerticalCapsule } from './crowdSim';
 
 // "sostituisci i nemici della citta' con il nostro manichino.. basta
 // boxman": il corpo comune di passanti, nemici e poliziotti -- lo stesso
@@ -207,7 +211,9 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   const actionsRef = useRef<Record<string, THREE.AnimationAction>>({});
   const curRef = useRef<string | null>(null);
 
-  const play = (name: string, fade = 0.2, loop = true, timeScale = 1) => {
+  // startAt: da che punto della clip partire (s), per riprendere il passo
+  // di una sagoma della folla senza salti
+  const play = (name: string, fade = 0.2, loop = true, timeScale = 1, startAt?: number) => {
     const clip = clips[name];
     if (!clip) return;
     const acts = actionsRef.current;
@@ -217,6 +223,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     const prev = curRef.current ? acts[curRef.current] : null;
     if (prev && prev !== a) prev.fadeOut(fade);
     a.reset();
+    if (startAt !== undefined) a.time = startAt % clip.duration;
     a.setLoop(loop ? THREE.LoopRepeat : THREE.LoopOnce, loop ? Infinity : 1);
     a.clampWhenFinished = !loop;
     a.setEffectiveWeight(1);
@@ -344,7 +351,17 @@ export function useMannequinActor(opts: MannequinActorOptions) {
           if (!ragdoll.knockDown(vel.clone().normalize(), vel.length())) ragdoll.launchDeath(vel, seg, share);
         };
         const h = lastHitRef.current;
-        if (h) {
+        const kb = data.knockdown;
+        data.knockdown = null;
+        if (kb?.blast) {
+          // ucciso da un'esplosione: vola via dal centro, ogni pezzo per conto suo
+          _dir
+            .set(kb.dirX, kb.up ?? 0.5, kb.dirZ)
+            .normalize()
+            .multiplyScalar(kb.speed);
+          launch(_dir, 'Torso', 0.8);
+          applyKnockdownBlast(kb, ragdoll);
+        } else if (h) {
           _dir.copy(h.dir).multiplyScalar(Math.min(h.speed, 12));
           _dir.y = Math.max(_dir.y, 0.4);
           launch(_dir, h.seg);
@@ -367,7 +384,23 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     if (data.knockdown) {
       const k = data.knockdown;
       data.knockdown = null;
-      if (!startKO(k.dirX, k.dirZ, k.speed)) {
+      if (startKO(k.dirX, k.dirZ, k.speed, k.up)) {
+        applyKnockdownBlast(k, ragdoll);
+      } else if (k.blast) {
+        // esplosione senza ragdoll attiva (folla, lontano): vicino al
+        // centro si muore e si vola col rig della morte, altrimenti una
+        // spinta -- e niente "colpito" (non e' il giocatore ad averlo
+        // aggredito: chi e' intorno scappa, vedi explodeAt)
+        if (k.speed > 6) {
+          data.hp = 0;
+          data.isDead = true;
+          data.knockdown = k;
+          return null;
+        }
+        _dir.set(k.dirX, k.up ?? 0.4, k.dirZ).normalize();
+        ragdoll.pulseHit(_dir, 0.8, 'Torso');
+        return null;
+      } else {
         // senza ragdoll attiva: solo una spinta forte, come prima
         _dir.set(k.dirX, 0.4, k.dirZ).normalize();
         ragdoll.pulseHit(_dir, 0.8, 'Torso');
@@ -441,6 +474,11 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     farParkedRef.current = false;
     clone.visible = true;
     data.position.set(x, 0, z);
+    // via le azioni rimaste dal giro precedente (il mixer dormiva con i
+    // loro pesi a meta' dissolvenza): la prima clip parte netta, senza
+    // mescolarsi con la posa a T ("glitch" della folla: braccia aperte per
+    // un attimo quando un passante prende il corpo vero)
+    mixer.stopAllAction();
     curRef.current = null;
     if (opts.targetable !== false && !data.isDead) addCityOpponent(data);
   };
@@ -463,6 +501,94 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     curRef.current = null;
     if (opts.targetable !== false) addCityOpponent(data);
   };
+
+  // Ispettore NPC (tasto I): cosa sta facendo, scelto col clic
+  const inspectExtraRef = useRef<(() => [string, string][]) | null>(null);
+  const liveRef = useRef({ kd, ragdoll });
+  liveRef.current = { kd, ragdoll };
+  useEffect(
+    () =>
+      registerInspectable(id, {
+        where: (out) => {
+          if (dormantRef.current || !clone.visible) return false;
+          // a terra: dove sta il bacino
+          if ((liveRef.current.kd.isDown() || deadRef.current) && liveRef.current.ragdoll.getBoneWorldPosition('pelvis', _pelvisPos)) {
+            out.x = _pelvisPos.x;
+            out.y = _pelvisPos.y - 0.4;
+            out.z = _pelvisPos.z;
+            out.h = 0.8;
+            return true;
+          }
+          clone.getWorldPosition(_pelvisPos);
+          out.x = _pelvisPos.x;
+          out.y = _pelvisPos.y;
+          out.z = _pelvisPos.z;
+          out.h = 1.8;
+          return true;
+        },
+        info: () => {
+          const rows: [string, string][] = [];
+          const state = deadRef.current
+            ? `morto da ${deadForRef.current.toFixed(1)} s`
+            : liveRef.current.kd.isDown()
+              ? 'KO a terra (ragdoll)'
+              : getUpLeftRef.current > 0
+                ? `si rialza (${getUpLeftRef.current.toFixed(1)} s)`
+                : 'in piedi';
+          rows.push(['stato', state]);
+          rows.push(['clip scelta', curRef.current ?? '-']);
+          rows.push([
+            'dettaglio',
+            farParkedRef.current
+              ? 'lontano: animazione a 5 fps, niente fisica'
+              : rigOnRef.current
+                ? 'vicino, ragdoll attiva'
+                : 'vicino, senza ragdoll attiva',
+          ]);
+          rows.push(['vita', `${Math.max(0, data.hp).toFixed(0)} / ${maxHp.current}`]);
+          for (const r of inspectExtraRef.current?.() ?? []) rows.push(r);
+          return { title: `${opts.name} (${id})`, rows, anims: mixerAnims(mixer as any) };
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [id, clone, mixer]
+  );
+
+  // colpi da lontano (lib/shotProxies.ts): oltre FAR_DIST le capsule fisiche
+  // sono parcheggiate e il raggio fisico non lo vedrebbe piu'
+  useEffect(
+    () =>
+      registerShotProxy((o, d, maxDist) => {
+        if (!farParkedRef.current || dormantRef.current || deadRef.current) return null;
+        const px = data.position.x;
+        const pz = data.position.z;
+        const gy = groundAt(px, pz);
+        let best: { seg: string; t: number } | null = null;
+        for (const sh of HIT_SHAPES) {
+          const t = rayVsVerticalCapsule(o.x, o.y, o.z, d.x, d.y, d.z, px, pz, gy + sh.y0, gy + sh.y1, sh.r);
+          if (t > 0 && t <= maxDist && (!best || t < best.t)) best = { seg: sh.seg, t };
+        }
+        return best ? { ownerId: id, segment: best.seg, distance: best.t } : null;
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [id, data]
+  );
+
+  // esplosioni (lib/explosions.ts): danno, KO o morte con la spinta
+  useEffect(
+    () =>
+      registerFighterBlast(
+        data,
+        {
+          blast: (c, sp, r) => liveRef.current.ragdoll.blast(c, sp, r),
+          getBoneWorldPosition: (b, o) => liveRef.current.ragdoll.getBoneWorldPosition(b, o),
+        },
+        () => liveRef.current.kd.isDown() || getUpLeftRef.current > 0,
+        { present: () => !dormantRef.current }
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data]
+  );
 
   // Registro per il debug dev (con pulizia automatica per evitare memory leak)
   useEffect(() => {
@@ -490,6 +616,10 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     sleep,
     wake,
     setTint,
+    // righe in piu' per l'ispettore NPC (comportamento di chi usa il corpo)
+    setInspectExtra: (fn: (() => [string, string][]) | null) => {
+      inspectExtraRef.current = fn;
+    },
     isDormant: () => dormantRef.current,
     isDead: () => deadRef.current,
     deadFor: () => deadForRef.current,

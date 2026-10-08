@@ -5,6 +5,7 @@
 // la stessa cosa per tutti e due.
 import { useStore } from '../../store';
 import { KO_BENCH_KEYS } from '../Environment/ragdoll/ragdollBench';
+import { explodeAt } from '../../lib/explosions';
 
 interface PcsDebug {
   down: boolean;
@@ -58,8 +59,9 @@ export const KO_SCENARIOS: KoScenario[] = [
   {
     label: '5 Esplosione',
     run: (d) => {
+      // un'esplosione vera (lib/explosions.ts) 1.5 m davanti ai piedi
       const f = fwd(d.trav.rot);
-      d.knockDown(-f.x, -f.z, 13, 0.9);
+      explodeAt([d.posX + f.x * 1.5, d.trav.feetY + 0.3, d.posZ + f.z * 1.5], { radius: 6, power: 1, damage: 0, source: 'laboratorio KO' });
     },
   },
   {

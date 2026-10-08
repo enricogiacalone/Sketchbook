@@ -14,6 +14,7 @@ import { useStore } from '../../store';
 import { FighterData, TowerData, HealingItemData, CombatPropData, GameMode, AnimCatalog } from './SquadArenaTypes';
 import { locomotionTuning as LT, RUN_CLIP, timeScaleFor } from './locomotion';
 import { GETUP_CLIP } from './ragdoll/knockdown';
+import { registerFighterBlast, applyKnockdownBlast } from '../../lib/explosions';
 import { useKnockdown } from './ragdoll/useKnockdown';
 
 // Velocita' dell'IA in m/s (prima erano spostamenti per FRAME: andavano al
@@ -303,13 +304,19 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
   // (ragdoll/useKnockdown.ts) -- prima era una copia senza l'alzata del
   // rialzo (gomiti e mani nel pavimento) e con la dissolvenza in entrata
   const kd = useKnockdown(ragdoll, scene, clipsMap[GETUP_CLIP]);
-  const startKnockdown = (dirX: number, dirZ: number, speed: number) => {
+  const startKnockdown = (dirX: number, dirZ: number, speed: number, up = 0.3) => {
     if (!enableRagdoll || kd.isDown() || data.isDead) return;
-    if (!kd.start(dirX, dirZ, speed)) return;
+    if (!kd.start(dirX, dirZ, speed, up)) return;
     data.state = 'A terra';
     data.attackLock = 0;
     knockVelRef.current.set(0, 0, 0);
   };
+  // esplosioni (lib/explosions.ts)
+  React.useEffect(
+    () => registerFighterBlast(data, ragdoll, () => kd.isDown()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [data]
+  );
   useFrame((_state, delta) => {
     // Posa animata rimessa nelle ossa prima del mixer (vedi
     // restoreActiveAnimationPose in useRagdollActive.ts).
@@ -395,12 +402,18 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
       // above still plays underneath but only affects bones the ragdoll
       // rig doesn't cover (fingers etc.), see ragdollConfig.ts.
       if (enableRagdoll) ragdoll.activateDeath();
+      // morto da un'esplosione: il corpo vola dal centro
+      if (data.knockdown) {
+        if (enableRagdoll) applyKnockdownBlast(data.knockdown, ragdoll);
+        data.knockdown = null;
+      }
       applyTransform();
       return;
     }
 
     if (data.knockdown) {
-      startKnockdown(data.knockdown.dirX, data.knockdown.dirZ, data.knockdown.speed);
+      startKnockdown(data.knockdown.dirX, data.knockdown.dirZ, data.knockdown.speed, data.knockdown.up);
+      if (enableRagdoll) applyKnockdownBlast(data.knockdown, ragdoll);
       data.knockdown = null;
     }
     if (kd.isDown()) {

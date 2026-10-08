@@ -1,11 +1,9 @@
 import React, { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RigidBody, BallCollider, RapierRigidBody } from '@react-three/rapier';
-import * as THREE from 'three';
 import Explosion from './Explosion';
 import { useStore } from '../../store';
-import { damageFighter, applyFighterHit } from './weapons/shootableRegistry';
-import { DUEL_PLAYER_ID } from './DuelArena';
+import { explodeAt } from '../../lib/explosions';
 
 const Meteorite: React.FC<{ id: number, initialPosition: [number, number, number], initialVelocity: [number, number, number], onExplode: (id: number, pos: [number, number, number]) => void }> = ({ id, initialPosition, initialVelocity, onExplode }) => {
   const position = useRef(initialPosition);
@@ -79,47 +77,9 @@ const MeteoriteSpawner: React.FC = () => {
     const blastRadius = state.explosionRadius;
     setExplosions(prev => [...prev, { id: id, pos, scale }]);
 
-    const expPosVec = new THREE.Vector3(...pos);
-
-    // 1. Deal damage and apply powerful shockwave impulse/launch to player
-    const pPos = state.playerPos;
-    const dx = pPos[0] - pos[0];
-    const dy = pPos[1] - pos[1];
-    const dz = pPos[2] - pos[2];
-    const distPlayer = Math.sqrt(dx * dx + dy * dy + dz * dz);
-    if (distPlayer < blastRadius) {
-      const damage = Math.round((50 * scale) * (1 - distPlayer / blastRadius));
-      if (damage > 0) {
-        state.takeDamage(damage);
-        const damageDuel = (window as any).__damageDuelPlayer;
-        if (damageDuel) damageDuel(damage);
-      }
-      const hitDir = new THREE.Vector3(dx, Math.max(0.5, dy + 1.5), dz).normalize();
-      const force = (1 - distPlayer / blastRadius) * 80 * scale;
-      applyFighterHit(DUEL_PLAYER_ID, 'Torso', hitDir, force, expPosVec);
-    }
-
-    // 2. Deal damage and apply impulse to all nearby entities / enemies
-    for (const [entityId, entity] of state.entities) {
-      const ex = entity.position[0] - pos[0];
-      const ey = entity.position[1] - pos[1];
-      const ez = entity.position[2] - pos[2];
-      const distEntity = Math.sqrt(ex * ex + ey * ey + ez * ez);
-      if (distEntity < blastRadius) {
-        const damage = Math.round((40 * scale) * (1 - distEntity / blastRadius));
-        const hitDir = new THREE.Vector3(ex, Math.max(0.5, ey + 1.5), ez).normalize();
-        const force = (1 - distEntity / blastRadius) * 80 * scale;
-        
-        damageFighter(entityId, {
-          segment: 'Torso',
-          damage,
-          dirWorld: hitDir,
-          speed: force,
-          pointWorld: expPosVec,
-        });
-        applyFighterHit(entityId, 'Torso', hitDir, force, expPosVec);
-      }
-    }
+    // danno, KO/morte e spinta per tutti (giocatore, nemici, passanti) e
+    // per gli oggetti: lib/explosions.ts
+    explodeAt(pos, { radius: blastRadius, power: scale, damage: 50, source: 'meteorite' });
 
     // Play explosion sound
     try {

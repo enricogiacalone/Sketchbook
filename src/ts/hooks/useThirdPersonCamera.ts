@@ -41,6 +41,24 @@ const _rayDir = new THREE.Vector3();
 const _idealCamPos = new THREE.Vector3();
 const _prevVehiclePos = new THREE.Vector3();
 
+// Collisione della telecamera: prima il raggio provava TUTTA la scena a ogni
+// frame (intersectObjects ricorsivo) e solo dopo scartava personaggi, auto,
+// pali...: misurato 30 ms a frame in citta' (la meta' del frame), 16 dei
+// quali sui manichini (il raggio su una mesh con scheletro rifa' la posa di
+// ogni vertice), anche quelli nascosti. Ora i candidati (mesh solide, niente
+// personaggi ne' scheletri) si raccolgono ogni 2 secondi, e a ogni
+// frame si provano solo quelli visibili la cui sfera tocca il tratto
+// bersaglio -> telecamera.
+const COLLIDERS_REFRESH_S = 2;
+const _collSphere = new THREE.Sphere();
+const _collCenter = new THREE.Vector3();
+const _collToC = new THREE.Vector3();
+const _collNear: THREE.Object3D[] = [];
+// decisione "si ignora?" per oggetto (il nome e gli antenati non cambiano):
+// la raccolta dei candidati non rifa' i ~30 confronti di nomi per ogni
+// antenato di ogni oggetto a ogni giro
+const _ignoreMemo = new WeakMap<THREE.Object3D, boolean>();
+
 // Helper to check if an object or its ancestors should be excluded from camera collision
 const shouldIgnoreForCollision = (obj: THREE.Object3D, targetObj: THREE.Object3D): boolean => {
   let p: THREE.Object3D | null = obj;
@@ -87,7 +105,8 @@ const shouldIgnoreForCollision = (obj: THREE.Object3D, targetObj: THREE.Object3D
       nameLower.includes('punchingbag') ||
       nameLower.includes('crate') ||
       nameLower.includes('prop') ||
-      nameLower.includes('obstacle')
+      nameLower.includes('obstacle') ||
+      nameLower.includes('crowd')
     ) {
       return true;
     }
@@ -170,6 +189,11 @@ export const useThirdPersonCamera = () => {
     }
   }, []);
 
+  const collidersRef = useRef<{ list: THREE.Mesh[]; age: number; target: THREE.Object3D | null }>({
+    list: [],
+    age: Infinity,
+    target: null,
+  });
   const cachedTargetName = useRef<string | null>(null);
   const cachedTargetObj = useRef<THREE.Object3D | null>(null);
 
@@ -198,6 +222,8 @@ export const useThirdPersonCamera = () => {
     };
 
     const handleClick = () => {
+      // ispettore NPC: il mouse resta libero per scegliere i personaggi
+      if (useStore.getState().npcInspector) return;
       if (document.pointerLockElement !== gl.domElement) {
         gl.domElement.requestPointerLock();
       }
@@ -410,7 +436,45 @@ export const useThirdPersonCamera = () => {
       _raycaster.near = 0;
       _raycaster.far = distToIdeal;
       _raycaster.camera = camera;
-      const intersects = _raycaster.intersectObjects(scene.children, true);
+      const cc = collidersRef.current;
+      cc.age += delta;
+      if (cc.age > COLLIDERS_REFRESH_S || cc.target !== targetObj) {
+        cc.age = 0;
+        cc.target = targetObj;
+        cc.list.length = 0;
+        scene.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh || (m as unknown as THREE.SkinnedMesh).isSkinnedMesh) return;
+          if (targetObj) {
+            let ign = _ignoreMemo.get(m);
+            if (ign === undefined) {
+              ign = shouldIgnoreForCollision(m, targetObj);
+              _ignoreMemo.set(m, ign);
+            }
+            if (ign) return;
+          }
+          if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+          cc.list.push(m);
+        });
+      }
+      // solo i candidati visibili vicini al tratto bersaglio -> telecamera
+      _collNear.length = 0;
+      for (const m of cc.list) {
+        if (!m.visible || !m.parent) continue;
+        if ((m as unknown as THREE.InstancedMesh).isInstancedMesh) {
+          _collNear.push(m);
+          continue;
+        }
+        const bs = m.geometry.boundingSphere;
+        if (!bs) continue;
+        _collSphere.copy(bs).applyMatrix4(m.matrixWorld);
+        _collCenter.copy(_collSphere.center);
+        _collToC.subVectors(_collCenter, target.current);
+        const along = THREE.MathUtils.clamp(_collToC.dot(_rayDir), 0, distToIdeal);
+        _collToC.addScaledVector(_rayDir, -along);
+        if (_collToC.lengthSq() <= _collSphere.radius * _collSphere.radius) _collNear.push(m);
+      }
+      const intersects = _raycaster.intersectObjects(_collNear, false);
 
       for (let i = 0; i < intersects.length; i++) {
         const obj = intersects[i].object;

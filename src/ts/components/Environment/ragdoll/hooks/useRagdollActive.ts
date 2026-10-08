@@ -1672,6 +1672,14 @@ export function useRagdollActive(
     getActiveRagdollDebugSegments,
     measureClipRanges,
     isActiveRagdollPassive: () => passiveRef.current,
+    // KO subito, non al prossimo update(): chi lancia il corpo (KO,
+    // esplosione) lo fa a meta' frame, e con i motori ancora accesi il
+    // primo passo di fisica lo frenava -- misurato sul nemico del duello:
+    // da 9 a 1.6 m/s in 20 ms, l'esplosione lo spostava di 30 cm
+    goPassiveNow: () => {
+      const bench = useStore.getState().ragdollBench;
+      setMode(true, bench.pinHips, bench.aliveGravityScale);
+    },
     setNeutralClip: (clip: THREE.AnimationClip | null) => {
       neutralClipRef.current = clip;
     },

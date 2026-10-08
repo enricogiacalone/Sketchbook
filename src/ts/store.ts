@@ -206,6 +206,10 @@ interface GameState {
   // ispezionare contro una posa statica e nota invece che contro
   // un'animazione in movimento. Letto da PlayerCombatSoldier.tsx.
   tPoseDebug: boolean;
+  // "se clicco su un npc mi dice quale animazione sta effettuando":
+  // ispettore NPC (tasto I, UI/NpcInspector.tsx). Acceso, il mouse e'
+  // libero e il clic sceglie un personaggio invece di colpire.
+  npcInspector: boolean;
   // "crea un tasto aggiungi nemico invece di aggiungerlo subito" --
   // DuelArena.tsx montava SEMPRE il CombatSoldier avversario appena si
   // entrava nel duello, aggiungendo un secondo intero set di collider
@@ -381,6 +385,7 @@ interface GameState {
   setDuelDummyMode: (active: boolean) => void;
   setShowPhysicsDebug: (active: boolean) => void;
   setShowActiveRagdollDebug: (active: boolean) => void;
+  setNpcInspector: (on: boolean) => void;
   setTPoseDebug: (active: boolean) => void;
   addDuelEnemy: () => void;
   setPlayerWeaponState: (
@@ -473,6 +478,7 @@ export const useStore = create<GameState>((set) => ({
   showPhysicsDebug: false,
   showActiveRagdollDebug: false,
   tPoseDebug: false,
+  npcInspector: false,
   duelEnemyCount: 0,
   playerWeapon: 'fists',
   playerAiming: false,
@@ -582,6 +588,7 @@ export const useStore = create<GameState>((set) => ({
   setShowPhysicsDebug: (showPhysicsDebug) => set({ showPhysicsDebug }),
   setShowActiveRagdollDebug: (showActiveRagdollDebug) => set({ showActiveRagdollDebug }),
   setTPoseDebug: (tPoseDebug) => set({ tPoseDebug }),
+  setNpcInspector: (npcInspector) => set({ npcInspector }),
   addDuelEnemy: () => set((state) => ({ duelEnemyCount: state.duelEnemyCount + 1 })),
   setPlayerWeaponState: (partial) => set(partial),
   clearDuelEnemies: () => set({ duelEnemyCount: 0 }),
