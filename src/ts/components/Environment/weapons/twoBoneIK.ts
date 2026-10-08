@@ -30,7 +30,9 @@ function rotateWorld(bone: THREE.Object3D, from: THREE.Vector3, to: THREE.Vector
   bone.updateMatrixWorld(true);
 }
 
-export function solveTwoBoneIK(upper: THREE.Object3D, lower: THREE.Object3D, hand: THREE.Object3D, target: THREE.Vector3, weight = 1) {
+// pole (facoltativo, mondo): verso dove deve andare il gomito (es. in basso
+// e in fuori per il fucile); senza, resta nel piano dell'animazione
+export function solveTwoBoneIK(upper: THREE.Object3D, lower: THREE.Object3D, hand: THREE.Object3D, target: THREE.Vector3, weight = 1, pole?: THREE.Vector3) {
   if (!upper.parent || !lower.parent || !hand.parent || weight <= 0) return;
   upper.updateWorldMatrix(true, true);
   hand.getWorldQuaternion(_handW);
@@ -42,8 +44,9 @@ export function solveTwoBoneIK(upper: THREE.Object3D, lower: THREE.Object3D, han
   const dist = THREE.MathUtils.clamp(_d.length(), Math.abs(la - lb) + 1e-3, la + lb - 1e-3);
   _d.normalize();
   _t.copy(_a).addScaledVector(_d, dist);
-  // direzione di piega: il gomito attuale, tolta la componente lungo _d
-  _bend.subVectors(_b, _a);
+  // direzione di piega: il gomito attuale (o il polo), tolta la componente lungo _d
+  if (pole) _bend.copy(pole);
+  else _bend.subVectors(_b, _a);
   _bend.addScaledVector(_d, -_bend.dot(_d));
   if (_bend.lengthSq() < 1e-8) _bend.set(0, -1, 0).addScaledVector(_d, -_d.y);
   _bend.normalize();

@@ -7,7 +7,7 @@ import { useInput } from '../hooks/useInput';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../enums/CollisionGroups';
-import { droneMouseDelta, droneOrientation, droneShake, droneCamPose, droneHud, DroneHudTarget } from '../lib/droneFlight';
+import { droneMouseDelta, droneOrientation, droneShake, droneCamPose, droneHud, DroneHudTarget, dronePad } from '../lib/droneFlight';
 import { acquireAudioListener, releaseAudioListener } from '../lib/sharedAudioListener';
 import { cityOpponents } from './city/cityActors';
 import type { FighterData } from './Environment/SquadArenaTypes';
@@ -524,26 +524,32 @@ const Drone: React.FC = () => {
     const rollAngle = Math.PI / 2 - WORLD_UP.angleTo(_right) * (Math.sign(WORLD_UP.dot(_up)) || 1);
 
     const k = keys.current;
-    const mouseYawLeft = -(f.pointer.x / POINTER_DIVIDER) / zone;
-    const mousePitchDown = (f.pointer.y / POINTER_DIVIDER) / zone;
-    const yawLeft = mouseYawLeft + (k.KeyA || k.ArrowLeft ? 1 : 0);
-    const yawRight = k.KeyD || k.ArrowRight ? 1 : 0;
+    // pad (lib/droneFlight.ts dronePad): la levetta destra e' una cloche
+    // come il mouse, ma torna al centro quando la lasci; la sinistra
+    // spinge avanti/indietro e imbarda
+    const pd = dronePad;
+    _v1.set(f.pointer.x + pd.rx * zone, f.pointer.y + pd.ry * zone, 0);
+    if (_v1.length() > zone) _v1.setLength(zone);
+    const mouseYawLeft = -(_v1.x / POINTER_DIVIDER) / zone;
+    const mousePitchDown = (_v1.y / POINTER_DIVIDER) / zone;
+    const yawLeft = mouseYawLeft + (k.KeyA || k.ArrowLeft ? 1 : 0) + Math.max(0, -pd.lx);
+    const yawRight = (k.KeyD || k.ArrowRight ? 1 : 0) + Math.max(0, pd.lx);
     const pitchUp = k.ArrowUp ? 1 : 0;
     const pitchDown = mousePitchDown + (k.ArrowDown ? 1 : 0);
     // FlyControls.mousemove: rollLeft = yawLeft/2 - rollAngle/5 (si
     // inclina in virata e torna livellato da solo)
-    const rollLeft = mouseYawLeft / 2 - rollAngle / 5 + (k.KeyQ ? 1 : 0);
-    const rollRight = k.KeyE ? 1 : 0;
+    const rollLeft = mouseYawLeft / 2 - rollAngle / 5 + (k.KeyQ || pd.rollL ? 1 : 0);
+    const rollRight = k.KeyE || pd.rollR ? 1 : 0;
 
     const rotMult = dtMs * ROLL_SPEED;
     _q.set((pitchUp - pitchDown) * rotMult, (yawLeft - yawRight) * rotMult, (rollLeft - rollRight) * rotMult, 1).normalize();
     f.quat.multiply(_q).normalize();
 
     // spinta e attrito (FlyControls.update)
-    const forward = k.KeyW ? 1 : 0;
-    const back = k.KeyS ? 1 : 0;
-    const upK = k.KeyR || k.Space ? 1 : 0;
-    const downK = k.KeyF || k.ShiftLeft || k.ShiftRight ? 1 : 0;
+    const forward = Math.max(k.KeyW ? 1 : 0, -pd.ly);
+    const back = Math.max(k.KeyS ? 1 : 0, pd.ly);
+    const upK = Math.max(k.KeyR || k.Space ? 1 : 0, pd.up);
+    const downK = Math.max(k.KeyF || k.ShiftLeft || k.ShiftRight ? 1 : 0, pd.down);
     const accel = f.accelOff > 0 ? 0 : ACCELERATION;
     if (f.accelOff > 0) f.accelOff -= delta;
     _v1.set(0, upK - downK, back - forward).multiplyScalar(delta * accel); // deltaVelocity
@@ -812,7 +818,7 @@ const Drone: React.FC = () => {
     droneHud.gunTargetId = gunTarget ? (gunTarget as { d: FighterData }).d.id : null;
     droneHud.targets = targets;
 
-    // B: torna al giocatore
+    // B (o Triangolo / Select tenuto sul pad): torna al giocatore
     if (flyPressed) {
       setIsDrone(false);
       useStore.getState().setCurrentControllable('player');

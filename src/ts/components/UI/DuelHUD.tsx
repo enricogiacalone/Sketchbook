@@ -74,8 +74,8 @@ const DuelHUD: React.FC = () => {
           as the HP bars/exit button below would read as pointless
           clutter over the win/lose banner. */}
       {duelResult === 'none' && <WeaponHUD />}
-      {/* con la pistola il mirino e' quello di WeaponHUD, al centro */}
-      {duelResult === 'none' && playerWeapon !== 'pistol' &&
+      {/* con pistola o fucile il mirino e' quello di WeaponHUD, al centro (solo mirando) */}
+      {duelResult === 'none' && playerWeapon !== 'pistol' && playerWeapon !== 'rifle' &&
         (() => {
           const color = duelInRange ? '#22c55e' : 'rgba(255,255,255,0.7)';
           const glow = duelInRange ? '0 0 6px 1px rgba(34,197,94,0.8)' : 'none';

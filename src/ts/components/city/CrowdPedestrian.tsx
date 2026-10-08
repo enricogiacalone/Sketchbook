@@ -45,7 +45,9 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
     hp: 60,
     x: 0,
     z: -1000,
-    enableActiveRagdoll: false,
+    // ragdoll attiva (barcolla, reagisce ai colpi, cade "viva") da vicino:
+    // casella nel pannello Debug > Citta'
+    enableActiveRagdoll: useStore((s) => s.crowdActiveRagdoll),
   });
   const { data } = actor;
   const groupRef = useRef<THREE.Group>(null);
@@ -66,6 +68,23 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // smontato (meno corpi veri dal pannello): l'agente torna sagoma, il morto
+  // torna a camminare
+  useEffect(
+    () => () => {
+      const dead = deadAgent.current;
+      if (dead) {
+        reviveCrowdAgent(dead);
+        dead.slot = -1;
+        if (crowdSlots[slot] === dead) crowdSlots[slot] = null;
+      }
+      const a = agentRef.current;
+      if (a && a.slot === slot) a.slot = -1;
+      if (crowdSlots[slot] === a) crowdSlots[slot] = null;
+    },
+    [slot]
+  );
 
   const release = () => {
     const a = agentRef.current;

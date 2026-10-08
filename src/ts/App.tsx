@@ -27,6 +27,7 @@ import DroneHUD from './components/UI/DroneHUD';
 import DuelHUD from './components/UI/DuelHUD';
 import GamepadDebug from './components/UI/GamepadDebug';
 import GraphicsGUI from './components/UI/GraphicsGUI';
+import CityGUI from './components/UI/CityGUI';
 import Loader from './components/UI/Loader'; // Helper to track loading
 import LoadingScreen from './components/UI/LoadingScreen';
 import MissionHUD from './components/UI/MissionHUD';
@@ -88,6 +89,7 @@ const App: React.FC = () => {
     }
     setUserName(name);
     setIsJoined(true);
+    useStore.getState().setGameJoined(true);
     setIsLoading(true); // Start showing loader while Suspense does its thing
     console.log(`Joined as ${name} with ${controlMethod} (${mode})`);
     // "crea una sezione dedicata nel menu di avvio del gioco che mi fa
@@ -277,6 +279,7 @@ const App: React.FC = () => {
       <DroneHUD />
       <DuelHUD />
       <GraphicsGUI />
+      <CityGUI />
       <ScenariosGUI />
       <Minimap />
       <WeaponWheel />

@@ -130,6 +130,9 @@ interface GameState {
   // meteorites...). Set via window.__sim.startTest()/endTest() (see
   // debug/simDebug.ts) or the "Scenari" lil-gui panel (ScenariosGUI.tsx).
   testScene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race' | 'duel';
+  // entrato in scena (dopo il menu iniziale): il pannello Debug mostra le
+  // cartelle della scena solo da qui in poi (lib/debugGui.ts)
+  gameJoined: boolean;
   // "fammi scegliere ... le modalita di scontro dei manichini" -- which
   // CombatArena.tsx duel mode is active (TERRITORY_CONTROL/TEAMS/FFA, same
   // three options simulation-citta's own "Modalita Scontro" dropdown had --
@@ -265,6 +268,14 @@ interface GameState {
   dayCycle: boolean;
   // risoluzione che si adatta alla scheda video (Environment/AdaptiveResolution.tsx)
   adaptiveResolution: boolean;
+  // "mettimi un hud con cui configurare il numero di corpi veri, e anche uno
+  // per aumentare i palazzi veri" (pannello Debug > Citta', UI/CityGUI.tsx):
+  // corpi veri della folla (crowdSim), ragdoll attiva sui passanti, e
+  // distanza entro cui i palazzi sono veri (City.tsx, BuildingsStreamer).
+  // Ricordati nel browser.
+  crowdBodies: number;
+  crowdActiveRagdoll: boolean;
+  realBuildingDist: number;
   // risoluzione scelta da AdaptiveResolution (null = quella fissa, [1, 2]):
   // passa dalla prop dpr del Canvas, che R3F rimette a ogni render di App
   renderDpr: number | null;
@@ -357,6 +368,7 @@ interface GameState {
   setCollectiblesTotal: (total: number) => void;
   setIsPlayerGrounded: (grounded: boolean) => void;
   setTestScene: (scene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race' | 'duel') => void;
+  setGameJoined: (joined: boolean) => void;
   setArenaGameMode: (mode: GameMode) => void;
   setArenaFighterCount: (count: number) => void;
   meteoritesEnabled: boolean;
@@ -412,6 +424,9 @@ interface GameState {
   setToonStyle: (on: boolean) => void;
   setDayCycle: (on: boolean) => void;
   setAdaptiveResolution: (on: boolean) => void;
+  setCrowdBodies: (n: number) => void;
+  setCrowdActiveRagdoll: (on: boolean) => void;
+  setRealBuildingDist: (m: number) => void;
   setRenderDpr: (dpr: number | null) => void;
   setWeaponWheelOpen: (open: boolean) => void;
   setRequestedWeapon: (w: 'fists' | 'pistol' | 'rifle' | 'knife' | null) => void;
@@ -438,7 +453,15 @@ function readSetting(key: string, fallback: boolean): boolean {
     return fallback;
   }
 }
-function writeSetting(key: string, value: boolean) {
+function readNumSetting(key: string, fallback: number): number {
+  try {
+    const v = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}')[key];
+    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writeSetting(key: string, value: boolean | number) {
   try {
     const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
     all[key] = value;
@@ -476,6 +499,7 @@ export const useStore = create<GameState>((set) => ({
   // within its first couple of frames regardless.
   isPlayerGrounded: false,
   testScene: 'none',
+  gameJoined: false,
   arenaGameMode: 'TERRITORY_CONTROL',
   arenaFighterCount: 20,
   duelPlayerHp: 100,
@@ -504,6 +528,9 @@ export const useStore = create<GameState>((set) => ({
   toonStyle: readSetting('toonStyle', true),
   dayCycle: readSetting('dayCycle', false),
   adaptiveResolution: readSetting('adaptiveResolution', true),
+  crowdBodies: readNumSetting('crowdBodies', 6),
+  crowdActiveRagdoll: readSetting('crowdActiveRagdoll', false),
+  realBuildingDist: readNumSetting('realBuildingDist', 55),
   renderDpr: null,
   weaponWheelOpen: false,
   requestedWeapon: null,
@@ -568,6 +595,7 @@ export const useStore = create<GameState>((set) => ({
   setCollectiblesTotal: (total) => set({ collectiblesTotal: total }),
   setIsPlayerGrounded: (grounded) => set((state) => (state.isPlayerGrounded === grounded ? state : { isPlayerGrounded: grounded })),
   setTestScene: (testScene) => set({ testScene }),
+  setGameJoined: (gameJoined) => set({ gameJoined }),
   setArenaGameMode: (arenaGameMode) => set({ arenaGameMode }),
   setArenaFighterCount: (arenaFighterCount) => set({ arenaFighterCount }),
   meteoritesEnabled: false,
@@ -618,6 +646,18 @@ export const useStore = create<GameState>((set) => ({
   setAdaptiveResolution: (adaptiveResolution) => {
     writeSetting('adaptiveResolution', adaptiveResolution);
     set({ adaptiveResolution });
+  },
+  setCrowdBodies: (crowdBodies) => {
+    writeSetting('crowdBodies', crowdBodies);
+    set({ crowdBodies });
+  },
+  setCrowdActiveRagdoll: (crowdActiveRagdoll) => {
+    writeSetting('crowdActiveRagdoll', crowdActiveRagdoll);
+    set({ crowdActiveRagdoll });
+  },
+  setRealBuildingDist: (realBuildingDist) => {
+    writeSetting('realBuildingDist', realBuildingDist);
+    set({ realBuildingDist });
   },
   setRenderDpr: (renderDpr) => set((state) => (state.renderDpr === renderDpr ? state : { renderDpr })),
   setWeaponWheelOpen: (open) => set((state) => (state.weaponWheelOpen === open ? state : { weaponWheelOpen: open })),

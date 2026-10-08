@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useStore } from '../store';
+import { dronePad } from '../lib/droneFlight';
 
 const STICK_DEADZONE = 0.25;
+const DRONE_HOLD_MS = 500;
 const SPRINT_TAP_WINDOW_MS = 900;
 
 const ACTION_NAMES = [
@@ -85,6 +87,12 @@ export const useInput = () => {
   // "per correre devo premere x piu' volte come gta": istanti delle ultime
   // pressioni del tasto corsa (X / Shift), per sprintMash() qui sotto
   const shiftTaps = useRef<number[]>([]);
+  // Select del pad: premuto = camera, tenuto DRONE_HOLD_MS = drone (prendi/lascia)
+  const selectDownAt = useRef(0);
+  const selectHoldFired = useRef(false);
+  // Triangolo usato per lasciare il drone: non vale come "sali in auto"
+  // finche' non lo si rilascia
+  const triangleBlocked = useRef(false);
 
   // Keyboard/mouse and gamepad are two independent sources, each tracked
   // on its own and OR-ed together into `input` below. Without this split,
@@ -160,6 +168,10 @@ export const useInput = () => {
     };
     window.addEventListener('contextmenu', handleContextMenu);
     const handleKeyDown = (e: KeyboardEvent) => {
+      // scrivendo in un campo (numero nel pannello Debug, chat) i tasti non
+      // muovono il personaggio
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       const action = keys[e.code];
       if (action) {
         keyboardActions.current[action] = true;
@@ -315,6 +327,8 @@ export const useInput = () => {
     if (!pad) {
       // No pad connected (or it just disconnected) -- make sure nothing
       // stays stuck "on" from a previously connected frame.
+      dronePad.lx = dronePad.ly = dronePad.rx = dronePad.ry = dronePad.up = dronePad.down = 0;
+      dronePad.rollL = dronePad.rollR = false;
       let hadAny = false;
       for (const action of ACTION_NAMES) {
         if (g[action]) hadAny = true;
@@ -346,9 +360,29 @@ export const useInput = () => {
     //   in auto   R2 gas, L2 freno/retro, R1 freno a mano, levetta sx sterza,
     //             Triangolo scendi, croce destra fari
     //   in volo   R2 su / gas, L2 giu' / freno, L1 R1 imbardata
+    //   drone     Select tenuto prende il drone (e lo lascia); levetta sx
+    //             avanti/indietro e imbardata, levetta dx cloche (beccheggio
+    //             e virata), R2 sali, L2 scendi, L1/R1 rollio, X
+    //             mitragliatrice, Quadrato missile, Triangolo torna a piedi
     const ctrl = useStore.getState().currentControllable;
     const inCar = ctrl === 'car';
     const flying = ctrl === 'helicopter' || ctrl === 'airplane';
+    const inDrone = ctrl === 'drone';
+    const dz = (v: number | undefined) => (v === undefined || Math.abs(v) < STICK_DEADZONE ? 0 : v);
+    dronePad.lx = dz(pad.axes[0]);
+    dronePad.ly = dz(pad.axes[1]);
+    dronePad.rx = dz(pad.axes[2]);
+    dronePad.ry = dz(pad.axes[3]);
+    // grilletti: alcuni pad (DualShock 3 e simili) li danno solo come
+    // "premuto", con il valore analogico fermo a 0 -- si prende il maggiore
+    const trig = (i: number) => {
+      const t = pad!.buttons[i];
+      return t ? Math.max(t.value || 0, t.pressed ? 1 : 0) : 0;
+    };
+    dronePad.up = trig(7);
+    dronePad.down = trig(6);
+    dronePad.rollL = !!pad.buttons[4]?.pressed;
+    dronePad.rollR = !!pad.buttons[5]?.pressed;
     const wpn = useStore.getState().playerWeapon;
     const armed = wpn === 'pistol' || wpn === 'rifle';
     const b = (i: number) => !!pad!.buttons[i]?.pressed;
@@ -367,6 +401,15 @@ export const useInput = () => {
       g.yawLeft = false;
       g.yawRight = false;
       g.headlights = b(15);
+    } else if (inDrone) {
+      g.shift = false;
+      g.jump = false;
+      g.yawLeft = false;
+      g.yawRight = false;
+      g.primary = b(0); // X: mitragliatrice (tenuto)
+      g.secondary = b(2); // Quadrato: missile
+      g.lockOn = false;
+      g.headlights = false;
     } else if (flying) {
       g.shift = r2; // su / gas
       g.jump = l2; // giu' / freno
@@ -388,14 +431,34 @@ export const useInput = () => {
       g.headlights = false;
     }
     g.attackLeft = false;
-    g.enter = b(3) && !(l2 && !armed && !inCar && !flying); // Triangolo: veicolo
-    g.dodge = (b(2) && l2 && !inCar && !flying) || b(10); // L2 + Quadrato, o L3: schivata
-    g.reload = b(13) || (b(1) && armed && !inCar && !flying); // croce giu' o Cerchio con un'arma
-    g.weapon1 = b(14) && !inCar; // croce sinistra: pugni
-    g.weapon2 = b(15) && !inCar; // croce destra: pistola
-    g.weapon3 = b(12); // croce su: fucile
-    // Select: le 4 distanze della camera (ZOOM_LEVELS in useThirdPersonCamera.ts)
-    g.camera = b(8);
+    // Triangolo col drone: torna a piedi (e finche' resta premuto non fa
+    // salire sul veicolo vicino)
+    if (inDrone && b(3)) triangleBlocked.current = true;
+    else if (!b(3)) triangleBlocked.current = false;
+    g.enter = b(3) && !inDrone && !triangleBlocked.current && !(l2 && !armed && !inCar && !flying); // Triangolo: veicolo
+    g.dodge = ((b(2) && l2) || b(10)) && !inCar && !flying && !inDrone; // L2 + Quadrato, o L3: schivata
+    g.reload = (b(13) || (b(1) && armed && !inCar && !flying)) && !inDrone; // croce giu' o Cerchio con un'arma
+    g.weapon1 = b(14) && !inCar && !inDrone; // croce sinistra: pugni
+    g.weapon2 = b(15) && !inCar && !inDrone; // croce destra: pistola
+    g.weapon3 = b(12) && !inDrone; // croce su: fucile
+    // Select premuto e rilasciato: le 4 distanze della camera (ZOOM_LEVELS in
+    // useThirdPersonCamera.ts); tenuto DRONE_HOLD_MS: prendi / lascia il drone
+    const now = performance.now();
+    let selectTap = false;
+    let selectHold = false;
+    if (b(8)) {
+      if (!selectDownAt.current) selectDownAt.current = now;
+      if (!selectHoldFired.current && now - selectDownAt.current >= DRONE_HOLD_MS) {
+        selectHoldFired.current = true;
+        selectHold = true;
+      }
+    } else if (selectDownAt.current) {
+      selectTap = !selectHoldFired.current;
+      selectDownAt.current = 0;
+      selectHoldFired.current = false;
+    }
+    g.camera = selectTap && !inDrone;
+    g.fly = selectHold || (inDrone && b(3));
     // Start: pausa (la gestisce GameFreeze.tsx anche a gioco fermo)
     g.pause = b(9);
 

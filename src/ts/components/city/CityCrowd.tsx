@@ -15,6 +15,8 @@ import {
   assignCrowdSlots,
   crowdAgents,
   CROWD_FULL_SLOTS,
+  CROWD_MAX_SLOTS,
+  setCrowdSlotCount,
   reviveCrowdAgent,
   stepCrowd,
   type CrowdAgent,
@@ -27,6 +29,9 @@ import {
 // muore, poi l'agente torna a camminare).
 
 const ASSIGN_EVERY_S = 0.2;
+// corpi veri aggiunti dal pannello: uno alla volta (crearne uno -- manichino,
+// mixer, ragdoll -- costa qualche millisecondo), per non bloccare il gioco
+const BODY_MOUNT_EVERY_S = 0.12;
 
 // Muri dei palazzi (con zoccolo e annesso), pali di lampioni e semafori e
 // colonnine delle pensiline: le forme fisse che la folla deve evitare.
@@ -69,6 +74,16 @@ const carColliderOf = new Map<number, number>();
 const Crowd: React.FC = () => {
   const [enemies, setEnemies] = useState<Array<{ id: string; agentId: number; position: [number, number, number]; hp?: number }>>([]);
   const acc = useRef(ASSIGN_EVERY_S);
+  // quanti corpi veri sono montati (verso store.crowdBodies, Debug > Citta')
+  const bodiesWanted = useStore((s) => Math.max(0, Math.min(CROWD_MAX_SLOTS, Math.round(s.crowdBodies))));
+  const [bodies, setBodies] = useState(() => Math.min(bodiesWanted, CROWD_FULL_SLOTS));
+  const mountAcc = useRef(0);
+  useEffect(() => {
+    if (bodies > bodiesWanted) setBodies(bodiesWanted);
+  }, [bodies, bodiesWanted]);
+  useEffect(() => {
+    setCrowdSlotCount(Math.min(bodies, bodiesWanted));
+  }, [bodies, bodiesWanted]);
   const { world } = useRapier();
   const obstacles = useRef<CrowdObstacle[]>([]);
 
@@ -97,6 +112,13 @@ const Crowd: React.FC = () => {
   }, [world]);
 
   useFrame((state, dt) => {
+    if (bodies < bodiesWanted) {
+      mountAcc.current += dt;
+      if (mountAcc.current >= BODY_MOUNT_EVERY_S) {
+        mountAcc.current = 0;
+        setBodies((b) => Math.min(bodiesWanted, b + 1));
+      }
+    }
     const st = useStore.getState();
     // vicino a chi? al giocatore (anche in auto/drone: playerPos segue il
     // veicolo guidato) e alla telecamera, il piu' vicino dei due
@@ -183,7 +205,7 @@ const Crowd: React.FC = () => {
     <>
       <CrowdInstances />
       <NpcInspector />
-      {Array.from({ length: CROWD_FULL_SLOTS }, (_, s) => (
+      {Array.from({ length: Math.min(bodies, bodiesWanted) }, (_, s) => (
         <CrowdPedestrian key={s} slot={s} onBecomeEnemy={handleBecomeEnemy} />
       ))}
       {enemies.map((e) => (

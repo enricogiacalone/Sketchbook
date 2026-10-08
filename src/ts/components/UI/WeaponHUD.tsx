@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { PISTOL_MAG_SIZE, RIFLE_MAG_SIZE } from '../Environment/weapons/weaponConfig';
@@ -7,6 +7,10 @@ import { PISTOL_MAG_SIZE, RIFLE_MAG_SIZE } from '../Environment/weapons/weaponCo
 // sopra la spalla guarda esattamente li', vedi useThirdPersonCamera.ts),
 // hit marker quando un colpo va a segno e contatore del caricatore.
 const HIT_MARKER_MS = 260;
+// "il mirino deve comparire solo quando miro": come in GTA il mirino c'e'
+// solo mirando, o per un attimo dopo un colpo sparato dal fianco (la
+// munizione scesa = un colpo partito); l'hit marker si vede comunque
+const SHOT_RETICLE_MS = 900;
 
 const WeaponHUD: React.FC = () => {
   const { weapon, aiming, ammo, reloading, hitAt, hitKill, hitHead, currentControllable, isDrone, testScene, duelResult, locked } =
@@ -35,6 +39,20 @@ const WeaponHUD: React.FC = () => {
     const id = window.setTimeout(() => setTick((t) => t + 1), HIT_MARKER_MS - markerAge + 5);
     return () => window.clearTimeout(id);
   }, [hitAt, markerOn, markerAge]);
+  const [shotAt, setShotAt] = useState(0);
+  const lastAmmo = useRef(ammo);
+  useEffect(() => {
+    if (ammo < lastAmmo.current) setShotAt(performance.now());
+    lastAmmo.current = ammo;
+  }, [ammo]);
+  const shotAge = performance.now() - shotAt;
+  const shotOn = shotAt > 0 && shotAge < SHOT_RETICLE_MS;
+  useEffect(() => {
+    if (!shotOn) return;
+    const id = window.setTimeout(() => setTick((t) => t + 1), SHOT_RETICLE_MS - shotAge + 5);
+    return () => window.clearTimeout(id);
+  }, [shotAt, shotOn, shotAge]);
+  const reticleOn = aiming || shotOn;
 
   // "pistol" qui = un'arma da fuoco in mano (pistola o fucile)
   const pistol = weapon === 'pistol' || weapon === 'rifle';
@@ -78,11 +96,15 @@ const WeaponHUD: React.FC = () => {
               }}
             />
           )}
-          <div style={{ ...tick, left: -1, top: -gap - len, width: 2, height: len }} />
-          <div style={{ ...tick, left: -1, top: gap, width: 2, height: len }} />
-          <div style={{ ...tick, top: -1, left: -gap - len, width: len, height: 2 }} />
-          <div style={{ ...tick, top: -1, left: gap, width: len, height: 2 }} />
-          <div style={{ ...tick, left: -1, top: -1, width: 2, height: 2 }} />
+          {reticleOn && (
+            <>
+              <div style={{ ...tick, left: -1, top: -gap - len, width: 2, height: len }} />
+              <div style={{ ...tick, left: -1, top: gap, width: 2, height: len }} />
+              <div style={{ ...tick, top: -1, left: -gap - len, width: len, height: 2 }} />
+              <div style={{ ...tick, top: -1, left: gap, width: len, height: 2 }} />
+              <div style={{ ...tick, left: -1, top: -1, width: 2, height: 2 }} />
+            </>
+          )}
           {markerOn &&
             [45, 135, 225, 315].map((a) => (
               <div

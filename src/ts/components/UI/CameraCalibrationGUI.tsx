@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
 import { useStore } from '../../store';
-import { acquireDebugGui, releaseDebugGui } from '../../lib/debugGui';
+import { acquireDebugGui, debugSection, releaseDebugGui } from '../../lib/debugGui';
 
 const CameraCalibrationGUI: React.FC = () => {
   useEffect(() => {
-    const gui = acquireDebugGui();
-    const folder = gui.addFolder('Camera Calibrazione (GTA IV)');
+    // sezione comune "Personaggio e camera" del pannello Debug
+    acquireDebugGui();
+    const folder = debugSection('personaggio').addFolder('Camera (GTA IV)');
     const st = () => useStore.getState();
     const bind = {
       get playerRadius() {

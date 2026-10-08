@@ -21,6 +21,7 @@ import { usePistolModel, useGunModel, RIFLE_SPEC, type GunModelApi } from './wea
 import { useKnifeModel } from './weapons/useKnifeModel';
 import { solveTwoBoneIK } from './weapons/twoBoneIK';
 import { applyFootIK, newFootIK } from './footIK';
+import { PoseLayer, boneChain } from './weapons/poseLayer';
 import { stepAt, stepTopAt } from './stairSteps';
 import { newTravState, stepTraversal, followGround, isTraversing, hangHandTargets, type TravCtx } from './traversal/traversal';
 import { GETUP_CLIP } from './ragdoll/knockdown';
@@ -128,6 +129,21 @@ const KNIFE_HEAVY_KNOCKDOWN_SPEED = 4.5;
 const PLAYER_REVIVE_S = 4;
 const KNIFE_LUNGE_SPEED = 1.5; // m/s -> ~45 cm di passo
 const _support = new THREE.Vector3();
+// presa del fucile (rifleIK)
+const RIFLE_BLADE_DEG = 25; // busto di tre quarti col fucile in mira (meta' da basso)
+const _UP = new THREE.Vector3(0, 1, 0);
+const _ZERO = new THREE.Vector3();
+const _rfFwd = new THREE.Vector3();
+const _rfRight = new THREE.Vector3();
+const _rfSh = new THREE.Vector3();
+const _rfDir = new THREE.Vector3();
+const _rfPos = new THREE.Vector3();
+const _rfTmp = new THREE.Vector3();
+const _rfPoleR = new THREE.Vector3();
+const _rfPoleL = new THREE.Vector3();
+const _rfQ = new THREE.Quaternion();
+const _rfQ2 = new THREE.Quaternion();
+const _rfM = new THREE.Matrix4();
 
 // "estrai la pistola... aggiungilo al nostro personaggio" -- animazioni a
 // strati: con la pistola in mano le GAMBE fanno camminata/corsa/strafe e
@@ -166,6 +182,12 @@ const PISTOL_FACE_TURN_RATE = 0.3;
 const HIP_FIRE_HOLD_S = 0.9;
 const HIP_FIRE_WAIT_S = 0.25;
 const HIP_FIRE_FACING = 0.35; // rad
+const HIP_FIRE_FACING_RUN = 1.5; // rad
+// mirando si corre fin di lato (il busto gira fino a SPINE_TWIST_MAX, il
+// resto lo prende il braccio); piu' indietro si cammina di lato in mira.
+// AIM_RUN_HYST evita di saltare avanti e indietro tra le due sul confine
+const AIM_RUN_MAX_ANGLE = THREE.MathUtils.degToRad(95);
+const AIM_RUN_HYST = THREE.MathUtils.degToRad(15);
 const PISTOL_SHOOT_ANIM_S = 0.22;
 const _shotCamDir = new THREE.Vector3();
 const _shotDir = new THREE.Vector3();
@@ -503,6 +525,13 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   // sparo dal fianco (senza mirare): per quanto si resta girati verso il
   // mirino, e il colpo in attesa che il corpo sia girato
   const hipFireRef = useRef(0);
+  // si corre mirando (gambe come senza arma, busto e braccio in mira)
+  const aimRunRef = useRef(false);
+  // la pistola si tiene con una mano (layer delle braccia acceso)
+  const pistolArmsOnRef = useRef(false);
+  const pistolRaisedRef = useRef(false);
+  // torsione del busto verso la camera con un'arma: solo mirando o sparando
+  const gunTwistRef = useRef(0);
   const pendingHipShotRef = useRef(0);
   const upperActionRef = useRef<string | null>(null);
   const weaponStoreRef = useRef({ w: '', a: false, n: -1, r: false });
@@ -666,6 +695,20 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     return { clone: clonedScene, mixer: animMixer, actions: actMap, clipsMap: cMap, animCatalog: catalog };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, animations, data]);
+
+  // pistola a una mano (weapons/poseLayer.ts): le clip Pistol_* solo sul
+  // braccio destro (sulle due braccia mentre si ricarica), il resto del
+  // corpo fa la locomozione normale
+  const pistolArms = useMemo(() => {
+    const clips = PISTOL_UPPER_CLIPS.map((n) => clipsMap[n]).filter(Boolean);
+    const right = boneChain(clone, 'clavicle_r');
+    const left = boneChain(clone, 'clavicle_l');
+    // dita della destra (impugnano la pistola sempre) e il resto del braccio
+    // (si alza solo per mirare/sparare/ricaricare)
+    const fingers = boneChain(clone, 'hand_r').filter((n) => n !== 'hand_r');
+    const arm = right.filter((n) => !fingers.includes(n));
+    return { layer: new PoseLayer(clone, clips, [...right, ...left]), fingers, arm, left };
+  }, [clone, clipsMap]);
 
   // KO fisico e rialzo: lo stesso pezzo dei nemici e della citta' (ragdoll/useKnockdown.ts)
   const kd = useKnockdown(ragdoll, scene, clipsMap[GETUP_CLIP]);
@@ -990,7 +1033,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   const isEngaged = () => !!input.lockOn && opponents.some((o) => !o.isDead);
   const onStairs = () => stepTopAt(data.position.x, data.position.z, travRef.current.feetY) !== null;
   const idleName = () => {
-    if (isGun() && actions['Pistol_Idle__legs']) return 'Pistol_Idle__legs';
+    // fucile: gambe di Pistol_Idle, busto sul layer alto; pistola: riposo
+    // normale (la mano con la pistola e' sul layer delle braccia)
+    if (weaponRef.current === 'rifle' && actions['Pistol_Idle__legs']) return 'Pistol_Idle__legs';
     if (weaponRef.current === 'knife' && actions[KNIFE_IDLE_CLIP]) return KNIFE_IDLE_CLIP;
     if (isEngaged()) return animCatalog.idle;
     return onStairs() ? stairsIdle : relaxedIdle;
@@ -1075,14 +1120,26 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     if (!tPose && isGun() && !data.isDead && !isDown() && data.state !== 'Vittoria!' && !isDodgingRef.current && !traving()) {
       desired =
         reloadLeftRef.current > 0
-          ? 'Pistol_Reload__upper'
+          ? 'Pistol_Reload'
           : shootAnimLeftRef.current > 0
-            ? 'Pistol_Shoot__upper'
+            ? 'Pistol_Shoot'
             : aimingRef.current || hipFireRef.current > 0 || raiseLeftRef.current > 0
-              ? 'Pistol_Aim_Neutral__upper'
-              : 'Pistol_Idle__upper';
+              ? 'Pistol_Aim_Neutral'
+              : 'Pistol_Idle';
     }
-    setUpperLayer(desired);
+    // pistola: una mano sola (layer delle braccia, applicato dopo il mixer)
+    const onePistol = weaponRef.current === 'pistol' && desired !== null;
+    pistolArmsOnRef.current = onePistol;
+    pistolRaisedRef.current = desired !== null && desired !== 'Pistol_Idle';
+    if (onePistol) {
+      pistolArms.layer.set(desired, {
+        once: desired === 'Pistol_Reload' || desired === 'Pistol_Shoot',
+        timeScale: desired === 'Pistol_Reload' ? (clipsMap.Pistol_Reload?.duration ?? 1) / reloadDurRef.current : 1,
+      });
+      setUpperLayer(null);
+      return;
+    }
+    setUpperLayer(desired ? `${desired}__upper` : null);
   };
 
   const startReload = () => {
@@ -1234,7 +1291,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     fireCooldownRef.current = st.interval;
     raiseLeftRef.current = PISTOL_RAISE_AFTER_SHOT_S;
     shootAnimLeftRef.current = PISTOL_SHOOT_ANIM_S;
-    setUpperLayer('Pistol_Shoot__upper', true);
+    if (weaponRef.current === 'pistol') pistolArms.layer.set('Pistol_Shoot', { once: true, restart: true });
+    else setUpperLayer('Pistol_Shoot__upper', true);
   };
 
   useFrame((_state, delta) => {
@@ -1373,6 +1431,18 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       skeletonRef.current?.pose();
     } else if (mixer) {
       mixer.update(delta * globalSpeed);
+      // pistola rilassata come in GTA: braccio lungo il fianco come nella
+      // camminata, solo la mano la impugna; mirando / sparando il braccio si
+      // alza nella posa di mira; ricaricando lavorano tutte e due le mani
+      const on = pistolArmsOnRef.current;
+      pistolArms.layer.apply(
+        [
+          { key: 'grip', bones: pistolArms.fingers, on },
+          { key: 'arm', bones: pistolArms.arm, on: on && pistolRaisedRef.current },
+          { key: 'left', bones: pistolArms.left, on: on && reloadLeftRef.current > 0 },
+        ],
+        delta * globalSpeed
+      );
     }
     // "coglione testa su chrome" -- temporary live-browser debug readout
     // for the duel-player fighter's own internal state (input/attackLock/
@@ -1494,10 +1564,17 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       0,
       1
     );
+    // con un'arma il busto guarda la camera solo mirando o sparando (prima
+    // sempre: correndo con la pistola si girava di lato)
+    gunTwistRef.current = THREE.MathUtils.clamp(
+      gunTwistRef.current + (aimingRef.current || hipFireRef.current > 0 ? 1 : -1) * delta * 6,
+      0,
+      1
+    );
     if (!tPoseBench && !benchClip && !traving() && !inCarBody())
       ragdoll.applySpineLean(
         THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX),
-        THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX),
+        THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX) * (isGun() ? gunTwistRef.current : 1),
         spineLeanWRef.current
       );
     // Fucile: e' agganciato al petto (calcio alla spalla, vedi
@@ -1505,7 +1582,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // sinistra sull'astina (non durante la ricarica: va al caricatore).
     // Dopo la torsione del busto, prima del ragdoll: fa parte della posa
     // bersaglio.
-    const rifleIK = () => {
+    // (first: il busto di tre quarti si mette una volta sola per frame)
+    const rifleIK = (first: boolean) => {
       if (tPoseBench || benchClip || weaponRef.current !== 'rifle' || data.isDead || isDodgingRef.current || isDown() || traving()) return;
       if (!armBonesRef.current) {
         const get = (n: string) => clone.getObjectByName(n);
@@ -1520,12 +1598,71 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       }
       const arms = armBonesRef.current;
       if (arms) {
-        solveTwoBoneIK(arms.r.upper, arms.r.lower, arms.r.hand, rifle.getGripWorld(_support), 1);
+        // "mi sembra strana la posizione delle braccia" col fucile: era
+        // agganciato al petto con una presa tarata sulla posa della pistola
+        // e le mani ci andavano sopra con l'IK nel piano dei gomiti della
+        // pistola (misurato fuori dal gioco: gomito destro all'altezza della
+        // spalla e 40 cm in fuori, braccio sinistro teso e dritto). Ora, come
+        // in GTA: in mira il calcio sta nell'incavo della spalla destra e la
+        // canna va dove guarda la camera; senza mirare il fucile e' basso
+        // davanti al corpo (canna in giu' e un po' a sinistra). Il busto si
+        // mette di tre quarti (spalla sinistra avanti) e i gomiti vanno in
+        // basso: il destro un po' in fuori, il sinistro sotto l'astina.
+        const k = rifleRaiseRef.current;
+        const rot = data.rotation;
+        _rfFwd.set(-Math.sin(rot), 0, -Math.cos(rot));
+        _rfRight.set(Math.cos(rot), 0, -Math.sin(rot));
+        const sp = clone.getObjectByName('spine_03');
+        if (first && sp?.parent) {
+          sp.getWorldQuaternion(_rfQ);
+          _rfQ.premultiply(_rfQ2.setFromAxisAngle(_UP, -THREE.MathUtils.degToRad(RIFLE_BLADE_DEG * (0.5 + 0.5 * k))));
+          sp.parent.getWorldQuaternion(_rfQ2);
+          sp.quaternion.copy(_rfQ2.invert().multiply(_rfQ));
+          sp.updateMatrixWorld(true);
+        }
+        arms.r.upper.getWorldPosition(_rfSh);
+        // in mira: canna sulla linea della camera, calcio nell'incavo della spalla
+        _rfDir.copy(_camAimDir).normalize();
+        _rfQ.setFromRotationMatrix(_rfM.lookAt(_ZERO, _rfDir, _UP));
+        _rfPos
+          .copy(_rfSh)
+          .addScaledVector(_rfFwd, 0.06)
+          .addScaledVector(_rfRight, -0.07)
+          .addScaledVector(_UP, -0.04)
+          .sub(rifle.getRearLocal(_rfTmp).applyQuaternion(_rfQ));
+        // pronto basso
+        _rfDir.copy(_rfFwd).multiplyScalar(0.8).addScaledVector(_UP, -0.6).addScaledVector(_rfRight, -0.35).normalize();
+        _rfQ2.setFromRotationMatrix(_rfM.lookAt(_ZERO, _rfDir, _UP));
+        _rfTmp.copy(_rfSh).addScaledVector(_UP, -0.36).addScaledVector(_rfFwd, 0.2).addScaledVector(_rfRight, -0.04);
+        _rfQ2.slerp(_rfQ, k);
+        _rfTmp.lerp(_rfPos, k);
+        rifle.setWorldPose(_rfTmp, _rfQ2);
+        _rfPoleR.copy(_UP).multiplyScalar(-1).addScaledVector(_rfRight, 0.5).addScaledVector(_rfFwd, -0.2);
+        _rfPoleL.copy(_UP).multiplyScalar(-1).addScaledVector(_rfRight, -0.35);
+        solveTwoBoneIK(arms.r.upper, arms.r.lower, arms.r.hand, rifle.getGripWorld(_support), 1, _rfPoleR);
         if (reloadLeftRef.current <= 0 && rifle.getSupportWorld(_support))
-          solveTwoBoneIK(arms.l.upper, arms.l.lower, arms.l.hand, _support, 1);
+          solveTwoBoneIK(arms.l.upper, arms.l.lower, arms.l.hand, _support, 1, _rfPoleL);
       }
     };
-    rifleIK();
+    rifleIK(true);
+    // pistola in mira: la posa Pistol_Aim_Neutral tiene la canna ~20 gradi a
+    // destra del busto (misurato); si gira tutto il braccio dalla spalla
+    // perche' la canna vada esattamente dove guarda la camera, come in GTA
+    const pistolAim = () => {
+      if (weaponRef.current !== 'pistol' || data.isDead || isDodgingRef.current || isDown() || traving()) return;
+      const w = pistolArms.layer.weight('arm');
+      if (w < 0.01) return;
+      const upper = clone.getObjectByName('upperarm_r');
+      if (!upper?.parent) return;
+      pistol.getBoreDirWorld(_rfDir);
+      _rfQ.setFromUnitVectors(_rfDir, _rfTmp.copy(_camAimDir).normalize());
+      _rfQ.slerp(_rfQ2.identity(), 1 - w);
+      upper.getWorldQuaternion(_rfQ2).premultiply(_rfQ);
+      upper.parent.getWorldQuaternion(_rfQ);
+      upper.quaternion.copy(_rfQ.invert().multiply(_rfQ2));
+      upper.updateMatrixWorld(true);
+    };
+    pistolAim();
     // appeso a un bordo: mani sul bordo vero (IK), qualunque sia la posa
     const hangIK = () => {
       if (!hangHandTargets(travRef.current, _hangL, _hangR)) return;
@@ -1567,7 +1704,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // di nuovo DOPO il ragdoll attivo: le braccia fisiche non sempre
     // riescono a seguire la posa (limiti dei giunti, inerzia) e il fucile
     // e' rigido sul petto -- le mani restano comunque sull'arma
-    rifleIK();
+    rifleIK(false);
+    pistolAim();
     hangIK();
     // Keeps `data.hurtboxHandle` current for whoever's attacking THIS
     // fighter (their own checkAttackContact reads it off `opponent`) --
@@ -2169,7 +2307,22 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // dove guarda la camera solo mirando (L2 / tasto destro) o appena dopo
     // un colpo sparato senza mirare; per il resto si va dove si cammina,
     // come a mani nude (prima con la pistola si camminava sempre di lato)
-    const gunFacingCam = isGun() && (aimingRef.current || hipFireRef.current > 0);
+    // (pistola: sparando mentre si corre il corpo continua a correre, gira
+    // il busto; da fermi ci si gira verso il mirino)
+    // "quando miro devo poter correre come senza arma, premendo x
+    // ripetutamente": mirando e correndo (X tenuto o premuto piu' volte) in
+    // una direzione entro AIM_RUN_MAX_ANGLE dal mirino, le gambe corrono
+    // come senza arma (stessa locomozione, stesse velocita') e sono busto e
+    // braccio a tenere la mira; camminando si va di lato mirando, come prima
+    const moving = _moveDir.lengthSq() > 0.0001;
+    let aimRun = false;
+    if (isGun() && aimingRef.current && moving && (input.shift || input.sprintMash() > 0)) {
+      let d = Math.atan2(_moveDir.x, _moveDir.z) + Math.PI - camYaw;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      aimRun = Math.abs(d) < AIM_RUN_MAX_ANGLE + (aimRunRef.current ? AIM_RUN_HYST : 0);
+    }
+    aimRunRef.current = aimRun;
+    const gunFacingCam = isGun() && ((aimingRef.current && !aimRun) || (hipFireRef.current > 0 && !moving));
     if (gunFacingCam) {
       targetRotation = camYaw;
     } else if (input.lockOn && _toOpponent.lengthSq() > 0.0001) {
@@ -2240,7 +2393,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       if (!aimingRef.current) {
         let face = camYaw - data.rotation;
         face = Math.atan2(Math.sin(face), Math.cos(face));
-        const turned = Math.abs(face) < HIP_FIRE_FACING;
+        // (pistola correndo: il busto si gira fin quasi di lato)
+        const moving = _moveDir.lengthSq() > 0.0001;
+        const turned = Math.abs(face) < (moving ? HIP_FIRE_FACING_RUN : HIP_FIRE_FACING);
         if (pendingHipShotRef.current > 0) {
           pendingHipShotRef.current -= delta * globalSpeed;
           shoot = turned || pendingHipShotRef.current <= 0;
@@ -2255,10 +2410,23 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       input.consumeJustPressed('attackLeft');
       input.consumeJustPressed('yawRight');
 
-      if (_moveDir.lengthSq() > 0.0001) {
+      // "quando spara con la pistola devo poter correre come senza": pistola
+      // senza mirare (anche sparando dal fianco) -> la locomozione libera
+      // alla GTA qui sotto, come a mani nude
+      // (anche il fucile, e anche mirando se si corre: vedi aimRun)
+      const pistolFree = !aimingRef.current || aimRunRef.current;
+      if (pistolFree) {
+        // (prosegue sotto)
+      } else if (_moveDir.lengthSq() > 0.0001) {
         _moveDir.normalize();
         const sprint = input.shift && !aimingRef.current && reloadLeftRef.current <= 0;
-        const loco = pickDirectionalLoco(sprint, aimingRef.current ? aimWalkTs() : dirWalkTs(), '__legs');
+        // pistola in mira: clip intere (il braccio sinistro si muove con la
+        // camminata), fucile: solo gambe (il busto tiene il fucile)
+        const loco = pickDirectionalLoco(
+          sprint,
+          aimingRef.current ? aimWalkTs() : dirWalkTs(),
+          weaponRef.current === 'pistol' ? '' : '__legs'
+        );
         resolveAndApplyMovement(_moveDir.x * loco.speed * delta * globalSpeed, _moveDir.z * loco.speed * delta * globalSpeed);
         transitionToAnimation(loco.clip, 0.2, true, loco.ts);
         data.state = loco.running ? 'Corre' : 'Si muove';
@@ -2266,8 +2434,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
         transitionToAnimation(idleName(), 0.2, true);
         data.state = idleState();
       }
-      applyTransform();
-      return;
+      if (!pistolFree) {
+        applyTransform();
+        return;
+      }
     }
 
     // --- Attacks: three distinct strikes, one per key, instead of one
@@ -2415,7 +2585,14 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     const mash = injured ? 0 : input.sprintMash();
     const flatWant = mash > 0 ? LT.jogSpeed + (LT.runSpeed - LT.jogSpeed) * mash : runWanted ? LT.jogSpeed : walkSpeed;
     const want = !hasDir ? 0 : stair ? (runWanted || mash > 0 ? LT.runSpeed / (gR * dR) : walkSpeed / (gW * dW)) * stairCycle : flatWant;
-    data.rotation = stepLoco(ls, rotBeforeFacing, hasDir ? Math.atan2(_moveDir.x, _moveDir.z) + Math.PI : null, want, LT.runSpeed, dtL);
+    data.rotation = stepLoco(
+      ls,
+      gunFacingCam ? data.rotation : rotBeforeFacing,
+      hasDir ? Math.atan2(_moveDir.x, _moveDir.z) + Math.PI : null,
+      want,
+      LT.runSpeed,
+      dtL
+    );
     const running = ls.speed > (walkSpeed + LT.runSpeed) / 2;
     // fiatone: secondi di corsa di fila (camminare li fa calare piano)
     if (running) sprintTimeRef.current += dtL;
@@ -2432,7 +2609,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       // passo vanno alla stessa fase del ciclo (appoggio sinistro allineato)
       // e la cadenza e' quella che fa avanzare i piedi alla velocita' vera
       const idleClip = idleName();
-      const clips = [walkClip, runClip, idleClip].filter((c, i, arr) => !!actions[c] && arr.indexOf(c) === i);
+      // col fucile solo le gambe (il busto tiene il fucile sul layer alto)
+      const legs = weaponRef.current === 'rifle';
+      const actName = (c: string) => (legs && actions[c + '__legs'] ? c + '__legs' : c);
+      const clips = [walkClip, runClip, idleClip].map(actName).filter((c, i, arr) => !!actions[c] && arr.indexOf(c) === i);
       const lb = locoBlendRef.current;
       if (!lb.active) {
         // entrata: da quello che c'era (un colpo, un idle Kimodo...)
@@ -2482,7 +2662,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
         }
       }
       const set = (c: string, weight: number, synced: boolean) => {
-        const a = actions[c];
+        const a = actions[actName(c)];
         if (!a) return;
         if (!a.isRunning()) a.play();
         // il peso lo decide il mescolamento (via una dissolvenza rimasta da
@@ -2498,7 +2678,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       set(walkClip, wWalk, true);
       if (idleClip !== walkClip && idleClip !== runClip) set(idleClip, w.idle, false);
       // la clip "di riferimento" (chi legge data.currentAnim)
-      data.currentAnim = wRun > wWalk ? runClip : wWalk >= w.idle ? walkClip : idleClip;
+      data.currentAnim = actName(wRun > wWalk ? runClip : wWalk >= w.idle ? walkClip : idleClip);
       // inclinazione nelle curve (rollio del modello intorno al suo avanti)
       clone.rotation.z = -ls.lean;
     } else {

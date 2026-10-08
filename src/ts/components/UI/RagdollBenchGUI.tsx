@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useStore } from '../../store';
 import { DEFAULT_RAGDOLL_BENCH, type RagdollBenchSettings } from '../Environment/ragdoll/ragdollBench';
-import { acquireDebugGui, releaseDebugGui } from '../../lib/debugGui';
+import { acquireDebugGui, debugSection, releaseDebugGui } from '../../lib/debugGui';
 import { KO_SCENARIOS, copyKoValues, runKoScenario } from './koLab';
 
 // "metti il personaggio a T e sistema queste ossa della ragdoll attiva..
@@ -24,8 +24,11 @@ const NO_CLIP = '(gioco normale)';
 const RagdollBenchGUI: React.FC = () => {
   useEffect(() => {
     if (!import.meta.env.DEV) return;
-    const gui = acquireDebugGui();
-    const folder = gui.addFolder('Banco ragdoll');
+    // sezione comune "Fisica e ragdoll" del pannello Debug (lib/debugGui.ts):
+    // i comandi generali (prima doppi tra "Arena" e "Banco ragdoll") stanno
+    // in cima, il banco di prova e il laboratorio KO in due cartelle
+    acquireDebugGui();
+    const section = debugSection('fisica');
     const st = () => useStore.getState();
     const bench = () => st().ragdollBench;
     const setBench = (p: Partial<RagdollBenchSettings>) => st().setRagdollBench(p);
@@ -42,6 +45,12 @@ const RagdollBenchGUI: React.FC = () => {
       },
       set tPose(v: boolean) {
         st().setTPoseDebug(v);
+      },
+      get mostraCollider() {
+        return st().showPhysicsDebug;
+      },
+      set mostraCollider(v: boolean) {
+        st().setShowPhysicsDebug(v);
       },
       get mostraCorpi() {
         return st().showActiveRagdollDebug;
@@ -135,13 +144,23 @@ const RagdollBenchGUI: React.FC = () => {
       },
     };
 
-    folder.add(bind, 'ragdollAttivo').name('Ragdoll attivo').listen();
-    folder.add(bind, 'tPose').name('T-pose (bersaglio = T)').listen();
-    folder.add(bind, 'mostraCorpi').name('Mostra corpi fisici').listen();
+    // comandi generali, in cima alla sezione
+    const general = [
+      section.add(bind, 'ragdollAttivo').name('Ragdoll attivo (PD)').listen(),
+      section.add(bind, 'passivo').name('Ragdoll passivo (motori spenti)').listen(),
+      section.add(bind, 'mostraCollider').name('Mostra collider fisici').listen(),
+      section.add(bind, 'mostraCorpi').name('Mostra corpi ragdoll attivo').listen(),
+      section.add(bind, 'tPose').name('T-pose (ferma animazione)').listen(),
+      section.add(bind, 'pausa').name('Pausa fisica').listen(),
+      section.add({ f: () => (window as any).__physicsDebug?.step() }, 'f').name('Passo singolo fisica (1/120s)'),
+      section.add(bind, 'cameraOrto').name('Camera ortogonale').listen(),
+      section.add({ f: () => st().setDebugOrthoCameraAngleDeg((st().debugOrthoCameraAngleDeg + 90) % 360) }, 'f').name("Ruota vista 90'"),
+    ];
+
+    const folder = section.addFolder('Banco ragdoll');
     folder.add(bind, 'mostraBersagli').name('Mostra bersagli (bianco)').listen();
     folder.add(bind, 'tabella').name('Tabella errori/giunti').listen();
     folder.add(bind, 'soloFisica').name('Modello = solo fisica').listen();
-    folder.add(bind, 'passivo').name('Passivo (motori spenti)').listen();
     folder.add(bind, 'bacinoAncorato').name('Bacino ancorato').listen();
     folder.add(bind, 'gravita', 0, 1, 0.05).name('Gravita ragdoll vivo').listen();
     folder.add(bind, 'rigidita', 0.1, 4, 0.05).name('Rigidita motori x').listen();
@@ -153,10 +172,6 @@ const RagdollBenchGUI: React.FC = () => {
     for (const [label, seg] of Object.entries(TEST_HIT_SEGMENTS)) {
       folder.add({ f: () => (window as any).__ragdollBench?.hit(seg) }, 'f').name(label);
     }
-    folder.add(bind, 'pausa').name('Pausa fisica').listen();
-    folder.add({ f: () => (window as any).__physicsDebug?.step() }, 'f').name('Passo singolo (1/120s)');
-    folder.add(bind, 'cameraOrto').name('Camera ortogonale').listen();
-    folder.add({ f: () => st().setDebugOrthoCameraAngleDeg((st().debugOrthoCameraAngleDeg + 90) % 360) }, 'f').name("Ruota vista 90'");
     folder.add({ f: () => setBench({ rebuildNonce: bench().rebuildNonce + 1 }) }, 'f').name('Ricostruisci ragdoll');
     folder
       .add(
@@ -183,10 +198,9 @@ const RagdollBenchGUI: React.FC = () => {
     // "introduci kimodo": le clip generate (tools/kimodo/kimodo.sh) in un
     // pannello a parte, oltre che nell'elenco completo qui sopra. Scegliendone
     // una il manichino la ripete (clip -> pausa in guardia -> clip).
-    const kimodo = gui.addFolder('Animazioni Kimodo');
-    let kimodoCtrl = kimodo.add(bind, 'clip', [NO_CLIP]).name('Animazione').listen();
-    const kimodoInfo = { n: 'nessuna: tools/kimodo/kimodo.sh gen ...' };
-    const kimodoInfoCtrl = kimodo.add(kimodoInfo, 'n').name('Clip').disable();
+    // (prima in una cartella a parte: e' lo stesso elenco, filtrato, quindi
+    // sta accanto all'altro)
+    let kimodoCtrl = folder.add(bind, 'clip', [NO_CLIP]).name('Animazione Kimodo').listen();
 
     const poll = window.setInterval(() => {
       const names: string[] | undefined = (window as any).__ragdollBench?.clipNames?.();
@@ -198,10 +212,8 @@ const RagdollBenchGUI: React.FC = () => {
         const k = names.filter((n) => n.startsWith('Kimodo_'));
         kimodoCtrl = kimodoCtrl
           .options([NO_CLIP, ...k])
-          .name('Animazione')
+          .name(`Animazione Kimodo (${k.length})`)
           .listen();
-        kimodoInfo.n = k.length ? `${k.length}` : kimodoInfo.n;
-        kimodoInfoCtrl.updateDisplay();
         window.clearInterval(poll);
       }
     }, 1000);
@@ -210,7 +222,7 @@ const RagdollBenchGUI: React.FC = () => {
 
     // "facciamo dei test e ti do dei feedback" -- KO alla GTA IV: scenari
     // ripetibili (anche Alt+1..7) e i cursori del carattere dei muscoli.
-    const ko = gui.addFolder('Laboratorio KO');
+    const ko = section.addFolder('Laboratorio KO');
     const koBind = {
       get tono() {
         return bench().koTone;
@@ -287,8 +299,8 @@ const RagdollBenchGUI: React.FC = () => {
       window.clearInterval(poll);
       window.removeEventListener('keydown', onKey);
       ko.destroy();
-      kimodo.destroy();
       folder.destroy();
+      general.forEach((c) => c.destroy());
       releaseDebugGui();
     };
   }, []);

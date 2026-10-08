@@ -924,9 +924,13 @@ const GreenCourtyard: React.FC<{ x: number; z: number; treeTemplates: TreeTempla
 // tra le due distanze per non montare/smontare avanti e indietro sul
 // confine; al massimo un palazzo caricato per controllo (4 al secondo) per
 // spalmare il costo di creazione su piu' frame.
+// (la distanza si cambia dal pannello Debug > Citta': store.realBuildingDist;
+// questa e' quella di partenza)
 const BUILDING_LOAD_DIST = 55;
-const BUILDING_UNLOAD_DIST = 75;
+const BUILDING_UNLOAD_EXTRA = 20;
 const BUILDING_CHECK_S = 0.25;
+// per il pannello: quanti palazzi veri ci sono adesso
+export const realBuildingsInfo = { count: 0, total: 0 };
 
 const footprintDist = (b: CityBuildingRecord, px: number, pz: number) => {
   const dx = Math.max(0, Math.abs(px - b.x) - b.w / 2);
@@ -1000,7 +1004,8 @@ const BuildingsStreamer: React.FC = () => {
     Math.min(footprintDist(b, px, pz), footprintDist(b, qx, qz));
   const [near, setNear] = useState<number[]>(() => {
     const pp = useStore.getState().playerPos;
-    return buildings.map((b, i) => (footprintDist(b, pp[0], pp[2]) < BUILDING_LOAD_DIST ? i : -1)).filter((i) => i >= 0);
+    const load = useStore.getState().realBuildingDist ?? BUILDING_LOAD_DIST;
+    return buildings.map((b, i) => (footprintDist(b, pp[0], pp[2]) < load ? i : -1)).filter((i) => i >= 0);
   });
   const nearRef = useRef(new Set(near));
   const acc = useRef(0);
@@ -1010,11 +1015,14 @@ const BuildingsStreamer: React.FC = () => {
     if (acc.current < BUILDING_CHECK_S) return;
     acc.current = 0;
     const cam = state.camera.position;
-    const pp = useStore.getState().playerPos;
+    const st = useStore.getState();
+    const pp = st.playerPos;
+    const loadDist = st.realBuildingDist ?? BUILDING_LOAD_DIST;
+    const unloadDist = loadDist + BUILDING_UNLOAD_EXTRA;
     const cur = nearRef.current;
     let changed = false;
     for (const i of [...cur]) {
-      if (nearest(pp[0], pp[2], cam.x, cam.z, buildings[i]) > BUILDING_UNLOAD_DIST) {
+      if (nearest(pp[0], pp[2], cam.x, cam.z, buildings[i]) > unloadDist) {
         cur.delete(i);
         changed = true;
       }
@@ -1030,7 +1038,7 @@ const BuildingsStreamer: React.FC = () => {
         changed = true;
         continue;
       }
-      if (d < BUILDING_LOAD_DIST && d < bestD) {
+      if (d < loadDist && d < bestD) {
         bestD = d;
         best = i;
       }
@@ -1040,6 +1048,8 @@ const BuildingsStreamer: React.FC = () => {
       changed = true;
     }
     if (changed) setNear([...cur].sort((a, b) => a - b));
+    realBuildingsInfo.count = cur.size;
+    realBuildingsInfo.total = buildings.length;
   });
 
   if (import.meta.env.DEV) (window as any).__buildingsNear = near;

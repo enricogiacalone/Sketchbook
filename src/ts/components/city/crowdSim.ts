@@ -19,7 +19,13 @@ import {
 // tutti gli altri sono disegnati in blocco come sagome instanziate
 // (CrowdInstances.tsx), senza fisica e senza mixer di animazione.
 
-export const CROWD_FULL_SLOTS = 6; // corpi veri al massimo
+export const CROWD_FULL_SLOTS = 6; // corpi veri di partenza
+// "mettimi un hud con cui configurare il numero di corpi veri": quanti ne
+// usa la folla lo decide il pannello Debug > Citta' (store.crowdBodies),
+// fino a CROWD_MAX_SLOTS
+export const CROWD_MAX_SLOTS = 40;
+let slotCount = CROWD_FULL_SLOTS;
+export const crowdSlotCount = () => slotCount;
 export const CROWD_ASSIGN_DIST = 26; // entro questa distanza un agente prende un corpo vero
 export const CROWD_RELEASE_DIST = 32; // oltre, lo restituisce al pool
 export const CROWD_DRAW_DIST = 190; // le sagome oltre non si disegnano
@@ -276,7 +282,25 @@ function makeAgents(): CrowdAgent[] {
 
 export const crowdAgents: CrowdAgent[] = makeAgents();
 // agente assegnato a ciascun corpo vero del pool (null = libero)
-export const crowdSlots: (CrowdAgent | null)[] = Array.from({ length: CROWD_FULL_SLOTS }, () => null);
+export const crowdSlots: (CrowdAgent | null)[] = Array.from({ length: CROWD_MAX_SLOTS }, () => null);
+// primo corpo libero tra quelli in uso (-1 = nessuno)
+const freeSlot = () => {
+  for (let s = 0; s < slotCount; s++) if (!crowdSlots[s]) return s;
+  return -1;
+};
+// cambia quanti corpi veri usa la folla. Togliendone, i vivi tornano sagome
+// subito; i corpi con un morto o un nemico li libera il loro componente
+// quando viene smontato (CrowdPedestrian)
+export function setCrowdSlotCount(n: number) {
+  slotCount = Math.max(0, Math.min(CROWD_MAX_SLOTS, Math.round(n)));
+  for (let s = slotCount; s < CROWD_MAX_SLOTS; s++) {
+    const a = crowdSlots[s];
+    if (a && !a.gone) {
+      a.slot = -1;
+      crowdSlots[s] = null;
+    }
+  }
+}
 
 // durata del ciclo della camminata delle sagome (s a velocita' base)
 export const CROWD_GAIT_CYCLE_S = 1.1;
@@ -687,7 +711,7 @@ export function crowdPanic(x: number, z: number, radius = PANIC_RADIUS) {
 // pieno e c'e' un agente parecchio piu' vicino dell'assegnato piu' lontano,
 // si scambiano.
 export function assignCrowdSlots() {
-  for (let s = 0; s < crowdSlots.length; s++) {
+  for (let s = 0; s < slotCount; s++) {
     const a = crowdSlots[s];
     // i corpi con un agente "andato" (nemico/morto) li libera il corpo stesso
     if (a && !a.gone && !a.pendingHit && a.dist > CROWD_RELEASE_DIST) {
@@ -700,11 +724,11 @@ export function assignCrowdSlots() {
     .filter((a) => !a.gone && a.slot < 0 && (a.pendingHit || a.dist < CROWD_ASSIGN_DIST))
     .sort((a, b) => (a.pendingHit ? 0 : 1) - (b.pendingHit ? 0 : 1) || a.dist - b.dist);
   for (const c of candidates) {
-    let free = crowdSlots.indexOf(null);
+    let free = freeSlot();
     if (free < 0) {
       // il piu' lontano tra gli assegnati (non impegnato in qualcosa)
       let worst = -1;
-      for (let s = 0; s < crowdSlots.length; s++) {
+      for (let s = 0; s < slotCount; s++) {
         const a = crowdSlots[s];
         if (a && !a.gone && !a.pendingHit && (worst < 0 || a.dist > crowdSlots[worst]!.dist)) worst = s;
       }
@@ -826,11 +850,11 @@ export function raycastCrowd(
 export function promoteCrowdAgent(a: CrowdAgent, hit: CrowdPendingHit) {
   a.pendingHit = hit;
   if (a.slot >= 0) return;
-  let free = crowdSlots.indexOf(null);
+  let free = freeSlot();
   if (free < 0) {
     // il corpo assegnato piu' lontano (non uno gia' impegnato: nemico o morto)
     let worst = -1;
-    for (let s = 0; s < crowdSlots.length; s++) {
+    for (let s = 0; s < slotCount; s++) {
       const b = crowdSlots[s];
       if (b && !b.gone && !b.pendingHit && (worst < 0 || b.dist > crowdSlots[worst]!.dist)) worst = s;
     }

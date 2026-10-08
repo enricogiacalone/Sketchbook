@@ -33,7 +33,7 @@ import { SimplexNoise } from 'three-stdlib';
 import { getPlaylist, type SpeakerId, type Track } from './musicLibrary';
 import { setFlatGroundOverride } from '../Road';
 import { useInput } from '../../../hooks/useInput';
-import { acquireDebugGui, releaseDebugGui } from '../../../lib/debugGui';
+import { acquireDebugGui, debugSection, releaseDebugGui } from '../../../lib/debugGui';
 import { acquireAudioListener, releaseAudioListener } from '../../../lib/sharedAudioListener';
 import { CollisionGroups, groupsExcluding } from '../../../enums/CollisionGroups';
 
@@ -453,8 +453,9 @@ const AudioArena: React.FC = () => {
   });
 
   useEffect(() => {
-    const gui = acquireDebugGui();
-    const folder = gui.addFolder('Musica (casse arena)');
+    // pannello Debug > Arena (si vede solo nel duello)
+    acquireDebugGui();
+    const folder = debugSection('arena').addFolder('Musica (casse)');
     const s = settingsRef.current;
     folder.add({ f: () => togglePlay() }, 'f').name('Play / pausa tutte (M)');
     folder
