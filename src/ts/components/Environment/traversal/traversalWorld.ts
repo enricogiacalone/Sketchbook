@@ -104,6 +104,23 @@ export function supportHeight(world: World, rapier: RapierModule, x: number, z: 
   return best;
 }
 
+// Un solo raggio (IK dei piedi): quota e normale dell'appoggio proprio sotto
+// (x, z), mai sotto baseY (il pavimento/terreno, normale in su).
+export function groundUnder(world: World, rapier: RapierModule, x: number, z: number, fromY: number, baseY: number, out: { y: number; nx: number; ny: number; nz: number }) {
+  out.y = baseY;
+  out.nx = 0;
+  out.ny = 1;
+  out.nz = 0;
+  const h = ray(world, rapier, x, fromY, z, 0, -1, 0, Math.max(0.05, fromY - baseY + 0.05), true);
+  if (h && h.ny > 0.45 && fromY - h.toi > baseY) {
+    out.y = fromY - h.toi;
+    out.nx = h.nx;
+    out.ny = h.ny;
+    out.nz = h.nz;
+  }
+  return out;
+}
+
 export interface LedgeInfo {
   // punto sulla faccia del muro, alla quota della cima
   face: THREE.Vector3;

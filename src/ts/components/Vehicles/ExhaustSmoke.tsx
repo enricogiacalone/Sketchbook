@@ -133,7 +133,10 @@ const ExhaustSmoke: React.FC<{ pipes: [number, number, number][] }> = ({ pipes }
   });
   useEffect(
     () => () => {
-      for (const e of emitters) e.material.dispose();
+      for (const e of emitters) {
+        e.material.dispose();
+        if (import.meta.env.DEV) (window as any).__exhaustEmitters?.delete(e);
+      }
     },
     [emitters]
   );

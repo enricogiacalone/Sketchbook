@@ -1,9 +1,10 @@
-import React, { useLayoutEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { interactionGroups } from '@react-three/rapier';
 import { useStaticBoxes, type StaticBox } from './staticColliders';
 import { CollisionGroups } from '../../enums/CollisionGroups';
 import { STAIR_RAMP_GROUPS } from './traversal/traversalWorld';
+import { registerStepFlights, stepTreads } from './stairSteps';
 import {
   BUILDING_HOLE_LEN,
   BUILDING_SLAB_THICKNESS,
@@ -89,16 +90,33 @@ export const BuildingStairwell: React.FC<Props> = ({ x, y, z, width, depth, heig
   const slabARef = useRef<THREE.InstancedMesh>(null);
   const slabBRef = useRef<THREE.InstancedMesh>(null);
   const stepRef = useRef<THREE.InstancedMesh>(null);
+  // gradini visibili per l'IK dei piedi (stairSteps.ts), nel mondo
+  useEffect(
+    () =>
+      registerStepFlights(
+        flights.map((fl) => ({
+          xa: x + fl.xa,
+          ya: y + fl.ya,
+          xb: x + fl.xb,
+          yb: y + fl.yb,
+          z: z + fl.z,
+          halfWidth: BUILDING_STAIR_LANE / 2,
+          steps,
+        }))
+      ),
+    [x, y, z, flights, steps]
+  );
   const stringerRef = useRef<THREE.InstancedMesh>(null);
   const landingRef = useRef<THREE.InstancedMesh>(null);
   const railRef = useRef<THREE.InstancedMesh>(null);
 
   // matrici delle istanze (coordinate del mondo: le mesh non stanno in un gruppo)
   useLayoutEffect(() => {
-    const put = (m: THREE.InstancedMesh | null, i: number, px: number, py: number, pz: number, rz = 0) => {
+    const put = (m: THREE.InstancedMesh | null, i: number, px: number, py: number, pz: number, rz = 0, sx = 1) => {
       if (!m) return;
       _o.position.set(x + px, y + py, z + pz);
       _o.rotation.set(0, 0, rz);
+      _o.scale.set(sx, 1, 1);
       _o.updateMatrix();
       m.setMatrixAt(i, _o.matrix);
     };
@@ -107,11 +125,12 @@ export const BuildingStairwell: React.FC<Props> = ({ x, y, z, width, depth, heig
       put(slabBRef.current, f - 1, pieceB.cx, f * floorHeight, pieceB.cz);
     }
     flights.forEach((fl, k) => {
-      for (let i = 0; i < steps; i++) {
-        const t = (i + 0.5) / steps;
-        // la cima di ogni gradino sta sulla rampa di collisione, al centro del gradino
-        put(stepRef.current, k * steps + i, fl.xa + (fl.xb - fl.xa) * t, fl.ya + (fl.yb - fl.ya) * t - stepRise / 2, fl.z);
-      }
+      // alzate tutte uguali, pedate centrate sulla rampa (stairSteps.ts);
+      // (l'ultimo argomento accorcia il gradino: mezza pedata in cima)
+      stepTreads({ ya: fl.ya, yb: fl.yb, steps }).forEach((t, i) => {
+        const u = (t.u0 + t.u1) / 2;
+        put(stepRef.current, k * steps + i, fl.xa + (fl.xb - fl.xa) * u, t.top - stepRise / 2, fl.z, 0, (t.u1 - t.u0) * steps);
+      });
       // soletta inclinata sotto i gradini
       const r = rampTransform({ ...fl, ya: fl.ya - stepRise, yb: fl.yb - stepRise }, STRINGER_T);
       put(stringerRef.current, k, r.x, r.y, r.z, r.rotZ);

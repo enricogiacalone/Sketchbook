@@ -20,6 +20,8 @@ import { useRapier } from '@react-three/rapier';
 import { usePistolModel, useGunModel, RIFLE_SPEC, type GunModelApi } from './weapons/usePistolModel';
 import { useKnifeModel } from './weapons/useKnifeModel';
 import { solveTwoBoneIK } from './weapons/twoBoneIK';
+import { applyFootIK, newFootIK } from './footIK';
+import { stepAt, stepTopAt } from './stairSteps';
 import { newTravState, stepTraversal, followGround, isTraversing, hangHandTargets, type TravCtx } from './traversal/traversal';
 import { GETUP_CLIP } from './ragdoll/knockdown';
 import { useKnockdown } from './ragdoll/useKnockdown';
@@ -154,6 +156,12 @@ const aimWalkTs = () => timeScaleFor('Walk', LT.aimWalkSpeed);
 // "sta in posizione di combattimento solo quando aggancio un nemico, per il
 // resto in idle normale": idle rilassato del rig (il primo che esiste)
 const RELAXED_IDLE_CLIPS = ['Idle_A', 'Idle_Subtle', 'Idle'];
+// "la posizione di riposo va in contrasto con il salire le scale cercando di
+// mettere sempre il piede destro dietro quello sinistro": Idle_A tiene il
+// destro 39 cm dietro il sinistro (misurato), su una scala vuol dire uno o
+// due gradini piu' in basso. Sulle scale il riposo e' Idle_Subtle (piedi
+// quasi pari: 11 cm), stesso stile.
+const STAIRS_IDLE_CLIPS = ['Idle_Subtle', 'Idle'];
 const PISTOL_FACE_TURN_RATE = 0.3;
 const PISTOL_SHOOT_ANIM_S = 0.22;
 const _shotCamDir = new THREE.Vector3();
@@ -461,6 +469,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   // locomozione alla GTA IV (gtaLocomotion.ts): velocita' con inerzia,
   // curve, inclinazione, e il "mixer" di fermo/camminata/corsa in fase
   const locoRef = useRef(newLocoState());
+  const footIKRef = useRef(newFootIK());
+  // passo accorciato sulle scale (vedi il movimento libero e footIK.ts)
+  const strideRef = useRef({ scale: 1, fwdX: 0, fwdZ: 1, rootX: 0, rootZ: 0 });
   const locoBlendRef = useRef<{ active: boolean; clips: string[]; blendIn: number }>({ active: false, clips: [], blendIn: 0 });
   // stati Kimodo (vedi INJURED_HP e seguenti)
   const sprintTimeRef = useRef(0);
@@ -968,11 +979,14 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   // Guardia (Fighting Idle) solo col lock-on su un nemico vivo; altrimenti
   // idle normale. Con la pistola le gambe stanno nella posa Pistol_Idle.
   const relaxedIdle = RELAXED_IDLE_CLIPS.find((n) => actions[n]) ?? animCatalog.idle;
+  const stairsIdle = STAIRS_IDLE_CLIPS.find((n) => actions[n]) ?? relaxedIdle;
   const isEngaged = () => !!input.lockOn && opponents.some((o) => !o.isDead);
+  const onStairs = () => stepTopAt(data.position.x, data.position.z, travRef.current.feetY) !== null;
   const idleName = () => {
     if (isGun() && actions['Pistol_Idle__legs']) return 'Pistol_Idle__legs';
     if (weaponRef.current === 'knife' && actions[KNIFE_IDLE_CLIP]) return KNIFE_IDLE_CLIP;
-    return isEngaged() ? animCatalog.idle : relaxedIdle;
+    if (isEngaged()) return animCatalog.idle;
+    return onStairs() ? stairsIdle : relaxedIdle;
   };
   const idleState = () => (weaponRef.current === 'fists' && !isEngaged() ? 'Riposo' : 'In guardia');
   // Fermi: esultanza o fiatone (clip Kimodo) al posto del riposo. true se ha
@@ -1399,6 +1413,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       // locomozione alla GTA IV (gtaLocomotion.ts): velocita', fase, inclinazione
       get loco() {
         return { ...locoRef.current, blend: locoBlendRef.current.active, anim: data.currentAnim, rot: data.rotation };
+      },
+      get footIK() {
+        const f = footIKRef.current;
+        return { w: f.w, restAnkle: f.restAnkle, ...f.debug };
       },
       get activeSegments() {
         return ragdoll.getActiveRagdollDebugSegments();
@@ -2351,7 +2369,25 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     const walkClip = injured ? K.injuredWalk : animCatalog.walk;
     const walkSpeed = injured ? INJURED_WALK_SPEED : LT.walkSpeed;
     const runClip = injured ? walkClip : animCatalog.run;
-    const want = hasDir ? (input.shift && !injured ? LT.runSpeed : walkSpeed) : 0;
+    // "deve salire e scendere un gradino alla volta come un vero umano": sulle
+    // scale la camminata (o la corsa) gira alla sua cadenza normale ma ogni
+    // passo avanza di una pedata, quindi si va piu' piano (velocita' =
+    // cadenza x 2 pedate a ciclo); footIK accorcia il passo animato e mette
+    // ogni piede al centro della pedata dopo quella dell'altro.
+    const dW = clipsMap[walkClip]?.duration ?? 1;
+    const dR = clipsMap[runClip]?.duration ?? 1;
+    const gW = CLIP_GROUND_SPEED[walkClip] ?? walkSpeed / Math.max(0.1, timeScaleFor(walkClip, walkSpeed));
+    const gR = CLIP_GROUND_SPEED[runClip] ?? gW;
+    const stair = stepAt(data.position.x, data.position.z, travRef.current.feetY);
+    const stairCycle = stair ? 2 * stair.tread : 0;
+    const runWanted = input.shift && !injured;
+    const want = !hasDir
+      ? 0
+      : stair
+        ? (runWanted ? LT.runSpeed / (gR * dR) : walkSpeed / (gW * dW)) * stairCycle
+        : runWanted
+          ? LT.runSpeed
+          : walkSpeed;
     data.rotation = stepLoco(ls, rotBeforeFacing, hasDir ? Math.atan2(_moveDir.x, _moveDir.z) + Math.PI : null, want, LT.runSpeed, dtL);
     const running = ls.speed > (walkSpeed + LT.runSpeed) / 2;
     // fiatone: secondi di corsa di fila (camminare li fa calare piano)
@@ -2386,25 +2422,45 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
           a.play();
         }
       }
+      // una clip che esce dal mescolamento (il riposo cambia salendo su una
+      // scala) si dissolve, se no resterebbe al peso che aveva
+      for (const c of lb.clips) if (!clips.includes(c)) actions[c]?.fadeOut(0.25);
       lb.clips = clips;
       lb.blendIn = Math.min(1, lb.blendIn + dtL / 0.2);
-      const w = locoWeights(ls.speed, walkSpeed, LT.runSpeed);
+      // sulle scale si va piu' piano alla stessa cadenza: camminata o corsa le
+      // decide la cadenza (cicli al secondo), non la velocita'
+      let blendSpeed = ls.speed;
+      if (stair) {
+        const cyc = ls.speed / Math.max(0.05, stairCycle);
+        const cW = walkSpeed / (gW * dW);
+        const cR = LT.runSpeed / (gR * dR);
+        blendSpeed = cyc <= cW ? cyc * gW * dW : walkSpeed + ((cyc - cW) / Math.max(1e-3, cR - cW)) * (LT.runSpeed - walkSpeed);
+      }
+      const w = locoWeights(blendSpeed, walkSpeed, LT.runSpeed);
       const wWalk = runClip === walkClip ? w.walk + w.run : w.walk;
       const wRun = runClip === walkClip ? 0 : w.run;
-      const dW = clipsMap[walkClip]?.duration ?? 1;
-      const dR = clipsMap[runClip]?.duration ?? 1;
-      const gW = CLIP_GROUND_SPEED[walkClip] ?? walkSpeed / Math.max(0.1, timeScaleFor(walkClip, walkSpeed));
-      const gR = CLIP_GROUND_SPEED[runClip] ?? gW;
       const moving = wWalk + wRun;
       if (moving > 1e-3) {
-        // metri per ciclo del passo mescolato
+        // metri per ciclo del passo mescolato (sulle scale: due pedate)
         const perCycle = (wWalk * gW * dW + wRun * gR * dR) / moving;
-        ls.phase = (ls.phase + (ls.speed / Math.max(0.05, perCycle)) * dtL) % 1;
+        const cycle = stair ? stairCycle : perCycle;
+        ls.phase = (ls.phase + (ls.speed / Math.max(0.05, cycle)) * dtL) % 1;
+        if (stair) {
+          const sr = strideRef.current;
+          sr.scale = Math.min(1, stairCycle / Math.max(0.05, perCycle));
+          sr.fwdX = _bodyFwd.x;
+          sr.fwdZ = _bodyFwd.z;
+          sr.rootX = data.position.x;
+          sr.rootZ = data.position.z;
+        }
       }
       const set = (c: string, weight: number, synced: boolean) => {
         const a = actions[c];
         if (!a) return;
         if (!a.isRunning()) a.play();
+        // il peso lo decide il mescolamento (via una dissolvenza rimasta da
+        // quando era uscita)
+        a.stopFading();
         a.setEffectiveWeight(weight * lb.blendIn);
         if (synced) {
           a.setEffectiveTimeScale(0);
@@ -2425,6 +2481,36 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     }
 
     applyTransform();
+  });
+
+  // piedi sul terreno vero e fermi quando appoggiano (footIK.ts): dopo
+  // tutto il resto del frame (animazione, mira, IK delle mani, posizione)
+  useFrame((_state, delta) => {
+    const bench = useStore.getState();
+    const active =
+      !bench.tPoseDebug &&
+      !bench.ragdollBench.benchClip &&
+      !data.isDead &&
+      !isDown() &&
+      !traving() &&
+      !inCarBody() &&
+      !isDodgingRef.current &&
+      travRef.current.mode === 'ground';
+    const p = groupRef.current?.position;
+    applyFootIK(footIKRef.current, clone, {
+      world,
+      rapier,
+      feetY: travRef.current.feetY,
+      baseY: p ? getTerrainHeight(p.x, p.z) + getRoadOffset(p.x, p.z) : travRef.current.feetY,
+      active,
+      dt: delta * globalSpeed,
+      stride: strideRef.current,
+      fwdX: -Math.sin(data.rotation),
+      fwdZ: -Math.cos(data.rotation),
+      moving: locoRef.current.speed > 0.05,
+    });
+    // il passo accorciato vale solo per il frame in cui il movimento l'ha chiesto
+    strideRef.current.scale = 1;
   });
 
   return (

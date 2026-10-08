@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { RigidBody, CuboidCollider } from '@react-three/rapier';
 import { AUDIO_ARENA_FLOOR_Y } from './audioArena/AudioArena';
 import { CLIMBABLE_GROUPS, STAIR_RAMP_GROUPS, registerLadder, unregisterLadder } from './traversal/traversalWorld';
+import { registerStepFlights, stepTreads } from './stairSteps';
 
 // "procedi, voglio anche il salto normale" -- percorso di prova per il
 // movimento da avventura (traversal/traversal.ts), nell'angolo dell'arena
@@ -42,7 +43,11 @@ const LADDER = { x: -10, z: -16 + 1.5 + 0.06, halfWidth: 0.3, top: 3.5 };
 // d'altezza getBuildingHeightOffset, qui una rampa di collisione che
 // supportHeight segue). Salgono verso +x fino alla cima della piattaforma
 // alta (faccia ovest, x = -11.5).
-const STAIRS = { x0: -14.5, x1: -11.5, z: -16, width: 2.0, rise: 3.5, steps: 12 };
+// "ogni gradino deve avere la stessa altezza e deve salire un gradino alla
+// volta come un vero umano": 19 alzate da 18.4 cm e pedate da 28 cm (33
+// gradi, una scala normale); prima erano 12 gradini da 29 cm su 3 m (49
+// gradi), una scala a pioli piu' che una scala.
+const STAIRS = { x0: -16.8, x1: -11.5, z: -16, width: 2.0, rise: 3.5, steps: 19 };
 const STAIR_RUN = STAIRS.x1 - STAIRS.x0;
 const STAIR_ANGLE = Math.atan2(STAIRS.rise, STAIR_RUN);
 const STAIR_LEN = Math.hypot(STAIRS.rise, STAIR_RUN);
@@ -71,8 +76,13 @@ const ParkourCourse: React.FC = () => {
       topY: BASE + LADDER.top,
       halfWidth: LADDER.halfWidth,
     });
+    // gradini visibili per l'IK dei piedi (stairSteps.ts)
+    const offSteps = registerStepFlights([
+      { xa: STAIRS.x0, ya: BASE, xb: STAIRS.x1, yb: BASE + STAIRS.rise, z: STAIRS.z, halfWidth: STAIRS.width / 2, steps: STAIRS.steps },
+    ]);
     return () => {
       unregisterLadder('parkour-ladder');
+      offSteps();
     };
   }, []);
 
@@ -122,20 +132,18 @@ const ParkourCourse: React.FC = () => {
           </mesh>
         </group>
       ))}
-      {/* gradini (la cima di ognuno sta sulla rampa, al suo centro) */}
-      {Array.from({ length: STAIRS.steps }, (_, i) => {
-        const t = (i + 0.5) / STAIRS.steps;
-        const stepRun = (STAIR_RUN / STAIRS.steps) * 1.1;
+      {/* gradini: alzate tutte uguali, pedate centrate sulla rampa (stairSteps.ts) */}
+      {stepTreads({ ya: BASE, yb: BASE + STAIRS.rise, steps: STAIRS.steps }).map((t, i) => {
         const stepRise = STAIRS.rise / STAIRS.steps;
         return (
           <mesh
             key={`st${i}`}
-            position={[STAIRS.x0 + t * STAIR_RUN, BASE + t * STAIRS.rise - stepRise / 2, STAIRS.z]}
+            position={[STAIRS.x0 + ((t.u0 + t.u1) / 2) * STAIR_RUN, t.top - stepRise / 2, STAIRS.z]}
             material={mats.stair}
             castShadow
             receiveShadow
           >
-            <boxGeometry args={[stepRun, stepRise, STAIRS.width]} />
+            <boxGeometry args={[(t.u1 - t.u0) * STAIR_RUN + 0.01, stepRise, STAIRS.width]} />
           </mesh>
         );
       })}

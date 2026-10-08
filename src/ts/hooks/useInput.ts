@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber';
 import { useStore } from '../store';
 
 const STICK_DEADZONE = 0.25;
+const SPRINT_TAP_WINDOW_MS = 900;
 
 const ACTION_NAMES = [
   'forward', 'backward', 'left', 'right', 'jump', 'shift',
@@ -81,6 +82,9 @@ export const useInput = () => {
   // Refs are better for "just pressed" as they don't trigger re-renders
   // and are immediate for useFrame consumption.
   const justPressed = useRef<Record<string, boolean>>({});
+  // "per correre devo premere x piu' volte come gta": istanti delle ultime
+  // pressioni del tasto corsa (X / Shift), per sprintMash() qui sotto
+  const shiftTaps = useRef<number[]>([]);
 
   // Keyboard/mouse and gamepad are two independent sources, each tracked
   // on its own and OR-ed together into `input` below. Without this split,
@@ -97,7 +101,15 @@ export const useInput = () => {
       for (const action of ACTION_NAMES) {
         const value = keyboardActions.current[action] || gamepadActions.current[action];
         if (value !== prev[action]) {
-          if (value && !prev[action]) justPressed.current[action] = true;
+          if (value && !prev[action]) {
+            justPressed.current[action] = true;
+            if (action === 'shift') {
+              const t = performance.now();
+              const taps = shiftTaps.current;
+              taps.push(t);
+              while (taps.length && t - taps[0] > SPRINT_TAP_WINDOW_MS) taps.shift();
+            }
+          }
           if (!value) justPressed.current[action] = false;
           next[action] = value;
           didChange = true;
@@ -319,60 +331,73 @@ export const useInput = () => {
     const axisForward = pad.axes[1] ?? 0; // negative = stick pushed up/forward
     const axisStrafe = pad.axes[0] ?? 0;
 
-    g.forward = axisForward < -STICK_DEADZONE;
-    g.backward = axisForward > STICK_DEADZONE;
+    // "mappa i tasti del joystick come gta" -- schema di GTA V (pad
+    // PlayStation, indici del mapping standard: 0 X, 1 Cerchio, 2 Quadrato,
+    // 3 Triangolo, 4 L1, 5 R1, 6 L2, 7 R2, 8 Select, 9 Start, 10 L3, 11 R3,
+    // 12-15 croce su/giu'/sinistra/destra):
+    //   a piedi   levetta sx muove, dx camera; X corsa (tenuto) e scatto
+    //             (premuto piu' volte); Quadrato salto; Triangolo sali/scendi
+    //             dal veicolo; Cerchio attacco leggero / ricarica; R2 spara /
+    //             attacco pesante; L2 mira (con un'arma) o aggancia il
+    //             nemico (a mani nude); con L2 tenuto Quadrato e' la
+    //             schivata e Triangolo l'attacco alternativo; L1 ruota delle
+    //             armi; R1 parata; R3 guarda dietro; L3 capriola; croce:
+    //             armi rapide (sx pugni, dx pistola, su fucile), giu' ricarica
+    //   in auto   R2 gas, L2 freno/retro, R1 freno a mano, levetta sx sterza,
+    //             Triangolo scendi, croce destra fari
+    //   in volo   R2 su / gas, L2 giu' / freno, L1 R1 imbardata
+    const ctrl = useStore.getState().currentControllable;
+    const inCar = ctrl === 'car';
+    const flying = ctrl === 'helicopter' || ctrl === 'airplane';
+    const wpn = useStore.getState().playerWeapon;
+    const armed = wpn === 'pistol' || wpn === 'rifle';
+    const b = (i: number) => !!pad!.buttons[i]?.pressed;
+    const l2 = b(6);
+    const r2 = b(7);
+
+    g.forward = axisForward < -STICK_DEADZONE || (inCar && r2);
+    g.backward = axisForward > STICK_DEADZONE || (inCar && l2);
     g.left = axisStrafe < -STICK_DEADZONE;
     g.right = axisStrafe > STICK_DEADZONE;
-    // "per saltare usa cerchio, per correre usa x, come gta"
-    g.jump = !!pad.buttons[1]?.pressed; // B / Circle: salto
-    g.shift = !!pad.buttons[0]?.pressed; // A / Cross: corsa
-    g.primary = !!pad.buttons[7]?.pressed; // RT: fire
-    // mira (armi) / parata (mani nude, coltello): L2 come in GTA, oppure R1.
-    // L2 resta anche il pugno sinistro a mani nude (attackLeft qui sotto):
-    // PlayerCombatSoldier non para quando L2 e' il pugno.
-    g.secondary = !!pad.buttons[6]?.pressed || !!pad.buttons[5]?.pressed; // L2 / R1
-    // X/Square AND Y/Triangle both enter/exit a vehicle -- Triangle used to
-    // drive the separate (and entirely unused -- nothing ever read
-    // input.enter_passenger) 'enter_passenger' action; folded into 'enter'
-    // per request so Triangle actually does something.
-    g.enter = !!pad.buttons[2]?.pressed || !!pad.buttons[3]?.pressed; // Square or Triangle
-    // Square and Triangle ALSO independently drive yawLeft/yawRight --
-    // "ricordati del gamepad, ho quadrato e triangolo a disposizione".
-    // These two actions already exist (KeyQ/KeyE) but never had a
-    // gamepad binding. Firing them from the same buttons as 'enter' is
-    // harmless: only one controllable is ever active at a time, so
-    // whichever of 'enter' (Player.tsx, entering a vehicle),
-    // 'yawLeft'/'yawRight' (Helicopter/Airplane/Drone turning), or
-    // 'yawLeft'/'yawRight' (PlayerCombatSoldier.tsx's Cross/Hook
-    // attacks) actually gets read never overlaps with the others.
-    g.yawLeft = !!pad.buttons[2]?.pressed; // X/Square
-    g.yawRight = !!pad.buttons[3]?.pressed; // Y/Triangle
-    // L2 (button 6) also drives 'secondary' above (aim) -- "con l2 usa il braccio sinistro e con r2
-    // quello destro" -- PlayerCombatSoldier.tsx's left-arm punch (Jab)
-    // checks this alongside 'yawLeft' (Q/Square), so all three fire the
-    // same strike.
-    g.attackLeft = !!pad.buttons[6]?.pressed; // L2
-    // "guardare l'avversario se tengo premuto l1" -- separate from
-    // everything above, L1 (button 4) has never driven anything in
-    // this app before now, so no reuse/overlap reasoning needed.
-    // L1 (button 4) e' la ruota delle armi, come in GTA (UI/WeaponWheel.tsx
-    // legge il pad da se'); l'aggancio passa a R3, dove prima c'era il
-    // coltello (ora si sceglie dalla ruota)
-    g.lockOn = !!pad.buttons[11]?.pressed; // R3
-    g.weapon1 = !!pad.buttons[14]?.pressed; // croce sinistra: pugni
-    g.weapon2 = !!pad.buttons[15]?.pressed; // croce destra: pistola
-    g.reload = !!pad.buttons[13]?.pressed; // croce giu': ricarica
-    g.weapon3 = !!pad.buttons[12]?.pressed; // croce su: fucile
-    g.dodge = !!pad.buttons[10]?.pressed; // L3 (levetta sinistra premuta): capriola
-    // Back/Select: cycle the camera's 4 zoom presets (see ZOOM_LEVELS in
-    // useThirdPersonCamera.ts). Reuses the 'camera' action, which already
-    // existed with a keyboard binding (KeyC) but, like enter_passenger
-    // above, had nothing reading it anywhere.
-    g.camera = !!pad.buttons[8]?.pressed;
-    // Start: pause/resume (see isPaused in store.ts). This used to drive
-    // 'respawn', which -- same story again -- nothing ever read; KeyR still
-    // fires it from the keyboard side in case that's wired up later.
-    g.pause = !!pad.buttons[9]?.pressed;
+    if (inCar) {
+      g.jump = b(5); // R1: freno a mano
+      g.shift = false;
+      g.primary = false;
+      g.secondary = false;
+      g.yawLeft = false;
+      g.yawRight = false;
+      g.headlights = b(15);
+    } else if (flying) {
+      g.shift = r2; // su / gas
+      g.jump = l2; // giu' / freno
+      g.yawLeft = b(4);
+      g.yawRight = b(5);
+      g.primary = false;
+      g.secondary = false;
+      g.headlights = false;
+    } else {
+      g.shift = b(0); // X: corsa / scatto
+      g.jump = b(2) && !l2; // Quadrato: salto
+      g.primary = r2; // R2: spara / attacco pesante
+      // L2: mira con un'arma; a mani nude aggancia il nemico (lockOn),
+      // e la parata passa a R1
+      g.secondary = armed ? l2 : b(5);
+      g.lockOn = !armed && l2;
+      g.yawLeft = b(1) && !armed; // Cerchio: attacco leggero (Jab)
+      g.yawRight = b(3) && l2 && !armed; // L2 + Triangolo: attacco alternativo
+      g.headlights = false;
+    }
+    g.attackLeft = false;
+    g.enter = b(3) && !(l2 && !armed && !inCar && !flying); // Triangolo: veicolo
+    g.dodge = (b(2) && l2 && !inCar && !flying) || b(10); // L2 + Quadrato, o L3: schivata
+    g.reload = b(13) || (b(1) && armed && !inCar && !flying); // croce giu' o Cerchio con un'arma
+    g.weapon1 = b(14) && !inCar; // croce sinistra: pugni
+    g.weapon2 = b(15) && !inCar; // croce destra: pistola
+    g.weapon3 = b(12); // croce su: fucile
+    // Select: le 4 distanze della camera (ZOOM_LEVELS in useThirdPersonCamera.ts)
+    g.camera = b(8);
+    // Start: pausa (la gestisce GameFreeze.tsx anche a gioco fermo)
+    g.pause = b(9);
 
     applyMerged();
   });
@@ -385,5 +410,15 @@ export const useInput = () => {
     return false;
   };
 
-  return { ...input, consumeJustPressed };
+  // quanto si sta "pestando" il tasto corsa (0..1): come in GTA, tenerlo
+  // premuto fa correre, premerlo piu' volte di fila fa scattare; smette di
+  // contare appena si smette di premere
+  const sprintMash = () => {
+    const now = performance.now();
+    const taps = shiftTaps.current;
+    while (taps.length && now - taps[0] > SPRINT_TAP_WINDOW_MS) taps.shift();
+    return Math.min(1, Math.max(0, (taps.length - 1) / 3));
+  };
+
+  return { ...input, consumeJustPressed, sprintMash };
 };

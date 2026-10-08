@@ -22,6 +22,13 @@
 // clip.json (facoltativo): { "inPlace": true } (predefinito) toglie lo
 // spostamento orizzontale (la clip resta sul posto, la posizione la decide il
 // gioco); false lo tiene (root motion).
+// { "rootMotion": true } (partenze, fermate, svolte sul posto): oltre allo
+// spostamento toglie anche la direzione del corpo (la clip guarda sempre
+// avanti) e scrive in kimodoClips.json "motion": per ogni fotogramma quanto
+// il corpo e' avanzato (x di lato, z avanti, metri del nostro manichino) e
+// girato (yaw, radianti, + = a sinistra) rispetto all'inizio. Il gioco muove
+// e gira il personaggio con quei numeri: i piedi restano dove li mette la
+// clip.
 import { NodeIO } from '@gltf-transform/core';
 import * as THREE from 'three';
 import fs from 'node:fs';
@@ -165,15 +172,36 @@ for (let j = 0; j < 30; j++) {
 }
 
 // allineamento della posa di riposo: ruota la direzione di ogni nostro osso
-// su quella del corrispondente in SOMA
+// su quella del corrispondente in SOMA.
+// Tranne schiena, collo, testa e clavicole: li' le direzioni a riposo sono
+// diverse per anatomia, non per posa (la nostra schiena a riposo ha la sua
+// curva, la clavicola sale di 6 gradi e va piu' indietro di 20; in SOMA sono
+// dritte). Allinearle raddrizzava la nostra schiena come quella di SOMA e
+// abbassava le spalle: misurato in gioco, con le clip Kimodo il petto 2-3 cm
+// e le spalle 2-5 cm piu' in basso che con le clip del manichino ("le
+// animazioni di kimodo hanno le spalle piu' basse del mio personaggio").
+// Per schiena, collo e testa si copia la rotazione di SOMA rispetto al suo
+// riposo (che e' in piedi a T come il nostro): SOMA dritto = il nostro
+// dritto. Le clavicole si allineano solo in orizzontale (avanti/indietro) e
+// tengono la loro inclinazione: copiate del tutto le spalle salivano di 2-6
+// cm sopra quelle del manichino, allineate del tutto scendevano di 2-5;
+// cosi' (misurato) stanno come nelle clip del manichino.
+const NO_ALIGN = new Set(['pelvis', 'spine_01', 'spine_02', 'spine_03', 'neck_01', 'head']);
+const YAW_ALIGN = new Set(['clavicle_l', 'clavicle_r']);
 const align = new Map();
 for (const [name, [, tChild, sChild]] of Object.entries(MAP)) {
   const b = bones.get(name);
   if (!b) throw new Error(`osso ${name} non trovato in ${RIG}`);
   const q = new THREE.Quaternion();
-  if (tChild && sChild) {
+  if (tChild && sChild && !NO_ALIGN.has(name)) {
     const dt = restWorldP.get(bones.get(tChild)).clone().sub(restWorldP.get(b)).normalize();
     const ds = somaRestP[S[sChild]].clone().sub(somaRestP[S[MAP[name][0]]]).normalize();
+    if (YAW_ALIGN.has(name)) {
+      // la direzione orizzontale di SOMA con la pendenza nostra
+      const h = Math.hypot(dt.x, dt.z);
+      const hs = Math.hypot(ds.x, ds.z) || 1;
+      ds.set((ds.x / hs) * h, dt.y, (ds.z / hs) * h).normalize();
+    }
     q.setFromUnitVectors(dt, ds);
   }
   align.set(b, q);
@@ -242,11 +270,17 @@ function retarget(rootPos, rotXYZW, opts) {
   // sui piedi, sparisce l'avanzare (una camminata diventa un tapis roulant e
   // la velocita' finisce in extras.speed per il gioco)
   const traj = smoothTrajectory(rootPos, T, 15);
+  const yawS = opts.rootMotion ? headingOf(rotXYZW, T) : null;
+  const C = new THREE.Quaternion();
+  const Y = new THREE.Vector3(0, 1, 0);
   for (let t = 0; t < T; t++) {
+    if (yawS) C.setFromAxisAngle(Y, -yawS[t]);
     for (let j = 0; j < 30; j++) {
       L.fromArray(rotXYZW, (t * 30 + j) * 4).normalize();
-      if (SOMA_PARENTS[j] < 0) G[j].copy(L);
-      else G[j].multiplyQuaternions(G[SOMA_PARENTS[j]], L);
+      if (SOMA_PARENTS[j] < 0) {
+        if (yawS) G[j].multiplyQuaternions(C, L);
+        else G[j].copy(L);
+      } else G[j].multiplyQuaternions(G[SOMA_PARENTS[j]], L);
     }
     // rotazioni nel mondo delle nostre ossa
     for (const o of order) {
@@ -272,7 +306,12 @@ function retarget(rootPos, rotXYZW, opts) {
     }
     // bacino
     const hips = new THREE.Vector3().fromArray(rootPos, t * 3);
-    if (opts.inPlace) hips.set(hips.x - traj[t * 2], hips.y, hips.z - traj[t * 2 + 1]);
+    if (opts.inPlace || yawS) hips.set(hips.x - traj[t * 2], hips.y, hips.z - traj[t * 2 + 1]);
+    if (yawS) {
+      // l'ondeggiare dei fianchi intorno alla traiettoria, nella direzione del corpo
+      v.set(hips.x, 0, hips.z).applyQuaternion(C);
+      hips.set(v.x, hips.y, v.z);
+    }
     const hipMid = sHipsToHipMid.clone().applyQuaternion(G[0]).add(hips).multiplyScalar(K);
     const pelvisDelta = W.get(pelvis).clone().multiply(restWorldQ.get(pelvis).clone().invert());
     const pw = hipMid.sub(pelvisToHipMid.clone().applyQuaternion(pelvisDelta));
@@ -286,7 +325,51 @@ function retarget(rootPos, rotXYZW, opts) {
   for (let t = 1; t < T; t++) dist += Math.hypot(traj[t * 2] - traj[t * 2 - 2], traj[t * 2 + 1] - traj[t * 2 - 1]);
   const speed = (K * dist) / Math.max(1e-6, (T - 1) / FPS);
   if (opts.loop) return { ...makeLoop(T, tracks, pelvisPos, opts.loop), speed };
-  return { T, tracks, pelvisPos, speed };
+  let motion;
+  if (yawS) {
+    // spostamento e rotazione rispetto al primo fotogramma, nella direzione
+    // del corpo all'inizio
+    const c0 = Math.cos(-yawS[0]);
+    const s0 = Math.sin(-yawS[0]);
+    const r3 = (n) => Math.round(n * 1000) / 1000;
+    motion = { fps: FPS, x: [], z: [], yaw: [] };
+    for (let t = 0; t < T; t++) {
+      const dx = traj[t * 2] - traj[0];
+      const dz = traj[t * 2 + 1] - traj[1];
+      // rotazione intorno a y di -yaw0: x' = x cos + z sin, z' = -x sin + z cos
+      motion.x.push(r3(K * (dx * c0 + dz * s0)));
+      motion.z.push(r3(K * (-dx * s0 + dz * c0)));
+      motion.yaw.push(r3(yawS[t] - yawS[0]));
+    }
+  }
+  return { T, tracks, pelvisPos, speed, motion };
+}
+
+// direzione del corpo (yaw del bacino SOMA, + = verso +x cioe' a sinistra)
+// per fotogramma, senza salti di 2 pi greco e smussata (resta la torsione
+// naturale dei fianchi a ogni passo, si toglie solo il girarsi)
+function headingOf(rotXYZW, T) {
+  const raw = new Float32Array(T);
+  const q = new THREE.Quaternion();
+  const f = new THREE.Vector3();
+  for (let t = 0; t < T; t++) {
+    q.fromArray(rotXYZW, t * 30 * 4).normalize();
+    f.set(0, 0, 1).applyQuaternion(q);
+    raw[t] = Math.atan2(f.x, f.z);
+    if (t > 0) {
+      while (raw[t] - raw[t - 1] > Math.PI) raw[t] -= 2 * Math.PI;
+      while (raw[t] - raw[t - 1] < -Math.PI) raw[t] += 2 * Math.PI;
+    }
+  }
+  const out = new Float32Array(T);
+  const half = 6;
+  for (let t = 0; t < T; t++) {
+    let a = 0;
+    let n = 0;
+    for (let k = Math.max(0, t - half); k <= Math.min(T - 1, t + half); k++, n++) a += raw[k];
+    out[t] = a / n;
+  }
+  return out;
 }
 
 function smoothTrajectory(rootPos, T, half) {
@@ -401,7 +484,7 @@ for (const name of dirs.sort()) {
     ...(manifest[name] ?? {}),
     ...(fs.existsSync(path.join(dir, 'clip.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'clip.json'), 'utf8')) : {}),
   };
-  const { T, tracks, pelvisPos, speed } = retarget(
+  const { T, tracks, pelvisPos, speed, motion } = retarget(
     readF32(path.join(dir, 'root_positions.f32')),
     readF32(path.join(dir, 'local_rotations_xyzw.f32')),
     opts
@@ -427,7 +510,7 @@ for (const name of dirs.sort()) {
   const prompt = fs.existsSync(path.join(dir, 'prompt.txt')) ? fs.readFileSync(path.join(dir, 'prompt.txt'), 'utf8').trim() : '';
   const info = { duration: +((T - 1) / FPS).toFixed(3), loop: !!opts.loop, inPlace: !!opts.inPlace, speed: +speed.toFixed(3), prompt };
   anim.setExtras({ ...info, source: 'kimodo soma-rp-v1.1' });
-  meta[`Kimodo_${name}`] = info;
+  meta[`Kimodo_${name}`] = motion ? { ...info, motion } : info;
   console.log(
     `${`Kimodo_${name}`.padEnd(32)} ${((T - 1) / FPS).toFixed(1).padStart(5)} s ${opts.loop ? 'loop' : '    '} ${speed.toFixed(2)} m/s  ${prompt}`
   );

@@ -1,5 +1,5 @@
 {
-  "_note": "Animazioni Kimodo del gioco. npm run kimodo -- batch genera quelle che mancano (assets-src/kimodo/<name>). seconds 2-5; inPlace (predefinito true) toglie l'avanzare; loop: { minSeconds } la rende ciclica. Cambiare inPlace/loop non richiede di rigenerare: basta npm run kimodo -- retarget. Cambiare prompt/seed/seconds si': cancella la cartella e rilancia batch.",
+  "_note": "Animazioni Kimodo del gioco. npm run kimodo -- batch genera quelle che mancano (assets-src/kimodo/<name>). seconds 2-5; inPlace (predefinito true) toglie l'avanzare; loop: { minSeconds } la rende ciclica. Cambiare inPlace/loop non richiede di rigenerare: basta npm run kimodo -- retarget. rootMotion: true (partenze, fermate, svolte) toglie anche la direzione del corpo e scrive in kimodoClips.json come la clip avanza e gira, per il gioco. Cambiare prompt/seed/seconds si': cancella la cartella e rilancia batch.",
   "animations": [
     {
       "group": "ragdoll",
@@ -163,6 +163,78 @@
       "seconds": 4,
       "seed": 54,
       "prompt": "A person does a short joyful victory dance, pumping their fists."
+    },
+    {
+      "group": "locomozione",
+      "name": "walk_start",
+      "seconds": 3,
+      "seed": 61,
+      "rootMotion": true,
+      "prompt": "A person standing still starts walking forward at a normal relaxed pace and keeps walking for a few steps."
+    },
+    {
+      "group": "locomozione",
+      "name": "run_start",
+      "seconds": 3,
+      "seed": 62,
+      "rootMotion": true,
+      "prompt": "A person standing still starts running forward, accelerating quickly into a steady run."
+    },
+    {
+      "group": "locomozione",
+      "name": "walk_stop",
+      "seconds": 3,
+      "seed": 63,
+      "rootMotion": true,
+      "prompt": "A person walking forward at a normal pace slows down and comes to a natural stop, then stands still."
+    },
+    {
+      "group": "locomozione",
+      "name": "run_stop",
+      "seconds": 3,
+      "seed": 64,
+      "rootMotion": true,
+      "prompt": "A person running forward decelerates with a few steps and comes to a stop, then stands still."
+    },
+    {
+      "group": "locomozione",
+      "name": "turn_left_90",
+      "seconds": 2,
+      "seed": 65,
+      "rootMotion": true,
+      "prompt": "A person standing still turns ninety degrees to the left in place with small steps, then stands still."
+    },
+    {
+      "group": "locomozione",
+      "name": "turn_right_90",
+      "seconds": 2,
+      "seed": 66,
+      "rootMotion": true,
+      "prompt": "A person standing still turns ninety degrees to the right in place with small steps, then stands still."
+    },
+    {
+      "group": "locomozione",
+      "name": "turn_180",
+      "seconds": 3,
+      "seed": 67,
+      "rootMotion": true,
+      "prompt": "A person standing still turns around one hundred eighty degrees in place with a few small steps, then stands still."
+    },
+    {
+      "group": "locomozione",
+      "name": "walk_upstairs",
+      "seconds": 4,
+      "seed": 68,
+      "loop": { "minSeconds": 1 },
+      "prompt": "A person walks up a flight of stairs at a normal pace, lifting the knees for each step."
+    },
+    {
+      "group": "locomozione",
+      "name": "walk_downstairs",
+      "seconds": 4,
+      "seed": 69,
+      "loop": { "minSeconds": 1 },
+      "prompt": "A person walks down a flight of stairs at a normal pace, carefully stepping down each step."
     }
   ]
 }

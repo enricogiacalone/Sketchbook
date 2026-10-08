@@ -1,0 +1,1 @@
+A person standing still starts running forward, accelerating quickly into a steady run.
