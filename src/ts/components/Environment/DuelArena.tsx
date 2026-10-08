@@ -12,6 +12,7 @@ import ParkourCourse from './ParkourCourse';
 import Car from '../Vehicles/Car';
 import DebugOrthoCamera from './DebugOrthoCamera';
 import ArenaObstacles from './ArenaObstacles';
+import TunnelBench from './TunnelBench';
 import { useStore } from '../../store';
 import { FighterData } from './SquadArenaTypes';
 import { CITY_PLAYER_ID } from '../CityPlayer';
@@ -94,7 +95,10 @@ const DuelArena: React.FC = () => {
   const dz = DUEL_CENTER[1];
 
   const storePlayer = useStore((s) => s.duelArenaPlayer);
-  const fallbackPlayer = useMemo(() => makeFighter(CITY_PLAYER_ID, 'Tu', 'PLAYER', playerX, dz, facingToward(playerX, dz, enemyX, dz)), [playerX, dz, enemyX]);
+  const fallbackPlayer = useMemo(
+    () => makeFighter(CITY_PLAYER_ID, 'Tu', 'PLAYER', playerX, dz, facingToward(playerX, dz, enemyX, dz)),
+    [playerX, dz, enemyX]
+  );
   const playerData = storePlayer ?? fallbackPlayer;
 
   const duelEnemyCount = useStore((state) => state.duelEnemyCount);
@@ -129,10 +133,7 @@ const DuelArena: React.FC = () => {
 
   const allFighters = useMemo(() => [playerData, ...enemies], [playerData, enemies]);
 
-  const bagPositionXZ = useMemo<[number, number]>(
-    () => [playerX + BAG_OFFSET[0], dz + BAG_OFFSET[1]],
-    [playerX, dz]
-  );
+  const bagPositionXZ = useMemo<[number, number]>(() => [playerX + BAG_OFFSET[0], dz + BAG_OFFSET[1]], [playerX, dz]);
   const bagRef = useRef<PunchingBagHandle>(null);
   const [bagHurtboxHandle, setBagHurtboxHandle] = useState<number | null>(null);
   const [bagSolidHandle, setBagSolidHandle] = useState<number | null>(null);
@@ -232,6 +233,7 @@ const DuelArena: React.FC = () => {
       </Suspense>
       <PunchingBag ref={bagRef} positionXZ={bagPositionXZ} onReady={setBagHurtboxHandle} onSolidReady={setBagSolidHandle} />
       {showObstacles && <ArenaObstacles />}
+      {import.meta.env.DEV && <TunnelBench />}
       {showCourse && <ParkourCourse />}
       {showCar && <Car id={DUEL_CAR_ID} position={DUEL_CAR_SPAWN} rotation={[0, -Math.PI / 2, 0]} scale={DUEL_CAR_SCALE} massKg={1100} />}
       {enemies.map((enemy) => (

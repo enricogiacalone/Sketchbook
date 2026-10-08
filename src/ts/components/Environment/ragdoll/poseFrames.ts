@@ -2,7 +2,7 @@
 // attivo -- separate da activeRagdollFrames.ts perche' il corpo del
 // cervello-mosca le usa anche in un Web Worker, dove three-stdlib non va
 // importato. activeRagdollFrames.ts le riesporta.
-import * as THREE from "three";
+import * as THREE from 'three';
 
 export interface BindPoseSnapshot {
   // Orientazione mondo del frame del personaggio nella posa di bind
@@ -123,3 +123,46 @@ export function jointAxisAngles(q: THREE.Quaternion, out: THREE.Vector3): THREE.
   return out;
 }
 
+// Capsula di un segmento nel frame LOCALE del suo osso guida, misurata
+// sulla posa di bind: inizio, direzione (unitaria), lunghezza totale e
+// mezza altezza per ColliderDesc.capsule. fromOffset/toOffset sono nel
+// frame del personaggio (X sinistra, Y su, Z avanti) -- vedi RagdollSegment.
+// Essendo nel frame dell'osso vale in qualunque posa: posizione nel mondo
+// = posOsso + quatOsso * (start + dir * t).
+export interface SegmentCapsuleLocal {
+  start: THREE.Vector3;
+  dir: THREE.Vector3;
+  center: THREE.Vector3;
+  length: number;
+  halfHeight: number;
+}
+export function segmentCapsuleLocal(
+  seg: {
+    drivingBone: string;
+    toBone: string;
+    radius: number;
+    lengthScale?: number;
+    fromOffset?: [number, number, number];
+    toOffset?: [number, number, number];
+  },
+  bind: BindPoseSnapshot,
+  defaultLengthScale = 0.92
+): SegmentCapsuleLocal | null {
+  const bp = bind.pos[seg.drivingBone];
+  const bt = bind.pos[seg.toBone];
+  const bq = bind.quat[seg.drivingBone];
+  if (!bp || !bt || !bq) return null;
+  const from = bp.clone();
+  if (seg.fromOffset) from.add(new THREE.Vector3(...seg.fromOffset).applyQuaternion(bind.refQuat));
+  const to = bt.clone();
+  if (seg.toOffset) to.add(new THREE.Vector3(...seg.toOffset).applyQuaternion(bind.refQuat));
+  const inv = bq.clone().invert();
+  const dirWorld = to.sub(from);
+  const rawLen = dirWorld.length() || 0.05;
+  const dir = dirWorld.normalize().applyQuaternion(inv);
+  const start = from.sub(bp).applyQuaternion(inv);
+  const length = Math.max(0.05, rawLen * (seg.lengthScale ?? defaultLengthScale));
+  const halfHeight = Math.max(0.01, length / 2 - seg.radius);
+  const center = start.clone().addScaledVector(dir, length / 2);
+  return { start, dir, center, length, halfHeight };
+}

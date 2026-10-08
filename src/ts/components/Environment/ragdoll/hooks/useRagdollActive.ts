@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
-import { useBeforePhysicsStep, useFilterContactPair, useRapier } from '@react-three/rapier';
+import { useAfterPhysicsStep, useBeforePhysicsStep, useFilterContactPair, useRapier } from '@react-three/rapier';
 import type { ImpulseJoint, RigidBody as RapierRigidBody } from '@dimforge/rapier3d-compat';
 import {
   ACTIVE_RAGDOLL_SEGMENTS,
@@ -21,7 +21,7 @@ import {
   ACTIVE_RAGDOLL_HIT_RECOVERY_S,
   type RagdollSegment,
 } from '../ragdollConfig';
-import { aliveRagdollGroups, passiveRagdollGroups, FIGHTER_BITS } from '../../../../enums/CollisionGroups';
+import { aliveRagdollGroups, passiveRagdollGroups, FIGHTER_BITS, CollisionGroups } from '../../../../enums/CollisionGroups';
 import { useStore } from '../../../../store';
 import { registerShootableCollider, unregisterShootableCollider } from '../../weapons/shootableRegistry';
 import { sweeperColliders } from '../sweepers';
@@ -29,8 +29,13 @@ import { sweeperColliders } from '../sweepers';
 // tetti di velocita' dei corpi del ragdoll KO (m/s, rad/s)
 const KO_MAX_LIN_SPEED = 30;
 const KO_MAX_ANG_SPEED = 60;
-// per quanto il rotore spinge ancora il corpo appena andato KO (s)
-const SWEEPER_GRACE_S = 0.3;
+// pezzo del corpo KO considerato "sopra" una pala (vedi il filtro dei
+// contatti): il suo punto piu' basso sta oltre la cima della pala meno
+// questo margine (m)
+const SWEEPER_RIDE_MARGIN = 0.04;
+// quanto si indebolisce (0-1) un pezzo del corpo vivo spinto da un
+// ostacolo che si muove (vedi useAfterPhysicsStep)
+const OBSTACLE_PUSH_WEAKNESS = 0.95;
 // corpo KO quasi fermo (m/s, rad/s) per SETTLE_S secondi -> si addormenta
 const SETTLE_LIN = 0.15;
 const SETTLE_ANG = 1.2;
@@ -68,6 +73,7 @@ import {
   captureClipPose,
   jointAxisAngles,
   measureClipJointRanges,
+  segmentCapsuleLocal,
   type BindPoseSnapshot,
   type JointRange,
 } from '../activeRagdollFrames';
@@ -340,7 +346,6 @@ export function useRagdollActive(
   const neutralClipRef = useRef<THREE.AnimationClip | null>(null);
   const jointFrameRef = useRef<JointFrameMap | null>(null);
   const passiveRef = useRef(false);
-  const passiveSinceRef = useRef(0); // quando e' andato KO (performance.now)
   const settledForRef = useRef(0); // da quanto il corpo KO e' quasi fermo (s)
   // KO alla GTA IV: tempo dal colpo, posa "tenuta" per giunto (relativa al
   // genitore), direzione della caduta, muscoli gia' spenti del tutto
@@ -353,6 +358,14 @@ export function useRagdollActive(
   const koDirRef = useRef(new THREE.Vector3());
   // handle del collider -> indice del segmento (solo i NOSTRI collider)
   const colliderIndexRef = useRef<Map<number, number>>(new Map());
+  // gruppi di collisione degli ALTRI collider toccati dal corpo vivo, letti
+  // fuori dal passo di fisica (vedi il filtro dei contatti)
+  const otherGroupsRef = useRef<Map<number, number>>(new Map());
+  const unknownCollidersRef = useRef<Set<number>>(new Set());
+  // cima delle pale del rotore (y mondo) e punto piu' basso di ogni pezzo
+  // del corpo, aggiornati prima di ogni passo (vedi il filtro dei contatti)
+  const sweeperTopRef = useRef<Map<number, number>>(new Map());
+  const ownBottomRef = useRef<Map<number, number>>(new Map());
   // coppie proprie escluse ora (statiche + compenetrate all'inizio del KO)
   const selfExcludedRef = useRef<Set<number>>(new Set());
   const selfPendingRef = useRef<Array<[number, number]>>([]);
@@ -444,15 +457,14 @@ export function useRagdollActive(
         }
       }
 
-      // Direzione della capsula: vettore osso->osso nel frame dell'OSSO
-      // (costante, misurato in bind), portato nel frame del corpo.
-      const dirWorld = bTo.clone().sub(bFrom);
-      const rawLen = dirWorld.length() || 0.05;
-      const dirBody = dirWorld.normalize().applyQuaternion(bq.clone().invert()).applyQuaternion(bodyToBone);
-      const length = Math.max(0.05, rawLen * (seg.lengthScale ?? 0.92));
-      const halfHeight = Math.max(0.01, length / 2 - seg.radius);
+      // Capsula nel frame dell'OSSO (costante, misurata in bind, con gli
+      // eventuali fromOffset/toOffset), portata nel frame del corpo.
+      const cap = segmentCapsuleLocal(seg, bind);
+      if (!cap) continue;
+      const dirBody = cap.dir.clone().applyQuaternion(bodyToBone);
+      const halfHeight = cap.halfHeight;
       const capsuleRot = new THREE.Quaternion().setFromUnitVectors(yAxis, dirBody);
-      const capsuleOffset = dirBody.clone().multiplyScalar(length / 2);
+      const capsuleOffset = cap.center.clone().applyQuaternion(bodyToBone);
 
       const body = world.createRigidBody(
         rapier.RigidBodyDesc.dynamic()
@@ -516,15 +528,11 @@ export function useRagdollActive(
         const e = entries[seg.name];
         if (!e) continue;
         const from = ref.pos[seg.drivingBone];
-        const to = ref.pos[seg.toBone];
-        if (!from || !to) continue;
-        const len = from.distanceTo(to) * (seg.lengthScale ?? 0.92);
-        const c = to
-          .clone()
-          .sub(from)
-          .normalize()
-          .multiplyScalar(len / 2)
-          .add(from);
+        const fq = ref.quat[seg.drivingBone];
+        const cap = segmentCapsuleLocal(seg, bind);
+        if (!from || !fq || !cap) continue;
+        const len = cap.length;
+        const c = cap.center.clone().applyQuaternion(fq).add(from);
         const m = ACTIVE_RAGDOLL_MASS_KG[seg.name] ?? 1;
         centers[seg.name] = { c, m, own: m * ((len * len) / 12 + seg.radius * seg.radius * 0.5) };
       }
@@ -795,18 +803,118 @@ export function useRagdollActive(
     // RagdollWorld compreso (pavimenti, terreno, oggetti della citta') --
     // e il pavimento sotto i piedi del corpo vivo e' proprio quello da
     // evitare (vedi ALIVE_COLLISION_GROUPS).
+    //
+    // NIENTE chiamate al mondo qui dentro: il filtro gira DURANTE
+    // world.step, e world.getCollider() a quel punto lancia "recursive use
+    // of an object detected" -- Rapier scartava il contatto in silenzio.
+    // Cosi' il corpo VIVO non toccava NULLA (pale, pendoli, muri, capsule
+    // degli avversari): misurato col banco del tunneling, pala 11 cm dentro
+    // braccio e coscia senza nessun contatto finche' non andava KO. I gruppi
+    // dell'altro collider si leggono fuori dal passo (useAfterPhysicsStep
+    // sotto); finche' non si sanno, niente contatto (al massimo un passo).
     if (!passiveRef.current) {
-      const other = world.getCollider(a === undefined ? c1 : c2);
-      if (other && other.collisionGroups() >>> 16 === 0xffff) return rapier.SolverFlags.EMPTY;
+      const other = a === undefined ? c1 : c2;
+      const groups = otherGroupsRef.current.get(other);
+      if (groups === undefined) {
+        unknownCollidersRef.current.add(other);
+        return rapier.SolverFlags.EMPTY;
+      }
+      if (groups >>> 16 === 0xffff) return rapier.SolverFlags.EMPTY;
     }
-    // KO: il rotore dell'arena lo spinge ancora per un attimo -- e' quella
-    // spinta a sbalzarlo nella direzione del colpo -- poi non lo tocca piu'
-    // (niente trascinamento in tondo, vedi ragdoll/sweepers.ts)
-    if (passiveRef.current && sweeperColliders.has(a === undefined ? c1 : c2)) {
-      const grace = (import.meta.env.DEV && (window as any).__sweeperGraceS) ?? SWEEPER_GRACE_S;
-      if (performance.now() - passiveSinceRef.current > grace * 1000) return rapier.SolverFlags.EMPTY;
+    // KO e pale del rotore: la pala spinge di lato i pezzi che ha davanti,
+    // ma passa sotto quelli che le stanno SOPRA (niente corpo che ci sale e
+    // viene portato in tondo, vedi ragdoll/sweepers.ts). Prima la pala
+    // smetteva di toccare il corpo 0.3 s dopo il KO e gli passava
+    // attraverso a ogni giro (banco del tunneling: piede e tibia
+    // attraversati da parte a parte a 13 m/s).
+    if (passiveRef.current) {
+      const other = a === undefined ? c1 : c2;
+      if (sweeperColliders.has(other)) {
+        const top = sweeperTopRef.current.get(other);
+        const bottom = ownBottomRef.current.get(a === undefined ? c2 : c1);
+        if (top !== undefined && bottom !== undefined && bottom > top - SWEEPER_RIDE_MARGIN) return rapier.SolverFlags.EMPTY;
+      }
     }
     return rapier.SolverFlags.COMPUTE_IMPULSE;
+  });
+
+  useBeforePhysicsStep((w) => {
+    if (!passiveRef.current || sweeperColliders.size === 0) return;
+    // le pale girano solo attorno all'asse verticale: la loro cima non cambia
+    const tops = sweeperTopRef.current;
+    for (const h of sweeperColliders) {
+      if (tops.has(h)) continue;
+      const c = w.getCollider(h);
+      if (!c) continue;
+      const he = c.halfExtents?.();
+      const half = he ? he.y : ((c as any).halfHeight?.() ?? 0);
+      tops.set(h, c.translation().y + half + (c.roundRadius?.() ?? 0));
+    }
+    const bottoms = ownBottomRef.current;
+    const entries = activeBodiesRef.current;
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (e.body.numColliders() === 0) continue;
+      const col = e.body.collider(0);
+      const t = col.translation();
+      const q = col.rotation();
+      // asse della capsula (y locale) nel mondo: componente verticale
+      const ay = 1 - 2 * (q.x * q.x + q.z * q.z);
+      bottoms.set(col.handle, t.y - Math.abs(ay) * e.halfHeight - e.radius);
+    }
+  });
+
+  // Da VIVO, un ostacolo che si muove (pala, pendolo, pistone) e tocca un
+  // pezzo del corpo gli spegne subito i motori, come un colpo: altrimenti
+  // il servo tiene il braccio sulla posa animata e la pala ci passa
+  // attraverso (banco del tunneling: avambraccio e tibia attraversati a
+  // 8-12 m/s prima che arrivasse il KO). Il KO vero resta deciso da
+  // PlayerCombatSoldier (resolveObstacleContacts), un frame dopo.
+  useAfterPhysicsStep((w) => {
+    if (passiveRef.current) return;
+    const entries = activeBodiesRef.current;
+    for (const key of Object.keys(entries)) {
+      const e = entries[key];
+      if (e.body.numColliders() === 0) continue;
+      const col = e.body.collider(0);
+      let pushed = false;
+      w.contactPairsWith(col, (other) => {
+        if (pushed) return;
+        const ob = other.parent();
+        if (!ob || !ob.isKinematic()) return;
+        // solo gli ostacoli del mondo (RagdollWorld), non le capsule
+        // degli avversari: quelle sono i colpi, gia' gestiti a parte
+        if (((other.collisionGroups() >>> 16) & (1 << CollisionGroups.RagdollWorld)) === 0) return;
+        const v = ob.linvel();
+        const av = ob.angvel();
+        if (v.x * v.x + v.y * v.y + v.z * v.z < 1 && av.x * av.x + av.y * av.y + av.z * av.z < 0.25) return;
+        w.contactPair(col, other, (m) => {
+          if (m.numSolverContacts() > 0) pushed = true;
+        });
+      });
+      if (!pushed) continue;
+      e.hitWeakness = Math.max(e.hitWeakness, OBSTACLE_PUSH_WEAKNESS);
+      const p = e.segment.parent ? entries[e.segment.parent] : undefined;
+      if (p) p.hitWeakness = Math.max(p.hitWeakness, OBSTACLE_PUSH_WEAKNESS * 0.7);
+      for (const k2 of Object.keys(entries)) {
+        const c = entries[k2];
+        if (c.segment.parent === key) c.hitWeakness = Math.max(c.hitWeakness, OBSTACLE_PUSH_WEAKNESS);
+      }
+    }
+  });
+
+  useAfterPhysicsStep((w) => {
+    const unknown = unknownCollidersRef.current;
+    if (unknown.size === 0) return;
+    const cache = otherGroupsRef.current;
+    // i collider che spariscono non tornano (l'handle porta la generazione):
+    // la cache si svuota ogni tanto per non crescere all'infinito
+    if (cache.size > 4096) cache.clear();
+    for (const h of unknown) {
+      const c = w.getCollider(h);
+      if (c) cache.set(h, c.collisionGroups());
+    }
+    unknown.clear();
   });
 
   // Rete di sicurezza per il corpo KO: velocita' oltre ogni urto possibile
@@ -871,7 +979,6 @@ export function useRagdollActive(
       const entries = activeBodiesRef.current;
       const gravity = passive ? 1 : aliveGravity;
       const modeChanged = passive !== passiveRef.current;
-      if (modeChanged && passive) passiveSinceRef.current = performance.now();
       if (modeChanged || gravityScaleRef.current !== gravity) {
         for (const key of Object.keys(entries)) {
           const b = entries[key].body;
