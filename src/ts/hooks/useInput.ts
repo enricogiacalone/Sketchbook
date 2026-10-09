@@ -1,7 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { useStore } from '../store';
+import { dronePad } from '../lib/droneFlight';
+import { talkState } from '../lib/dialogue';
 
 const STICK_DEADZONE = 0.25;
+const DRONE_HOLD_MS = 500;
+// azioni che restano attive col dialogo aperto (ci si puo' allontanare)
+const DIALOGUE_FREE_ACTIONS = new Set<string>(['forward', 'backward', 'left', 'right', 'shift']);
+const SPRINT_TAP_WINDOW_MS = 900;
 
 const ACTION_NAMES = [
   'forward', 'backward', 'left', 'right', 'jump', 'shift',
@@ -39,6 +46,12 @@ const ACTION_NAMES = [
   'musicSchermo',
   // capriola del duello: Spazio adesso e' il salto (PlayerCombatSoldier)
   'dodge',
+  // parla con un personaggio / prendi un oggetto (Missions/StoryMission.tsx):
+  // T, o Triangolo sul pad quando si e' vicini a qualcuno
+  'talk',
+  // copertura dietro un muro alto (PlayerCombatSoldier.tsx): Q, R1 sul pad
+  // (come in GTA V; lontano da un muro restano il pugno / la parata)
+  'cover',
 ] as const;
 type Action = (typeof ACTION_NAMES)[number];
 
@@ -72,6 +85,8 @@ const emptyActionMap = (): Record<Action, boolean> => ({
   musicCubi: false,
   musicSchermo: false,
   dodge: false,
+  talk: false,
+  cover: false,
 });
 
 export const useInput = () => {
@@ -80,6 +95,15 @@ export const useInput = () => {
   // Refs are better for "just pressed" as they don't trigger re-renders
   // and are immediate for useFrame consumption.
   const justPressed = useRef<Record<string, boolean>>({});
+  // "per correre devo premere x piu' volte come gta": istanti delle ultime
+  // pressioni del tasto corsa (X / Shift), per sprintMash() qui sotto
+  const shiftTaps = useRef<number[]>([]);
+  // Select del pad: premuto = camera, tenuto DRONE_HOLD_MS = drone (prendi/lascia)
+  const selectDownAt = useRef(0);
+  const selectHoldFired = useRef(false);
+  // Triangolo usato per lasciare il drone: non vale come "sali in auto"
+  // finche' non lo si rilascia
+  const triangleBlocked = useRef(false);
 
   // Keyboard/mouse and gamepad are two independent sources, each tracked
   // on its own and OR-ed together into `input` below. Without this split,
@@ -96,7 +120,15 @@ export const useInput = () => {
       for (const action of ACTION_NAMES) {
         const value = keyboardActions.current[action] || gamepadActions.current[action];
         if (value !== prev[action]) {
-          if (value && !prev[action]) justPressed.current[action] = true;
+          if (value && !prev[action]) {
+            justPressed.current[action] = true;
+            if (action === 'shift') {
+              const t = performance.now();
+              const taps = shiftTaps.current;
+              taps.push(t);
+              while (taps.length && t - taps[0] > SPRINT_TAP_WINDOW_MS) taps.shift();
+            }
+          }
           if (!value) justPressed.current[action] = false;
           next[action] = value;
           didChange = true;
@@ -136,11 +168,27 @@ export const useInput = () => {
     KeyJ: 'musicCubi',
     KeyK: 'musicSchermo',
     KeyV: 'dodge',
+    KeyT: 'talk',
+    KeyZ: 'secondary',
+    KeyN: 'secondary',
+    ControlRight: 'secondary',
   };
 
   useEffect(() => {
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('contextmenu', handleContextMenu);
     const handleKeyDown = (e: KeyboardEvent) => {
+      // scrivendo in un campo (numero nel pannello Debug, chat) i tasti non
+      // muovono il personaggio
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       const action = keys[e.code];
+      // dialogo aperto: si puo' solo camminare (i tasti li legge DialogueBox)
+      if (talkState.open && action && !DIALOGUE_FREE_ACTIONS.has(action)) return;
+      // Q e' anche la copertura (vicino a un muro vince lei)
+      if (e.code === 'KeyQ') keyboardActions.current.cover = true;
       if (action) {
         keyboardActions.current[action] = true;
         applyMerged();
@@ -148,6 +196,7 @@ export const useInput = () => {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'KeyQ') keyboardActions.current.cover = false;
       const action = keys[e.code];
       if (action) {
         keyboardActions.current[action] = false;
@@ -156,6 +205,14 @@ export const useInput = () => {
     };
 
     const handleMouseDown = (e: MouseEvent) => {
+        // ispettore NPC acceso (UI/NpcInspector.tsx): il clic sceglie, non colpisce
+        if (useStore.getState().npcInspector) return;
+        // "quando clicco sull'hud nn deve contarlo come quando clicco sullo
+        // schermo della scena": conta solo il clic sulla scena (il canvas, o
+        // col mouse catturato), non quello sul pannello Debug o sui bottoni
+        if (!document.pointerLockElement && !(e.target instanceof HTMLCanvasElement)) return;
+        // dialogo aperto: il clic non spara
+        if (talkState.open) return;
         const action = e.button === 0 ? 'primary' : (e.button === 2 ? 'secondary' : null);
         if (action) {
             keyboardActions.current[action] = true;
@@ -200,6 +257,7 @@ export const useInput = () => {
     window.addEventListener('gamepaddisconnected', handleGamepadDisconnected);
 
     return () => {
+      window.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('mousedown', handleMouseDown);
@@ -292,6 +350,8 @@ export const useInput = () => {
     if (!pad) {
       // No pad connected (or it just disconnected) -- make sure nothing
       // stays stuck "on" from a previously connected frame.
+      dronePad.lx = dronePad.ly = dronePad.rx = dronePad.ry = dronePad.up = dronePad.down = 0;
+      dronePad.rollL = dronePad.rollR = false;
       let hadAny = false;
       for (const action of ACTION_NAMES) {
         if (g[action]) hadAny = true;
@@ -308,60 +368,134 @@ export const useInput = () => {
     const axisForward = pad.axes[1] ?? 0; // negative = stick pushed up/forward
     const axisStrafe = pad.axes[0] ?? 0;
 
-    g.forward = axisForward < -STICK_DEADZONE;
-    g.backward = axisForward > STICK_DEADZONE;
+    // "mappa i tasti del joystick come gta" -- schema di GTA V (pad
+    // PlayStation, indici del mapping standard: 0 X, 1 Cerchio, 2 Quadrato,
+    // 3 Triangolo, 4 L1, 5 R1, 6 L2, 7 R2, 8 Select, 9 Start, 10 L3, 11 R3,
+    // 12-15 croce su/giu'/sinistra/destra):
+    //   a piedi   levetta sx muove, dx camera; X corsa (tenuto) e scatto
+    //             (premuto piu' volte); Quadrato salto; Triangolo sali/scendi
+    //             dal veicolo; Cerchio attacco leggero / ricarica; R2 spara /
+    //             attacco pesante; L2 mira (con un'arma) o aggancia il
+    //             nemico (a mani nude); con L2 tenuto Quadrato e' la
+    //             schivata e Triangolo l'attacco alternativo; L1 ruota delle
+    //             armi; R1 parata; R3 guarda dietro; L3 capriola; croce:
+    //             armi rapide (sx pugni, dx pistola, su fucile), giu' ricarica
+    //   in auto   R2 gas, L2 freno/retro, R1 freno a mano, levetta sx sterza,
+    //             Triangolo scendi, croce destra fari
+    //   in volo   R2 su / gas, L2 giu' / freno, L1 R1 imbardata
+    //   drone     Select tenuto prende il drone (e lo lascia); levetta sx
+    //             avanti/indietro e imbardata, levetta dx cloche (beccheggio
+    //             e virata), R2 sali, L2 scendi, L1/R1 rollio, X
+    //             mitragliatrice, Quadrato missile, Triangolo torna a piedi
+    const ctrl = useStore.getState().currentControllable;
+    const inCar = ctrl === 'car';
+    const flying = ctrl === 'helicopter' || ctrl === 'airplane';
+    const inDrone = ctrl === 'drone';
+    const dz = (v: number | undefined) => (v === undefined || Math.abs(v) < STICK_DEADZONE ? 0 : v);
+    dronePad.lx = dz(pad.axes[0]);
+    dronePad.ly = dz(pad.axes[1]);
+    dronePad.rx = dz(pad.axes[2]);
+    dronePad.ry = dz(pad.axes[3]);
+    // grilletti: alcuni pad (DualShock 3 e simili) li danno solo come
+    // "premuto", con il valore analogico fermo a 0 -- si prende il maggiore
+    const trig = (i: number) => {
+      const t = pad!.buttons[i];
+      return t ? Math.max(t.value || 0, t.pressed ? 1 : 0) : 0;
+    };
+    dronePad.up = trig(7);
+    dronePad.down = trig(6);
+    dronePad.rollL = !!pad.buttons[4]?.pressed;
+    dronePad.rollR = !!pad.buttons[5]?.pressed;
+    const wpn = useStore.getState().playerWeapon;
+    const armed = wpn === 'pistol' || wpn === 'rifle';
+    const b = (i: number) => !!pad!.buttons[i]?.pressed;
+    const l2 = b(6);
+    const r2 = b(7);
+
+    g.forward = axisForward < -STICK_DEADZONE || (inCar && r2);
+    g.backward = axisForward > STICK_DEADZONE || (inCar && l2);
     g.left = axisStrafe < -STICK_DEADZONE;
     g.right = axisStrafe > STICK_DEADZONE;
-    // "per saltare usa cerchio, per correre usa x, come gta"
-    g.jump = !!pad.buttons[1]?.pressed; // B / Circle: salto
-    g.shift = !!pad.buttons[0]?.pressed; // A / Cross: corsa
-    g.primary = !!pad.buttons[7]?.pressed; // RT: fire
-    // mira (armi) / parata (mani nude, coltello): L2 come in GTA, oppure R1.
-    // L2 resta anche il pugno sinistro a mani nude (attackLeft qui sotto):
-    // PlayerCombatSoldier non para quando L2 e' il pugno.
-    g.secondary = !!pad.buttons[6]?.pressed || !!pad.buttons[5]?.pressed; // L2 / R1
-    // X/Square AND Y/Triangle both enter/exit a vehicle -- Triangle used to
-    // drive the separate (and entirely unused -- nothing ever read
-    // input.enter_passenger) 'enter_passenger' action; folded into 'enter'
-    // per request so Triangle actually does something.
-    g.enter = !!pad.buttons[2]?.pressed || !!pad.buttons[3]?.pressed; // Square or Triangle
-    // Square and Triangle ALSO independently drive yawLeft/yawRight --
-    // "ricordati del gamepad, ho quadrato e triangolo a disposizione".
-    // These two actions already exist (KeyQ/KeyE) but never had a
-    // gamepad binding. Firing them from the same buttons as 'enter' is
-    // harmless: only one controllable is ever active at a time, so
-    // whichever of 'enter' (Player.tsx, entering a vehicle),
-    // 'yawLeft'/'yawRight' (Helicopter/Airplane/Drone turning), or
-    // 'yawLeft'/'yawRight' (PlayerCombatSoldier.tsx's Cross/Hook
-    // attacks) actually gets read never overlaps with the others.
-    g.yawLeft = !!pad.buttons[2]?.pressed; // X/Square
-    g.yawRight = !!pad.buttons[3]?.pressed; // Y/Triangle
-    // L2 (button 6) also drives 'secondary' above (aim) -- "con l2 usa il braccio sinistro e con r2
-    // quello destro" -- PlayerCombatSoldier.tsx's left-arm punch (Jab)
-    // checks this alongside 'yawLeft' (Q/Square), so all three fire the
-    // same strike.
-    g.attackLeft = !!pad.buttons[6]?.pressed; // L2
-    // "guardare l'avversario se tengo premuto l1" -- separate from
-    // everything above, L1 (button 4) has never driven anything in
-    // this app before now, so no reuse/overlap reasoning needed.
-    // L1 (button 4) e' la ruota delle armi, come in GTA (UI/WeaponWheel.tsx
-    // legge il pad da se'); l'aggancio passa a R3, dove prima c'era il
-    // coltello (ora si sceglie dalla ruota)
-    g.lockOn = !!pad.buttons[11]?.pressed; // R3
-    g.weapon1 = !!pad.buttons[14]?.pressed; // croce sinistra: pugni
-    g.weapon2 = !!pad.buttons[15]?.pressed; // croce destra: pistola
-    g.reload = !!pad.buttons[13]?.pressed; // croce giu': ricarica
-    g.weapon3 = !!pad.buttons[12]?.pressed; // croce su: fucile
-    g.dodge = !!pad.buttons[10]?.pressed; // L3 (levetta sinistra premuta): capriola
-    // Back/Select: cycle the camera's 4 zoom presets (see ZOOM_LEVELS in
-    // useThirdPersonCamera.ts). Reuses the 'camera' action, which already
-    // existed with a keyboard binding (KeyC) but, like enter_passenger
-    // above, had nothing reading it anywhere.
-    g.camera = !!pad.buttons[8]?.pressed;
-    // Start: pause/resume (see isPaused in store.ts). This used to drive
-    // 'respawn', which -- same story again -- nothing ever read; KeyR still
-    // fires it from the keyboard side in case that's wired up later.
-    g.pause = !!pad.buttons[9]?.pressed;
+    if (inCar) {
+      g.jump = b(5); // R1: freno a mano
+      g.shift = false;
+      g.primary = false;
+      g.secondary = false;
+      g.yawLeft = false;
+      g.yawRight = false;
+      g.headlights = b(15);
+    } else if (inDrone) {
+      g.shift = false;
+      g.jump = false;
+      g.yawLeft = false;
+      g.yawRight = false;
+      g.primary = b(0); // X: mitragliatrice (tenuto)
+      g.secondary = b(2); // Quadrato: missile
+      g.lockOn = false;
+      g.headlights = false;
+    } else if (flying) {
+      g.shift = r2; // su / gas
+      g.jump = l2; // giu' / freno
+      g.yawLeft = b(4);
+      g.yawRight = b(5);
+      g.primary = false;
+      g.secondary = false;
+      g.headlights = false;
+    } else {
+      g.shift = b(0); // X: corsa / scatto
+      g.jump = b(2) && !l2; // Quadrato: salto
+      g.primary = r2; // R2: spara / attacco pesante
+      // L2: mira con un'arma; a mani nude aggancia il nemico (lockOn),
+      // e la parata passa a R1
+      g.secondary = armed ? l2 : b(5);
+      g.lockOn = !armed && l2;
+      g.yawLeft = b(1) && !armed; // Cerchio: attacco leggero (Jab)
+      g.yawRight = b(3) && l2 && !armed; // L2 + Triangolo: attacco alternativo
+      g.headlights = false;
+    }
+    g.attackLeft = false;
+    // Triangolo col drone: torna a piedi (e finche' resta premuto non fa
+    // salire sul veicolo vicino)
+    if (inDrone && b(3)) triangleBlocked.current = true;
+    else if (!b(3)) triangleBlocked.current = false;
+    g.enter = b(3) && !inDrone && !triangleBlocked.current && !(l2 && !armed && !inCar && !flying); // Triangolo: veicolo
+    g.dodge = ((b(2) && l2) || b(10)) && !inCar && !flying && !inDrone; // L2 + Quadrato, o L3: schivata
+    g.reload = (b(13) || (b(1) && armed && !inCar && !flying)) && !inDrone; // croce giu' o Cerchio con un'arma
+    g.weapon1 = b(14) && !inCar && !inDrone; // croce sinistra: pugni
+    g.weapon2 = b(15) && !inCar && !inDrone; // croce destra: pistola
+    g.weapon3 = b(12) && !inDrone; // croce su: fucile
+    // Select premuto e rilasciato: le 4 distanze della camera (ZOOM_LEVELS in
+    // useThirdPersonCamera.ts); tenuto DRONE_HOLD_MS: prendi / lascia il drone
+    const now = performance.now();
+    let selectTap = false;
+    let selectHold = false;
+    if (b(8)) {
+      if (!selectDownAt.current) selectDownAt.current = now;
+      if (!selectHoldFired.current && now - selectDownAt.current >= DRONE_HOLD_MS) {
+        selectHoldFired.current = true;
+        selectHold = true;
+      }
+    } else if (selectDownAt.current) {
+      selectTap = !selectHoldFired.current;
+      selectDownAt.current = 0;
+      selectHoldFired.current = false;
+    }
+    g.camera = selectTap && !inDrone;
+    g.fly = selectHold || (inDrone && b(3));
+    // R1: copertura (a piedi)
+    g.cover = b(5) && !inCar && !flying && !inDrone;
+    // vicino a un personaggio (lib/dialogue.ts): Triangolo parla, non sale
+    // in auto; col dialogo aperto i tasti li legge DialogueBox
+    g.talk = false;
+    if (!inCar && !flying && !inDrone && (talkState.near || talkState.open)) {
+      g.talk = b(3) && !talkState.open;
+      g.enter = false;
+    }
+    if (talkState.open) {
+      for (const a of ACTION_NAMES) if (!DIALOGUE_FREE_ACTIONS.has(a)) g[a] = false;
+    }
+    // Start: pausa (la gestisce GameFreeze.tsx anche a gioco fermo)
+    g.pause = b(9);
 
     applyMerged();
   });
@@ -374,5 +508,15 @@ export const useInput = () => {
     return false;
   };
 
-  return { ...input, consumeJustPressed };
+  // quanto si sta "pestando" il tasto corsa (0..1): come in GTA, tenerlo
+  // premuto fa correre, premerlo piu' volte di fila fa scattare; smette di
+  // contare appena si smette di premere
+  const sprintMash = () => {
+    const now = performance.now();
+    const taps = shiftTaps.current;
+    while (taps.length && now - taps[0] > SPRINT_TAP_WINDOW_MS) taps.shift();
+    return Math.min(1, Math.max(0, (taps.length - 1) / 3));
+  };
+
+  return { ...input, consumeJustPressed, sprintMash };
 };

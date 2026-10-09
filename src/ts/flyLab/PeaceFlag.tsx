@@ -9,6 +9,11 @@ import { SimpleClothCPU } from '../lib/simpleCloth/SimpleClothCPU';
 const W = 3.2, H = 2.1; // metri
 const NX = 32, NY = 21; // suddivisioni della stoffa
 const POLE_H = 6.2;
+// oltre questa distanza dalla telecamera (m) la stoffa resta ferma
+const FLAG_SIM_DIST = 60;
+const _pv = new THREE.Matrix4();
+const _frustum = new THREE.Frustum();
+const _flagSphere = new THREE.Sphere(new THREE.Vector3(), 3);
 
 function peaceTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
@@ -69,7 +74,16 @@ const PeaceFlag: React.FC<{ position: [number, number, number] }> = ({ position 
     texture.dispose();
   }, [geometry, texture]);
 
-  useFrame(({ clock }, delta) => {
+  useFrame(({ clock, camera }, delta) => {
+    // lontana o fuori inquadratura la stoffa non si simula: ~1 ms a
+    // bandiera a ogni frame, e in citta' ce ne sono una decina
+    const cx = camera.position.x - px;
+    const cz = camera.position.z - pz;
+    if (cx * cx + cz * cz > FLAG_SIM_DIST * FLAG_SIM_DIST) return;
+    _pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_pv);
+    _flagSphere.center.set(px + W / 2, POLE_H - H / 2, pz);
+    if (!_frustum.intersectsSphere(_flagSphere)) return;
     // raffiche: il vento cambia forza e un po' direzione nel tempo
     const t = clock.elapsedTime;
     const gust = 0.75 + 0.35 * Math.sin(t * 0.6) + 0.15 * Math.sin(t * 2.1 + 1.3);

@@ -21,50 +21,182 @@ export interface RagdollSegment {
   // capsules don't visibly overlap/z-fight at the joint (capsule caps are
   // already rounded, so a small margin reads better than none).
   lengthScale?: number;
+  // Spostamenti degli estremi della capsula (metri, nel frame del
+  // personaggio in posa di bind: X sinistra, Y su, Z avanti): l'inizio e'
+  // drivingBone + fromOffset, la direzione va verso toBone + toOffset.
+  // Servono dove l'osso non sta al centro della carne (testa, petto,
+  // tallone). Solo il ragdoll attivo li legge (segmentCapsuleLocal).
+  fromOffset?: [number, number, number];
+  toOffset?: [number, number, number];
 }
 
 export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
-  { name: 'Hips', drivingBone: 'pelvis', parent: null, toBone: 'spine_01', radius: 0.15, lengthScale: 0.6 },
-  // "osserva bene questo collider ragdoll attivo.. mi pare nn
-  // corrispondere molto al personaggio" -- misurato dal vivo sullo
-  // scheletro reale (soldier-citizen.glb): spine_01->neck_01 e' 0.44m,
-  // ma spine_02->spine_03 e' solo 0.14m e spine_03->neck_01 solo 0.17m.
-  // Torso qui sotto teneva ANCORA il vecchio toBone: 'neck_01' ereditato
-  // dal design a 3 pezzi (RAGDOLL_SEGMENTS sopra, dove Torso e' l'UNICO
-  // corpo della schiena) -- quindi Torso copriva l'INTERO tronco da
-  // spine_01 a neck_01, esattamente sovrapposto per intero a
-  // SpineMid+SpineHigh sotto, che vivono nello stesso range. Tre corpi
-  // fisici indipendenti impilati sulla stessa porzione di spina, ognuno
-  // tirato dal proprio motore PD verso una MEDIA leggermente diversa
-  // della posa animata -- e' la causa principale del "grumo" visibile a
-  // schermo vicino a petto/spalla e dell'instabilita' che non si ferma
-  // mai nemmeno da fermi. Accorciato a spine_02 cosi' Torso copre SOLO
-  // la sua fetta (spine_01->spine_02), come SpineMid/SpineHigh coprono
-  // la propria.
-  { name: 'Torso', drivingBone: 'spine_01', parent: 'Hips', toBone: 'spine_02', radius: 0.13 },
-  // Raggio ridotto rispetto al vecchio 0.16/0.15 (pensati per un UNICO
-  // pezzo che faceva da tronco intero) -- ora che ognuno di questi copre
-  // solo 0.13-0.18m di spina invece di 0.44m, un raggio da "petto
-  // intero" li faceva sovrapporre pesantemente anche ai vicini non
-  // adiacenti (es. Hips-SpineHigh). Restano comunque piu' tozzi che
-  // allungati (halfHeight vicino al raggio o sotto), normale per
-  // segmenti di colonna cosi' corti -- l'obiettivo qui e' ridurre la
-  // sovrapposizione, non eliminarla del tutto.
-  { name: 'SpineMid', drivingBone: 'spine_02', parent: 'Torso', toBone: 'spine_03', radius: 0.12 },
-  { name: 'SpineHigh', drivingBone: 'spine_03', parent: 'SpineMid', toBone: 'neck_01', radius: 0.12 },
-  { name: 'Head', drivingBone: 'neck_01', parent: 'SpineHigh', toBone: 'head_leaf', radius: 0.15, lengthScale: 1.3 },
-  { name: 'ClavicleL', drivingBone: 'clavicle_l', parent: 'SpineHigh', toBone: 'upperarm_l', radius: 0.05 },
-  { name: 'UpperArm_L', drivingBone: 'upperarm_l', parent: 'ClavicleL', toBone: 'lowerarm_l', radius: 0.06 },
-  { name: 'ForeArm_L', drivingBone: 'lowerarm_l', parent: 'UpperArm_L', toBone: 'hand_l', radius: 0.05 },
-  { name: 'ClavicleR', drivingBone: 'clavicle_r', parent: 'SpineHigh', toBone: 'upperarm_r', radius: 0.05 },
-  { name: 'UpperArm_R', drivingBone: 'upperarm_r', parent: 'ClavicleR', toBone: 'lowerarm_r', radius: 0.06 },
-  { name: 'ForeArm_R', drivingBone: 'lowerarm_r', parent: 'UpperArm_R', toBone: 'hand_r', radius: 0.05 },
-  { name: 'Thigh_L', drivingBone: 'thigh_l', parent: 'Hips', toBone: 'calf_l', radius: 0.095 },
-  { name: 'Shin_L', drivingBone: 'calf_l', parent: 'Thigh_L', toBone: 'foot_l', radius: 0.07 },
-  { name: 'Foot_L', drivingBone: 'foot_l', parent: 'Shin_L', toBone: 'ball_l', radius: 0.075, lengthScale: 1.4 },
-  { name: 'Thigh_R', drivingBone: 'thigh_r', parent: 'Hips', toBone: 'calf_r', radius: 0.095 },
-  { name: 'Shin_R', drivingBone: 'calf_r', parent: 'Thigh_R', toBone: 'foot_r', radius: 0.07 },
-  { name: 'Foot_R', drivingBone: 'foot_r', parent: 'Shin_R', toBone: 'ball_r', radius: 0.075, lengthScale: 1.4 },
+  // Forme misurate sulla mesh di soldier-citizen.glb in posa a T con
+  // scripts/ragdoll-fit.mjs (ottobre 2026): ogni pezzo copre la carne
+  // dei SUOI vertici (osso dominante) e sporge al massimo ~3 cm, nessun
+  // vertice resta fuori da tutte le capsule per piu' di ~4 cm (prima:
+  // fino a 10 cm scoperti sulla testa, 7 su petto e spalle, sfera del
+  // bacino che sporgeva di 9 cm). Le mani restano senza collider.
+  //
+  // Torso copre solo spine_01->spine_02, SpineMid e SpineHigh la loro
+  // fetta (vedi la storia in git: un Torso fino a neck_01 impilava tre
+  // corpi sulla stessa porzione di spina). Niente pezzo per il collo: lo
+  // copre la capsula della testa.
+  { name: 'Hips', drivingBone: 'pelvis', parent: null, toBone: 'spine_01', radius: 0.12, lengthScale: 1.1, fromOffset: [0, 0.004, 0.052] },
+  {
+    name: 'Torso',
+    drivingBone: 'spine_01',
+    parent: 'Hips',
+    toBone: 'spine_02',
+    radius: 0.124,
+    lengthScale: 0.75,
+    fromOffset: [0, 0, 0.037],
+  },
+  {
+    name: 'SpineMid',
+    drivingBone: 'spine_02',
+    parent: 'Torso',
+    toBone: 'spine_03',
+    radius: 0.13,
+    lengthScale: 1.43,
+    toOffset: [0, -0.004, 0.024],
+  },
+  // petto: capsula ORIZZONTALE da spalla a spalla (x +-0.2 a y 1.36),
+  // non lungo la spina -- il torace e' largo 34 cm e profondo 25
+  {
+    name: 'SpineHigh',
+    drivingBone: 'spine_03',
+    parent: 'SpineMid',
+    toBone: 'neck_01',
+    radius: 0.14,
+    lengthScale: 1,
+    fromOffset: [0.2, 0.078, -0.017],
+    toOffset: [-0.2, -0.092, 0.021],
+  },
+  // testa: dal collo fin sopra il cranio (head_leaf sta 19 cm sotto la
+  // sommita'), leggermente inclinata all'indietro come la nuca
+  {
+    name: 'Head',
+    drivingBone: 'neck_01',
+    parent: 'SpineHigh',
+    toBone: 'head_leaf',
+    radius: 0.095,
+    lengthScale: 1.99,
+    toOffset: [0, 0.005, -0.022],
+  },
+  {
+    name: 'ClavicleL',
+    drivingBone: 'clavicle_l',
+    parent: 'SpineHigh',
+    toBone: 'upperarm_l',
+    radius: 0.056,
+    lengthScale: 1.4,
+    toOffset: [-0.015, 0, -0.002],
+  },
+  {
+    name: 'UpperArm_L',
+    drivingBone: 'upperarm_l',
+    parent: 'ClavicleL',
+    toBone: 'lowerarm_l',
+    radius: 0.066,
+    lengthScale: 1.02,
+    fromOffset: [-0.051, 0.007, 0.002],
+  },
+  {
+    name: 'ForeArm_L',
+    drivingBone: 'lowerarm_l',
+    parent: 'UpperArm_L',
+    toBone: 'hand_l',
+    radius: 0.052,
+    lengthScale: 0.98,
+    fromOffset: [-0.013, -0.007, 0],
+    toOffset: [0, -0.009, 0.007],
+  },
+  {
+    name: 'ClavicleR',
+    drivingBone: 'clavicle_r',
+    parent: 'SpineHigh',
+    toBone: 'upperarm_r',
+    radius: 0.056,
+    lengthScale: 1.4,
+    toOffset: [0.015, 0, -0.002],
+  },
+  {
+    name: 'UpperArm_R',
+    drivingBone: 'upperarm_r',
+    parent: 'ClavicleR',
+    toBone: 'lowerarm_r',
+    radius: 0.066,
+    lengthScale: 1.02,
+    fromOffset: [0.051, 0.007, 0.002],
+  },
+  {
+    name: 'ForeArm_R',
+    drivingBone: 'lowerarm_r',
+    parent: 'UpperArm_R',
+    toBone: 'hand_r',
+    radius: 0.052,
+    lengthScale: 0.98,
+    fromOffset: [0.013, -0.007, 0],
+    toOffset: [0, -0.009, 0.007],
+  },
+  {
+    name: 'Thigh_L',
+    drivingBone: 'thigh_l',
+    parent: 'Hips',
+    toBone: 'calf_l',
+    radius: 0.082,
+    lengthScale: 1.03,
+    fromOffset: [0.007, 0.07, -0.004],
+  },
+  {
+    name: 'Shin_L',
+    drivingBone: 'calf_l',
+    parent: 'Thigh_L',
+    toBone: 'foot_l',
+    radius: 0.051,
+    lengthScale: 1.08,
+    fromOffset: [0.005, 0.022, -0.028],
+    toOffset: [0, -0.002, -0.015],
+  },
+  // piede: dal tallone (5 cm dietro e 3 sotto la caviglia) alla punta
+  {
+    name: 'Foot_L',
+    drivingBone: 'foot_l',
+    parent: 'Shin_L',
+    toBone: 'ball_l',
+    radius: 0.052,
+    lengthScale: 1.4,
+    fromOffset: [0, -0.034, -0.049],
+  },
+  {
+    name: 'Thigh_R',
+    drivingBone: 'thigh_r',
+    parent: 'Hips',
+    toBone: 'calf_r',
+    radius: 0.082,
+    lengthScale: 1.03,
+    fromOffset: [-0.007, 0.07, -0.004],
+  },
+  {
+    name: 'Shin_R',
+    drivingBone: 'calf_r',
+    parent: 'Thigh_R',
+    toBone: 'foot_r',
+    radius: 0.051,
+    lengthScale: 1.08,
+    fromOffset: [-0.005, 0.022, -0.028],
+    toOffset: [0, -0.002, -0.015],
+  },
+  {
+    name: 'Foot_R',
+    drivingBone: 'foot_r',
+    parent: 'Shin_R',
+    toBone: 'ball_r',
+    radius: 0.052,
+    lengthScale: 1.4,
+    fromOffset: [0, -0.034, -0.049],
+  },
 ];
 
 export const ACTIVE_RAGDOLL_MASS_WEIGHT: Record<string, number> = {

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { useThree } from '@react-three/fiber';
 import { useRapier } from '@react-three/rapier';
+import type { RigidBody } from '@dimforge/rapier3d-compat';
+import { setBlastWorld } from '../../../lib/explosions';
 import { CollisionGroups, allocFighterBit } from '../../../enums/CollisionGroups';
 import { useStore } from '../../../store';
 import { RAGDOLL_PULSE_NEARBY, HURTBOX_HEIGHT, HURTBOX_RADIUS, HURTBOX_GROUPS } from './ragdollConfig';
@@ -50,6 +52,11 @@ export interface RagdollController {
   // la spinta; poi chi chiama lo rimette in piedi (standUp) quando si e'
   // fermato. false se non c'e' il layer attivo.
   knockDown: (dir: THREE.Vector3, speed: number) => boolean;
+  // esplosione (lib/explosions.ts): come knockDown, ma ogni pezzo parte
+  // dal centro dell'esplosione verso fuori, piu' forte se piu' vicino (il
+  // corpo gira in aria). Vale anche per il corpo gia' a terra o morto.
+  // false se non c'e' nessun corpo fisico da spingere.
+  blast: (center: THREE.Vector3, speed: number, radius: number) => boolean;
   standUp: () => void;
   isKnockedDown: () => boolean;
   // stato del corpo a terra: fermo? a pancia in su? bacino e direzione della testa
@@ -78,7 +85,7 @@ export interface RagdollController {
   // ostacoli dell'arena: esce dalle compenetrazioni e dice chi lo sta
   // spingendo (vedi useRagdollSolidBodies.resolveObstacleContacts)
   resolveObstacleContacts: (skipHandle: number | null, dt: number, ignoreBodyHandle?: number | null) => ObstacleContact;
-  getSolidBodySegments: () => SolidBodySegmentDebug[];
+  // getSolidBodySegments: () => SolidBodySegmentDebug[];
   // Vedi ActiveRagdollSegmentDebug in useRagdollActive.ts -- collider
   // fisico e collider bersaglio (animazione) di ogni corpo del layer
   // attivo, con errori e angoli dei giunti rispetto ai limiti.
@@ -112,6 +119,10 @@ export function useRagdoll(
 ): RagdollController {
   const { world, rapier } = useRapier();
   const { scene } = useThree();
+  // le esplosioni spingono anche gli oggetti del mondo (lib/explosions.ts)
+  useEffect(() => {
+    setBlastWorld(world);
+  }, [world]);
 
   const { resolveBones } = useRagdollBones(modelRootRef);
   // bit del combattente per i gruppi di collisione (vedi FIGHTER_BITS)
@@ -151,10 +162,15 @@ export function useRagdoll(
     getActiveRagdollDebugSegments,
     measureClipRanges,
     setNeutralClip,
+    goPassiveNow,
   } = useRagdollActive(modelRootRef, resolveBones, ownerId, fighterBit);
   // KO del layer attivo (morte con ragdoll attivo acceso): motori spenti,
   // gravita' piena, finche' il combattente non viene ricreato/deactivate.
   const activeKnockedOutRef = useRef(false);
+  // morto (rig transitorio) quasi fermo da quanti secondi
+  const deathStillRef = useRef(0);
+  const deathTimeRef = useRef(0);
+  const deathHeavyRef = useRef(false);
   const hasActiveRig = () => Object.keys(activeBodiesRef.current).length > 0;
 
   const markerRef = useRef<THREE.Mesh | null>(null);
@@ -203,6 +219,14 @@ export function useRagdoll(
       return;
     }
     if (stateRef.current.active && stateRef.current.isDeath) return;
+    // via SUBITO le capsule solide (le parcheggia anche update(), ma solo
+    // al frame dopo): il corpo morto lanciato nello stesso frame ci
+    // sbatteva contro -- misurato con un'esplosione: da 14 a 4 m/s in 50 ms,
+    // il morto restava li' a tremare in piedi a mezz'aria
+    parkSolidBody();
+    deathStillRef.current = 0;
+    deathTimeRef.current = 0;
+    deathHeavyRef.current = false;
     destroyBodies();
     buildBodies();
     stateRef.current = {
@@ -212,12 +236,13 @@ export function useRagdoll(
       blendElapsed: 0,
       chainElapsed: 0,
     };
-  }, [buildBodies, destroyBodies]);
+  }, [buildBodies, destroyBodies, parkSolidBody]);
 
   const knockDown = useCallback(
     (dir: THREE.Vector3, speed: number): boolean => {
       if (!hasActiveRig() || stateRef.current.isDeath) return false;
       activeKnockedOutRef.current = true;
+      goPassiveNow();
       const entries = activeBodiesRef.current;
       const upper = /^(Head|Spine|Torso|Clavicle|UpperArm|ForeArm)/;
       for (const key of Object.keys(entries)) {
@@ -243,6 +268,47 @@ export function useRagdoll(
       return true;
     },
     [triggerHitMarker]
+  );
+
+  const blast = useCallback(
+    (center: THREE.Vector3, speed: number, radius: number): boolean => {
+      // pezzi del corpo: quello attivo (vivo o KO) o il rig della morte
+      const active = hasActiveRig() && !stateRef.current.isDeath;
+      const entries: Record<string, { body: RigidBody }> = active
+        ? activeBodiesRef.current
+        : stateRef.current.isDeath
+          ? bodiesRef.current
+          : {};
+      const keys = Object.keys(entries);
+      if (!keys.length) return false;
+      if (active) {
+        activeKnockedOutRef.current = true;
+        goPassiveNow();
+      }
+      // velocita' del corpo = speed al bacino; ogni pezzo in proporzione a
+      // quanto e' piu' vicino o lontano del bacino dal centro
+      const hp = (entries.Hips ?? entries[keys[0]]).body.translation();
+      const fHips = Math.max(0.1, 1 - Math.hypot(hp.x - center.x, hp.y - center.y, hp.z - center.z) / radius);
+      for (const key of keys) {
+        const b = entries[key].body;
+        const t = b.translation();
+        let dx = t.x - center.x;
+        let dy = t.y - center.y;
+        let dz = t.z - center.z;
+        const dist = Math.hypot(dx, dy, dz) || 1e-3;
+        dx /= dist;
+        dy = Math.max(dy / dist, 0) + 0.55;
+        dz /= dist;
+        const l = Math.hypot(dx, dy, dz);
+        const f = Math.max(0.1, 1 - dist / radius);
+        const s = speed * THREE.MathUtils.clamp(f / fHips, 0.6, 1.6);
+        const v = b.linvel();
+        b.setLinvel({ x: v.x * 0.3 + (dx / l) * s, y: v.y * 0.3 + (dy / l) * s, z: v.z * 0.3 + (dz / l) * s }, true);
+        b.wakeUp();
+      }
+      return true;
+    },
+    [activeBodiesRef, bodiesRef, stateRef]
   );
 
   const standUp = useCallback(() => {
@@ -481,7 +547,41 @@ export function useRagdoll(
       }
 
       if (s.isDeath) {
-        clampJointCones();
+        // "glitch strani" (folla): il morto del rig transitorio non si
+        // fermava mai -- strisciava a terra di ~0.3 m/s per sempre (la
+        // correzione dei coni dei giunti lo risvegliava a ogni frame).
+        // Quasi fermo per un attimo: si addormenta e non si tocca piu'
+        // finche' qualcosa non lo urta.
+        const bodies = bodiesRef.current;
+        let asleep = true;
+        let still = true;
+        for (const key of Object.keys(bodies)) {
+          const b = bodies[key].body;
+          if (!b.isSleeping()) asleep = false;
+          // solo la velocita' lineare: a terra i pezzi tremano sul posto
+          // (misurato: fino a 4.7 rad/s, i coni dei giunti contro i giunti)
+          const v = b.linvel();
+          if (v.x * v.x + v.y * v.y + v.z * v.z > 0.6 * 0.6) still = false;
+        }
+        deathStillRef.current = still ? deathStillRef.current + delta : 0;
+        // dopo il volo (1.2 s) il morto si "appesantisce": tanto smorzamento,
+        // il tremolio dei giunti si spegne e puo' addormentarsi (prima
+        // strisciava a ~0.3 m/s per sempre)
+        deathTimeRef.current += delta;
+        if (deathTimeRef.current > 1.2 && !deathHeavyRef.current) {
+          deathHeavyRef.current = true;
+          for (const key of Object.keys(bodies)) {
+            bodies[key].body.setLinearDamping(3);
+            bodies[key].body.setAngularDamping(6);
+          }
+        }
+        if (!asleep) {
+          if (deathStillRef.current > 0.8) {
+            for (const key of Object.keys(bodies)) bodies[key].body.sleep();
+          } else if (!deathHeavyRef.current) clampJointCones();
+          // (dopo il volo niente piu' coni: la loro correzione, che sposta
+          // i pezzi a mano a ogni frame, era il motore del tremolio)
+        }
         syncBonesFromPhysics(1);
         if (activeRagdollEnabled) resyncActiveRagdollToBones();
         return;
@@ -688,6 +788,7 @@ export function useRagdoll(
     activateDeath,
     launchDeath,
     knockDown,
+    blast,
     standUp,
     isKnockedDown,
     getLyingState,
@@ -703,7 +804,7 @@ export function useRagdoll(
     applySpineLean,
     resolveBodyMovement,
     resolveObstacleContacts,
-    getSolidBodySegments,
+    // getSolidBodySegments,
     getActiveRagdollDebugSegments,
     testActiveHit,
     measureClipRanges,

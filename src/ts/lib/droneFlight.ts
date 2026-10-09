@@ -42,6 +42,13 @@ export const droneOrientation = new THREE.Quaternion();
 // component that could hold a ref for the other to see.
 export const droneShake = { current: 0 };
 
+// "mappa i comandi del joystick anche quando prendo il controllo del drone":
+// levette e grilletti analogici del pad, scritti da useInput.ts a ogni frame
+// (gia' con la zona morta) e letti da Drone.tsx mentre si pilota. Levetta
+// sinistra: avanti/indietro e imbardata; destra: la cloche (come il mouse,
+// ma torna al centro lasciandola); R2/L2 su e giu' (0..1); L1/R1 rollio.
+export const dronePad = { lx: 0, ly: 0, rx: 0, ry: 0, up: 0, down: 0, rollL: false, rollR: false };
+
 // TEMP DEBUG (Claude): browser-automation testing can't get a real
 // pointer lock (verified live -- document.pointerLockElement stays null
 // even after a trusted-looking synthetic click), so there's no way to

@@ -1,12 +1,12 @@
 import React, { useRef, useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { RigidBody, CuboidCollider, RapierRigidBody, useRapier } from '@react-three/rapier';
+import { RigidBody, CuboidCollider, RapierRigidBody, useRapier, useBeforePhysicsStep } from '@react-three/rapier';
 // CoefficientCombineRule isn't re-exported by @react-three/rapier's own
 // types (only as a TS type, not the runtime enum) -- pulled directly from
 // its underlying @dimforge/rapier3d-compat dependency instead (already in
 // node_modules via @react-three/rapier, just not a direct package.json dep).
 import { CoefficientCombineRule } from '@dimforge/rapier3d-compat';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF } from '../../lib/gltf';
 import * as THREE from 'three';
 import { useInput } from '../../hooks/useInput';
 import { useStore } from '../../store';
@@ -17,6 +17,10 @@ import { simDebug } from '../../debug/simDebug';
 interface HelicopterProps {
   position?: [number, number, number];
   id?: string;
+  // "ingrandisci anche l'elicottero": scala del modello (come le auto, il
+  // modello originale era fatto per il boxman). La dinamica resta quella
+  // dell'originale in proporzione: tempi x sqrt(S) (vedi useBeforePhysicsStep).
+  scale?: number;
 }
 
 const _heliUp = new THREE.Vector3();
@@ -29,8 +33,30 @@ const _heliVertStab = new THREE.Vector3();
 const _heliPos = new THREE.Vector3();
 const _heliEuler = new THREE.Euler();
 const _heliQuat = new THREE.Quaternion();
+const _phQuat = new THREE.Quaternion();
+const _phUp = new THREE.Vector3();
+const _phRight = new THREE.Vector3();
+const _phForward = new THREE.Vector3();
+const _phVel = new THREE.Vector3();
+const _phAng = new THREE.Vector3();
+// forme di collisione di heli.glb (come l'originale) e massa 50 kg con
+// l'inerzia della scatola che le contiene tutte (cannon)
+const HELI_BOXES: { pos: [number, number, number]; half: [number, number, number] }[] = [
+  { pos: [0, 0.038, -0.145], half: [0.533, 0.711, 0.559] },
+  { pos: [0, 0.401, -1.229], half: [0.208, 0.349, 0.524] },
+  { pos: [0, 0.038, 0.621], half: [0.059, 0.711, 0.207] },
+  { pos: [0.296, -0.373, 0.621], half: [0.237, 0.3, 0.207] },
+  { pos: [-0.296, -0.373, 0.621], half: [0.237, 0.3, 0.207] },
+];
+// massa vera (gli impulsi di volo sono velocita', non dipendono dalla massa:
+// conta solo negli urti -- con 50 kg un'auto o un manichino lo spostavano)
+const HELI_MASS = 700;
+export const DEFAULT_HELI_SCALE = 1.5;
+const HELI_AABB_HALF = [0.534, 0.7895, 1.3035];
 
-const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 'heli-1' }) => {
+const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 'heli-1', scale = DEFAULT_HELI_SCALE }) => {
+  const S = scale;
+  const TS = Math.sqrt(S);
   const { scene } = useGLTF('heli.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
   // For window.__sim's `grounded`/`numContacts` telemetry -- see
@@ -51,7 +77,17 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
   const input = useInput();
   // Vehicle entry/exit (including the exit key) is orchestrated centrally
   // by Player.tsx (see vehicleTransition there).
-  const { currentControllable, controlledEntityId, controlledSeatType, isVehicleTransitioning, updateEntity, setPlayerInfo, isPaused } = useStore(
+  const {
+    currentControllable,
+    controlledEntityId,
+    controlledSeatType,
+    isVehicleTransitioning,
+    transitioningEntityId,
+    transitioningDoorName,
+    updateEntity,
+    setPlayerInfo,
+    isPaused,
+  } = useStore(
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
@@ -61,9 +97,11 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
       // isCarActive gate.
       controlledSeatType: state.controlledSeatType,
       isVehicleTransitioning: state.isVehicleTransitioning,
+      transitioningEntityId: state.transitioningEntityId,
+      transitioningDoorName: state.transitioningDoorName,
       updateEntity: state.updateEntity,
       setPlayerInfo: state.setPlayerInfo,
-      isPaused: state.isPaused,
+      isPaused: state.isPaused || state.physicsPaused,
     }))
   );
 
@@ -71,7 +109,6 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
   // <RigidBody>/<CuboidCollider> -- see Airplane.tsx for the general
   // reasoning (half-extents conversion, collisionGroups). Old full-size box
   // [1.2, 1.5, 4] -> half-extents [0.6, 0.75, 2].
-  const chassisHalfExtents: [number, number, number] = [0.6, 0.75, 2];
   const ref = useRef<RapierRigidBody>(null);
 
   useEffect(() => {
@@ -82,11 +119,33 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // massa, inerzia e gravita' come l'originale (forme a densita' 0)
+  useEffect(() => {
+    const body = ref.current;
+    if (!body) return;
+    const e = HELI_AABB_HALF.map((h) => h * S);
+    const I = [
+      (HELI_MASS / 12) * (4 * e[1] * e[1] + 4 * e[2] * e[2]),
+      (HELI_MASS / 12) * (4 * e[0] * e[0] + 4 * e[2] * e[2]),
+      (HELI_MASS / 12) * (4 * e[1] * e[1] + 4 * e[0] * e[0]),
+    ];
+    body.setAdditionalMassProperties(HELI_MASS, { x: 0, y: 0, z: 0 }, { x: I[0], y: I[1], z: I[2] }, { x: 0, y: 0, z: 0, w: 1 }, true);
+    body.setGravityScale(9.81 / Math.max(0.1, Math.abs(world.gravity.y)), true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [world, S]);
+
   const velocity = useRef([0, 0, 0]);
   const angularVelocity = useRef([0, 0, 0]);
 
   const enginePower = useRef(0);
+  const activeRef = useRef(false);
+  const isPausedRef = useRef(false);
+  isPausedRef.current = isPaused;
+  const lastTelemetry = useRef<Record<string, unknown>>({});
   const rotorsRef = useRef<THREE.Object3D[]>([]);
+  // portiere (door_L/door_R): si aprono mentre il personaggio sale o scende,
+  // come le auto (VehicleDoor dell'originale)
+  const doorsRef = useRef<{ node: THREE.Object3D; sign: number; open: number }[]>([]);
 
   useEffect(() => {
     // Same bug/fix as Airplane.tsx: this traversed `scene` (the shared,
@@ -100,17 +159,21 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
         if (child.userData.data === 'rotor') rotors.push(child);
       });
       rotorsRef.current = rotors;
+      const doors: { node: THREE.Object3D; sign: number; open: number }[] = [];
+      clonedScene.traverse((child) => {
+        if (child.name.startsWith('door_')) doors.push({ node: child, sign: -Math.sign(child.position.x) || 1, open: 0 });
+      });
+      doorsRef.current = doors;
     }
   }, [clonedScene]);
 
   useFrame((state, delta) => {
     const body = ref.current;
-    const isHeliActive = currentControllable === 'helicopter' && controlledEntityId === id && !isVehicleTransitioning && controlledSeatType === 'driver';
+    const isHeliActive =
+      currentControllable === 'helicopter' && controlledEntityId === id && !isVehicleTransitioning && controlledSeatType === 'driver';
 
     if (!body) return;
-    // Same reasoning as Airplane.tsx: this vehicle's control logic lives in
-    // a plain useFrame, not useBeforePhysicsStep, so <Physics paused> alone
-    // doesn't stop it.
+    // (in pausa fermi anche motore e rotori)
     if (isPaused) return;
 
     // Synchronous Rapier reads (no more worker-subscription lag -- see
@@ -135,7 +198,9 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
     // the first place, regardless of how close the player actually stood.
     // Throttled the same way (~10Hz) as the old active-only call it
     // replaces.
-    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
+    // elapsedTime e non getElapsedTime(): quella chiama getDelta() e ruba
+    // tempo al delta del frame dopo per TUTTI i useFrame (fisica compresa)
+    if (state.clock.elapsedTime % 0.1 < 0.02) {
       const t0 = body.translation();
       const rot0 = body.rotation();
       _heliQuat.set(rot0.x, rot0.y, rot0.z, rot0.w);
@@ -155,7 +220,10 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
       const angvelT = body.angvel();
       const collider0 = body.collider(0);
       let numContacts = 0;
-      if (collider0) world.contactPairsWith(collider0, () => { numContacts += 1; });
+      if (collider0)
+        world.contactPairsWith(collider0, () => {
+          numContacts += 1;
+        });
       simDebug.registerVehicle('helicopter', body, {
         id,
         active,
@@ -166,11 +234,7 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
         input: Object.fromEntries(Object.entries(input).filter(([, v]) => typeof v === 'boolean')),
         pos: [posT.x, posT.y, posT.z],
         quat: [rotT.x, rotT.y, rotT.z, rotT.w],
-        eulerDeg: [
-          THREE.MathUtils.radToDeg(_heliEuler.y),
-          THREE.MathUtils.radToDeg(_heliEuler.x),
-          THREE.MathUtils.radToDeg(_heliEuler.z),
-        ],
+        eulerDeg: [THREE.MathUtils.radToDeg(_heliEuler.y), THREE.MathUtils.radToDeg(_heliEuler.x), THREE.MathUtils.radToDeg(_heliEuler.z)],
         vel: [velT.x, velT.y, velT.z],
         speed: Math.hypot(velT.x, velT.y, velT.z),
         localSpeed: null,
@@ -184,138 +248,107 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
       });
     };
 
-    if (!isHeliActive) {
-      if (enginePower.current > 0) enginePower.current = Math.max(0, enginePower.current - delta * 0.06);
-      if (import.meta.env.DEV) reportTelemetry(false);
-      return;
+    {
+      const openDoor = isVehicleTransitioning && transitioningEntityId === id ? transitioningDoorName : null;
+      const step = 5 * delta;
+      for (const d of doorsRef.current) {
+        const target = d.node.name === openDoor ? 1 : 0;
+        d.open = Math.abs(target - d.open) <= step ? target : d.open + Math.sign(target - d.open) * step;
+        d.node.rotation.y = d.sign * d.open;
+      }
     }
 
-    if (enginePower.current < 1) enginePower.current = Math.min(1, enginePower.current + delta * 0.2);
-
+    // potenza del motore e rotori (come Helicopter.update dell'originale:
+    // sale in 5 s con qualcuno ai comandi, scende piano senza)
+    activeRef.current = isHeliActive;
+    if (isHeliActive) enginePower.current = Math.min(1, enginePower.current + delta * 0.2);
+    else enginePower.current = Math.max(0, enginePower.current - delta * 0.06);
     for (let i = 0; i < rotorsRef.current.length; i++) {
       rotorsRef.current[i].rotateX(enginePower.current * delta * 30);
     }
+    if (import.meta.env.DEV) reportTelemetry(isHeliActive, isHeliActive ? { ...lastTelemetry.current } : undefined);
+    if (!isHeliActive) return;
 
     const rot = body.rotation();
     _heliQuat.set(rot.x, rot.y, rot.z, rot.w);
-    const quat = _heliQuat;
-    _heliUp.set(0, 1, 0).applyQuaternion(quat);
-    const up = _heliUp;
-    const globalUp = _heliGlobalUp;
-    _heliRight.set(1, 0, 0).applyQuaternion(quat);
-    const right = _heliRight;
-    _heliForward.set(0, 0, 1).applyQuaternion(quat);
-    const forward = _heliForward;
-
-    // Legacy Helicopter.ts (pre-React) drove the physics body directly every
-    // ~60Hz substep -- `body.velocity +=`, `body.angularVelocity +=`, and
-    // `*=`/lerp for damping -- entirely independent of the body's mass or
-    // inertia tensor. This port instead used applyImpulse/applyTorqueImpulse
-    // for throttle and pitch/roll, which divide by mass and by the (very
-    // uneven, box-shaped) inertia tensor: the exact same numeric constant
-    // ended up producing wildly different actual responsiveness per axis
-    // (roll came out ~3x stronger than pitch). On top of that, roll's
-    // left/right (A/D) sign was flipped relative to legacy's rollLeft/
-    // rollRight -- so rolling was both backwards AND disproportionately
-    // strong ("l'elicottero funziona a cazzo"). Fixed by reading the
-    // current linear/angular velocity once, accumulating every term into it
-    // exactly like legacy did (restoring legacy's exact per-axis constants
-    // and roll sign), and writing the result back with a single
-    // setLinvel/setAngvel -- mass/inertia-independent again.
-    // dt60 renormalizes legacy's implicit-60fps-per-step constants to the
-    // real frame delta (dt60 == 1 at exactly 60fps), clamped so a dropped/
-    // backgrounded frame can't apply a single huge jump.
-    const dt60 = Math.min(delta * 60, 3);
-
-    // 1. Throttle (Ascend/Descend) -- legacy: body.velocity += up * 0.15 * enginePower
-    const curVel = body.linvel();
-    const vel = { x: curVel.x, y: curVel.y, z: curVel.z };
-    const throttleFactor = 0.15 * enginePower.current * dt60;
-    if (input.shift) {
-        vel.x += up.x * throttleFactor; vel.y += up.y * throttleFactor; vel.z += up.z * throttleFactor;
-    }
-    if (input.jump) {
-        vel.x -= up.x * throttleFactor; vel.y -= up.y * throttleFactor; vel.z -= up.z * throttleFactor;
-    }
-
-    // 2. Vertical Stabilization (Gravity compensation) -- legacy:
-    // gravityCompensation = |gravity| * physicsFrameTime * 0.98 * sqrt(clamp(dot(globalUp,up),0,1))
-    // vertDamping = (0, vel.y, 0) * -0.01; vertStab = (up*gravityCompensation + vertDamping) * enginePower
-    const gravity = 20;
-    let gravityCompensation = gravity * delta * 0.98;
-    const dot = globalUp.dot(up);
-    gravityCompensation *= Math.sqrt(THREE.MathUtils.clamp(dot, 0, 1));
-    const vertDampY = vel.y * -0.01;
-    _heliVertStab.set(up.x * gravityCompensation, up.y * gravityCompensation + vertDampY, up.z * gravityCompensation);
-    _heliVertStab.multiplyScalar(enginePower.current);
-    vel.x += _heliVertStab.x; vel.y += _heliVertStab.y; vel.z += _heliVertStab.z;
-
-    // 3. Positional Damping (horizontal drag only -- legacy's Helicopter.ts
-    // never touches Y here, only x/z: `body.velocity.x *= lerp(1, 0.995,
-    // enginePower); body.velocity.z *= ...`). Math.pow(base, dt60) instead
-    // of a flat multiply so this multiplicative damping also generalizes
-    // across frame rates instead of only being correct at 60fps.
-    const damping = Math.pow(THREE.MathUtils.lerp(1, 0.995, enginePower.current), dt60);
-    vel.x *= damping;
-    vel.z *= damping;
-
-    body.setLinvel(vel, true);
-
-    // 4. Rotation Stabilization, Yaw, Pitch & Roll (Controls) -- legacy
-    // applied every rotation term directly onto angularVelocity each step,
-    // then did one `angularVelocity *= 0.97` damping pass at the end;
-    // ported 1:1 here into a single accumulate-then-setAngvel, instead of
-    // the previous split of "setAngvel for stabilization+yaw" followed by
-    // a separate applyTorqueImpulse (inertia-tensor-divided) for pitch/roll.
-    _heliRotStabQuat.setFromUnitVectors(up, globalUp);
-    _heliRotStabEuler.setFromQuaternion(_heliRotStabQuat);
-
-    const angDamping = Math.pow(0.97, dt60);
-    let angX = angularVelocity.current[0] * angDamping;
-    let angY = angularVelocity.current[1] * angDamping;
-    let angZ = angularVelocity.current[2] * angDamping;
-
-    // Self-leveling -- legacy: angularVelocity += rotStabEuler * enginePower
-    angX += _heliRotStabEuler.x * enginePower.current * 2.0;
-    angZ += _heliRotStabEuler.z * enginePower.current * 2.0;
-
-    // Yaw (Q/E) -- legacy: angularVelocity += up * 0.07 * enginePower (yawLeft/Q), -= (yawRight/E)
-    const rotFactor = 0.07 * enginePower.current * dt60;
-    if (input.yawLeft) { angX += up.x * rotFactor; angY += up.y * rotFactor; angZ += up.z * rotFactor; }
-    if (input.yawRight) { angX -= up.x * rotFactor; angY -= up.y * rotFactor; angZ -= up.z * rotFactor; }
-
-    // Pitch (W/S) -- legacy: angularVelocity += right * 0.07 * enginePower (pitchDown/W), -= (pitchUp/S)
-    if (input.forward) { angX += right.x * rotFactor; angY += right.y * rotFactor; angZ += right.z * rotFactor; }
-    if (input.backward) { angX -= right.x * rotFactor; angY -= right.y * rotFactor; angZ -= right.z * rotFactor; }
-
-    // Roll (A/D) -- legacy: angularVelocity -= forward * 0.07 * enginePower (rollLeft/A), += (rollRight/D).
-    // (Previously flipped here: A applied +forward and D applied -forward --
-    // backwards relative to legacy, on top of being inertia-tensor-scaled.)
-    if (input.left) { angX -= forward.x * rotFactor; angY -= forward.y * rotFactor; angZ -= forward.z * rotFactor; }
-    if (input.right) { angX += forward.x * rotFactor; angY += forward.y * rotFactor; angZ += forward.z * rotFactor; }
-
-    body.setAngvel({ x: angX, y: angY, z: angZ }, true);
-
-    if (import.meta.env.DEV) {
-      reportTelemetry(true, {
-        throttleFactor, gravityCompensation, vertDampY, damping, dt60,
-        vertStab: [_heliVertStab.x, _heliVertStab.y, _heliVertStab.z],
-        velAfterSet: [vel.x, vel.y, vel.z],
-      });
-    }
-
     const t = body.translation();
     _heliPos.set(t.x, t.y, t.z);
-    const heliPos = _heliPos;
-    _heliEuler.setFromQuaternion(quat, 'YXZ');
-    const heliEuler = _heliEuler;
-
+    _heliEuler.setFromQuaternion(_heliQuat, 'YXZ');
     // Update player info so camera/minimap follow the helicopter
-    setPlayerInfo([heliPos.x, heliPos.y, heliPos.z], heliEuler.y);
+    setPlayerInfo([_heliPos.x, _heliPos.y, _heliPos.z], _heliEuler.y);
+  });
 
-    // (Position/rotation for the store are now kept up to date
-    // unconditionally above, active or parked -- no need to duplicate it
-    // here.)
+  // "anche gli altri veicoli aereo e elicottero" -- Helicopter.physicsPreStep
+  // dell'originale, a OGNI passo di fisica (l'originale: 60 Hz, qui 1/120 s:
+  // gli incrementi per passo sono riportati al passo vero con k = dt*60, gli
+  // smorzamenti come potenze). Differenze dalla versione di prima: gravita'
+  // dell'originale (9.81: il nostro mondo ha 20, l'elicottero ha la sua
+  // scala di gravita') e stabilizzazione dell'assetto identica (il
+  // quaternione scalato a 0.3 dell'originale: un raddrizzamento morbido,
+  // prima era ~20 volte piu' forte e l'elicottero non si inclinava quasi).
+  useBeforePhysicsStep((w) => {
+    const body = ref.current;
+    if (!body || isPausedRef.current) return;
+    const dt = w.timestep;
+    const k = dt * 60;
+    const ep = enginePower.current;
+    const active = activeRef.current;
+    const rot = body.rotation();
+    _phQuat.set(rot.x, rot.y, rot.z, rot.w);
+    _phUp.set(0, 1, 0).applyQuaternion(_phQuat);
+    _phRight.set(1, 0, 0).applyQuaternion(_phQuat);
+    _phForward.set(0, 0, 1).applyQuaternion(_phQuat);
+    const lv = body.linvel();
+    const vel = _phVel.set(lv.x, lv.y, lv.z);
+
+    // spinta (Shift su, Spazio giu')
+    if (active && input.shift) vel.addScaledVector(_phUp, 0.15 * ep * k);
+    if (active && input.jump) vel.addScaledVector(_phUp, -0.15 * ep * k);
+
+    // stabilizzazione verticale: compensa il 98% della gravita' (vera, quella
+    // che sente il corpo) secondo quanto e' dritto, piu' uno smorzamento
+    let gc = Math.abs(w.gravity.y) * body.gravityScale() * dt * 0.98;
+    gc *= Math.sqrt(THREE.MathUtils.clamp(_heliGlobalUp.dot(_phUp), 0, 1));
+    _heliVertStab.copy(_phUp).multiplyScalar(gc);
+    _heliVertStab.y += (vel.y * -0.01 * k) / TS;
+    vel.addScaledVector(_heliVertStab, ep);
+
+    // smorzamento orizzontale
+    // (similitudine con la scala S: rotazioni e smorzamenti piu' lenti di
+    // sqrt(S), accelerazioni lineari uguali)
+    const posDamp = Math.pow(THREE.MathUtils.lerp(1, 0.995, ep), k / TS);
+    vel.x *= posDamp;
+    vel.z *= posDamp;
+    body.setLinvel({ x: vel.x, y: vel.y, z: vel.z }, true);
+
+    const av = body.angvel();
+    const ang = _phAng.set(av.x, av.y, av.z);
+    // raddrizzamento (solo con qualcuno ai comandi), come l'originale
+    if (active) {
+      _heliRotStabQuat.setFromUnitVectors(_phUp, _heliGlobalUp);
+      _heliRotStabQuat.x *= 0.3;
+      _heliRotStabQuat.y *= 0.3;
+      _heliRotStabQuat.z *= 0.3;
+      _heliRotStabQuat.w *= 0.3;
+      _heliRotStabEuler.setFromQuaternion(_heliRotStabQuat);
+      ang.x += (_heliRotStabEuler.x * ep * k) / S;
+      ang.y += (_heliRotStabEuler.y * ep * k) / S;
+      ang.z += (_heliRotStabEuler.z * ep * k) / S;
+    }
+    if (active) {
+      const r = (0.07 * ep * k) / S;
+      if (input.backward) ang.addScaledVector(_phRight, -r); // S: muso su
+      if (input.forward) ang.addScaledVector(_phRight, r); // W: muso giu'
+      if (input.yawLeft) ang.addScaledVector(_phUp, r);
+      if (input.yawRight) ang.addScaledVector(_phUp, -r);
+      if (input.left) ang.addScaledVector(_phForward, -r);
+      if (input.right) ang.addScaledVector(_phForward, r);
+    }
+    ang.multiplyScalar(Math.pow(0.97, k / TS));
+    body.setAngvel({ x: ang.x, y: ang.y, z: ang.z }, true);
+    if (import.meta.env.DEV) {
+      lastTelemetry.current = { gravityCompensation: gc, dt, k, vertStab: [_heliVertStab.x, _heliVertStab.y, _heliVertStab.z] };
+    }
   });
 
   return (
@@ -325,17 +358,29 @@ const Helicopter: React.FC<HelicopterProps> = ({ position = [-15, 20, 15], id = 
       type="dynamic"
       colliders={false}
       position={position}
+      linearDamping={0.01}
+      angularDamping={0.01}
       collisionGroups={groupsExcluding(CollisionGroups.Default)}
     >
       {/* Same fix as Airplane.tsx: a bare box chassis with no wheel/
           traction model was resting on Rapier's default friction
           (~0.5) -- low friction here so it doesn't get glued down or
           snag while sliding/tipping on the ground. */}
-      <CuboidCollider args={chassisHalfExtents} mass={50} friction={0.05} restitution={0} frictionCombineRule={CoefficientCombineRule.Min} />
+      {HELI_BOXES.map((b, i) => (
+        <CuboidCollider
+          key={i}
+          args={[b.half[0] * S, b.half[1] * S, b.half[2] * S]}
+          position={[b.pos[0] * S, b.pos[1] * S, b.pos[2] * S]}
+          density={0}
+          friction={0.05}
+          restitution={0}
+          frictionCombineRule={CoefficientCombineRule.Min}
+        />
+      ))}
       {/* Chassis box half-height is 0.75; the glb's lowest point sits
           0.673 below the model's own origin, so -0.08 aligns it with
           the box's bottom face. */}
-      <primitive object={clonedScene} position={[0, -0.08, 0]} />
+      <primitive object={clonedScene} scale={S} />
     </RigidBody>
   );
 };

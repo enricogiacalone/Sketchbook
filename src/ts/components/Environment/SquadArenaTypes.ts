@@ -92,7 +92,15 @@ export interface FighterData {
   // Colpo FORTE ricevuto (affondo di coltello, ...): chi lo riceve va KO
   // fisico e poi si rialza (vedi ragdoll/knockdown.ts). Direzione orizzontale
   // e velocita' della spinta (m/s); il ricevente lo consuma e lo azzera.
-  knockdown?: { dirX: number; dirZ: number; speed: number } | null;
+  // up: quanto in alto (default 0.3); blast: esplosione (lib/explosions.ts)
+  // -- dopo il KO (o la morte) ogni pezzo del corpo parte dal centro.
+  knockdown?: {
+    dirX: number;
+    dirZ: number;
+    speed: number;
+    up?: number;
+    blast?: { x: number; y: number; z: number; radius: number; speed: number };
+  } | null;
 }
 
 export interface TowerData {

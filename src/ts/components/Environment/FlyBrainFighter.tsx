@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF } from '../../lib/gltf';
 import { useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
@@ -149,13 +149,19 @@ const FlyBrainFighter: React.FC = () => {
       createSim(S.task);
     }
     const sim = simRef.current;
-    if (!sim || useStore.getState().isPaused) return;
+    if (!sim || useStore.getState().isPaused || useStore.getState().physicsPaused) return;
     sim.acc += Math.min(delta, 0.1);
     sim.age += Math.min(delta, 0.1);
-    while (sim.acc >= 1 / CONTROL_HZ) {
+
+    let steps = 0;
+    const dt = 1 / CONTROL_HZ;
+    while (sim.acc >= dt && steps < 10) {
       sim.ctl.control();
-      sim.acc -= 1 / CONTROL_HZ;
+      sim.acc -= dt;
+      steps++;
     }
+    if (sim.acc > dt) sim.acc = 0;
+
     // disegno: prima tutta la posa del riferimento (dita, ecc.), poi le
     // ossa simulate dalla fisica
     for (const name in visBones) {

@@ -29,6 +29,38 @@ import {
 } from '../components/Environment/ragdoll/ragdollData';
 import { captureBindPose, captureClipPose, jointAxisAngles, type BindPoseSnapshot } from '../components/Environment/ragdoll/poseFrames';
 
+// Il corpo della mosca tiene le forme delle capsule con cui i cervelli
+// sono stati addestrati: nell'ottobre 2026 quelle del gioco
+// (ACTIVE_RAGDOLL_SEGMENTS) sono state rifatte misurandole sulla mesh,
+// ma cambiarle qui cambierebbe il corpo sotto i modelli gia' addestrati.
+// Stessi pezzi, stesso ordine: cambia solo raggio e lunghezza.
+const FLY_LEGACY_SHAPES: Record<string, { radius: number; lengthScale?: number }> = {
+  Hips: { radius: 0.15, lengthScale: 0.6 },
+  Torso: { radius: 0.13 },
+  SpineMid: { radius: 0.12 },
+  SpineHigh: { radius: 0.12 },
+  Head: { radius: 0.15, lengthScale: 1.3 },
+  ClavicleL: { radius: 0.05 },
+  ClavicleR: { radius: 0.05 },
+  UpperArm_L: { radius: 0.06 },
+  UpperArm_R: { radius: 0.06 },
+  ForeArm_L: { radius: 0.05 },
+  ForeArm_R: { radius: 0.05 },
+  Thigh_L: { radius: 0.095 },
+  Thigh_R: { radius: 0.095 },
+  Shin_L: { radius: 0.07 },
+  Shin_R: { radius: 0.07 },
+  Foot_L: { radius: 0.075, lengthScale: 1.4 },
+  Foot_R: { radius: 0.075, lengthScale: 1.4 },
+};
+const FLY_SEGMENTS: RagdollSegment[] = ACTIVE_RAGDOLL_SEGMENTS.map((s) => ({
+  name: s.name,
+  drivingBone: s.drivingBone,
+  parent: s.parent,
+  toBone: s.toBone,
+  ...FLY_LEGACY_SHAPES[s.name],
+}));
+
 type Rapier = typeof RAPIER_NS;
 
 const RAW_AXIS_ANG = [3, 4, 5] as const;
@@ -65,9 +97,22 @@ const FOOT_FRICTION = 1.0;
 // il corpo si afflosciava in ~1.3 s qualunque cosa facesse il cervello.
 // Qui valori da umanoide simulato (ordine di grandezza di DeepMimic).
 export const FLY_KP: Record<string, number> = {
-  Torso: 1000, SpineMid: 1000, SpineHigh: 1000, Head: 100,
-  ClavicleL: 400, ClavicleR: 400, UpperArm_L: 400, UpperArm_R: 400, ForeArm_L: 300, ForeArm_R: 300,
-  Thigh_L: 500, Thigh_R: 500, Shin_L: 500, Shin_R: 500, Foot_L: 400, Foot_R: 400,
+  Torso: 1000,
+  SpineMid: 1000,
+  SpineHigh: 1000,
+  Head: 100,
+  ClavicleL: 400,
+  ClavicleR: 400,
+  UpperArm_L: 400,
+  UpperArm_R: 400,
+  ForeArm_L: 300,
+  ForeArm_R: 300,
+  Thigh_L: 500,
+  Thigh_R: 500,
+  Shin_L: 500,
+  Shin_R: 500,
+  Foot_L: 400,
+  Foot_R: 400,
 };
 const FLY_KD_RATIO = 0.1;
 const FOOT_HEEL_BEHIND_ANKLE = 0.07; // m
@@ -108,7 +153,7 @@ export interface FlyBody {
 
 const segMass = (name: string) => {
   let sum = 0;
-  for (const s of ACTIVE_RAGDOLL_SEGMENTS) sum += ACTIVE_RAGDOLL_MASS_WEIGHT[s.name] ?? ACTIVE_RAGDOLL_MASS_WEIGHT_FALLBACK;
+  for (const s of FLY_SEGMENTS) sum += ACTIVE_RAGDOLL_MASS_WEIGHT[s.name] ?? ACTIVE_RAGDOLL_MASS_WEIGHT_FALLBACK;
   return ((ACTIVE_RAGDOLL_MASS_WEIGHT[name] ?? ACTIVE_RAGDOLL_MASS_WEIGHT_FALLBACK) / sum) * ACTIVE_RAGDOLL_TOTAL_MASS_KG;
 };
 
@@ -128,7 +173,7 @@ export function createFlyBody(
   neutralClip: THREE.AnimationClip | null
 ): FlyBody {
   const names = new Set<string>(['thigh_l', 'thigh_r', 'pelvis']);
-  for (const s of ACTIVE_RAGDOLL_SEGMENTS) {
+  for (const s of FLY_SEGMENTS) {
     names.add(s.drivingBone);
     names.add(s.toBone);
   }
@@ -141,7 +186,7 @@ export function createFlyBody(
 
   const segs: FlySegment[] = [];
   const bySeg: Record<string, FlySegment> = {};
-  for (const seg of ACTIVE_RAGDOLL_SEGMENTS) {
+  for (const seg of FLY_SEGMENTS) {
     const bone = bones[seg.drivingBone];
     const bFrom = bind.pos[seg.drivingBone];
     const bTo = bind.pos[seg.toBone];
@@ -241,7 +286,15 @@ export function createFlyBody(
     const from = ref.pos[s.seg.drivingBone];
     const to = ref.pos[s.seg.toBone];
     const len = from.distanceTo(to) * (s.seg.lengthScale ?? 0.92);
-    return { c: to.clone().sub(from).normalize().multiplyScalar(len / 2).add(from), own: s.mass * ((len * len) / 12 + s.seg.radius * s.seg.radius * 0.5) };
+    return {
+      c: to
+        .clone()
+        .sub(from)
+        .normalize()
+        .multiplyScalar(len / 2)
+        .add(from),
+      own: s.mass * ((len * len) / 12 + s.seg.radius * s.seg.radius * 0.5),
+    };
   });
   const isDesc = (i: number, anc: number) => {
     for (let c = i; c >= 0; c = segs[c].parent) if (c === anc) return true;
@@ -261,7 +314,12 @@ export function createFlyBody(
     if (s.parent < 0) continue;
     const p = segs[s.parent];
     const anchor1 = ref.pos[s.seg.drivingBone].clone().sub(ref.pos[p.seg.drivingBone]).applyQuaternion(refInv);
-    const data = R.JointData.generic({ x: anchor1.x, y: anchor1.y, z: anchor1.z }, { x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }, LOCKED_LINEAR_AXES_MASK as any);
+    const data = R.JointData.generic(
+      { x: anchor1.x, y: anchor1.y, z: anchor1.z },
+      { x: 0, y: 0, z: 0 },
+      { x: 1, y: 0, z: 0 },
+      LOCKED_LINEAR_AXES_MASK as any
+    );
     s.joint = world.createImpulseJoint(data, p.body, s.body, true);
     if (!firstJoint) firstJoint = s.joint;
   }
@@ -302,8 +360,8 @@ export function createFlyBody(
 // Dimensioni di osservazioni/azioni senza costruire un corpo (per preparare
 // la rete nel thread principale del laboratorio)
 export function flyDims(): { nObs: number; nAct: number } {
-  const n = ACTIVE_RAGDOLL_SEGMENTS.length;
-  const withParent = ACTIVE_RAGDOLL_SEGMENTS.filter((s) => s.parent).length;
+  const n = FLY_SEGMENTS.length;
+  const withParent = FLY_SEGMENTS.filter((s) => s.parent).length;
   return { nObs: n * 15 + 1 + FOOT_SENSORS, nAct: withParent * 3 };
 }
 
@@ -334,7 +392,10 @@ export function jointAnglesFromBodies(fb: FlyBody, out: Float32Array): Float32Ar
     if (s.parent < 0) continue;
     const pr = fb.segs[s.parent].body.rotation();
     const cr = s.body.rotation();
-    _q1.set(pr.x, pr.y, pr.z, pr.w).invert().multiply(_q2.set(cr.x, cr.y, cr.z, cr.w));
+    _q1
+      .set(pr.x, pr.y, pr.z, pr.w)
+      .invert()
+      .multiply(_q2.set(cr.x, cr.y, cr.z, cr.w));
     _q1.premultiply(fb.Finv).multiply(fb.F);
     jointAxisAngles(_q1, _a);
     out[k++] = _a.x;
@@ -383,7 +444,7 @@ export function setBodyFromBones(fb: FlyBody, prevWorld: { p: THREE.Vector3; q: 
       if (_q2.w < 0) _q2.set(-_q2.x, -_q2.y, -_q2.z, -_q2.w);
       const sh = Math.sqrt(_q2.x * _q2.x + _q2.y * _q2.y + _q2.z * _q2.z);
       const ang = 2 * Math.atan2(sh, _q2.w);
-      if (sh > 1e-8) s.body.setAngvel({ x: (_q2.x / sh) * ang / dt, y: (_q2.y / sh) * ang / dt, z: (_q2.z / sh) * ang / dt }, true);
+      if (sh > 1e-8) s.body.setAngvel({ x: ((_q2.x / sh) * ang) / dt, y: ((_q2.y / sh) * ang) / dt, z: ((_q2.z / sh) * ang) / dt }, true);
       else s.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     } else {
       s.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
@@ -406,10 +467,12 @@ export function lowestPoint(fb: FlyBody): number {
     _q1.set(r.x, r.y, r.z, r.w);
     if (c.shape.type === fb.R.ShapeType.Cuboid) {
       const he = (c.shape as any).halfExtents;
-      for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
-        _v1.set(sx * he.x, sy * he.y, sz * he.z).applyQuaternion(_q1);
-        minY = Math.min(minY, t.y + _v1.y);
-      }
+      for (const sx of [-1, 1])
+        for (const sy of [-1, 1])
+          for (const sz of [-1, 1]) {
+            _v1.set(sx * he.x, sy * he.y, sz * he.z).applyQuaternion(_q1);
+            minY = Math.min(minY, t.y + _v1.y);
+          }
     } else {
       const hh = c.halfHeight();
       _v1.set(0, hh, 0).applyQuaternion(_q1);
@@ -498,7 +561,8 @@ export function footPressure(fb: FlyBody, o: Float32Array, k: number): number {
     fb.world.contactPairsWith(col, (other: any) => {
       if (other.parent()?.handle !== s.body.handle) _others.push(other);
     });
-    let heel = 0, toe = 0;
+    let heel = 0,
+      toe = 0;
     for (const other of _others) {
       fb.world.contactPair(col, other, (m: any, flipped: boolean) => {
         const n = m.numContacts();
@@ -532,19 +596,29 @@ export function observe(fb: FlyBody, out: Float32Array | null): Float32Array {
   for (const s of fb.segs) {
     const t = s.body.translation();
     _v1.set(t.x - h.x, t.y - h.y, t.z - h.z).applyQuaternion(_headingInv);
-    o[k++] = _v1.x; o[k++] = _v1.y; o[k++] = _v1.z;
+    o[k++] = _v1.x;
+    o[k++] = _v1.y;
+    o[k++] = _v1.z;
     const r = s.body.rotation();
     _q1.set(r.x, r.y, r.z, r.w).premultiply(_headingInv);
     _v1.set(1, 0, 0).applyQuaternion(_q1);
-    o[k++] = _v1.x; o[k++] = _v1.y; o[k++] = _v1.z;
+    o[k++] = _v1.x;
+    o[k++] = _v1.y;
+    o[k++] = _v1.z;
     _v1.set(0, 1, 0).applyQuaternion(_q1);
-    o[k++] = _v1.x; o[k++] = _v1.y; o[k++] = _v1.z;
+    o[k++] = _v1.x;
+    o[k++] = _v1.y;
+    o[k++] = _v1.z;
     const lv = s.body.linvel();
     _v1.set(lv.x, lv.y, lv.z).applyQuaternion(_headingInv);
-    o[k++] = _v1.x * 0.3; o[k++] = _v1.y * 0.3; o[k++] = _v1.z * 0.3;
+    o[k++] = _v1.x * 0.3;
+    o[k++] = _v1.y * 0.3;
+    o[k++] = _v1.z * 0.3;
     const av = s.body.angvel();
     _v1.set(av.x, av.y, av.z).applyQuaternion(_headingInv);
-    o[k++] = _v1.x * 0.1; o[k++] = _v1.y * 0.1; o[k++] = _v1.z * 0.1;
+    o[k++] = _v1.x * 0.1;
+    o[k++] = _v1.y * 0.1;
+    o[k++] = _v1.z * 0.1;
   }
   footSensors(fb, o, k);
   return o;

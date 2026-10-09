@@ -63,7 +63,8 @@ export const RUN_SPEED = 6.0; // m/s (valore di partenza storico, vedi locomotio
 // i piedi seguono sempre lo spostamento. Letti ogni frame.
 export const locomotionTuning = {
   walkSpeed: 1.25, // m/s -- Walk a 1.7x: 2.0 passi/s
-  runSpeed: 4.8, // m/s -- Run_Female a 1.25x: 3.0 passi/s
+  runSpeed: 4.8, // m/s -- Run_Female a 1.25x: 3.0 passi/s (scatto: X premuto piu' volte)
+  jogSpeed: 3.2, // m/s -- corsa leggera (X tenuto), camminata e corsa mescolate
   aimWalkSpeed: 1.0, // m/s -- camminata in mira con la pistola (avanti)
   aiChargeSpeed: 4.8, // m/s -- carica dell'IA
 };

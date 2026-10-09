@@ -1,6 +1,6 @@
 import { DEFAULT_RAGDOLL_BENCH, type RagdollBenchSettings } from './components/Environment/ragdoll/ragdollBench';
 import { create } from 'zustand';
-import type { GameMode } from './components/Environment/SquadArenaTypes';
+import type { GameMode, FighterData } from './components/Environment/SquadArenaTypes';
 
 export type ControllableType = 'player' | 'car' | 'airplane' | 'helicopter' | 'drone' | 'combatSoldier';
 // Which kind of seat the player currently occupies inside a vehicle -- null
@@ -18,6 +18,16 @@ export type SeatKind = 'driver' | 'passenger' | null;
 // spawning, success/fail checks); this is just the mirror of it that the
 // HUD, the minimap blip, and the in-world marker meshes all read.
 export type MissionStatus = 'inactive' | 'active' | 'success' | 'failed' | 'allComplete';
+
+// una battuta del dialogo aperto (Missions/StoryMission.tsx la scrive,
+// UI/DialogueBox.tsx la disegna e rimanda le scelte a lib/dialogue.ts)
+export interface DialogueView {
+  speaker: string;
+  color: string;
+  text: string;
+  // vuoto: si va avanti con Invio / X
+  options: Array<{ label: string; disabled?: boolean }>;
+}
 
 export interface EntityInfo {
   id: string;
@@ -85,6 +95,14 @@ interface GameState {
   // the world is stepping, so anything still calling those every frame
   // would keep moving things even while "paused".
   isPaused: boolean;
+  // "pausa deve mettere tutto in pausa": isPaused ora ferma TUTTO (anche il
+  // ciclo dei frame, GameFreeze.tsx). La pausa dei soli strumenti di debug
+  // (pannello combattimento / banco ragdoll: fisica ferma + passo singolo,
+  // mentre la camera e il resto girano) e' questa, separata.
+  physicsPaused: boolean;
+  // mira col pad agganciata a un bersaglio (useThirdPersonCamera.ts): il
+  // mirino diventa rosso (WeaponHUD.tsx)
+  aimLocked: boolean;
   // "il personaggio si trasforma nel drone ... ha le stesse funzioni di
   // volo" (droneWorld) -- global so both Player.tsx (which drives it) and
   // useThirdPersonCamera.ts (which needs to know whether the mouse should
@@ -122,6 +140,9 @@ interface GameState {
   // meteorites...). Set via window.__sim.startTest()/endTest() (see
   // debug/simDebug.ts) or the "Scenari" lil-gui panel (ScenariosGUI.tsx).
   testScene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race' | 'duel';
+  // entrato in scena (dopo il menu iniziale): il pannello Debug mostra le
+  // cartelle della scena solo da qui in poi (lib/debugGui.ts)
+  gameJoined: boolean;
   // "fammi scegliere ... le modalita di scontro dei manichini" -- which
   // CombatArena.tsx duel mode is active (TERRITORY_CONTROL/TEAMS/FFA, same
   // three options simulation-citta's own "Modalita Scontro" dropdown had --
@@ -206,6 +227,10 @@ interface GameState {
   // ispezionare contro una posa statica e nota invece che contro
   // un'animazione in movimento. Letto da PlayerCombatSoldier.tsx.
   tPoseDebug: boolean;
+  // "se clicco su un npc mi dice quale animazione sta effettuando":
+  // ispettore NPC (tasto I, UI/NpcInspector.tsx). Acceso, il mouse e'
+  // libero e il clic sceglie un personaggio invece di colpire.
+  npcInspector: boolean;
   // "crea un tasto aggiungi nemico invece di aggiungerlo subito" --
   // DuelArena.tsx montava SEMPRE il CombatSoldier avversario appena si
   // entrava nel duello, aggiungendo un secondo intero set di collider
@@ -251,6 +276,19 @@ interface GameState {
   // Ricordate nel browser (localStorage) tra una partita e l'altra.
   toonStyle: boolean;
   dayCycle: boolean;
+  // risoluzione che si adatta alla scheda video (Environment/AdaptiveResolution.tsx)
+  adaptiveResolution: boolean;
+  // "mettimi un hud con cui configurare il numero di corpi veri, e anche uno
+  // per aumentare i palazzi veri" (pannello Debug > Citta', UI/CityGUI.tsx):
+  // corpi veri della folla (crowdSim), ragdoll attiva sui passanti, e
+  // distanza entro cui i palazzi sono veri (City.tsx, BuildingsStreamer).
+  // Ricordati nel browser.
+  crowdBodies: number;
+  crowdActiveRagdoll: boolean;
+  realBuildingDist: number;
+  // risoluzione scelta da AdaptiveResolution (null = quella fissa, [1, 2]):
+  // passa dalla prop dpr del Canvas, che R3F rimette a ogni render di App
+  renderDpr: number | null;
   // ruota delle armi (UI/WeaponWheel.tsx): aperta = camera e attacchi fermi
   weaponWheelOpen: boolean;
   // arma scelta dalla ruota, la indossa PlayerCombatSoldier al frame dopo
@@ -321,17 +359,30 @@ interface GameState {
   // elimination target) -- null when the active mission has no fixed
   // point (the survive-a-wave stage) or when no mission is active.
   missionTargetPos: [number, number] | null;
+  // "crea una missione interessante con personaggi con cui parlare e robe da
+  // fare" (Missions/StoryMission.tsx): soldi del giocatore, dialogo aperto
+  // (lo disegna UI/DialogueBox.tsx), personaggio a cui si puo' parlare
+  // adesso (UI/StoryHUD.tsx mostra il tasto) e banner di fine missione
+  cash: number;
+  dialogueView: DialogueView | null;
+  talkPrompt: string | null;
+  storyBanner: { title: string; subtitle: string; color: string; until: number } | null;
   setMissionStage: (stage: number) => void;
   setMissionStatus: (status: MissionStatus) => void;
   setMissionInfo: (title: string, briefing: string) => void;
   setMissionTimeRemaining: (t: number) => void;
   setMissionTargetPos: (pos: [number, number] | null) => void;
+  addCash: (amount: number) => void;
+  setDialogueView: (view: DialogueView | null) => void;
+  setTalkPrompt: (prompt: string | null) => void;
+  setStoryBanner: (banner: GameState['storyBanner']) => void;
   setCurrentControllable: (type: ControllableType, id?: string | null, seatType?: SeatKind, seatName?: string | null) => void;
   setIsVehicleTransitioning: (transitioning: boolean, entityId?: string | null, doorName?: string | null) => void;
   setDoorOpen: (vehicleId: string, doorName: string, open: boolean) => void;
   togglePause: () => void;
   setIsDrone: (isDrone: boolean) => void;
   setPaused: (paused: boolean) => void;
+  setPhysicsPaused: (paused: boolean) => void;
   setIsLoading: (loading: boolean) => void;
   setIsCrosshairVisible: (visible: boolean) => void;
   setPlayerInfo: (pos: [number, number, number], yaw: number) => void;
@@ -339,8 +390,32 @@ interface GameState {
   setCollectiblesTotal: (total: number) => void;
   setIsPlayerGrounded: (grounded: boolean) => void;
   setTestScene: (scene: 'none' | 'airplane' | 'helicopter' | 'car' | 'race' | 'duel') => void;
+  setGameJoined: (joined: boolean) => void;
   setArenaGameMode: (mode: GameMode) => void;
   setArenaFighterCount: (count: number) => void;
+  meteoritesEnabled: boolean;
+  meteoriteFrequency: number;
+  setMeteoritesEnabled: (enabled: boolean) => void;
+  setMeteoriteFrequency: (freq: number) => void;
+  explosionRadius: number;
+  explosionIntensity: number;
+  cameraPlayerRadius: number;
+  cameraVehicleRadius: number;
+  cameraFootTargetY: number;
+  cameraVehicleTargetY: number;
+  duelArenaPlayer: FighterData | null;
+  duelArenaEnemies: FighterData[];
+  duelBagHurtboxHandle: number | null;
+  duelBagSolidHandle: number | null;
+  setExplosionRadius: (radius: number) => void;
+  setExplosionIntensity: (intensity: number) => void;
+  setCameraPlayerRadius: (r: number) => void;
+  setCameraVehicleRadius: (r: number) => void;
+  setCameraFootTargetY: (y: number) => void;
+  setCameraVehicleTargetY: (y: number) => void;
+  setDuelArenaPlayer: (player: FighterData | null) => void;
+  setDuelArenaEnemies: (enemies: FighterData[]) => void;
+  setDuelBagHandles: (hurtbox: number | null, solid: number | null) => void;
   setDuelStatus: (
     playerHp: number,
     enemyHp: number,
@@ -353,6 +428,7 @@ interface GameState {
   setDuelDummyMode: (active: boolean) => void;
   setShowPhysicsDebug: (active: boolean) => void;
   setShowActiveRagdollDebug: (active: boolean) => void;
+  setNpcInspector: (on: boolean) => void;
   setTPoseDebug: (active: boolean) => void;
   addDuelEnemy: () => void;
   setPlayerWeaponState: (
@@ -369,6 +445,11 @@ interface GameState {
   setShowSimCitta: (on: boolean) => void;
   setToonStyle: (on: boolean) => void;
   setDayCycle: (on: boolean) => void;
+  setAdaptiveResolution: (on: boolean) => void;
+  setCrowdBodies: (n: number) => void;
+  setCrowdActiveRagdoll: (on: boolean) => void;
+  setRealBuildingDist: (m: number) => void;
+  setRenderDpr: (dpr: number | null) => void;
   setWeaponWheelOpen: (open: boolean) => void;
   setRequestedWeapon: (w: 'fists' | 'pistol' | 'rifle' | 'knife' | null) => void;
   setDebugOrthoCameraAngleDeg: (deg: number) => void;
@@ -394,7 +475,15 @@ function readSetting(key: string, fallback: boolean): boolean {
     return fallback;
   }
 }
-function writeSetting(key: string, value: boolean) {
+function readNumSetting(key: string, fallback: number): number {
+  try {
+    const v = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}')[key];
+    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function writeSetting(key: string, value: boolean | number) {
   try {
     const all = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
     all[key] = value;
@@ -417,6 +506,8 @@ export const useStore = create<GameState>((set) => ({
   transitioningDoorName: null,
   openVehicleDoors: {},
   isPaused: false,
+  physicsPaused: false,
+  aimLocked: false,
   isDrone: false,
   isLoading: false, // Set to false initially to show WelcomeScreen
   isCrosshairVisible: false,
@@ -430,6 +521,7 @@ export const useStore = create<GameState>((set) => ({
   // within its first couple of frames regardless.
   isPlayerGrounded: false,
   testScene: 'none',
+  gameJoined: false,
   arenaGameMode: 'TERRITORY_CONTROL',
   arenaFighterCount: 20,
   duelPlayerHp: 100,
@@ -443,6 +535,7 @@ export const useStore = create<GameState>((set) => ({
   showPhysicsDebug: false,
   showActiveRagdollDebug: false,
   tPoseDebug: false,
+  npcInspector: false,
   duelEnemyCount: 0,
   playerWeapon: 'fists',
   playerAiming: false,
@@ -456,6 +549,11 @@ export const useStore = create<GameState>((set) => ({
   showSimCitta: false,
   toonStyle: readSetting('toonStyle', true),
   dayCycle: readSetting('dayCycle', false),
+  adaptiveResolution: readSetting('adaptiveResolution', true),
+  crowdBodies: readNumSetting('crowdBodies', 6),
+  crowdActiveRagdoll: readSetting('crowdActiveRagdoll', false),
+  realBuildingDist: readNumSetting('realBuildingDist', 55),
+  renderDpr: null,
   weaponWheelOpen: false,
   requestedWeapon: null,
   debugOrthoCameraAngleDeg: 0,
@@ -473,6 +571,10 @@ export const useStore = create<GameState>((set) => ({
   missionBriefing: '',
   missionTimeRemaining: 0,
   missionTargetPos: null,
+  cash: 200,
+  dialogueView: null,
+  talkPrompt: null,
+  storyBanner: null,
   entities: new Map(),
   setHealth: (health) => set({ health }),
   setMaxHealth: (maxHealth) => set({ maxHealth }),
@@ -483,6 +585,10 @@ export const useStore = create<GameState>((set) => ({
   setMissionInfo: (title, briefing) => set({ missionTitle: title, missionBriefing: briefing }),
   setMissionTimeRemaining: (t) => set({ missionTimeRemaining: t }),
   setMissionTargetPos: (pos) => set({ missionTargetPos: pos }),
+  addCash: (amount) => set((state) => ({ cash: Math.max(0, state.cash + amount) })),
+  setDialogueView: (dialogueView) => set({ dialogueView }),
+  setTalkPrompt: (talkPrompt) => set((state) => (state.talkPrompt === talkPrompt ? state : { talkPrompt })),
+  setStoryBanner: (storyBanner) => set({ storyBanner }),
   setCurrentControllable: (type, id = null, seatType = null, seatName = null) =>
     set({
       currentControllable: type,
@@ -511,6 +617,7 @@ export const useStore = create<GameState>((set) => ({
   // Separate from togglePause: the tab-hidden auto-pause always wants to
   // force pause ON, never flip an already-paused game back to running.
   setPaused: (paused) => set({ isPaused: paused }),
+  setPhysicsPaused: (paused) => set({ physicsPaused: paused }),
   setIsLoading: (loading) => set({ isLoading: loading }),
   setIsCrosshairVisible: (visible) => set({ isCrosshairVisible: visible }),
   setPlayerInfo: (pos, yaw) => set({ playerPos: pos, playerYaw: yaw }),
@@ -518,8 +625,34 @@ export const useStore = create<GameState>((set) => ({
   setCollectiblesTotal: (total) => set({ collectiblesTotal: total }),
   setIsPlayerGrounded: (grounded) => set((state) => (state.isPlayerGrounded === grounded ? state : { isPlayerGrounded: grounded })),
   setTestScene: (testScene) => set({ testScene }),
+  setGameJoined: (gameJoined) => set({ gameJoined }),
   setArenaGameMode: (arenaGameMode) => set({ arenaGameMode }),
   setArenaFighterCount: (arenaFighterCount) => set({ arenaFighterCount }),
+  meteoritesEnabled: false,
+  meteoriteFrequency: 5,
+  setMeteoritesEnabled: (meteoritesEnabled) => set({ meteoritesEnabled }),
+  setMeteoriteFrequency: (meteoriteFrequency) => set({ meteoriteFrequency }),
+  explosionRadius: 15,
+  explosionIntensity: 1.0,
+  // "sistema lo zoom iniziale a piedi e in macchina, zoom out un po'"
+  // (prima 0.85 e 2.6)
+  cameraPlayerRadius: 1.4,
+  cameraVehicleRadius: 3.6,
+  cameraFootTargetY: 1.3,
+  cameraVehicleTargetY: 0.5,
+  duelArenaPlayer: null,
+  duelArenaEnemies: [],
+  duelBagHurtboxHandle: null,
+  duelBagSolidHandle: null,
+  setExplosionRadius: (explosionRadius) => set({ explosionRadius }),
+  setExplosionIntensity: (explosionIntensity) => set({ explosionIntensity }),
+  setCameraPlayerRadius: (cameraPlayerRadius) => set({ cameraPlayerRadius }),
+  setCameraVehicleRadius: (cameraVehicleRadius) => set({ cameraVehicleRadius }),
+  setCameraFootTargetY: (cameraFootTargetY) => set({ cameraFootTargetY }),
+  setCameraVehicleTargetY: (cameraVehicleTargetY) => set({ cameraVehicleTargetY }),
+  setDuelArenaPlayer: (duelArenaPlayer) => set({ duelArenaPlayer }),
+  setDuelArenaEnemies: (duelArenaEnemies) => set({ duelArenaEnemies }),
+  setDuelBagHandles: (duelBagHurtboxHandle, duelBagSolidHandle) => set({ duelBagHurtboxHandle, duelBagSolidHandle }),
   setDuelStatus: (duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY) =>
     set({ duelPlayerHp, duelEnemyHp, duelResult, duelInRange, duelReticleX, duelReticleY }),
   toggleDuelDummyMode: () => set((state) => ({ duelDummyMode: !state.duelDummyMode })),
@@ -527,6 +660,7 @@ export const useStore = create<GameState>((set) => ({
   setShowPhysicsDebug: (showPhysicsDebug) => set({ showPhysicsDebug }),
   setShowActiveRagdollDebug: (showActiveRagdollDebug) => set({ showActiveRagdollDebug }),
   setTPoseDebug: (tPoseDebug) => set({ tPoseDebug }),
+  setNpcInspector: (npcInspector) => set({ npcInspector }),
   addDuelEnemy: () => set((state) => ({ duelEnemyCount: state.duelEnemyCount + 1 })),
   setPlayerWeaponState: (partial) => set(partial),
   clearDuelEnemies: () => set({ duelEnemyCount: 0 }),
@@ -541,6 +675,23 @@ export const useStore = create<GameState>((set) => ({
     writeSetting('dayCycle', dayCycle);
     set({ dayCycle });
   },
+  setAdaptiveResolution: (adaptiveResolution) => {
+    writeSetting('adaptiveResolution', adaptiveResolution);
+    set({ adaptiveResolution });
+  },
+  setCrowdBodies: (crowdBodies) => {
+    writeSetting('crowdBodies', crowdBodies);
+    set({ crowdBodies });
+  },
+  setCrowdActiveRagdoll: (crowdActiveRagdoll) => {
+    writeSetting('crowdActiveRagdoll', crowdActiveRagdoll);
+    set({ crowdActiveRagdoll });
+  },
+  setRealBuildingDist: (realBuildingDist) => {
+    writeSetting('realBuildingDist', realBuildingDist);
+    set({ realBuildingDist });
+  },
+  setRenderDpr: (renderDpr) => set((state) => (state.renderDpr === renderDpr ? state : { renderDpr })),
   setWeaponWheelOpen: (open) => set((state) => (state.weaponWheelOpen === open ? state : { weaponWheelOpen: open })),
   setRequestedWeapon: (requestedWeapon) => set({ requestedWeapon }),
   setDebugOrthoCameraAngleDeg: (debugOrthoCameraAngleDeg) => set({ debugOrthoCameraAngleDeg }),

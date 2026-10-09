@@ -1,0 +1,1 @@
+A person running forward decelerates with a few steps and comes to a stop, then stands still.

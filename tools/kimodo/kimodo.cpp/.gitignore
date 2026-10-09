@@ -1,0 +1,43 @@
+# CMake and generated build products
+/build/
+/build-*/
+/cmake-build-*/
+/compile_commands.json
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# Nix and local development state
+/result
+/result-*
+/.direnv/
+/.cache/
+/.agents/
+/.codex/
+
+# Downloaded/derived model and reference assets
+/models/*
+!/models/MANIFEST.md
+/generated/
+/demo-output/
+*.gguf
+*.safetensors
+*.pth
+*.pt
+/dumps/
+/fixtures/
+
+# Tooling output
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+__pycache__/
+*.py[cod]
+.pytest_cache/
+/output_motion/
+/.kimodo-manifests/

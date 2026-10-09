@@ -1,4 +1,5 @@
 import GUI from 'lil-gui';
+import { useStore } from '../store';
 
 // "sistema lil gui.. le colonne devono essere retratte e nn accavallarsi
 // (per ora mi sembrano staccate)" -- root cause, confirmed live in the
@@ -31,9 +32,74 @@ export function acquireDebugGui(): GUI {
     // cartelle chiuse di default (si aprono cliccando il titolo)
     sharedGui = new GUI({ title: 'Debug', closeFolders: true });
     sharedGui.close();
+    createSections(sharedGui);
   }
   refCount += 1;
   return sharedGui;
+}
+
+// --- Sezioni -------------------------------------------------------------
+// "organizza meglio le cartelle hud, al momento e' tutto sparso e con
+// duplicati. dividi quello che si vede solo in arena da quello che si vede
+// in playground: quando entro in scena devo vedere solo i relativi a
+// playground o arena, o se comuni in entrambe". Il pannello ha sezioni
+// fisse, sempre in quest'ordine; ogni pannello mette le sue cartelle nella
+// sua sezione (debugSection) e ogni sezione si vede solo nella scena a cui
+// appartiene (e solo se ha qualcosa dentro).
+type TestScene = ReturnType<typeof useStore.getState>['testScene'];
+export type DebugSectionId = 'arena' | 'playground' | 'test' | 'personaggio' | 'fisica' | 'meteoriti' | 'grafica';
+const SECTIONS: Array<{ id: DebugSectionId; title: string; visible: (scene: TestScene, joined: boolean) => boolean }> = [
+  // solo nel duello (Duello 1v1)
+  { id: 'arena', title: 'Arena', visible: (scene, joined) => joined && scene === 'duel' },
+  // solo nella citta' (Enter Playground)
+  { id: 'playground', title: 'Playground', visible: (scene, joined) => joined && scene === 'none' },
+  // scenari di test puliti (volo, guida, gara)
+  { id: 'test', title: 'Scenario di test', visible: (scene, joined) => joined && scene !== 'none' && scene !== 'duel' },
+  // comuni
+  { id: 'personaggio', title: 'Personaggio e camera', visible: () => true },
+  { id: 'fisica', title: 'Fisica e ragdoll', visible: () => true },
+  // il cielo con i meteoriti c'e' in citta', nel duello e nella gara (Scene.tsx)
+  { id: 'meteoriti', title: 'Meteoriti', visible: (scene, joined) => joined && (scene === 'none' || scene === 'duel' || scene === 'race') },
+  { id: 'grafica', title: 'Grafica', visible: () => true },
+];
+let sections: Partial<Record<DebugSectionId, GUI>> = {};
+let unsubscribe: (() => void) | null = null;
+let refreshQueued = false;
+
+function createSections(root: GUI) {
+  sections = {};
+  for (const s of SECTIONS) {
+    const f = root.addFolder(s.title);
+    f.close();
+    sections[s.id] = f;
+  }
+  unsubscribe = useStore.subscribe((st, prev) => {
+    if (st.testScene !== prev.testScene || st.gameJoined !== prev.gameJoined) refreshDebugSections();
+  });
+  refreshDebugSections();
+}
+
+// mostra/nasconde le sezioni per la scena attuale (e quelle vuote)
+export function refreshDebugSections() {
+  if (refreshQueued) return;
+  refreshQueued = true;
+  queueMicrotask(() => {
+    refreshQueued = false;
+    const { testScene, gameJoined } = useStore.getState();
+    for (const s of SECTIONS) {
+      const f = sections[s.id];
+      if (!f) continue;
+      f.show(f.children.length > 0 && s.visible(testScene, gameJoined));
+    }
+  });
+}
+
+// la cartella della sezione (il pannello va preso con acquireDebugGui prima
+// e rilasciato con releaseDebugGui dopo, come sempre)
+export function debugSection(id: DebugSectionId): GUI {
+  if (!sharedGui) acquireDebugGui();
+  refreshDebugSections();
+  return sections[id]!;
 }
 
 // Call once per acquireDebugGui() call, from the SAME component's own
@@ -45,8 +111,13 @@ export function acquireDebugGui(): GUI {
 export function releaseDebugGui(): void {
   refCount -= 1;
   if (refCount <= 0 && sharedGui) {
+    unsubscribe?.();
+    unsubscribe = null;
+    sections = {};
     sharedGui.destroy();
     sharedGui = null;
     refCount = 0;
+    return;
   }
+  refreshDebugSections();
 }

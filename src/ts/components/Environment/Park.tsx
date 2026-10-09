@@ -1,10 +1,12 @@
-import React, { useMemo } from "react";
-import { RigidBody, CylinderCollider, CuboidCollider } from "@react-three/rapier";
-import { useTreeTemplates, TreeInstance, Flowers } from "./ParkTrees";
-import { RealGrassPatch } from "./RealGrass";
-import { getTerrainHeight } from "./Terrain";
-import { streetLampBulbMaterial } from "./Road";
-import { CollisionGroups, groupsExcluding } from "../../enums/CollisionGroups";
+import React, { useMemo } from 'react';
+import { RigidBody, CylinderCollider, CuboidCollider } from '@react-three/rapier';
+import { useTreeTemplates, TreeInstance, Flowers } from './ParkTrees';
+import { RealGrassPatch } from './RealGrass';
+import { getTerrainHeight } from './Terrain';
+import { streetLampBulbMaterial } from './Road';
+import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
+import { BAR } from '../../missions/storyPlaces';
+import { BarDaVito } from './StoryPlaces';
 
 const BLOCK_MIN = 0;
 const BLOCK_MAX = 60;
@@ -19,14 +21,11 @@ const PATH_WIDTH = 3;
 const KEEP_CLEAR: Array<[number, number, number]> = [
   [10, 0, 10],
   [0, 60, 10],
+  // Bar Da Vito (StoryPlaces.tsx) e i suoi tavolini
+  [BAR.x, BAR.z - 1, 9],
 ];
 
-const isFreeSpot = (
-  x: number,
-  z: number,
-  placed: Array<[number, number]>,
-  minSpacing: number
-): boolean => {
+const isFreeSpot = (x: number, z: number, placed: Array<[number, number]>, minSpacing: number): boolean => {
   const dCenter = Math.hypot(x - CENTER_X, z - CENTER_Z);
   if (dCenter < FOUNTAIN_RADIUS + 4) return false; // Keep clear of fountain and inner path
   for (const [sx, sz, r] of KEEP_CLEAR) {
@@ -68,28 +67,18 @@ const Fountain: React.FC = () => {
       </RigidBody>
       {/* Middle Tier */}
       <mesh position={[0, 1.2, 0]} castShadow>
-        <cylinderGeometry
-          args={[FOUNTAIN_RADIUS * 0.6, FOUNTAIN_RADIUS * 0.6, 0.5, 12]}
-        />
+        <cylinderGeometry args={[FOUNTAIN_RADIUS * 0.6, FOUNTAIN_RADIUS * 0.6, 0.5, 12]} />
         <meshStandardMaterial color="#777" />
       </mesh>
       {/* Top Tier */}
       <mesh position={[0, 2, 0]} castShadow>
-        <cylinderGeometry
-          args={[FOUNTAIN_RADIUS * 0.3, FOUNTAIN_RADIUS * 0.3, 0.4, 8]}
-        />
+        <cylinderGeometry args={[FOUNTAIN_RADIUS * 0.3, FOUNTAIN_RADIUS * 0.3, 0.4, 8]} />
         <meshStandardMaterial color="#666" />
       </mesh>
       {/* Water Surface */}
       <mesh position={[0, 0.6, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[FOUNTAIN_RADIUS * 0.9, 16]} />
-        <meshStandardMaterial
-          color="#44aaff"
-          emissive="#2288ff"
-          emissiveIntensity={0.5}
-          transparent
-          opacity={0.7}
-        />
+        <meshStandardMaterial color="#44aaff" emissive="#2288ff" emissiveIntensity={0.5} transparent opacity={0.7} />
       </mesh>
     </group>
   );
@@ -102,14 +91,8 @@ const Paths: React.FC = () => {
   return (
     <group>
       {/* Circular path around fountain */}
-      <mesh
-        position={[CENTER_X, yCenter, CENTER_Z]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        receiveShadow
-      >
-        <ringGeometry
-          args={[FOUNTAIN_RADIUS + 0.5, FOUNTAIN_RADIUS + PATH_WIDTH, 32]}
-        />
+      <mesh position={[CENTER_X, yCenter, CENTER_Z]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <ringGeometry args={[FOUNTAIN_RADIUS + 0.5, FOUNTAIN_RADIUS + PATH_WIDTH, 32]} />
         <meshStandardMaterial color="#a18c7c" roughness={1} />
       </mesh>
       {/* Radial paths to edges */}
@@ -117,32 +100,20 @@ const Paths: React.FC = () => {
         <React.Fragment key={s}>
           {/* X axis paths */}
           <mesh
-            position={[
-              CENTER_X + (s * (AREA_MAX - CENTER_X)) / 2 + s * 2,
-              yCenter,
-              CENTER_Z,
-            ]}
+            position={[CENTER_X + (s * (AREA_MAX - CENTER_X)) / 2 + s * 2, yCenter, CENTER_Z]}
             rotation={[-Math.PI / 2, 0, 0]}
             receiveShadow
           >
-            <planeGeometry
-              args={[AREA_MAX - CENTER_X - FOUNTAIN_RADIUS - 1, PATH_WIDTH]}
-            />
+            <planeGeometry args={[AREA_MAX - CENTER_X - FOUNTAIN_RADIUS - 1, PATH_WIDTH]} />
             <meshStandardMaterial color="#a18c7c" roughness={1} />
           </mesh>
           {/* Z axis paths */}
           <mesh
-            position={[
-              CENTER_X,
-              yCenter,
-              CENTER_Z + (s * (AREA_MAX - CENTER_Z)) / 2 + s * 2,
-            ]}
+            position={[CENTER_X, yCenter, CENTER_Z + (s * (AREA_MAX - CENTER_Z)) / 2 + s * 2]}
             rotation={[-Math.PI / 2, 0, 0]}
             receiveShadow
           >
-            <planeGeometry
-              args={[PATH_WIDTH, AREA_MAX - CENTER_Z - FOUNTAIN_RADIUS - 1]}
-            />
+            <planeGeometry args={[PATH_WIDTH, AREA_MAX - CENTER_Z - FOUNTAIN_RADIUS - 1]} />
             <meshStandardMaterial color="#a18c7c" roughness={1} />
           </mesh>
         </React.Fragment>
@@ -153,11 +124,7 @@ const Paths: React.FC = () => {
 
 // --- Benches --------------------------------------------------------------
 
-const Bench: React.FC<{ x: number; z: number; rotationY: number }> = ({
-  x,
-  z,
-  rotationY,
-}) => {
+const Bench: React.FC<{ x: number; z: number; rotationY: number }> = ({ x, z, rotationY }) => {
   const y = getTerrainHeight(x, z);
 
   return (
@@ -178,11 +145,7 @@ const Bench: React.FC<{ x: number; z: number; rotationY: number }> = ({
           <meshStandardMaterial color="#5d4037" />
         </mesh>
       </RigidBody>
-      <mesh
-        position={[0, 0.6, -0.35]}
-        rotation={[Math.PI / 2, 0, 0]}
-        castShadow
-      >
+      <mesh position={[0, 0.6, -0.35]} rotation={[Math.PI / 2, 0, 0]} castShadow>
         <boxGeometry args={[2.5, 0.8, 0.2]} />
         <meshStandardMaterial color="#5d4037" />
       </mesh>
@@ -312,62 +275,70 @@ const Park: React.FC = () => {
 
   // Same bounds/avoid-fountain settings as the old inline ParkGrass/flower
   // generation -- just delegated to the shared components now.
-  const grassAvoid = useMemo(
-    () => [{ x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH }],
-    []
-  );
-  const flowerAvoid = useMemo(
-    () => [
+  const grassAvoid = useMemo(() => {
+    const zones = [
+      { x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH },
+      // niente erba dentro il bar e sul dehors
+      { x: BAR.x - 2.5, z: BAR.z - 1.5, radius: 5 },
+      { x: BAR.x + 2.5, z: BAR.z - 1.5, radius: 5 },
+    ];
+    for (let x = CENTER_X + FOUNTAIN_RADIUS; x <= AREA_MAX; x += 1.5) {
+      zones.push({ x, z: CENTER_Z, radius: PATH_WIDTH / 2 + 0.4 });
+    }
+    for (let x = AREA_MIN; x <= CENTER_X - FOUNTAIN_RADIUS; x += 1.5) {
+      zones.push({ x, z: CENTER_Z, radius: PATH_WIDTH / 2 + 0.4 });
+    }
+    for (let z = CENTER_Z + FOUNTAIN_RADIUS; z <= AREA_MAX; z += 1.5) {
+      zones.push({ x: CENTER_X, z, radius: PATH_WIDTH / 2 + 0.4 });
+    }
+    for (let z = AREA_MIN; z <= CENTER_Z - FOUNTAIN_RADIUS; z += 1.5) {
+      zones.push({ x: CENTER_X, z, radius: PATH_WIDTH / 2 + 0.4 });
+    }
+    return zones;
+  }, []);
+
+  const flowerAvoid = useMemo(() => {
+    const zones = [
       { x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH + 1 },
-    ],
-    []
-  );
+      { x: BAR.x - 2.5, z: BAR.z - 1.5, radius: 5.5 },
+      { x: BAR.x + 2.5, z: BAR.z - 1.5, radius: 5.5 },
+    ];
+    for (let x = CENTER_X + FOUNTAIN_RADIUS; x <= AREA_MAX; x += 2) {
+      zones.push({ x, z: CENTER_Z, radius: PATH_WIDTH / 2 + 0.8 });
+    }
+    for (let x = AREA_MIN; x <= CENTER_X - FOUNTAIN_RADIUS; x += 2) {
+      zones.push({ x, z: CENTER_Z, radius: PATH_WIDTH / 2 + 0.8 });
+    }
+    for (let z = CENTER_Z + FOUNTAIN_RADIUS; z <= AREA_MAX; z += 2) {
+      zones.push({ x: CENTER_X, z, radius: PATH_WIDTH / 2 + 0.8 });
+    }
+    for (let z = AREA_MIN; z <= CENTER_Z - FOUNTAIN_RADIUS; z += 2) {
+      zones.push({ x: CENTER_X, z, radius: PATH_WIDTH / 2 + 0.8 });
+    }
+    return zones;
+  }, []);
 
   return (
     <group>
-      <RealGrassPatch
-        minX={AREA_MIN}
-        maxX={AREA_MAX}
-        minZ={AREA_MIN}
-        maxZ={AREA_MAX}
-        avoid={grassAvoid}
-      />
+      <RealGrassPatch minX={AREA_MIN} maxX={AREA_MAX} minZ={AREA_MIN} maxZ={AREA_MAX} avoid={grassAvoid} />
       <Fountain />
+      <BarDaVito />
       <Paths />
       {trees.map((t, i) => (
-        <TreeInstance
-          key={i}
-          x={t.x}
-          z={t.z}
-          rotationY={t.rotationY}
-          scale={t.scale}
-          template={treeTemplates[t.templateIndex]}
-        />
+        <TreeInstance key={i} x={t.x} z={t.z} rotationY={t.rotationY} scale={t.scale} template={treeTemplates[t.templateIndex]} />
       ))}
       {/* Re-enabled along with Road.tsx's StreetLight -- see that file for
           why these were off (an unrelated bug, since fixed). */}
       {LAMP_POSITIONS.map(([x, z], i) => (
         <StreetLamp key={i} x={x} z={z} />
       ))}
-      <Flowers
-        minX={AREA_MIN}
-        maxX={AREA_MAX}
-        minZ={AREA_MIN}
-        maxZ={AREA_MAX}
-        avoid={flowerAvoid}
-      />
+      <Flowers minX={AREA_MIN} maxX={AREA_MAX} minZ={AREA_MIN} maxZ={AREA_MAX} avoid={flowerAvoid} />
       {/* Benches along the circular path */}
       {[0, Math.PI / 2, Math.PI, Math.PI * 1.5].map((angle, i) => (
         <Bench
           key={`bench-${i}`}
-          x={
-            CENTER_X +
-            Math.cos(angle + 0.4) * (FOUNTAIN_RADIUS + PATH_WIDTH + 1.5)
-          }
-          z={
-            CENTER_Z +
-            Math.sin(angle + 0.4) * (FOUNTAIN_RADIUS + PATH_WIDTH + 1.5)
-          }
+          x={CENTER_X + Math.cos(angle + 0.4) * (FOUNTAIN_RADIUS + PATH_WIDTH + 1.5)}
+          z={CENTER_Z + Math.sin(angle + 0.4) * (FOUNTAIN_RADIUS + PATH_WIDTH + 1.5)}
           rotationY={-angle - 0.4 + Math.PI / 2}
         />
       ))}

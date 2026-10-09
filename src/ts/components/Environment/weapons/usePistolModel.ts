@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF } from '../../../lib/gltf';
 import { useThree } from '@react-three/fiber';
 import { acquireAudioListener, releaseAudioListener } from '../../../lib/sharedAudioListener';
 import { SkeletonUtils } from 'three-stdlib';
@@ -129,6 +129,11 @@ export interface PistolModelApi {
   getGripWorld: (out: THREE.Vector3) => THREE.Vector3;
   // 0 = pronto basso (canna giu' di hold.lowerDeg), 1 = in mira
   setRaise: (k: number) => void;
+  // posa dell'arma decisa da fuori, nel mondo (origine = impugnatura, -Z =
+  // canna): da li' in poi `hold` non conta piu' (fucile, vedi
+  // PlayerCombatSoldier). E il calcio (retro) nel frame dell'arma.
+  setWorldPose: (pos: THREE.Vector3, quat: THREE.Quaternion) => void;
+  getRearLocal: (out: THREE.Vector3) => THREE.Vector3;
   kick: () => void;
   // 0..1 durante la ricarica (caricatore giu' e su), null altrimenti
   setReloadProgress: (p: number | null) => void;
@@ -141,6 +146,9 @@ export interface PistolModelApi {
 
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
+const _m = new THREE.Matrix4();
+const _m2 = new THREE.Matrix4();
+const _one = new THREE.Vector3(1, 1, 1);
 
 export type GunModelApi = PistolModelApi;
 
@@ -148,11 +156,7 @@ export function usePistolModel(modelRootRef: React.RefObject<THREE.Object3D | nu
   return useGunModel(modelRootRef, PISTOL_SPEC, handBoneName);
 }
 
-export function useGunModel(
-  modelRootRef: React.RefObject<THREE.Object3D | null>,
-  spec: GunSpec,
-  handBoneName = 'hand_r'
-): GunModelApi {
+export function useGunModel(modelRootRef: React.RefObject<THREE.Object3D | null>, spec: GunSpec, handBoneName = 'hand_r'): GunModelApi {
   const { scene } = useGLTF(spec.url);
 
   const parts = useMemo(() => {
@@ -174,11 +178,7 @@ export function useGunModel(
       box.min.y + spec.gripFromBottom * size.y,
       box.max.z - spec.gripFromRear * size.z
     );
-    const muzzleLocal = new THREE.Vector3(
-      (box.min.x + box.max.x) / 2,
-      box.max.y - spec.boreFromTop * size.y,
-      box.min.z
-    );
+    const muzzleLocal = new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y - spec.boreFromTop * size.y, box.min.z);
     // frame arma: origine all'impugnatura, stesse direzioni del modello
     const gunFrame = new THREE.Group();
     gunFrame.name = spec.name + '-frame';
@@ -189,6 +189,8 @@ export function useGunModel(
     muzzle.name = spec.name + '-muzzle';
     muzzle.position.copy(muzzleLocal).sub(grip).multiplyScalar(scale);
     gunFrame.add(muzzle);
+    // calcio: il retro dell'arma, poco sopra meta' altezza
+    const rearLocal = new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y + 0.62 * size.y, box.max.z).sub(grip).multiplyScalar(scale);
     let support: THREE.Object3D | null = null;
     if (spec.support) {
       support = new THREE.Object3D();
@@ -214,6 +216,7 @@ export function useGunModel(
       gunFrame,
       muzzle,
       support,
+      rearLocal,
       slide: slide as THREE.Object3D | null,
       mag: mag as THREE.Object3D | null,
       slideRest: (slide as THREE.Object3D | null)?.position.clone() ?? new THREE.Vector3(),
@@ -288,6 +291,7 @@ export function useGunModel(
     };
   }, [modelRootRef, handBoneName, parts, spec]);
   const raiseRef = useRef(1);
+  const worldPoseRef = useRef(false);
 
   // Sposta un nodo del modello di `meters` lungo un asse del frame arma
   // (in coordinate mondo), convertendo nello spazio del suo genitore.
@@ -327,6 +331,19 @@ export function useGunModel(
       setRaise: (k) => {
         raiseRef.current = k;
       },
+      setWorldPose: (pos, quat) => {
+        const h = parts.holder;
+        const p = h.parent;
+        if (!p) return;
+        worldPoseRef.current = true;
+        p.updateWorldMatrix(true, false);
+        _m.compose(pos, quat, _one);
+        _m2.copy(p.matrixWorld).invert().multiply(_m);
+        _m2.decompose(h.position, h.quaternion, h.scale);
+        parts.gunFrame.rotation.set(0, 0, 0);
+        h.updateMatrixWorld(true);
+      },
+      getRearLocal: (out) => out.copy(parts.rearLocal),
       getBoreDirWorld: (out) => {
         parts.gunFrame.updateWorldMatrix(true, false);
         return out.set(0, 0, -1).transformDirection(parts.gunFrame.matrixWorld);
@@ -362,14 +379,13 @@ export function useGunModel(
       },
       update: (delta) => {
         const t = spec.hold;
-        parts.holder.position.set(t.px, t.py, t.pz);
-        parts.holder.rotation.set(
-          THREE.MathUtils.degToRad(t.rx),
-          THREE.MathUtils.degToRad(t.ry),
-          THREE.MathUtils.degToRad(t.rz)
-        );
-        // pronto basso: la canna ruota verso il basso attorno all'impugnatura
-        parts.gunFrame.rotation.x = -THREE.MathUtils.degToRad((t.lowerDeg ?? 0) * (1 - raiseRef.current));
+        // (posa decisa da fuori con setWorldPose: niente presa fissa)
+        if (!worldPoseRef.current) {
+          parts.holder.position.set(t.px, t.py, t.pz);
+          parts.holder.rotation.set(THREE.MathUtils.degToRad(t.rx), THREE.MathUtils.degToRad(t.ry), THREE.MathUtils.degToRad(t.rz));
+          // pronto basso: la canna ruota verso il basso attorno all'impugnatura
+          parts.gunFrame.rotation.x = -THREE.MathUtils.degToRad((t.lowerDeg ?? 0) * (1 - raiseRef.current));
+        }
         if (!parts.holder.visible) return;
         slideOffsetRef.current = Math.max(0, slideOffsetRef.current - (spec.kickM / spec.kickReturnS) * delta);
         const p = reloadRef.current;

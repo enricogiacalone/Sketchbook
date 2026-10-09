@@ -1,13 +1,15 @@
 import { useEffect } from 'react';
 import { useStore } from '../../store';
-import { acquireDebugGui, releaseDebugGui } from '../../lib/debugGui';
+import { acquireDebugGui, debugSection, releaseDebugGui } from '../../lib/debugGui';
+import { adaptiveResInfo } from '../Environment/AdaptiveResolution';
 
-// Pannello "Grafica" (nel pannello Debug in alto a destra): le stesse due
-// caselle del menu iniziale, per cambiarle durante la partita.
+// Sezione "Grafica" del pannello Debug (comune a tutte le scene): le stesse
+// caselle del menu iniziale, per cambiarle durante la partita, e l'HUD di
+// gioco (prima stava nella cartella "Arena").
 const GraphicsGUI: React.FC = () => {
   useEffect(() => {
-    const gui = acquireDebugGui();
-    const folder = gui.addFolder('Grafica');
+    acquireDebugGui();
+    const folder = debugSection('grafica');
     const st = () => useStore.getState();
     const bind = {
       get toon() {
@@ -22,11 +24,32 @@ const GraphicsGUI: React.FC = () => {
       set giornata(v: boolean) {
         st().setDayCycle(v);
       },
+      get adattiva() {
+        return st().adaptiveResolution;
+      },
+      set adattiva(v: boolean) {
+        st().setAdaptiveResolution(v);
+      },
+      // "togli tutta la merda ui in piu' che nn c'entra con questo test..
+      // mettila disabilitata di default ma abilitabile tramite checkbox":
+      // Controls/StatusBars/MissionHUD/Minimap (App.tsx)
+      get hud() {
+        return st().showGameplayHud;
+      },
+      set hud(v: boolean) {
+        st().setShowGameplayHud(v);
+      },
     };
-    folder.add(bind, 'toon').name('Stile toon').listen();
-    folder.add(bind, 'giornata').name('Scorre la giornata (giorno/notte)').listen();
+    const ctrls = [
+      folder.add(bind, 'toon').name('Stile toon').listen(),
+      folder.add(bind, 'giornata').name('Scorre la giornata (giorno/notte)').listen(),
+      folder.add(bind, 'adattiva').name('Risoluzione adattiva').listen(),
+      folder.add(adaptiveResInfo, 'dpr').name('  risoluzione (dpr)').listen().disable(),
+      folder.add(adaptiveResInfo, 'fps').name('  fps').listen().disable(),
+      folder.add(bind, 'hud').name('Mostra HUD di gioco').listen(),
+    ];
     return () => {
-      folder.destroy();
+      ctrls.forEach((c) => c.destroy());
       releaseDebugGui();
     };
   }, []);

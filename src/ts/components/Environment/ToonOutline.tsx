@@ -1,86 +1,28 @@
 import React, { useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
-
-// "stilizza il gioco in stile toon" -- la parte sull'IMMAGINE: contorni
-// d'inchiostro e colori piu' pieni. La scena si disegna in un'immagine a
-// parte (con la profondita'), poi un passaggio a schermo intero:
-//  - sagome: dove il pixel accanto e' molto piu' lontano (bordo di un
-//    oggetto contro quello che c'e' dietro) -- linea sul lato vicino;
-//  - spigoli: dove la superficie piega (la profondita' smette di variare
-//    in modo lineare: su un piano 1/z varia linearmente sullo schermo,
-//    su uno spigolo no) -- solo da vicino, da lontano sarebbe rumore;
-//  - le linee svaniscono con la distanza (la nebbia fa il resto).
-// Montato solo con lo stile toon acceso: prende il posto del disegno
-// automatico di react-three-fiber (useFrame con priorita' 1).
-// Spessori/soglie modificabili dal vivo in DEV: window.__toonOutline.
-
-const vertexShader = /* glsl */ `
-varying vec2 vUv;
-void main() {
-  vUv = uv;
-  gl_Position = vec4( position.xy, 0.0, 1.0 );
-}
-`;
-
-const fragmentShader = /* glsl */ `
-#include <common>
-#include <packing>
-uniform sampler2D tColor;
-uniform sampler2D tDepth;
-uniform vec2 texel;
-uniform float cameraNear;
-uniform float cameraFar;
-uniform float thickness;
-uniform float lineWidth;
-uniform float silMin;
-uniform float silMax;
-uniform float creaseMin;
-uniform float creaseMax;
-uniform float creaseFar;
-uniform float lineFar;
-uniform float saturation;
-uniform float inkDark;
-varying vec2 vUv;
-
-float viewDist( float d ) { return -perspectiveDepthToViewZ( d, cameraNear, cameraFar ); }
-
-void main() {
-  vec4 col = texture2D( tColor, vUv );
-  float d = texture2D( tDepth, vUv ).x;
-  float edge = 0.0;
-  if ( d < 1.0 ) {
-    vec2 ox = vec2( texel.x * thickness, 0.0 );
-    vec2 oy = vec2( 0.0, texel.y * thickness );
-    float z = viewDist( d );
-    float zl = viewDist( texture2D( tDepth, vUv - ox ).x );
-    float zr = viewDist( texture2D( tDepth, vUv + ox ).x );
-    float zd = viewDist( texture2D( tDepth, vUv - oy ).x );
-    float zu = viewDist( texture2D( tDepth, vUv + oy ).x );
-    // sagoma: un vicino molto piu' lontano di questo pixel
-    float far4 = max( max( zl - z, zr - z ), max( zd - z, zu - z ) );
-    float sil = smoothstep( silMin, silMax, far4 / z );
-    // spigolo: derivata seconda di 1/z, relativa a 1/z (vale uguale a
-    // ogni distanza), in "pixel"
-    float w = 1.0 / z;
-    float lap = max( abs( 1.0 / zl + 1.0 / zr - 2.0 * w ), abs( 1.0 / zd + 1.0 / zu - 2.0 * w ) );
-    float crease = smoothstep( creaseMin, creaseMax, lap / w / ( texel.y * thickness ) );
-    crease *= 1.0 - smoothstep( creaseFar * 0.5, creaseFar, z );
-    edge = max( sil, crease ) * ( 1.0 - smoothstep( lineFar * 0.4, lineFar, z ) );
-  }
-  // colori piu' pieni
-  float l = dot( col.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
-  col.rgb = max( mix( vec3( l ), col.rgb, saturation ), 0.0 );
-  // inchiostro: lo stesso colore molto scuro (piu' morbido del nero puro)
-  col.rgb = mix( col.rgb, col.rgb * inkDark, edge );
-  gl_FragColor = col;
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
-}
-`;
+import {
+  texture,
+  uv,
+  Fn,
+  vec2,
+  vec3,
+  vec4,
+  float,
+  uniform,
+  mix,
+  max,
+  abs,
+  dot,
+  smoothstep,
+  step,
+  perspectiveDepthToViewZ,
+} from 'three/tsl';
+import { MeshBasicNodeMaterial, QuadMesh } from 'three/webgpu';
 
 const ToonOutline: React.FC = () => {
   const gl = useThree((s) => s.gl);
+  const _size = useMemo(() => new THREE.Vector2(), []);
 
   const rt = useMemo(() => {
     const depth = new THREE.DepthTexture(1, 1, THREE.FloatType);
@@ -92,65 +34,113 @@ const ToonOutline: React.FC = () => {
     });
   }, []);
 
-  const pass = useMemo(() => {
-    const material = new THREE.ShaderMaterial({
-      vertexShader,
-      fragmentShader,
-      uniforms: {
-        tColor: { value: rt.texture },
-        tDepth: { value: rt.depthTexture },
-        texel: { value: new THREE.Vector2(1, 1) },
-        cameraNear: { value: 0.1 },
-        cameraFar: { value: 1000 },
-        thickness: { value: 1 },
-        lineWidth: { value: 1.5 },
-        silMin: { value: 0.03 },
-        silMax: { value: 0.08 },
-        creaseMin: { value: 0.6 },
-        creaseMax: { value: 1.2 },
-        creaseFar: { value: 45 },
-        lineFar: { value: 160 },
-        saturation: { value: 1.25 },
-        inkDark: { value: 0.18 },
-      },
-      depthTest: false,
-      depthWrite: false,
+  const uniforms = useMemo(
+    () => ({
+      texel: uniform(new THREE.Vector2(1 / window.innerWidth, 1 / window.innerHeight)),
+      cameraNear: uniform(0.1),
+      cameraFar: uniform(1000),
+      thickness: uniform(1),
+      lineWidth: uniform(1.5),
+      silMin: uniform(0.03),
+      silMax: uniform(0.08),
+      creaseMin: uniform(0.6),
+      creaseMax: uniform(1.2),
+      creaseFar: uniform(45),
+      lineFar: uniform(160),
+      saturation: uniform(1.25),
+      inkDark: uniform(0.18),
+    }),
+    []
+  );
+
+  const quadMesh = useMemo(() => {
+    const mat = new MeshBasicNodeMaterial() as any;
+    mat.depthTest = false;
+    mat.depthWrite = false;
+
+    const viewDist = Fn(([d]: any) => {
+      return perspectiveDepthToViewZ(d, uniforms.cameraNear, uniforms.cameraFar).negate();
     });
-    const scene = new THREE.Scene();
-    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
-    mesh.frustumCulled = false;
-    scene.add(mesh);
-    return { material, scene, camera: new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), mesh };
-  }, [rt]);
+
+    mat.colorNode = Fn(() => {
+      const uvCoord = uv();
+      const col = texture(rt.texture, uvCoord);
+      const d = texture(rt.depthTexture, uvCoord).r;
+
+      const ox = vec2(uniforms.texel.x.mul(uniforms.thickness), 0.0);
+      const oy = vec2(0.0, uniforms.texel.y.mul(uniforms.thickness));
+
+      const z = viewDist(d);
+      const zl = viewDist(texture(rt.depthTexture, uvCoord.sub(ox)).r);
+      const zr = viewDist(texture(rt.depthTexture, uvCoord.add(ox)).r);
+      const zd = viewDist(texture(rt.depthTexture, uvCoord.sub(oy)).r);
+      const zu = viewDist(texture(rt.depthTexture, uvCoord.add(oy)).r);
+
+      const far4 = max(max(zl.sub(z), zr.sub(z)), max(zd.sub(z), zu.sub(z)));
+      const sil = smoothstep(uniforms.silMin, uniforms.silMax, far4.div(z));
+
+      const w = float(1.0).div(z);
+      const invZl = float(1.0).div(zl);
+      const invZr = float(1.0).div(zr);
+      const invZd = float(1.0).div(zd);
+      const invZu = float(1.0).div(zu);
+
+      const lap = max(abs(invZl.add(invZr).sub(w.mul(2.0))), abs(invZd.add(invZu).sub(w.mul(2.0))));
+      const creaseDenom = uniforms.texel.y.mul(uniforms.thickness);
+      const crease = smoothstep(uniforms.creaseMin, uniforms.creaseMax, lap.div(w).div(creaseDenom));
+      const creaseFade = float(1.0).sub(smoothstep(uniforms.creaseFar.mul(0.5), uniforms.creaseFar, z));
+      const creaseFinal = crease.mul(creaseFade);
+
+      const lineFade = float(1.0).sub(smoothstep(uniforms.lineFar.mul(0.4), uniforms.lineFar, z));
+      const edge = max(sil, creaseFinal).mul(lineFade);
+
+      const isRendered = step(d, 0.9999);
+      const finalEdge = mix(0.0, edge, isRendered);
+
+      const l = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));
+      const mixedCol = max(mix(vec3(l), col.rgb, uniforms.saturation), vec3(0.0));
+      const inkedCol = mix(mixedCol, mixedCol.mul(uniforms.inkDark), finalEdge);
+
+      return vec4(inkedCol, col.a);
+    })();
+
+    return new QuadMesh(mat);
+  }, [rt, uniforms]);
 
   useEffect(() => {
-    if (import.meta.env.DEV) (window as any).__toonOutline = pass.material.uniforms;
+    if (import.meta.env.DEV) (window as any).__toonOutline = uniforms;
     return () => {
       rt.depthTexture?.dispose();
       rt.dispose();
-      pass.material.dispose();
-      pass.mesh.geometry.dispose();
+      quadMesh.material.dispose();
       if (import.meta.env.DEV) delete (window as any).__toonOutline;
     };
-  }, [rt, pass]);
+  }, [rt, quadMesh, uniforms]);
 
-  const _size = useMemo(() => new THREE.Vector2(), []);
   useFrame((state) => {
     const { scene, camera } = state;
     gl.getDrawingBufferSize(_size);
-    if (rt.width !== _size.x || rt.height !== _size.y) rt.setSize(_size.x, _size.y);
-    const u = pass.material.uniforms;
-    u.texel.value.set(1 / _size.x, 1 / _size.y);
-    // linee di ~1.5 px "logici" (su Retina 3 px veri), regolabili in DEV
-    u.thickness.value = Math.max(1.5, gl.getPixelRatio() * u.lineWidth.value);
-    const cam = camera as THREE.PerspectiveCamera;
-    u.cameraNear.value = cam.near;
-    u.cameraFar.value = cam.far;
+    if (_size.x > 0 && _size.y > 0 && (rt.width !== _size.x || rt.height !== _size.y)) {
+      rt.setSize(_size.x, _size.y);
+    }
 
+    if (_size.x > 0 && _size.y > 0) {
+      uniforms.texel.value.set(1 / _size.x, 1 / _size.y);
+    }
+    uniforms.thickness.value = Math.max(1.5, gl.getPixelRatio() * (uniforms.lineWidth.value as number));
+
+    const cam = camera as THREE.PerspectiveCamera;
+    if (cam.near !== undefined) uniforms.cameraNear.value = cam.near;
+    if (cam.far !== undefined) uniforms.cameraFar.value = cam.far;
+
+    // 1. Render main scene into render target
+    const currentRenderTarget = gl.getRenderTarget();
     gl.setRenderTarget(rt);
     gl.render(scene, camera);
-    gl.setRenderTarget(null);
-    gl.render(pass.scene, pass.camera);
+
+    // 2. Render post-processing quad pass to screen
+    gl.setRenderTarget(currentRenderTarget);
+    quadMesh.render(gl);
   }, 1);
 
   return null;

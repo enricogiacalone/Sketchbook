@@ -42,7 +42,7 @@ export const ROAD_THICKNESS = 1.0;
 // radius 3): a spare outer perimeter road with no buildings past it.
 export const ROAD_OFFSETS: number[] = (() => {
   const arr: number[] = [];
-  for (let i = -2; i <= 2; i++) {
+  for (let i = -3; i <= 3; i++) {
     arr.push(i * ROAD_GRID_SPACING);
   }
   return arr;

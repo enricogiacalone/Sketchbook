@@ -1,7 +1,8 @@
 import React, { useRef, useMemo, useEffect, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RigidBody, CuboidCollider, RapierRigidBody, useRapier, useBeforePhysicsStep, interactionGroups } from '@react-three/rapier';
-import { useGLTF, Html } from '@react-three/drei';
+import { Html } from '@react-three/drei';
+import { useGLTF } from '../../lib/gltf';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 import { useInput } from '../../hooks/useInput';
@@ -9,11 +10,14 @@ import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { vehicleBodyHandles, farCars } from './vehicleRegistry';
+import ExhaustSmoke from './ExhaustSmoke';
 import { MANNEQUIN_URL, MANNEQUIN_BASE_ANIMS_URL } from '../city/useMannequinActor';
 import { remoteDrivenCars, isRemoteDriven } from '../multiplayer/remoteVehicles';
 import { simDebug } from '../../debug/simDebug';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { getRoadOffset } from '../Environment/Road';
+import { CoefficientCombineRule } from '@dimforge/rapier3d-compat';
+import { SketchbookRaycastVehicle } from './sketchbookRaycastVehicle';
 
 interface CarProps {
   position?: [number, number, number];
@@ -76,7 +80,7 @@ class FixedTickSpring {
 
   public simulate(timeStep: number): void {
     const total = this.offset + timeStep;
-    const ticks = Math.floor(total / this.tickTime);
+    const ticks = Math.min(Math.floor(total / this.tickTime), 10);
     this.offset = total - ticks * this.tickTime;
     for (let i = 0; i < ticks; i++) {
       const acceleration = (this.target - this.position) / this.mass;
@@ -84,6 +88,8 @@ class FixedTickSpring {
       this.velocity *= this.damping;
       this.position += this.velocity;
     }
+    // "capping": if we reached the limit, discard leftover time
+    if (this.offset > this.tickTime) this.offset = 0;
   }
 }
 
@@ -93,17 +99,23 @@ const WHEEL_RADIUS = 0.25;
 const SUSPENSION_STIFFNESS = 20;
 const SUSPENSION_REST_LENGTH = 0.35;
 const MAX_SUSPENSION_TRAVEL = 1;
-const FRICTION_SLIP = 1.0;
+const FRICTION_SLIP = 0.8; // come l'originale (era 1.0)
 const DAMPING_RELAXATION = 2;
 const DAMPING_COMPRESSION = 2;
-// The original's rollInfluence (0.4, a Bullet/cannon-only knob that damps
-// how much of a tire's side-friction torque gets transferred to the chassis,
-// specifically to fight flip-overs) has no equivalent on Rapier's
-// DynamicRayCastVehicleController -- it exposes per-wheel friction slip and
-// side-friction-stiffness, but nothing that damps roll torque transfer
-// directly. Left undocumented-but-omitted rather than approximated; if real
-// suspension + a low-enough center of mass isn't enough to keep cars upright
-// through hard turns/impacts once this is live-tested, revisit here.
+// "qui la macchina si guidava molto meglio": la spinta laterale delle ruote
+// applicata piu' in basso, verso il baricentro (vedi sketchbookRaycastVehicle.ts)
+// -- il DynamicRayCastVehicleController di Rapier non ce l'ha.
+const ROLL_INFLUENCE = 0.8;
+// Il telaio dell'originale: 50 kg, baricentro nell'origine del modello (non
+// nel centro delle forme: piu' in basso, e' cio' che lo tiene dritto),
+// inerzia della scatola che contiene tutte le forme di collisione di
+// car.glb (i due box + le 12 sfere) e gravita' 9.81 (il nostro mondo ha
+// 20: l'auto ha la sua scala di gravita'). Le forze sono riportate alla
+// massa vera (FORCE_SCALE) e, con la scala S del modello, le velocita' a
+// sqrt(S) (stessa dinamica dell'originale, solo piu' grande).
+const ORIGINAL_MASS = 50;
+const ORIGINAL_GRAVITY = 9.81;
+const CANNON_AABB_HALF = [0.612, 0.555, 1.2105];
 const AXLE_LOCAL: [number, number, number] = [-1, 0, 0];
 const DIRECTION_LOCAL: [number, number, number] = [0, -1, 0];
 // Module-level, reused for every car's per-wheel visual-transform math (see
@@ -116,15 +128,9 @@ const WHEEL_UP_AXIS = new THREE.Vector3(-DIRECTION_LOCAL[0], -DIRECTION_LOCAL[1]
 const WHEEL_AXLE_AXIS = new THREE.Vector3(...AXLE_LOCAL).normalize();
 const WHEEL_DIRECTION_AXIS = new THREE.Vector3(...DIRECTION_LOCAL).normalize();
 
-// Engine/transmission/steering tuning, straight from the original's Car.ts
-// -- and, unlike the cannon-worker era, this is no longer just "the closest
-// approximation we can test": Rapier's DynamicRayCastVehicleController is,
-// like cannon-es's own RaycastVehicle, a straight port of Bullet's
-// btRaycastVehicle, so these Newton-scale force/brake values (tuned against
-// the ORIGINAL, non-React Sketchbook running a real, working cannon-es
-// RaycastVehicle -- see git history) should carry over directly. Still,
-// this hasn't been live-tested yet post-migration -- see the dev-only
-// __carDebug hook below for tuning once it has.
+// Motore/cambio/sterzo: gli stessi numeri di Car.ts dell'originale (forze
+// per il telaio da 50 kg, riportate alla massa vera con FORCE_SCALE) sul
+// veicolo a raggi dell'originale (sketchbookRaycastVehicle.ts).
 const ENGINE_FORCE = 500; // Restored to match the original vanilla Sketchbook's Car.ts tuning.
 const MAX_GEARS = 5;
 const TIME_TO_SHIFT = 0.2;
@@ -181,10 +187,6 @@ const CHASSIS_SHAPES = [
 // persona in piedi si fermava di colpo come contro un gradino.
 const WHEEL_RAY_GROUPS = interactionGroups([CollisionGroups.Default], [CollisionGroups.Default, CollisionGroups.TrimeshColliders]);
 
-// massa "di fabbrica" (densita' 1): volume dei due box
-const CHASSIS_VOLUMES = CHASSIS_SHAPES.map((s) => s.fullDimensions[0] * s.fullDimensions[1] * s.fullDimensions[2]);
-const CHASSIS_BASE_MASS = CHASSIS_VOLUMES.reduce((a, b) => a + b, 0);
-
 // Module-level scratch objects, reused across every Car instance's useFrame/
 // useBeforePhysicsStep calls instead of allocating fresh THREE.Vector3/
 // Quaternion objects every frame (safe because R3F/rapier run each
@@ -203,6 +205,8 @@ const _chassisQuat = new THREE.Quaternion();
 const _steerQuat = new THREE.Quaternion();
 const _spinQuat = new THREE.Quaternion();
 const _chassisUp = new THREE.Vector3();
+const _airAng = new THREE.Vector3();
+const _airRight = new THREE.Vector3();
 const _uprightQuat = new THREE.Quaternion();
 const _uprightEuler = new THREE.Euler();
 // AI patrol scratch vectors -- see the FollowPath-derived AI block in
@@ -307,7 +311,11 @@ const Car: React.FC<CarProps> = ({
   massKg = DEFAULT_CAR_MASS_KG,
 }) => {
   const S = scale;
-  const FORCE_SCALE = massKg ? massKg / CHASSIS_BASE_MASS : 1;
+  const MASS = massKg || DEFAULT_CAR_MASS_KG;
+  const FORCE_SCALE = MASS / ORIGINAL_MASS;
+  // similitudine con l'originale (modello S volte piu' grande): velocita' e
+  // tempi x sqrt(S)
+  const VS = Math.sqrt(S);
   const { scene } = useGLTF('car.glb');
   const clonedScene = useMemo(() => scene.clone(), [scene]);
   const { world, rapier } = useRapier();
@@ -381,7 +389,7 @@ const Car: React.FC<CarProps> = ({
       openVehicleDoors: state.openVehicleDoors,
       updateEntity: state.updateEntity,
       setPlayerInfo: state.setPlayerInfo,
-      isPaused: state.isPaused,
+      isPaused: state.isPaused || state.physicsPaused,
     }))
   );
 
@@ -391,6 +399,18 @@ const Car: React.FC<CarProps> = ({
   // render's callback, so reading this same variable inside useFrame below
   // is exactly as fresh as recomputing it there every frame would be.
   const humanIsDriving = currentControllable === 'car' && controlledEntityId === id && controlledSeatType === 'driver';
+  // due tubi di scarico in fondo al paraurti posteriore (scatola bassa di
+  // car.glb), un po' sotto la sua meta' altezza
+  const exhaustPipes = useMemo<[number, number, number][]>(() => {
+    const b = CHASSIS_SHAPES[0];
+    const z = (b.position[2] - b.fullDimensions[2] / 2) * S - 0.12;
+    const y = (b.position[1] - b.fullDimensions[1] * 0.3) * S;
+    const x = b.fullDimensions[0] * 0.3 * S;
+    return [
+      [x, y, z],
+      [-x, y, z],
+    ];
+  }, [S]);
 
   // AI patrol state (see the useFrame block below) -- only ever advanced
   // when patrolRoute is set; harmless idle refs otherwise.
@@ -543,14 +563,8 @@ const Car: React.FC<CarProps> = ({
   // its own suspension physics, and rollover recovery (or lack thereof) is
   // now a real physical consequence of chassis mass/CoM/suspension tuning,
   // not something hand-simulated.
-  // Typed via ReturnType rather than importing DynamicRayCastVehicleController
-  // directly from @dimforge/rapier3d-compat: @react-three/rapier bundles its
-  // own nested copy of that package (a different version than whatever else
-  // may be installed at the top level), and world.createVehicleController()
-  // below returns THAT copy's type -- importing the type from the top-level
-  // package name would silently resolve to a structurally-different (if
-  // near-identical) class and fail to typecheck.
-  const vehicleController = useRef<ReturnType<typeof world.createVehicleController> | null>(null);
+  // (veicolo a raggi dell'originale, vedi sketchbookRaycastVehicle.ts)
+  const vehicleController = useRef<SketchbookRaycastVehicle | null>(null);
 
   // Per-wheel chassis-local connection point (top of the suspension strut).
   // The +0.2 Y offset is inherited, unchanged, from the old cannon setup's
@@ -573,22 +587,38 @@ const Car: React.FC<CarProps> = ({
     const chassis = chassisRef.current;
     if (!chassis) return;
 
-    const controller = world.createVehicleController(chassis);
-    // Matches the original's indexForwardAxis: 2, indexRightAxis: 0,
-    // indexUpAxis: 1 (Z-forward, X-right, Y-up). Rapier's controller only
-    // exposes up/forward directly (right is implicit); note the setter for
-    // forward is genuinely named `setIndexForwardAxis` (not a typo here --
-    // see @dimforge/rapier3d-compat's own ray_cast_vehicle_controller.d.ts).
-    controller.indexUpAxis = 1;
-    controller.setIndexForwardAxis = 2;
+    // massa/baricentro/inerzia come l'originale (le forme hanno densita' 0)
+    const e = CANNON_AABB_HALF.map((h) => h * S);
+    const inertia = new THREE.Vector3(
+      (MASS / 12) * (4 * e[1] * e[1] + 4 * e[2] * e[2]),
+      (MASS / 12) * (4 * e[0] * e[0] + 4 * e[2] * e[2]),
+      (MASS / 12) * (4 * e[1] * e[1] + 4 * e[0] * e[0])
+    );
+    chassis.setAdditionalMassProperties(
+      MASS,
+      { x: 0, y: 0, z: 0 },
+      { x: inertia.x, y: inertia.y, z: inertia.z },
+      { x: 0, y: 0, z: 0, w: 1 },
+      true
+    );
+    chassis.setGravityScale(ORIGINAL_GRAVITY / Math.max(0.1, Math.abs(world.gravity.y)), true);
 
+    const controller = new SketchbookRaycastVehicle(world, rapier, chassis, inertia);
     for (let i = 0; i < 4; i++) {
-      controller.addWheel(wheelConnectionPoints[i], WHEEL_DIRECTION_AXIS, WHEEL_AXLE_AXIS, SUSPENSION_REST_LENGTH * S, WHEEL_RADIUS * S);
-      controller.setWheelSuspensionStiffness(i, SUSPENSION_STIFFNESS);
-      controller.setWheelMaxSuspensionTravel(i, MAX_SUSPENSION_TRAVEL * S);
-      controller.setWheelFrictionSlip(i, FRICTION_SLIP);
-      controller.setWheelSuspensionRelaxation(i, DAMPING_RELAXATION);
-      controller.setWheelSuspensionCompression(i, DAMPING_COMPRESSION);
+      controller.addWheel({
+        connectionLocal: wheelConnectionPoints[i],
+        directionLocal: WHEEL_DIRECTION_AXIS,
+        axleLocal: WHEEL_AXLE_AXIS,
+        radius: WHEEL_RADIUS * S,
+        suspensionRestLength: SUSPENSION_REST_LENGTH * S,
+        maxSuspensionTravel: MAX_SUSPENSION_TRAVEL * S,
+        // (similitudine: stessa compressione relativa, stessi tempi x sqrt(S))
+        suspensionStiffness: SUSPENSION_STIFFNESS / S,
+        dampingCompression: DAMPING_COMPRESSION / VS,
+        dampingRelaxation: DAMPING_RELAXATION / VS,
+        frictionSlip: FRICTION_SLIP,
+        rollInfluence: ROLL_INFLUENCE,
+      });
     }
 
     vehicleController.current = controller;
@@ -602,7 +632,6 @@ const Car: React.FC<CarProps> = ({
 
     return () => {
       vehicleBodyHandles.delete(chassis.handle);
-      world.removeVehicleController(controller);
       vehicleController.current = null;
       // Drop this car's window.__sim telemetry entry on unmount (e.g.
       // leaving the race/car-test scenario) so a stale, no-longer-driven
@@ -622,6 +651,9 @@ const Car: React.FC<CarProps> = ({
   const gear = useRef(1);
   const shiftTimer = useRef(0);
   const flipTimer = useRef(0);
+  // controllo in aria / raddrizzarsi (originale: airSpinTimer, canTiltForwards)
+  const airSpinTimer = useRef(0);
+  const canTiltForwards = useRef(false);
 
   // -- Physics-step driving logic: engine force / brake / steering per
   // wheel, then controller.updateVehicle() to actually integrate them into
@@ -959,19 +991,15 @@ const Car: React.FC<CarProps> = ({
     if (shiftTimer.current > 0) {
       shiftTimer.current = Math.max(0, shiftTimer.current - dt);
     } else if (activeBackward) {
-      const powerFactor = (GEARS_MAX_SPEEDS['R'] - speed) / Math.abs(GEARS_MAX_SPEEDS['R']);
+      const powerFactor = (GEARS_MAX_SPEEDS['R'] * VS - speed) / Math.abs(GEARS_MAX_SPEEDS['R'] * VS);
       const force = ((ENGINE_FORCE * FORCE_SCALE) / gear.current) * Math.abs(powerFactor);
-      // Sign flipped (Claude) -- see the "forward" branch below, same fix,
-      // opposite direction: this was applying its force with the wrong
-      // sign relative to Rapier's DynamicRayCastVehicleController
-      // convention, so accelerator and reverse were swapped end to end
-      // (see git history / chat: "l'acceleratore e la retromarcia sn
-      // invertite").
-      appliedEngineForce = -force;
-      for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, -force);
+      // (segni come l'originale: con il veicolo di sketchbookRaycastVehicle
+      // la forza positiva spinge indietro)
+      appliedEngineForce = force;
+      for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, force);
     } else {
-      const top = GEARS_MAX_SPEEDS[String(gear.current)];
-      const bottom = GEARS_MAX_SPEEDS[String(gear.current - 1)];
+      const top = GEARS_MAX_SPEEDS[String(gear.current)] * VS;
+      const bottom = GEARS_MAX_SPEEDS[String(gear.current - 1)] * VS;
       const powerFactor = (top - speed) / (top - bottom);
 
       if (powerFactor < 0.1 && gear.current < MAX_GEARS) {
@@ -984,18 +1012,9 @@ const Car: React.FC<CarProps> = ({
         for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, 0);
       } else if (activeForward) {
         const force = ((ENGINE_FORCE * FORCE_SCALE) / gear.current) * powerFactor;
-        // Sign flipped (Claude) -- was `-force`. Rapier's vehicle
-        // controller's positive wheel engine force turned out to drive
-        // this chassis in its local -Z (the same direction `_forward`/
-        // `speed` above call "backward"), the opposite of what this code
-        // assumed when it was ported from the cannon-es version. Flipping
-        // just these two signs (this branch and the `input.backward`
-        // branch above) realigns accelerator/reverse with W/S without
-        // touching the speed/gear logic, which was already measuring
-        // "forward" consistently via the `_forward` vector -- only the
-        // force applied to actually go there was inverted.
-        appliedEngineForce = force;
-        for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, force);
+        // avanti = forza negativa, come applyEngineForce(-force) dell'originale
+        appliedEngineForce = -force;
+        for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, -force);
       } else {
         for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, 0);
       }
@@ -1012,7 +1031,7 @@ const Car: React.FC<CarProps> = ({
     _cross.crossVectors(_normalizedVel, _forward);
     const driftCorrection = _up.dot(_cross) < 0 ? -angleTo : angleTo;
 
-    const speedFactor = THREE.MathUtils.clamp(speed * 0.3, 1, Number.MAX_VALUE);
+    const speedFactor = THREE.MathUtils.clamp((speed / VS) * 0.3, 1, Number.MAX_VALUE);
     if (activeRight) {
       const steering = Math.min(-MAX_STEER_VAL / speedFactor, -driftCorrection);
       steeringSpring.current.target = THREE.MathUtils.clamp(steering, -MAX_STEER_VAL, MAX_STEER_VAL);
@@ -1024,6 +1043,42 @@ const Car: React.FC<CarProps> = ({
     }
     steeringSpring.current.simulate(dt);
     for (let j = 0; j < steeringIndices.length; j++) controller.setWheelSteering(steeringIndices[j], steeringSpring.current.position);
+
+    // -- In aria e a ruote all'aria, come l'originale (Car.physicsPreStep):
+    // sinistra/destra fanno ruotare l'auto attorno al suo asse lungo,
+    // avanti/indietro la fanno beccheggiare. In aria l'effetto cresce in 2 s;
+    // ferma e capovolta, sinistra/destra la fanno rigirare sulle ruote.
+    {
+      if (controller.numWheelsOnGround === 0) {
+        airSpinTimer.current += dt;
+        if (!activeForward) canTiltForwards.current = true;
+      } else {
+        canTiltForwards.current = false;
+        airSpinTimer.current = 0;
+      }
+      const sp = speed / VS;
+      const airInfluence = THREE.MathUtils.clamp(airSpinTimer.current / 2, 0, 1) * THREE.MathUtils.clamp(sp, 0, 1);
+      _chassisUp.set(0, 1, 0).applyQuaternion(_chassisQuat);
+      const flipOver = THREE.MathUtils.clamp(1 - sp, 0, 1) * (-_chassisUp.y / 2 + 0.5) * 3;
+      // (originale: 0.15 rad/s per passo a 60 Hz, tetto 2 rad/s; tempi x sqrt(S))
+      const accel = (0.15 * dt * 60) / VS;
+      const maxSpin = 2 / VS;
+      const av = chassis.angvel();
+      _airAng.set(av.x, av.y, av.z);
+      _airRight.set(1, 0, 0).applyQuaternion(_chassisQuat);
+      const before = _airAng.lengthSq();
+      if (activeRight && !activeLeft) {
+        if (_airAng.dot(_forward) < maxSpin) _airAng.addScaledVector(_forward, accel * (airInfluence + flipOver));
+      } else if (activeLeft && !activeRight) {
+        if (_airAng.dot(_forward) > -maxSpin) _airAng.addScaledVector(_forward, -accel * (airInfluence + flipOver));
+      }
+      if (canTiltForwards.current && activeForward && !activeBackward) {
+        if (_airAng.dot(_airRight) < maxSpin) _airAng.addScaledVector(_airRight, accel * airInfluence);
+      } else if (activeBackward && !activeForward) {
+        if (_airAng.dot(_airRight) > -maxSpin) _airAng.addScaledVector(_airRight, -accel * airInfluence);
+      }
+      if (_airAng.lengthSq() !== before) chassis.setAngvel({ x: _airAng.x, y: _airAng.y, z: _airAng.z }, true);
+    }
 
     // -- Handbrake (Space), rear wheels only, matching the original.
     const brakeForce = input.jump ? BRAKE_FORCE * FORCE_SCALE : 0;
@@ -1176,7 +1231,9 @@ const Car: React.FC<CarProps> = ({
     // nemici): le auto in pattuglia non devono sovrascriverne la posizione
     if (humanIsDriving) setPlayerInfo([_carPos.x, _carPos.y, _carPos.z], _carEuler.y);
 
-    if (state.clock.getElapsedTime() % 0.1 < 0.02) {
+    // elapsedTime e non getElapsedTime(): quella chiama getDelta() e ruba
+    // tempo al delta del frame dopo per TUTTI i useFrame (fisica compresa)
+    if (state.clock.elapsedTime % 0.1 < 0.02) {
       updateEntity(id, {
         type: 'car',
         position: [_carPos.x, _carPos.y, _carPos.z],
@@ -1203,12 +1260,18 @@ const Car: React.FC<CarProps> = ({
           key={i}
           args={[(shape.fullDimensions[0] / 2) * S, (shape.fullDimensions[1] / 2) * S, (shape.fullDimensions[2] / 2) * S]}
           position={[shape.position[0] * S, shape.position[1] * S, shape.position[2] * S]}
-          friction={0.3}
+          // telaio "scivoloso" come l'originale (attrito 0.01): contro un muro
+          // striscia invece di inchiodarsi
+          friction={0.01}
+          frictionCombineRule={CoefficientCombineRule.Min}
           restitution={0}
-          {...(massKg ? { mass: (massKg * CHASSIS_VOLUMES[i]) / CHASSIS_BASE_MASS } : { density: 1 / (S * S * S) })}
+          // massa e baricentro li decide setAdditionalMassProperties (sopra)
+          density={0}
         />
       ))}
       <primitive object={clonedScene} scale={S} />
+      {/* fumo dello scarico (ExhaustSmoke.tsx): solo a motore acceso */}
+      {(humanIsDriving || (!!patrolRoute && patrolRoute.length >= 2)) && <ExhaustSmoke pipes={exhaustPipes} />}
 
       {/* Headlights -- conditionally mounted (see the big comment above):
           only exist in the scene graph at all while `headlightsOn`, so a

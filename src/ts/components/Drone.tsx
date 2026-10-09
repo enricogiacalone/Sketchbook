@@ -1,13 +1,13 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { RigidBody, BallCollider, RapierRigidBody, useRapier } from '@react-three/rapier';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF } from '../lib/gltf';
 import * as THREE from 'three';
 import { useInput } from '../hooks/useInput';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../enums/CollisionGroups';
-import { droneMouseDelta, droneOrientation, droneShake, droneCamPose, droneHud, DroneHudTarget } from '../lib/droneFlight';
+import { droneMouseDelta, droneOrientation, droneShake, droneCamPose, droneHud, DroneHudTarget, dronePad } from '../lib/droneFlight';
 import { acquireAudioListener, releaseAudioListener } from '../lib/sharedAudioListener';
 import { cityOpponents } from './city/cityActors';
 import type { FighterData } from './Environment/SquadArenaTypes';
@@ -16,6 +16,7 @@ import { emitShotFx } from './Environment/weapons/weaponFx';
 import { getTerrainHeight } from './Environment/Terrain';
 import { getRoadOffset } from './Environment/Road';
 import Explosion from './Environment/Explosion';
+import { explodeAt } from '../lib/explosions';
 
 // "voglio che il drone in realta' e' il compagno del player e gli
 // fluttua attorno quando premo b ne prendo il controllo" -- entity sua,
@@ -80,6 +81,8 @@ const LOCK_DECAY_PER_S = 1.2;
 const MISSILE_SPEED = 600 * DW; // m/s (10 unita' a frame)
 const MISSILE_HIT = 10 * DW; // m
 const MISSILE_DAMAGE = 25;
+// raggio dell'esplosione del missile (m)
+const MISSILE_BLAST_RADIUS = 5;
 const MISSILE_LIFE = 5; // s
 const SHAKE = 1 * DW; // scuotimento camera mentre si spara (±0.5 unita')
 const TARGET_CHEST_Y = 1.2;
@@ -152,7 +155,7 @@ const Drone: React.FC = () => {
     useShallow((state) => ({
       currentControllable: state.currentControllable,
       controlledEntityId: state.controlledEntityId,
-      isPaused: state.isPaused,
+      isPaused: state.isPaused || state.physicsPaused,
       playerPos: state.playerPos,
       playerYaw: state.playerYaw,
       setIsDrone: state.setIsDrone,
@@ -396,13 +399,9 @@ const Drone: React.FC = () => {
         if (dist < MISSILE_HIT || m.target.isDead) {
           addBoom(m.pos, 1);
           playAt(SOUND_URLS.explosions[Math.floor(Math.random() * 2)], m.pos, 40, 1);
-          if (!m.target.isDead) {
-            _v1.copy(_v2).normalize();
-            _v1.y = Math.max(_v1.y, 0.5);
-            _v1.normalize();
-            damage(m.target, MISSILE_DAMAGE, 'Torso', _v1.clone(), 30, _v3.clone());
-            if (!m.target.isDead) m.target.knockdown = { dirX: _v1.x, dirZ: _v1.z, speed: 6 };
-          }
+          // danno, KO o morte e spinta per tutti quelli vicini, non solo
+          // il bersaglio (lib/explosions.ts)
+          explodeAt(m.pos, { radius: MISSILE_BLAST_RADIUS, power: 1, damage: MISSILE_DAMAGE * 2, source: 'missile del drone' });
         }
         ms.splice(i, 1);
         missileMeshes.current.delete(m.id);
@@ -525,26 +524,32 @@ const Drone: React.FC = () => {
     const rollAngle = Math.PI / 2 - WORLD_UP.angleTo(_right) * (Math.sign(WORLD_UP.dot(_up)) || 1);
 
     const k = keys.current;
-    const mouseYawLeft = -(f.pointer.x / POINTER_DIVIDER) / zone;
-    const mousePitchDown = (f.pointer.y / POINTER_DIVIDER) / zone;
-    const yawLeft = mouseYawLeft + (k.KeyA || k.ArrowLeft ? 1 : 0);
-    const yawRight = k.KeyD || k.ArrowRight ? 1 : 0;
+    // pad (lib/droneFlight.ts dronePad): la levetta destra e' una cloche
+    // come il mouse, ma torna al centro quando la lasci; la sinistra
+    // spinge avanti/indietro e imbarda
+    const pd = dronePad;
+    _v1.set(f.pointer.x + pd.rx * zone, f.pointer.y + pd.ry * zone, 0);
+    if (_v1.length() > zone) _v1.setLength(zone);
+    const mouseYawLeft = -(_v1.x / POINTER_DIVIDER) / zone;
+    const mousePitchDown = (_v1.y / POINTER_DIVIDER) / zone;
+    const yawLeft = mouseYawLeft + (k.KeyA || k.ArrowLeft ? 1 : 0) + Math.max(0, -pd.lx);
+    const yawRight = (k.KeyD || k.ArrowRight ? 1 : 0) + Math.max(0, pd.lx);
     const pitchUp = k.ArrowUp ? 1 : 0;
     const pitchDown = mousePitchDown + (k.ArrowDown ? 1 : 0);
     // FlyControls.mousemove: rollLeft = yawLeft/2 - rollAngle/5 (si
     // inclina in virata e torna livellato da solo)
-    const rollLeft = mouseYawLeft / 2 - rollAngle / 5 + (k.KeyQ ? 1 : 0);
-    const rollRight = k.KeyE ? 1 : 0;
+    const rollLeft = mouseYawLeft / 2 - rollAngle / 5 + (k.KeyQ || pd.rollL ? 1 : 0);
+    const rollRight = k.KeyE || pd.rollR ? 1 : 0;
 
     const rotMult = dtMs * ROLL_SPEED;
     _q.set((pitchUp - pitchDown) * rotMult, (yawLeft - yawRight) * rotMult, (rollLeft - rollRight) * rotMult, 1).normalize();
     f.quat.multiply(_q).normalize();
 
     // spinta e attrito (FlyControls.update)
-    const forward = k.KeyW ? 1 : 0;
-    const back = k.KeyS ? 1 : 0;
-    const upK = k.KeyR || k.Space ? 1 : 0;
-    const downK = k.KeyF || k.ShiftLeft || k.ShiftRight ? 1 : 0;
+    const forward = Math.max(k.KeyW ? 1 : 0, -pd.ly);
+    const back = Math.max(k.KeyS ? 1 : 0, pd.ly);
+    const upK = Math.max(k.KeyR || k.Space ? 1 : 0, pd.up);
+    const downK = Math.max(k.KeyF || k.ShiftLeft || k.ShiftRight ? 1 : 0, pd.down);
     const accel = f.accelOff > 0 ? 0 : ACCELERATION;
     if (f.accelOff > 0) f.accelOff -= delta;
     _v1.set(0, upK - downK, back - forward).multiplyScalar(delta * accel); // deltaVelocity
@@ -741,8 +746,10 @@ const Drone: React.FC = () => {
     if (shooting) {
       f.bulletAcc += delta * BULLET_RATE;
       const gt = gunTarget as { d: FighterData; lead: THREE.Vector3 } | null;
-      while (f.bulletAcc >= 1) {
+      let steps = 0;
+      while (f.bulletAcc >= 1 && steps < 20) {
         f.bulletAcc -= 1;
+        steps++;
         // parte 5 unita' davanti al drone, verso l'anticipo del bersaglio
         // nel mirino se c'e', altrimenti dritto (un filo verso l'alto)
         const origin = _dronePos.clone().addScaledVector(camDir, 5 * DW);
@@ -766,17 +773,23 @@ const Drone: React.FC = () => {
     }
 
     // ============================ MISSILE ================================
-    if (input.consumeJustPressed('secondary') && f.lockLevel >= 1) {
+    if (input.consumeJustPressed('secondary')) {
       // selectNearestTargetInSight: il piu' vicino tra quelli nel cerchio
       let best: FighterData | null = null;
       let bestD = Infinity;
       for (const t of targets) {
         if (!t.inSight || t.distance >= bestD) continue;
         const d = cityOpponents.find((o) => o.id === t.id);
-        if (d) {
+        if (d && !d.isDead) {
           bestD = t.distance;
           best = d;
         }
+      }
+      if (!best) {
+        best = cityOpponents.find((o) => !o.isDead) ?? null;
+      }
+      if (!best && cityOpponents.length > 0) {
+        best = cityOpponents[0];
       }
       if (best) {
         const id = serial.current++;
@@ -805,7 +818,7 @@ const Drone: React.FC = () => {
     droneHud.gunTargetId = gunTarget ? (gunTarget as { d: FighterData }).d.id : null;
     droneHud.targets = targets;
 
-    // B: torna al giocatore
+    // B (o Triangolo / Select tenuto sul pad): torna al giocatore
     if (flyPressed) {
       setIsDrone(false);
       useStore.getState().setCurrentControllable('player');

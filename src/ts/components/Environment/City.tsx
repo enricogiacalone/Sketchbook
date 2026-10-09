@@ -19,6 +19,8 @@ import {
 import { useTreeTemplates, TreeInstance, TreeTemplate, Flowers } from './ParkTrees';
 import { RealGrassPatch } from './RealGrass';
 import { StaticInstances } from './StaticInstances';
+import { MarketPlaza, WarehouseYard } from './StoryPlaces';
+import { MARKET } from '../../missions/storyPlaces';
 
 const _windowDummy = new THREE.Object3D();
 const _windowColor = new THREE.Color();
@@ -267,11 +269,8 @@ export const CITY_LAYOUT: CityLayout = (() => {
   // independently.
   const LED_PALETTE = ['#00eaff', '#ff2fd0', '#7cff3a', '#ffb300', '#8a6bff', '#ff3b5c'];
 
-  // "fai la citta piu piccola" -- 2 -> 1: a 3x3 block grid (8 built
-  // blocks + the center park) instead of 5x5 (24 + park). Also directly
-  // helps the ongoing perf work: roughly a third of the buildings, LED
-  // trims/lights, parked cars and pedestrians as before.
-  const gridRadius = 1;
+  // Citta estesa a 5x5 blocchi (gridRadius = 2)
+  const gridRadius = 2;
   for (let i = -gridRadius; i <= gridRadius; i++) {
     for (let j = -gridRadius; j <= gridRadius; j++) {
       const blockX = i * gridSpacing + gridSpacing / 2;
@@ -279,10 +278,8 @@ export const CITY_LAYOUT: CityLayout = (() => {
 
       if (i === 0 && j === 0) continue;
 
-      // Plaza block coordinates must stay inside the (now smaller)
-      // [-gridRadius, gridRadius] range -- these two are picked to sit on
-      // opposite corners of the grid, same relative layout idea as before.
-      if ((i === -1 && j === 1) || (i === 1 && j === -1)) {
+      // Plaza block coordinates on opposite corners of the 5x5 grid
+      if ((i === -2 && j === 2) || (i === 2 && j === -2)) {
         pArr.push({ x: blockX, z: blockZ });
         continue;
       }
@@ -381,16 +378,26 @@ export function getBuildingDetails(index: number): BuildingDetails {
     const annexW = width * (0.35 + Math.random() * 0.15);
     const annexD = depth * (0.35 + Math.random() * 0.15);
     const annexH = height * (0.3 + Math.random() * 0.3);
-    const annexCorner = Math.floor(Math.random() * 4);
-    const asx = annexCorner % 2 === 0 ? 1 : -1;
-    const asz = annexCorner < 2 ? 1 : -1;
-    annex = {
-      w: annexW,
-      d: annexD,
-      h: annexH,
-      ox: asx * (width / 2 + annexW / 2 - 0.5),
-      oz: asz * (depth / 2 + annexD / 2 - 0.5),
-    };
+    const firstCorner = Math.floor(Math.random() * 4);
+    // l'annesso sporge dall'impronta del palazzo: prima non si guardava
+    // dove, e quasi sempre finiva su marciapiede e strada (un blocco in
+    // mezzo alla via per auto e passanti) o dentro un altro palazzo. Si
+    // prova ogni angolo; se nessuno sta libero, niente annesso.
+    for (let c = 0; c < 4 && !annex; c++) {
+      const annexCorner = (firstCorner + c) % 4;
+      const asx = annexCorner % 2 === 0 ? 1 : -1;
+      const asz = annexCorner < 2 ? 1 : -1;
+      const ox = asx * (width / 2 + annexW / 2 - 0.5);
+      const oz = asz * (depth / 2 + annexD / 2 - 0.5);
+      const ax = b.x + ox;
+      const az = b.z + oz;
+      if (footprintOverlapsRoad(ax, az, annexW, annexD)) continue;
+      const hitsOther = CITY_LAYOUT.buildings.some(
+        (o, j) =>
+          j !== index && Math.abs(o.x - ax) < (o.w + annexW) / 2 + BUILDING_GAP && Math.abs(o.z - az) < (o.d + annexD) / 2 + BUILDING_GAP
+      );
+      if (!hitsOther) annex = { w: annexW, d: annexD, h: annexH, ox, oz };
+    }
   }
 
   // Real per-floor windows, punched into the two long faces (+/-Z) and
@@ -903,7 +910,7 @@ const GreenCourtyard: React.FC<{ x: number; z: number; treeTemplates: TreeTempla
                 posto dell'altro grass"). Bounds match the 20x20 courtyard
                 plane above; counts scaled down proportionally from Park's
                 own 51x51 area. */}
-      <RealGrassPatch minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} instances={700} />
+      <RealGrassPatch minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} instances={700} baseY={y} />
       <Flowers minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} count={12} />
       {trees.map((t, i) => (
         <TreeInstance key={i} x={t.x} z={t.z} rotationY={t.rotationY} scale={t.scale} template={treeTemplates[t.templateIndex]} />
@@ -919,9 +926,13 @@ const GreenCourtyard: React.FC<{ x: number; z: number; treeTemplates: TreeTempla
 // tra le due distanze per non montare/smontare avanti e indietro sul
 // confine; al massimo un palazzo caricato per controllo (4 al secondo) per
 // spalmare il costo di creazione su piu' frame.
+// (la distanza si cambia dal pannello Debug > Citta': store.realBuildingDist;
+// questa e' quella di partenza)
 const BUILDING_LOAD_DIST = 55;
-const BUILDING_UNLOAD_DIST = 75;
+const BUILDING_UNLOAD_EXTRA = 20;
 const BUILDING_CHECK_S = 0.25;
+// per il pannello: quanti palazzi veri ci sono adesso
+export const realBuildingsInfo = { count: 0, total: 0 };
 
 const footprintDist = (b: CityBuildingRecord, px: number, pz: number) => {
   const dx = Math.max(0, Math.abs(px - b.x) - b.w / 2);
@@ -995,7 +1006,8 @@ const BuildingsStreamer: React.FC = () => {
     Math.min(footprintDist(b, px, pz), footprintDist(b, qx, qz));
   const [near, setNear] = useState<number[]>(() => {
     const pp = useStore.getState().playerPos;
-    return buildings.map((b, i) => (footprintDist(b, pp[0], pp[2]) < BUILDING_LOAD_DIST ? i : -1)).filter((i) => i >= 0);
+    const load = useStore.getState().realBuildingDist ?? BUILDING_LOAD_DIST;
+    return buildings.map((b, i) => (footprintDist(b, pp[0], pp[2]) < load ? i : -1)).filter((i) => i >= 0);
   });
   const nearRef = useRef(new Set(near));
   const acc = useRef(0);
@@ -1005,11 +1017,14 @@ const BuildingsStreamer: React.FC = () => {
     if (acc.current < BUILDING_CHECK_S) return;
     acc.current = 0;
     const cam = state.camera.position;
-    const pp = useStore.getState().playerPos;
+    const st = useStore.getState();
+    const pp = st.playerPos;
+    const loadDist = st.realBuildingDist ?? BUILDING_LOAD_DIST;
+    const unloadDist = loadDist + BUILDING_UNLOAD_EXTRA;
     const cur = nearRef.current;
     let changed = false;
     for (const i of [...cur]) {
-      if (nearest(pp[0], pp[2], cam.x, cam.z, buildings[i]) > BUILDING_UNLOAD_DIST) {
+      if (nearest(pp[0], pp[2], cam.x, cam.z, buildings[i]) > unloadDist) {
         cur.delete(i);
         changed = true;
       }
@@ -1025,7 +1040,7 @@ const BuildingsStreamer: React.FC = () => {
         changed = true;
         continue;
       }
-      if (d < BUILDING_LOAD_DIST && d < bestD) {
+      if (d < loadDist && d < bestD) {
         bestD = d;
         best = i;
       }
@@ -1035,6 +1050,8 @@ const BuildingsStreamer: React.FC = () => {
       changed = true;
     }
     if (changed) setNear([...cur].sort((a, b) => a - b));
+    realBuildingsInfo.count = cur.size;
+    realBuildingsInfo.total = buildings.length;
   });
 
   if (import.meta.env.DEV) (window as any).__buildingsNear = near;
@@ -1082,7 +1099,28 @@ const City: React.FC = () => {
       {courtyards.map((c, i) => (
         <GreenCourtyard key={`court-${i}`} x={c.x} z={c.z} treeTemplates={treeTemplates} />
       ))}
-      {plazas.map((p, i) => (
+      {/* "modifica un po' la citta'": la prima piazza e' il mercato, la
+          seconda il deposito dei Serpenti (StoryPlaces.tsx, la missione di
+          Missions/StoryMission.tsx) */}
+      <MarketPlaza />
+      {treeTemplates.length > 0 &&
+        [
+          [-17, -17],
+          [17, -17],
+          [-17, 17],
+          [17, 17],
+        ].map(([ox, oz], i) => (
+          <TreeInstance
+            key={`market-tree-${i}`}
+            x={MARKET.x + ox}
+            z={MARKET.z + oz}
+            rotationY={i * 1.7}
+            scale={0.24}
+            template={treeTemplates[i % treeTemplates.length]}
+          />
+        ))}
+      <WarehouseYard />
+      {plazas.slice(2).map((p, i) => (
         <React.Fragment key={`plaza-${i}`}>
           <group position={[p.x, getTerrainHeight(p.x, p.z), p.z]}>
             <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
@@ -1117,6 +1155,7 @@ const City: React.FC = () => {
             maxZ={p.z + 22}
             instances={3200}
             avoid={[{ x: p.x, z: p.z, radius: 4 }]}
+            baseY={getTerrainHeight(p.x, p.z)}
           />
           <Flowers minX={p.x - 22} maxX={p.x + 22} minZ={p.z - 22} maxZ={p.z + 22} count={45} avoid={[{ x: p.x, z: p.z, radius: 4 }]} />
           {/* Real trees, same deal as GreenCourtyard above -- placed in

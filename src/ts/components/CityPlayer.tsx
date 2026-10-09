@@ -20,7 +20,10 @@ import { POSE_LEN, capturePose, poseBoneList } from './multiplayer/mannequinPose
 import type { MannequinExt, NetHit, NetShot, Vec3 } from './multiplayer/netTypes';
 import { remoteDrivenCars, isRemoteDriven } from './multiplayer/remoteVehicles';
 import { remoteGunFx } from './multiplayer/remoteRegistry';
-import { cityOpponents, addCityOpponent, removeCityOpponent } from './city/cityActors';
+import { cityOpponents, cityOpponentsVersion, addCityOpponent, removeCityOpponent } from './city/cityActors';
+import { AIM_CHEST_Y, registerAimTargets } from '../lib/aimTargets';
+import { getTerrainHeight } from './Environment/Terrain';
+import { getRoadOffset } from './Environment/Road';
 
 // "sostituire il personaggio boxman in playground con il nostro manichino":
 // nel mondo aperto il giocatore e' lo stesso manichino del duello
@@ -36,6 +39,11 @@ export const CITY_PLAYER_ID = 'player';
 const SPAWN_X = 0;
 const SPAWN_Z = 0;
 const GLOBAL_SPEED = 1.0;
+// vita che si recupera da sola (GTA V): dopo REGEN_DELAY_S senza colpi,
+// REGEN_PER_S punti al secondo fino a REGEN_CAP della vita massima
+const REGEN_DELAY_S = 5;
+const REGEN_PER_S = 4;
+const REGEN_CAP = 0.5;
 
 const _wp = new THREE.Vector3();
 const _wq = new THREE.Quaternion();
@@ -150,10 +158,61 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
 
   // --- avversari remoti (proxy) ---------------------------------------------
   const proxiesRef = useRef(new Map<string, RemoteProxy>());
-  // lista stabile (stesso array, modificato sul posto): PlayerCombatSoldier
-  // la legge a ogni frame senza doversi ri-renderizzare. Condivisa con i
-  // manichini della citta' (passanti, nemici: city/cityActors.ts)
-  const opponents = cityOpponents;
+  const duelEnemies = useStore((s) => s.duelArenaEnemies);
+  const duelBagHurtbox = useStore((s) => s.duelBagHurtboxHandle);
+  const duelBagSolid = useStore((s) => s.duelBagSolidHandle);
+  const showCar = useStore((s) => s.arenaScene.car);
+
+  const [oppVersion, setOppVersion] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (oppVersion !== cityOpponentsVersion) {
+        setOppVersion(cityOpponentsVersion);
+      }
+    }, 100);
+    return () => clearInterval(interval);
+  }, [oppVersion]);
+
+  const opponents = useMemo(() => {
+    return [...cityOpponents, ...duelEnemies];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oppVersion, duelEnemies]);
+
+  // bersagli per l'aggancio della mira col pad (lib/aimTargets.ts): nemici,
+  // passanti col corpo vero, avversari del duello
+  const opponentsRef = useRef(opponents);
+  opponentsRef.current = opponents;
+  useEffect(
+    () =>
+      registerAimTargets((out) => {
+        for (const o of opponentsRef.current) {
+          if (o.isDead || o === data) continue;
+          const p = o.position;
+          out.push({ id: o.id, x: p.x, y: getTerrainHeight(p.x, p.z) + getRoadOffset(p.x, p.z) + Math.max(0, p.y) + AIM_CHEST_Y, z: p.z });
+        }
+      }),
+    [data]
+  );
+
+  useEffect(() => {
+    const st = useStore.getState();
+    st.setDuelArenaPlayer(data);
+    return () => {
+      useStore.getState().setDuelArenaPlayer(null);
+    };
+  }, [data]);
+
+  // veicoli guidabili: auto della citta', elicottero ed eventuali auto d'arena (store), non guidati da altri
+  const cityCarIds = useMemo(
+    () => () => {
+      const out: string[] = [];
+      if (showCar) out.push('duel-car');
+      for (const [id, e] of useStore.getState().entities)
+        if ((e.type === 'car' || e.type === 'helicopter') && !isRemoteDriven(id)) out.push(id);
+      return out;
+    },
+    [showCar]
+  );
 
   // --- rete -------------------------------------------------------------------
   const netRef = useRef<{ group: THREE.Object3D | null; bones: (THREE.Object3D | null)[]; buf: Int16Array; drone: THREE.Object3D | null }>({
@@ -301,8 +360,31 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
 
   // --- ogni frame ------------------------------------------------------------
   const lastHpRef = useRef(data.hp);
-  useFrame(() => {
+  const regenRef = useRef({ lastHp: data.hp, quiet: 0, acc: 0 });
+  useFrame((_state, delta) => {
     const st = useStore.getState();
+    // "la vita si recupera se ferito come in GTA" (GTA V): dopo qualche
+    // secondo senza colpi risale piano, ma solo fino a meta'; il resto lo
+    // ridanno le cure (la frutta di Salvo, i collezionabili)
+    {
+      const rg = regenRef.current;
+      const hp = Math.min(data.hp, st.health);
+      if (hp < rg.lastHp || data.isDead) {
+        rg.quiet = 0;
+        rg.acc = 0;
+      } else rg.quiet += delta;
+      const cap = maxHp.current * REGEN_CAP;
+      if (!data.isDead && hp > 0 && hp < cap && rg.quiet > REGEN_DELAY_S && !st.isPaused) {
+        rg.acc += REGEN_PER_S * delta;
+        if (rg.acc >= 1) {
+          const add = Math.floor(rg.acc);
+          rg.acc -= add;
+          // a punti interi: la barra della vita non si ridisegna a ogni frame
+          st.setHealth(Math.min(cap, Math.round(hp) + add));
+        }
+      }
+      rg.lastHp = Math.min(data.hp, useStore.getState().health);
+    }
     // vita <-> barra della vita: danni/cure da altre parti del gioco
     // (store.takeDamage, collezionabili) arrivano al manichino e viceversa
     if (st.health !== lastHpRef.current) {
@@ -373,16 +455,6 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
     };
   }, [data, opponents, rapierCtx]);
 
-  // auto guidabili: quelle della citta' (store) non guidate da altri
-  const cityCarIds = useMemo(
-    () => () => {
-      const out: string[] = [];
-      for (const [id, e] of useStore.getState().entities) if (e.type === 'car' && !isRemoteDriven(id)) out.push(id);
-      return out;
-    },
-    []
-  );
-
   return (
     <>
       <PlayerCombatSoldier
@@ -393,6 +465,8 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
         vehicleIds={cityCarIds}
         footControllable="player"
         droneId={DRONE_ID}
+        bagHurtboxHandle={duelBagHurtbox}
+        bagSolidHandle={duelBagSolid}
         publishPlayerInfo
       />
       <WeaponEffects />

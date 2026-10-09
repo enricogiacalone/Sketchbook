@@ -21,15 +21,16 @@ interface PedestrianProps {
   z2: number;
   speed?: number;
   phase?: number;
+  color?: string;
   onBecomeEnemy: (id: string, position: [number, number, number], hp?: number) => void;
 }
 
 // colori "civili" (tinta emissiva sul manichino)
 const CIVILIAN_COLORS = ['#8d6e63', '#607d8b', '#9e9d24', '#6d4c41', '#78909c', '#a1887f', '#5d4037', '#827717', '#455a64'];
-const WALK_CLIPS = ['Walk', 'Walk_Formal', 'Walk_Female'];
+const WALK_CLIPS = ['Walk'];
 const IDLE_CLIPS = ['Idle_A', 'Idle_TalkingPhone', 'Idle_FoldArms', 'Idle_Talking', 'Idle_Subtle'];
 // la velocita' "a terra" delle camminate (m/s, per non far scivolare i piedi)
-const WALK_BASE_SPEED: Record<string, number> = { Walk: 0.73, Walk_Formal: 0.8, Walk_Female: 0.75 };
+const WALK_BASE_SPEED: Record<string, number> = { Walk: 0.73 };
 // tempo a terra da morto prima di tornare a camminare
 const CORPSE_S = 30;
 // vicinanza che lo fa arrabbiare (a piedi; in auto conta l'investimento)
@@ -41,13 +42,13 @@ const hash = (s: string) => {
   return Math.abs(h);
 };
 
-const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2, phase = 0, onBecomeEnemy }) => {
+const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2, phase = 0, color: customColor, onBecomeEnemy }) => {
   const h = hash(id);
-  const color = CIVILIAN_COLORS[h % CIVILIAN_COLORS.length];
+  const color = customColor ?? CIVILIAN_COLORS[h % CIVILIAN_COLORS.length];
   const walkClip = WALK_CLIPS[h % WALK_CLIPS.length];
   const idleClip = IDLE_CLIPS[(h >> 3) % IDLE_CLIPS.length];
   // passo naturale: le camminate del rig sono lente, non accelerarle troppo
-  const walkSpeed = Math.min(1.35, speed * 0.85);
+  const walkSpeed = Math.min(1.05, speed * 0.85);
 
   const start = useMemo(() => new THREE.Vector3(x1, 0, z1), [x1, z1]);
   const end = useMemo(() => new THREE.Vector3(x2, 0, z2), [x2, z2]);
@@ -62,6 +63,7 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
     hp: 60,
     x: p0.x,
     z: p0.z,
+    enableActiveRagdoll: false,
   });
   const { data } = actor;
 
@@ -86,6 +88,12 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
       } else return;
     }
 
+    if (res === 'down') {
+      // KO: a terra e poi si rialza (poi 'hurt': si arrabbia)
+      actor.holdRoot(g);
+      return;
+    }
+
     if (res === 'hurt' && !becameEnemy.current) {
       becameEnemy.current = true;
       onBecomeEnemy(id, [data.position.x, g.position.y, data.position.z], (data.hp / actor.maxHp()) * 100);
@@ -100,13 +108,14 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
       if (t.current >= 1) {
         t.current = 1;
         dir.current = -1;
-        pauseTimer.current = 1.5 + Math.random() * 2.5;
+        pauseTimer.current = 0.2 + Math.random() * 0.5;
       } else if (t.current <= 0) {
         t.current = 0;
         dir.current = 1;
-        pauseTimer.current = 1.5 + Math.random() * 2.5;
+        pauseTimer.current = 0.2 + Math.random() * 0.5;
       }
-      actor.play(walkClip, 0.3, true, walkSpeed / (WALK_BASE_SPEED[walkClip] ?? 0.75));
+      const clip = actor.hasClip(walkClip) ? walkClip : 'Walk';
+      actor.play(clip, 0.3, true, walkSpeed / (WALK_BASE_SPEED[clip] ?? 0.73));
     }
 
     const pos = scratch.current.lerpVectors(start, end, t.current);
