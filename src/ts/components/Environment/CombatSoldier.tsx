@@ -742,12 +742,6 @@ const CombatSoldier: React.FC<CombatSoldierProps> = ({
     <>
       <group ref={groupRef} onPointerOver={() => setHovered(true)} onPointerOut={() => setHovered(false)}>
         <primitive object={clone} scale={1} rotation={[0, Math.PI, 0]} />
-        {!data.isDead && (
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
-            <ringGeometry args={[0.35, 0.45, 24]} />
-            <meshBasicMaterial color={TEAM_COLOR[data.team] ?? '#f59e0b'} />
-          </mesh>
-        )}
         {hovered && (
           <Html position={[0, 2.3, 0]} center distanceFactor={10}>
             <div

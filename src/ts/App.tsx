@@ -17,6 +17,7 @@ import SunLight from './components/Environment/SunLight';
 import ToonStyle from './components/Environment/ToonStyle';
 import WorldFog from './components/Environment/WorldFog';
 import ThirdPersonCamera from './components/ThirdPersonCamera';
+import PhysicsBridge from './components/PhysicsBridge';
 import ChatInput from './components/UI/ChatInput';
 import CollectiblesCounter from './components/UI/CollectiblesCounter';
 import CameraCalibrationGUI from './components/UI/CameraCalibrationGUI';
@@ -234,6 +235,12 @@ const App: React.FC = () => {
               numSolverIterations={15}
               // Matches cannon's old `stepSize` (fixed physics tick rate).
               timeStep={1 / 120}
+              // "fai la 4" (prestazioni): con l'interpolazione @react-three/rapier
+              // copia posizione e rotazione di TUTTI i corpi (330+, ~17 per
+              // ragdoll attiva) prima di ogni passo, 2-5 passi a frame. A 120
+              // passi al secondo l'errore senza interpolazione e' al massimo
+              // 1/120 s di movimento: non si vede, e si risparmia CPU.
+              interpolate={false}
               // NOTE: @react-three/rapier internally clamps the frame delta to 0.5s 
               // (max 60 steps at 120Hz) to prevent "spiral of death".
               // Stops the physics world from stepping at all -- see
@@ -266,6 +273,7 @@ const App: React.FC = () => {
                       Player.tsx spawns/despawns on the fly toggle
                       anymore. */}
               <Drone />
+              <PhysicsBridge />
             </Physics>
 
             <ThirdPersonCamera />

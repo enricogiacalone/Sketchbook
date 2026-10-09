@@ -8,14 +8,15 @@ import { useShallow } from 'zustand/react/shallow';
 import { useInput } from './useInput';
 import { droneMouseDelta, droneShake, droneCamPose } from '../lib/droneFlight';
 import { aimLock, collectAimTargets, type AimTarget } from '../lib/aimTargets';
+import { physicsBridge } from '../lib/physicsBridge';
+import type { Ray } from '@dimforge/rapier3d-compat';
 
-const DUEL_CAR_CAM_RADIUS = 5;
 const HELI_CAM_RADIUS = 8;
 const MIN_RADIUS = 0.4;
 const MAX_RADIUS = 10;
 const FOCUS_Y_OFFSET = 0.4;
 const _focusTarget = new THREE.Vector3();
-const DUEL_START_RADIUS = 1.5;
+const DUEL_START_RADIUS = 1.8;
 const DUEL_START_PHI = 10; // degrees
 
 const SHOULDER_OFFSET_HIP = 0.45;
@@ -44,7 +45,8 @@ const _aimDir = new THREE.Vector3();
 const CAMERA_STICK_YAW_SPEED = 140;
 const CAMERA_STICK_PITCH_SPEED = 110;
 
-const ZOOM_LEVELS = [0.85, 2.5, 5, 10];
+// (il primo livello e' la distanza di partenza a piedi, store.cameraPlayerRadius)
+const ZOOM_LEVELS = [1.4, 2.5, 5, 10];
 
 const _droneShakeOffset = new THREE.Vector3();
 const DRONE_SHAKE_DECAY = 0.85;
@@ -52,6 +54,7 @@ const DRONE_SHAKE_DECAY = 0.85;
 const _carCamQ = new THREE.Quaternion();
 const _carCamF = new THREE.Vector3();
 const _raycaster = new THREE.Raycaster();
+let _camRay: Ray | null = null;
 const _rayDir = new THREE.Vector3();
 const _idealCamPos = new THREE.Vector3();
 const _prevVehiclePos = new THREE.Vector3();
@@ -327,7 +330,9 @@ export const useThirdPersonCamera = () => {
         _carCamF.set(0, 0, 1).applyQuaternion(_carCamQ);
         theta.current = THREE.MathUtils.radToDeg(Math.atan2(_carCamF.x, _carCamF.z) + Math.PI);
         phi.current = 15;
-        const r = currentControllable === 'helicopter' ? HELI_CAM_RADIUS : DUEL_CAR_CAM_RADIUS;
+        // (in auto parte gia' alla sua distanza: prima partiva da 5 m e si
+        // avvicinava a quella di guida, un'avanti-indietro inutile)
+        const r = currentControllable === 'helicopter' ? HELI_CAM_RADIUS : cameraVehicleRadius;
         targetRadius.current = r;
         radius.current = r;
         _prevVehiclePos.copy(targetObj.position);
@@ -453,7 +458,35 @@ export const useThirdPersonCamera = () => {
     const distToIdeal = _rayDir.length();
     let hitDist = distToIdeal;
 
-    if (distToIdeal > 0.001) {
+    const pb = physicsBridge;
+    if (distToIdeal > 0.001 && pb.world && pb.rapier) {
+      // "fai la 4" (prestazioni): il raggio contro le mesh costava ~10 ms a
+      // frame in citta' (misurato: 356 candidati, quasi tutti instanced che
+      // coprono la citta' intera e mesh grandi senza BVH -- un terzo del
+      // frame). Ora un raggio della fisica contro i soli collider fissi
+      // (palazzi, terreno, oggetti fermi): microsecondi, e la telecamera si
+      // ferma sulla forma di collisione, come in GTA. Niente personaggi ne'
+      // veicoli (dinamici/cinematici): non c'e' niente da escludere a mano.
+      _rayDir.normalize();
+      const R = pb.rapier;
+      _camRay ??= new R.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
+      _camRay.origin = { x: target.current.x, y: target.current.y, z: target.current.z };
+      _camRay.dir = { x: _rayDir.x, y: _rayDir.y, z: _rayDir.z };
+      let best = Infinity;
+      pb.world.intersectionsWithRay(
+        _camRay,
+        distToIdeal,
+        true,
+        (h) => {
+          const t = h.timeOfImpact;
+          if (t > 0.2 && t < best) best = t;
+          return true;
+        },
+        R.QueryFilterFlags.EXCLUDE_DYNAMIC | R.QueryFilterFlags.EXCLUDE_KINEMATIC | R.QueryFilterFlags.EXCLUDE_SENSORS
+      );
+      if (best < Infinity) hitDist = Math.max(0.4, best - 0.2);
+    } else if (distToIdeal > 0.001) {
+      // (senza mondo fisico: il vecchio raggio contro le mesh)
       _rayDir.normalize();
       _raycaster.set(target.current, _rayDir);
       _raycaster.near = 0;

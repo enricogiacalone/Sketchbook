@@ -604,8 +604,10 @@ export const useStore = create<GameState>((set) => ({
   setMeteoriteFrequency: (meteoriteFrequency) => set({ meteoriteFrequency }),
   explosionRadius: 15,
   explosionIntensity: 1.0,
-  cameraPlayerRadius: 0.85,
-  cameraVehicleRadius: 2.6,
+  // "sistema lo zoom iniziale a piedi e in macchina, zoom out un po'"
+  // (prima 0.85 e 2.6)
+  cameraPlayerRadius: 1.4,
+  cameraVehicleRadius: 3.6,
   cameraFootTargetY: 1.3,
   cameraVehicleTargetY: 0.5,
   duelArenaPlayer: null,

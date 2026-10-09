@@ -105,6 +105,8 @@ const Crowd: React.FC = () => {
     if (import.meta.env.DEV) {
       // per i test (spostare un'auto sul marciapiede, ...)
       (window as any).__crowdWorld = world;
+      // stress test dei corpi veri (debug/stressBodies.ts): window.__stress.run()
+      void import('../../debug/stressBodies').then((m) => m.setStressWorld(world));
       // quanti passanti (vicini) stanno dentro a un muro o a un palo adesso
       (window as any).__crowdInsideStatics = () =>
         crowdAgents.filter((a) => !a.gone && a.dist < 60 && insideStatics(a.x, a.z, 0.2)).map((a) => a.id);

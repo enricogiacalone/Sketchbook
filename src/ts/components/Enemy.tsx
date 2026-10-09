@@ -1,11 +1,14 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { useStore } from '../store';
 import SpeechBubble from './UI/SpeechBubble';
 import { getTerrainHeight } from './Environment/Terrain';
 import { getRoadOffset } from './Environment/Road';
-import Bullet from './Bullet';
+import { castShot } from './Environment/weapons/hitscan';
+import { emitShotFx, type ShotSurface } from './Environment/weapons/weaponFx';
+import { damageFighter, getShootableCollider } from './Environment/weapons/shootableRegistry';
 import EnemyHealthBar from './Environment/EnemyHealthBar';
 import { useMannequinActor } from './city/useMannequinActor';
 import { usePistolModel } from './Environment/weapons/usePistolModel';
@@ -15,7 +18,7 @@ import { RUN_CLIP, timeScaleFor } from './Environment/locomotion';
 // manichino.. basta boxman": lo stesso manichino del giocatore
 // (useMannequinActor: capsule per segmento, colpi veri, ragdoll alla
 // morte), con la pistola in mano. Ti insegue di corsa, a tiro si ferma,
-// mira e spara (proiettili fisici, Bullet.tsx, al petto); se per un po' non
+// mira e spara al petto; se per un po' non
 // riesce a starti vicino rinuncia e torna un passante (onGiveUp).
 
 interface EnemyProps {
@@ -36,8 +39,16 @@ const RUN_SPEED = 3.8; // m/s
 const FIRE_RANGE = 12; // oltre torna a inseguire
 const STOP_RANGE = 8; // entro si ferma a sparare
 const FIRE_COOLDOWN_S = 1.1;
-const BULLET_SPEED = 50;
 const SPREAD_RAD = 0.06;
+// "i nemici devono sparare proiettili come me nn palline gialle": colpo
+// istantaneo lungo un raggio (hitscan.ts, come il giocatore) con gli stessi
+// effetti (WeaponEffects.tsx: tracciante, lampo, scintille, fori); danno al
+// giocatore per segmento (la testa fa piu' male), come prima
+const SHOT_RANGE = 60;
+const SHOT_DAMAGE: Record<string, number> = { Head: 35, Torso: 15, Hips: 12 };
+const SHOT_DAMAGE_LIMB = 8;
+const SHOT_HIT_SPEED = 2.5;
+const SHOT_WORLD_IMPULSE = 0.6;
 const GIVE_UP_TIME = 15;
 const CORPSE_S = 25;
 // altezza del petto del giocatore (manichino) sopra i piedi: dove si mira.
@@ -68,10 +79,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
   const pistol = usePistolModel(actor.modelRootRef);
 
   const groupRef = useRef<THREE.Group>(null);
-  const [bullets, setBullets] = useState<{ id: string; pos: [number, number, number]; vel: [number, number, number] }[]>([]);
-  const removeBullet = useCallback((bulletId: string) => {
-    setBullets((prev) => prev.filter((b) => b.id !== bulletId));
-  }, []);
+  const { world, rapier } = useRapier();
   const [message, setMessage] = useState('');
   const [gone, setGone] = useState(false);
 
@@ -84,7 +92,6 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
     deadHandled: false,
     corpseDone: false,
     entityT: 0,
-    serial: 0,
   });
 
   useEffect(() => {
@@ -168,13 +175,36 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
         _aim.addScaledVector(_perp, (Math.random() * 2 - 1) * SPREAD_RAD);
         _aim.y += (Math.random() * 2 - 1) * SPREAD_RAD;
         _aim.normalize();
-        // parte oltre la propria mano (le proprie capsule fermerebbero il colpo)
-        const o = _muzzle.clone().addScaledVector(_aim, 0.3);
-        const bid = `enemy-bullet-${id}-${s.serial++}`;
-        setBullets((prev) => [
-          ...prev,
-          { id: bid, pos: [o.x, o.y, o.z], vel: [_aim.x * BULLET_SPEED, _aim.y * BULLET_SPEED, _aim.z * BULLET_SPEED] },
-        ]);
+        // (i propri collider non contano: castShot esclude chi spara)
+        const hit = castShot(world, rapier, _muzzle, _aim, SHOT_RANGE, id);
+        let surface: ShotSurface = 'none';
+        let decal = false;
+        if (hit.hit && hit.collider) {
+          const info = getShootableCollider(hit.collider.handle);
+          if (info) {
+            surface = 'body';
+            damageFighter(info.ownerId, {
+              segment: info.segment,
+              damage: SHOT_DAMAGE[info.segment] ?? SHOT_DAMAGE_LIMB,
+              dirWorld: _aim,
+              speed: SHOT_HIT_SPEED,
+              pointWorld: hit.point,
+            });
+          } else {
+            surface = 'world';
+            const body = hit.collider.parent();
+            if (body && body.isDynamic()) {
+              body.applyImpulseAtPoint(
+                { x: _aim.x * SHOT_WORLD_IMPULSE, y: _aim.y * SHOT_WORLD_IMPULSE, z: _aim.z * SHOT_WORLD_IMPULSE },
+                { x: hit.point.x, y: hit.point.y, z: hit.point.z },
+                true
+              );
+            } else decal = true;
+          }
+        }
+        // remote=true: e' un effetto da disegnare e basta, non uno sparo del
+        // giocatore da mandare agli altri in rete
+        emitShotFx({ from: _muzzle, to: hit.point, normal: hit.normal, surface, decal }, true);
         pistol.kick();
         pistol.playShot();
         if (actor.hasClip('Pistol_Shoot')) {
@@ -232,9 +262,6 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
         <SpeechBubble message={message} position={[0, 2.4, 0]} />
       </group>
       <EnemyHealthBar data={data} maxHp={MAX_HP} />
-      {bullets.map((b) => (
-        <Bullet key={b.id} id={b.id} position={b.pos} velocity={b.vel} owner="enemy" onKill={removeBullet} />
-      ))}
     </>
   );
 };

@@ -190,6 +190,10 @@ export const useInput = () => {
     const handleMouseDown = (e: MouseEvent) => {
         // ispettore NPC acceso (UI/NpcInspector.tsx): il clic sceglie, non colpisce
         if (useStore.getState().npcInspector) return;
+        // "quando clicco sull'hud nn deve contarlo come quando clicco sullo
+        // schermo della scena": conta solo il clic sulla scena (il canvas, o
+        // col mouse catturato), non quello sul pannello Debug o sui bottoni
+        if (!document.pointerLockElement && !(e.target instanceof HTMLCanvasElement)) return;
         const action = e.button === 0 ? 'primary' : (e.button === 2 ? 'secondary' : null);
         if (action) {
             keyboardActions.current[action] = true;

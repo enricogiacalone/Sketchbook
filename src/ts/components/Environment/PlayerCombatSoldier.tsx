@@ -2724,12 +2724,6 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     <>
       <group ref={groupRef} name={entityName}>
         <primitive object={clone} scale={1} rotation={[0, Math.PI, 0]} />
-        {!data.isDead && (
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
-            <ringGeometry args={[0.35, 0.45, 24]} />
-            <meshBasicMaterial color={PLAYER_COLOR} />
-          </mesh>
-        )}
       </group>
       {/* "fai riferimenti visivi per ragdoll e fisica dei solidi" -- world-
           space wireframes of the 11 real solid colliders above, NOT nested

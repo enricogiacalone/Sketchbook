@@ -25,7 +25,9 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
   // just no longer something you have to type from scratch every single
   // time you reload to test.
   const [name, setName] = useState('Enrico');
-  const [controlMethod, setControlMethod] = useState('keyboard');
+  // "togli la scelta tastiera o gamepad": tastiera, mouse e joystick
+  // funzionano sempre insieme (useInput.ts), la scelta non cambiava niente
+  const controlMethod = 'auto';
   const toonStyle = useStore((st) => st.toonStyle);
   const setToonStyle = useStore((st) => st.setToonStyle);
   const dayCycle = useStore((st) => st.dayCycle);
@@ -96,26 +98,6 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
               maxLength={15}
             />
             {error && <span className="welcome-error-msg">{error}</span>}
-          </div>
-
-          <div className="welcome-form-group">
-            <label className="welcome-label">Control Mode</label>
-            <div className="welcome-options">
-              <div
-                className={`welcome-option-card ${controlMethod === 'keyboard' ? 'active' : ''}`}
-                onClick={() => setControlMethod('keyboard')}
-              >
-                <span className="welcome-option-icon">⌨️</span>
-                <span className="welcome-option-title">Keyboard & Mouse</span>
-              </div>
-              <div
-                className={`welcome-option-card ${controlMethod === 'gamepad' ? 'active' : ''}`}
-                onClick={() => setControlMethod('gamepad')}
-              >
-                <span className="welcome-option-icon">🎮</span>
-                <span className="welcome-option-title">Gamepad</span>
-              </div>
-            </div>
           </div>
 
           <div className="welcome-form-group">
