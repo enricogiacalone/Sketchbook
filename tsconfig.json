@@ -1,11 +1,39 @@
 {
   "include": ["src/ts/**/*"],
+  "exclude": [
+    "node_modules",
+    "src/ts/sketchbook.ts",
+    "src/ts/core/**/*",
+    "src/ts/characters/**/*",
+    "src/ts/debug/**/*",
+    "src/ts/game/**/*",
+    "src/ts/interfaces/**/*",
+    "src/ts/network/**/*",
+    "src/ts/physics/**/*",
+    "src/ts/ui/**/*",
+    "src/ts/vehicles/**/*",
+    "src/ts/world/**/*"
+  ],
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "es2020",
     "target": "es6",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "allowJs": true,
     "declaration": true,
     "declarationDir": "build/types",
-    "baseUrl": "."
+    "rootDir": "src/ts",
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "types": ["three"],
+    "typeRoots": ["./node_modules/@types", "./src/ts/types"],
+    "lib": ["es2019", "dom", "dom.iterable"],
+    "skipLibCheck": true,
+    "paths": {
+      "~/*": ["./src/ts/*"],
+      "$lib/*": ["./src/lib/*"],
+      "three/examples/jsm/*": ["./node_modules/three/examples/jsm/*"]
+    }
   }
 }

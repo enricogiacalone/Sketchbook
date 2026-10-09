@@ -1,33 +1,51 @@
-/* Welcome screen */
+/* Loading screen */
 
 #loading-screen {
-  position: absolute;
+  position: fixed;
   top: 0;
-  z-index: 0;
+  left: 0;
+  z-index: 999998;
   display: flex;
   justify-content: center;
   align-items: center;
   flex-direction: column;
   text-align: center;
-  height: 100%;
-  width: 100%;
+  height: 100vh;
+  width: 100vw;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #ffffff;
+  overflow: hidden;
 }
 
 #loader {
   display: flex;
-  -webkit-box-align: center;
   align-items: center;
-  -webkit-box-pack: center;
   justify-content: center;
+  margin-bottom: 24px;
 }
 
 #main-title {
-  margin-bottom: 0;
+  margin-bottom: 8px;
+  font-size: 32px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #a5b4fc 0%, #6366f1 50%, #ec4899 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: pulse-title 2s infinite ease-in-out;
+}
+
+@keyframes pulse-title {
+  0%, 100% { opacity: 0.85; transform: scale(0.98); }
+  50% { opacity: 1; transform: scale(1.02); }
 }
 
 #loading-text {
-  font-size: larger;
-  margin-top: 10px;
+  font-size: 14px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #94a3b8;
+  font-weight: 600;
+  margin-top: 16px;
 }
 
 #loading-screen-background {
@@ -35,7 +53,5 @@
   position: absolute;
   height: 100%;
   width: 100%;
-  background: -webkit-linear-gradient(top, #568db5 0%, #ccdde8 100%);
-  background: -linear-gradient(top, #568db5 0%, #ccdde8 100%);
-  background: -moz-linear-gradient(top, #568db5 0%, #ccdde8 100%);
+  background: radial-gradient(circle at center, #0c0c1e 0%, #030308 100%);
 }

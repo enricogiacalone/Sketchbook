@@ -1,0 +1,19 @@
+package main
+
+// Copied from NVIDIA Kimodo's Apache-2.0 skeleton definitions. Offsets are
+// the parent-local differences extracted from the official neutral-joint
+// assets in the trusted reference container.
+func init() {
+	skeletonDefinitions["soma30"] = skeletonDefinition{
+		key:     "soma30",
+		names:   []string{"Hips", "Spine1", "Spine2", "Chest", "Neck1", "Neck2", "Head", "Jaw", "LeftEye", "RightEye", "LeftShoulder", "LeftArm", "LeftForeArm", "LeftHand", "LeftHandThumbEnd", "LeftHandMiddleEnd", "RightShoulder", "RightArm", "RightForeArm", "RightHand", "RightHandThumbEnd", "RightHandMiddleEnd", "LeftLeg", "LeftShin", "LeftFoot", "LeftToeBase", "RightLeg", "RightShin", "RightFoot", "RightToeBase"},
+		parents: []int{-1, 0, 1, 2, 3, 4, 5, 6, 6, 6, 3, 10, 11, 12, 13, 13, 3, 16, 17, 18, 19, 19, 0, 22, 23, 24, 0, 26, 27, 28},
+		offsets: [][3]float32{{0, 0, 0}, {-.00013727, .0500376256, -.00053726669}, {-1.86574103e-9, .0712530139, -.000298248546}, {-5.75188398e-9, .0755006305, -.00815970992}, {-.00181676517, .263112953, -.00553348292}, {-2.85102231e-8, .0770939664, .0230258546}, {-4.5975437e-8, .0612891595, .0195370861}, {2.63687901e-5, .0047559225, .0309494062}, {.0320638079, .0538020513, .0758688308}, {-.0322244017, .05361869, .0755823359}, {.0162165175, .232371641, .0511341324}, {.149198457, 2.19397873e-8, -.0550232576}, {.287393078, 2.50268389e-9, -2.58787737e-5}, {.270939812, -7.06625108e-9, 2.60897248e-5}, {.122686267, -.0322017573, .0483306876}, {.190119595, -.00312878387, -.000339570373}, {-.0138011824, .231803086, .0521415786}, {-.150371962, 1.17387901e-7, -.0554560437}, {-.287366393, 1.87628082e-8, -2.59709359e-5}, {-.271336198, -1.16767401e-9, 2.61269368e-5}, {-.122642483, -.0321145448, .0480403904}, {-.190005945, -.00306615542, -.0003157343}, {.10043214, -.0843452671, .0259565473}, {-1e-8, -.432217537, -.00802912805}, {1e-8, -.421550959, -.0348152298}, {0, -.0505947206, .132315294}, {-.10047278, -.0829525995, .0262031695}, {1e-8, -.433622059, -.00805555828}, {2e-8, -.421173943, -.0347839785}, {-3.42907669e-9, -.0507960932, .132841956}},
+	}
+	skeletonDefinitions["g1skel34"] = skeletonDefinition{
+		key:     "g1skel34",
+		names:   []string{"pelvis_skel", "left_hip_pitch_skel", "left_hip_roll_skel", "left_hip_yaw_skel", "left_knee_skel", "left_ankle_pitch_skel", "left_ankle_roll_skel", "left_toe_base", "right_hip_pitch_skel", "right_hip_roll_skel", "right_hip_yaw_skel", "right_knee_skel", "right_ankle_pitch_skel", "right_ankle_roll_skel", "right_toe_base", "waist_yaw_skel", "waist_roll_skel", "waist_pitch_skel", "left_shoulder_pitch_skel", "left_shoulder_roll_skel", "left_shoulder_yaw_skel", "left_elbow_skel", "left_wrist_roll_skel", "left_wrist_pitch_skel", "left_wrist_yaw_skel", "left_hand_roll_skel", "right_shoulder_pitch_skel", "right_shoulder_roll_skel", "right_shoulder_yaw_skel", "right_elbow_skel", "right_wrist_roll_skel", "right_wrist_pitch_skel", "right_wrist_yaw_skel", "right_hand_roll_skel"},
+		parents: []int{-1, 0, 1, 2, 3, 4, 5, 6, 0, 8, 9, 10, 11, 12, 13, 0, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 17, 26, 27, 28, 29, 30, 31, 32},
+		offsets: [][3]float32{{0, 0, 0}, {.064452, -.1027, 0}, {.052, -.030465, 0}, {0, -.12412, .025001}, {.0021489, -.17734, -.078273}, {-.000094445, -.30001, 0}, {0, -.017558, 0}, {0, -.035, .14}, {-.064452, -.1027, 0}, {-.052, -.030465, 0}, {0, -.12412, .025001}, {-.0021489, -.17734, -.078273}, {.000094445, -.30001, 0}, {0, -.017558, 0}, {0, -.035, .14}, {0, 0, 0}, {0, .044, -.0039635}, {0, 0, 0}, {.10022, .24778, .0039563}, {.038, -.013831, 0}, {.00624, -.1032, 0}, {0, -.080518, .015783}, {.00188791, -.01, .1}, {0, 0, .038}, {0, 0, .046}, {0, 0, .1}, {-.10021, .24778, .0039563}, {-.038, -.013831, 0}, {-.00624, -.1032, 0}, {0, -.080518, .015783}, {-.00188791, -.01, .1}, {0, 0, .038}, {0, 0, .046}, {0, 0, .1}},
+	}
+}

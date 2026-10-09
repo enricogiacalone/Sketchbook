@@ -1,7 +1,52 @@
 @import "modules/base.css";
 @import "modules/githubCorner.css";
 @import "modules/leftPanel.css";
-@import "modules/dat.gui.css";
 @import "modules/loadingScreen.css";
 @import "modules/cubeLoader.css";
 @import "modules/welcomeScreen.css";
+@import "modules/minimap.css";
+@import "modules/chatInput.css";
+
+/* Crosshair */
+#crosshair {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin-top: -10px; /* Half of height */
+  margin-left: -10px; /* Half of width */
+  border: 2px solid white;
+  border-radius: 50%;
+  box-sizing: border-box;
+  pointer-events: none; /* Allow clicks to pass through */
+  z-index: 1000; /* Ensure it's on top */
+  display: none; /* Hidden by default, UIManager will show it */
+}
+
+#game-state-controls {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 1001;
+  background-color: rgba(0, 0, 0, 0.7);
+  padding: 10px;
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+}
+
+#game-state-controls button {
+  background-color: #4caf50; /* Green */
+  color: white;
+  padding: 10px 15px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.3s ease;
+}
+
+#game-state-controls button:hover {
+  background-color: #45a049;
+}
