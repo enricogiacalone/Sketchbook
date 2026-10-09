@@ -18,6 +18,8 @@ import ToonStyle from './components/Environment/ToonStyle';
 import WorldFog from './components/Environment/WorldFog';
 import ThirdPersonCamera from './components/ThirdPersonCamera';
 import PhysicsBridge from './components/PhysicsBridge';
+import SaveGameManager from './components/SaveGameManager';
+import { loadGame } from './lib/saveGame';
 import StoryHUD from './components/UI/StoryHUD';
 import DialogueBox from './components/UI/DialogueBox';
 import ChatInput from './components/UI/ChatInput';
@@ -43,6 +45,7 @@ import WelcomeScreen from './components/UI/WelcomeScreen';
 import { useStore } from './store';
 import Ocean from './components/Environment/Ocean';
 import Minimap from './components/UI/Minimap';
+import PauseMap from './components/UI/PauseMap';
 import GameFreeze from './components/GameFreeze';
 const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 
@@ -89,6 +92,16 @@ const App: React.FC = () => {
       setLabMode(true);
       return;
     }
+    // l'audio si sblocca solo dentro il clic (prima dell'attesa qui sotto)
+    (THREE.AudioContext.getContext() as unknown as globalThis.AudioContext).resume().catch(() => {});
+    // salvataggio (soldi, missioni, dove ero, lib/saveGame.ts): prima di
+    // entrare, cosi' il personaggio nasce dove si era rimasti
+    void loadGame(name)
+      .catch(() => null)
+      .then(() => enterGame(name, controlMethod, mode));
+  };
+
+  const enterGame = (name: string, controlMethod: string, mode: 'world' | 'duel' | 'flylab') => {
     setUserName(name);
     setIsJoined(true);
     useStore.getState().setGameJoined(true);
@@ -295,6 +308,7 @@ const App: React.FC = () => {
       <RagdollBenchGUI />
       <WeaponHUD />
       <StoryHUD />
+      <SaveGameManager />
       <DialogueBox />
       <RagdollBenchOverlay />
 
@@ -309,8 +323,9 @@ const App: React.FC = () => {
         </>
       )}
 
-      {/* Dev helper to track loading progress */}
-      {isPaused && (
+      {/* pausa in citta': la mappa alla GTA (waypoint e GPS); altrove il velo */}
+      {isPaused && isJoined && testScene === 'none' && <PauseMap />}
+      {isPaused && !(isJoined && testScene === 'none') && (
         <div
           style={{
             position: 'absolute',

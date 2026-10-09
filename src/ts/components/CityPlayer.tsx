@@ -85,7 +85,13 @@ interface RemoteProxy {
 
 const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
   const data = useMemo(() => {
-    const f = makeFighter(CITY_PLAYER_ID, 'Tu', 'PLAYER', SPAWN_X, SPAWN_Z, 0);
+    // dove si era rimasti (salvataggio, lib/saveGame.ts): stesso punto,
+    // stessa direzione, stessa quota dei piedi
+    const sp = useStore.getState().spawnPoint;
+    const f = sp
+      ? makeFighter(CITY_PLAYER_ID, 'Tu', 'PLAYER', sp[0], sp[1], sp[2] - Math.PI)
+      : makeFighter(CITY_PLAYER_ID, 'Tu', 'PLAYER', SPAWN_X, SPAWN_Z, 0);
+    if (sp && Number.isFinite(sp[3])) f.position.y = Math.max(0, sp[3] - (getTerrainHeight(sp[0], sp[1]) + getRoadOffset(sp[0], sp[1])));
     // vita del mondo aperto = la barra della vita (store), non quella del duello
     f.hp = useStore.getState().maxHealth || 100;
     return f;

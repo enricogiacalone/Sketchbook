@@ -1,8 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { useStore } from '../../store';
-import { ROAD_OFFSETS, ROAD_WIDTH, SIDEWALK_WIDTH, ROAD_SIZE } from '../Environment/Road';
-import { CITY_LAYOUT, CITY_BLOCK_SIZE } from '../Environment/City';
-import { RUNWAY_CENTER, RUNWAY_LENGTH, RUNWAY_WIDTH, HELIPORT_CENTER, HELIPORT_RADIUS } from '../Environment/Airport';
+import { buildCityImage, WORLD_HALF } from '../../lib/cityMapImage';
+import { gps, updateGps } from '../../lib/gps';
 import { radarState } from '../../lib/radarState';
 import { cityOpponents } from '../city/cityActors';
 
@@ -56,79 +55,12 @@ const COL = {
   armorBg: '#1f3a5c',
   enemy: '#e0352b',
   mission: '#f0c419',
+  waypoint: '#c45ce0', // GTA: waypoint e tragitto viola
   player: '#e9e9e9',
 };
 
-// --- citta' pre-disegnata -----------------------------------------------------
-const WORLD_HALF = ROAD_SIZE / 2 + 20; // un po' di mare attorno all'isola
-const TERRAIN_HALF = ROAD_SIZE / 2;
+// --- citta' pre-disegnata (lib/cityMapImage.ts, condivisa con la mappa) ---
 const MAP_PX_PER_M = 3;
-
-function buildCityImage(): HTMLCanvasElement {
-  const size = Math.ceil(WORLD_HALF * 2 * MAP_PX_PER_M);
-  const c = document.createElement('canvas');
-  c.width = size;
-  c.height = size;
-  const g = c.getContext('2d')!;
-  const k = MAP_PX_PER_M;
-  const X = (x: number) => (x + WORLD_HALF) * k;
-  const Z = (z: number) => (z + WORLD_HALF) * k;
-
-  g.fillStyle = COL.water;
-  g.fillRect(0, 0, size, size);
-  g.fillStyle = COL.land;
-  g.fillRect(X(-TERRAIN_HALF), Z(-TERRAIN_HALF), TERRAIN_HALF * 2 * k, TERRAIN_HALF * 2 * k);
-
-  // isolati: parco (blocco 0,0), piazze, cortili
-  const B = CITY_BLOCK_SIZE;
-  const block = (cx: number, cz: number, color: string) => {
-    g.fillStyle = color;
-    g.fillRect(X(cx - B / 2), Z(cz - B / 2), B * k, B * k);
-  };
-  block(B / 2, B / 2, COL.park);
-  CITY_LAYOUT.plazas.forEach((p) => block(p.x, p.z, COL.plaza));
-  CITY_LAYOUT.courtyards.forEach((p) => block(p.x, p.z, COL.block));
-
-  // strade con marciapiedi
-  const half = ROAD_WIDTH / 2;
-  for (const o of ROAD_OFFSETS) {
-    g.fillStyle = COL.sidewalk;
-    g.fillRect(X(-TERRAIN_HALF), Z(o - half - SIDEWALK_WIDTH), TERRAIN_HALF * 2 * k, (ROAD_WIDTH + 2 * SIDEWALK_WIDTH) * k);
-    g.fillRect(X(o - half - SIDEWALK_WIDTH), Z(-TERRAIN_HALF), (ROAD_WIDTH + 2 * SIDEWALK_WIDTH) * k, TERRAIN_HALF * 2 * k);
-  }
-  for (const o of ROAD_OFFSETS) {
-    g.fillStyle = COL.road;
-    g.fillRect(X(-TERRAIN_HALF), Z(o - half), TERRAIN_HALF * 2 * k, ROAD_WIDTH * k);
-    g.fillRect(X(o - half), Z(-TERRAIN_HALF), ROAD_WIDTH * k, TERRAIN_HALF * 2 * k);
-  }
-
-  // palazzi
-  g.lineWidth = 1;
-  for (const b of CITY_LAYOUT.buildings) {
-    g.fillStyle = COL.building;
-    g.fillRect(X(b.x - b.w / 2), Z(b.z - b.d / 2), b.w * k, b.d * k);
-    g.strokeStyle = COL.buildingEdge;
-    g.strokeRect(X(b.x - b.w / 2) + 0.5, Z(b.z - b.d / 2) + 0.5, b.w * k - 1, b.d * k - 1);
-  }
-
-  // aeroporto: pista lungo X ed eliporto
-  g.fillStyle = COL.runway;
-  g.fillRect(X(RUNWAY_CENTER[0] - RUNWAY_LENGTH / 2), Z(RUNWAY_CENTER[1] - RUNWAY_WIDTH / 2), RUNWAY_LENGTH * k, RUNWAY_WIDTH * k);
-  g.fillStyle = COL.runwayMark;
-  for (let x = -RUNWAY_LENGTH / 2 + 8; x < RUNWAY_LENGTH / 2 - 8; x += 12) {
-    g.fillRect(X(RUNWAY_CENTER[0] + x), Z(RUNWAY_CENTER[1]) - 1, 6 * k, 2);
-  }
-  g.fillStyle = COL.heliport;
-  g.beginPath();
-  g.arc(X(HELIPORT_CENTER[0]), Z(HELIPORT_CENTER[1]), HELIPORT_RADIUS * k, 0, Math.PI * 2);
-  g.fill();
-  g.fillStyle = COL.runwayMark;
-  g.font = `bold ${Math.round(HELIPORT_RADIUS * k)}px sans-serif`;
-  g.textAlign = 'center';
-  g.textBaseline = 'middle';
-  g.fillText('H', X(HELIPORT_CENTER[0]), Z(HELIPORT_CENTER[1]));
-  return c;
-}
 
 // punto sul bordo del rettangolo (inset) lungo la semiretta dal giocatore
 function clampToRect(px: number, py: number, x: number, y: number, w: number, h: number, inset: number) {
@@ -150,7 +82,7 @@ const Minimap: React.FC = () => {
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const city = buildCityImage();
+    const city = buildCityImage(COL, MAP_PX_PER_M);
     let raf = 0;
     let span = SPAN_FOOT;
     let last: { x: number; z: number; t: number } | null = null;
@@ -188,6 +120,8 @@ const Minimap: React.FC = () => {
       }
       last = { x: px, z: pz, t: now };
       const onFoot = st.currentControllable === 'player' || st.currentControllable === 'combatSoldier';
+      // GPS: segue il giocatore e ricalcola il tragitto (lib/gps.ts)
+      updateGps(px, pz, !onFoot, st.missionTargetPos, now);
       const zoomK = onFoot ? Math.min(1, speed / 12) * 0.2 : Math.min(1, speed / SPEED_FOR_MAX_ZOOM);
       const wantSpan = SPAN_FOOT + (SPAN_FAST - SPAN_FOOT) * zoomK;
       span += (wantSpan - span) * 0.05;
@@ -221,6 +155,25 @@ const Minimap: React.FC = () => {
       g.drawImage(city, 0, 0);
       g.restore();
 
+      // --- tragitto del GPS: dal giocatore lungo le strade ---
+      const route = gps.route;
+      if (route && route.points.length > 1) {
+        g.beginPath();
+        g.moveTo(cx, cy);
+        for (let i = 1; i < route.points.length; i++) {
+          const q = toScreen(route.points[i][0], route.points[i][1]);
+          g.lineTo(q.x, q.y);
+        }
+        g.lineJoin = 'round';
+        g.lineCap = 'round';
+        g.strokeStyle = 'rgba(0,0,0,0.55)';
+        g.lineWidth = 6 * scale;
+        g.stroke();
+        g.strokeStyle = gps.kind === 'waypoint' ? COL.waypoint : COL.mission;
+        g.lineWidth = 3.5 * scale;
+        g.stroke();
+      }
+
       // --- blip ---
       const dot = (x: number, y: number, r: number, fill: string, stroke = 'rgba(0,0,0,0.8)') => {
         g.beginPath();
@@ -253,6 +206,22 @@ const Minimap: React.FC = () => {
         const p0 = toScreen(mt[0], mt[1]);
         const p = clampToRect(cx, cy, p0.x, p0.y, W, H, 8 * scale);
         dot(p.x, p.y, (p.clamped ? 4.5 : 5.5) * scale, COL.mission);
+      }
+      // waypoint: viola, resta sul bordo se lontano
+      const wp = gps.waypoint;
+      if (wp) {
+        const p0 = toScreen(wp[0], wp[1]);
+        const p = clampToRect(cx, cy, p0.x, p0.y, W, H, 8 * scale);
+        g.save();
+        g.translate(p.x, p.y);
+        g.rotate(Math.PI / 4);
+        const r = (p.clamped ? 4 : 5) * scale;
+        g.fillStyle = COL.waypoint;
+        g.fillRect(-r, -r, r * 2, r * 2);
+        g.lineWidth = 1.5;
+        g.strokeStyle = 'rgba(0,0,0,0.85)';
+        g.strokeRect(-r, -r, r * 2, r * 2);
+        g.restore();
       }
       // nord: "N" sul bordo
       {

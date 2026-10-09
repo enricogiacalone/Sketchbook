@@ -7,6 +7,7 @@ import { streetLampBulbMaterial } from './Road';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { BAR } from '../../missions/storyPlaces';
 import { BarDaVito } from './StoryPlaces';
+import { worldRng } from '../../lib/worldSeed';
 
 const BLOCK_MIN = 0;
 const BLOCK_MAX = 60;
@@ -250,19 +251,20 @@ const Park: React.FC = () => {
     }> = [];
 
     if (treeTemplates.length > 0) {
+      const rnd = worldRng('park-trees');
       const treeCount = 16;
       for (let i = 0; i < treeCount; i++) {
         for (let attempt = 0; attempt < 6; attempt++) {
-          const x = AREA_MIN + Math.random() * (AREA_MAX - AREA_MIN);
-          const z = AREA_MIN + Math.random() * (AREA_MAX - AREA_MIN);
+          const x = AREA_MIN + rnd() * (AREA_MAX - AREA_MIN);
+          const z = AREA_MIN + rnd() * (AREA_MAX - AREA_MIN);
           if (isFreeSpot(x, z, placed, 4)) {
             placed.push([x, z]);
             treeResult.push({
               x,
               z,
-              rotationY: Math.random() * Math.PI * 2,
-              scale: TREE_SCALE * (0.8 + Math.random() * 0.5),
-              templateIndex: Math.floor(Math.random() * treeTemplates.length),
+              rotationY: rnd() * Math.PI * 2,
+              scale: TREE_SCALE * (0.8 + rnd() * 0.5),
+              templateIndex: Math.floor(rnd() * treeTemplates.length),
             });
             break;
           }

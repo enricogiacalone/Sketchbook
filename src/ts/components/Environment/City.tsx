@@ -20,6 +20,7 @@ import { useTreeTemplates, TreeInstance, TreeTemplate, Flowers } from './ParkTre
 import { RealGrassPatch } from './RealGrass';
 import { StaticInstances } from './StaticInstances';
 import { MarketPlaza, WarehouseYard } from './StoryPlaces';
+import { worldRng } from '../../lib/worldSeed';
 import { MARKET } from '../../missions/storyPlaces';
 
 const _windowDummy = new THREE.Object3D();
@@ -268,6 +269,8 @@ export const CITY_LAYOUT: CityLayout = (() => {
   // building's facade material and its night accent lighting are picked
   // independently.
   const LED_PALETTE = ['#00eaff', '#ff2fd0', '#7cff3a', '#ffb300', '#8a6bff', '#ff3b5c'];
+  // sempre la stessa citta' a parita' di seme (lib/worldSeed.ts)
+  const rnd = worldRng('city-layout');
 
   // Citta estesa a 5x5 blocchi (gridRadius = 2)
   const gridRadius = 2;
@@ -286,18 +289,18 @@ export const CITY_LAYOUT: CityLayout = (() => {
 
       cArr.push({ x: blockX, z: blockZ });
 
-      const count = 3 + Math.floor(Math.random() * 2);
+      const count = 3 + Math.floor(rnd() * 2);
       for (let k = 0; k < count; k++) {
-        const w = 10 + Math.random() * 12;
-        const d = 10 + Math.random() * 12;
-        const h = 20 + Math.random() * 90;
-        const style = styles[Math.floor(Math.random() * styles.length)];
+        const w = 10 + rnd() * 12;
+        const d = 10 + rnd() * 12;
+        const h = 20 + rnd() * 90;
+        const style = styles[Math.floor(rnd() * styles.length)];
         const palette = buildingColorsByStyle[style];
-        const color = palette[Math.floor(Math.random() * palette.length)];
+        const color = palette[Math.floor(rnd() * palette.length)];
 
         for (let attempt = 0; attempt < 30; attempt++) {
-          const angle = Math.random() * Math.PI * 2;
-          const dist = 18 + Math.random() * 7;
+          const angle = rnd() * Math.PI * 2;
+          const dist = 18 + rnd() * 7;
           const x = blockX + Math.cos(angle) * dist;
           const z = blockZ + Math.sin(angle) * dist;
 
@@ -316,11 +319,11 @@ export const CITY_LAYOUT: CityLayout = (() => {
               h,
               color,
               style,
-              corner: Math.floor(Math.random() * 4),
+              corner: Math.floor(rnd() * 4),
               numFloors,
               floorHeight: h / numFloors,
-              ledColor: LED_PALETTE[Math.floor(Math.random() * LED_PALETTE.length)],
-              ledPhase: Math.random() * Math.PI * 2,
+              ledColor: LED_PALETTE[Math.floor(rnd() * LED_PALETTE.length)],
+              ledPhase: rnd() * Math.PI * 2,
               by: getTerrainHeight(x, z),
             });
             break;
@@ -361,24 +364,25 @@ export function getBuildingDetails(index: number): BuildingDetails {
   const hit = detailsCache.get(index);
   if (hit) return hit;
   const b = CITY_LAYOUT.buildings[index];
+  const rnd = worldRng('building', index);
   const width = b.w,
     depth = b.d,
     height = b.h,
     style = b.style,
     numFloors = b.numFloors,
     floorHeight = b.floorHeight;
-  const hasGreenRoof = height > 40 && Math.random() > 0.5;
-  const hasSetbackTier = !hasGreenRoof && height > 70 && Math.random() > 0.4;
-  const hasRoofUnits = !hasGreenRoof && !hasSetbackTier && height > 25 && Math.random() > 0.55;
-  const hasCanopy = style !== 'glass' && width >= 14 && Math.random() > 0.4;
-  const hasAnnex = width >= 14 && depth >= 14 && height > 25 && Math.random() > 0.7;
+  const hasGreenRoof = height > 40 && rnd() > 0.5;
+  const hasSetbackTier = !hasGreenRoof && height > 70 && rnd() > 0.4;
+  const hasRoofUnits = !hasGreenRoof && !hasSetbackTier && height > 25 && rnd() > 0.55;
+  const hasCanopy = style !== 'glass' && width >= 14 && rnd() > 0.4;
+  const hasAnnex = width >= 14 && depth >= 14 && height > 25 && rnd() > 0.7;
 
   let annex: { w: number; d: number; h: number; ox: number; oz: number } | null = null;
   if (hasAnnex) {
-    const annexW = width * (0.35 + Math.random() * 0.15);
-    const annexD = depth * (0.35 + Math.random() * 0.15);
-    const annexH = height * (0.3 + Math.random() * 0.3);
-    const firstCorner = Math.floor(Math.random() * 4);
+    const annexW = width * (0.35 + rnd() * 0.15);
+    const annexD = depth * (0.35 + rnd() * 0.15);
+    const annexH = height * (0.3 + rnd() * 0.3);
+    const firstCorner = Math.floor(rnd() * 4);
     // l'annesso sporge dall'impronta del palazzo: prima non si guardava
     // dove, e quasi sempre finiva su marciapiede e strada (un blocco in
     // mezzo alla via per auto e passanti) o dentro un altro palazzo. Si
@@ -419,13 +423,13 @@ export function getBuildingDetails(index: number): BuildingDetails {
       const wy = (f + 0.5) * floorHeight;
       for (let c = 0; c < countW; c++) {
         const wx = (c - (countW - 1) / 2) * spacing;
-        windowInstances.push({ x: wx, y: wy, z: depth / 2 + 0.04, rotationY: 0, lit: Math.random() > 0.65 });
-        windowInstances.push({ x: wx, y: wy, z: -depth / 2 - 0.04, rotationY: Math.PI, lit: Math.random() > 0.65 });
+        windowInstances.push({ x: wx, y: wy, z: depth / 2 + 0.04, rotationY: 0, lit: rnd() > 0.65 });
+        windowInstances.push({ x: wx, y: wy, z: -depth / 2 - 0.04, rotationY: Math.PI, lit: rnd() > 0.65 });
       }
       for (let r = 0; r < countD; r++) {
         const wz = (r - (countD - 1) / 2) * spacing;
-        windowInstances.push({ x: width / 2 + 0.04, y: wy, z: wz, rotationY: Math.PI / 2, lit: Math.random() > 0.65 });
-        windowInstances.push({ x: -width / 2 - 0.04, y: wy, z: wz, rotationY: -Math.PI / 2, lit: Math.random() > 0.65 });
+        windowInstances.push({ x: width / 2 + 0.04, y: wy, z: wz, rotationY: Math.PI / 2, lit: rnd() > 0.65 });
+        windowInstances.push({ x: -width / 2 - 0.04, y: wy, z: wz, rotationY: -Math.PI / 2, lit: rnd() > 0.65 });
       }
     }
   }
@@ -869,17 +873,18 @@ const GreenCourtyard: React.FC<{ x: number; z: number; treeTemplates: TreeTempla
   // (keyed on x/z) so trees don't reshuffle every re-render.
   const trees = useMemo(() => {
     if (treeTemplates.length === 0) return [];
-    const count = 3 + Math.floor(Math.random() * 2); // 3-4 per courtyard
+    const rnd = worldRng('courtyard', Math.round(x) * 1000 + Math.round(z));
+    const count = 3 + Math.floor(rnd() * 2); // 3-4 per courtyard
     const result: Array<{ x: number; z: number; rotationY: number; scale: number; templateIndex: number }> = [];
     for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2 + Math.random() * 0.6;
-      const dist = 5 + Math.random() * 2.5;
+      const angle = (i / count) * Math.PI * 2 + rnd() * 0.6;
+      const dist = 5 + rnd() * 2.5;
       result.push({
         x: x + Math.cos(angle) * dist,
         z: z + Math.sin(angle) * dist,
-        rotationY: Math.random() * Math.PI * 2,
-        scale: 0.22 * (0.8 + Math.random() * 0.5),
-        templateIndex: Math.floor(Math.random() * treeTemplates.length),
+        rotationY: rnd() * Math.PI * 2,
+        scale: 0.22 * (0.8 + rnd() * 0.5),
+        templateIndex: Math.floor(rnd() * treeTemplates.length),
       });
     }
     return result;

@@ -364,6 +364,11 @@ interface GameState {
   // (lo disegna UI/DialogueBox.tsx), personaggio a cui si puo' parlare
   // adesso (UI/StoryHUD.tsx mostra il tasto) e banner di fine missione
   cash: number;
+  // salvataggio (lib/saveGame.ts): chi gioca (nome del menu iniziale),
+  // missioni completate (id), dove ricomparire [x, z, imbardata, quota dei piedi]
+  playerName: string;
+  completedMissions: string[];
+  spawnPoint: [number, number, number, number] | null;
   dialogueView: DialogueView | null;
   talkPrompt: string | null;
   storyBanner: { title: string; subtitle: string; color: string; until: number } | null;
@@ -373,6 +378,11 @@ interface GameState {
   setMissionTimeRemaining: (t: number) => void;
   setMissionTargetPos: (pos: [number, number] | null) => void;
   addCash: (amount: number) => void;
+  setCash: (cash: number) => void;
+  setPlayerName: (name: string) => void;
+  setCompletedMissions: (ids: string[]) => void;
+  addCompletedMission: (id: string) => void;
+  setSpawnPoint: (p: [number, number, number, number] | null) => void;
   setDialogueView: (view: DialogueView | null) => void;
   setTalkPrompt: (prompt: string | null) => void;
   setStoryBanner: (banner: GameState['storyBanner']) => void;
@@ -572,6 +582,9 @@ export const useStore = create<GameState>((set) => ({
   missionTimeRemaining: 0,
   missionTargetPos: null,
   cash: 200,
+  playerName: '',
+  completedMissions: [],
+  spawnPoint: null,
   dialogueView: null,
   talkPrompt: null,
   storyBanner: null,
@@ -586,6 +599,12 @@ export const useStore = create<GameState>((set) => ({
   setMissionTimeRemaining: (t) => set({ missionTimeRemaining: t }),
   setMissionTargetPos: (pos) => set({ missionTargetPos: pos }),
   addCash: (amount) => set((state) => ({ cash: Math.max(0, state.cash + amount) })),
+  setCash: (cash) => set({ cash: Math.max(0, Math.round(cash)) }),
+  setPlayerName: (playerName) => set({ playerName }),
+  setCompletedMissions: (completedMissions) => set({ completedMissions }),
+  addCompletedMission: (id) =>
+    set((state) => (state.completedMissions.includes(id) ? state : { completedMissions: [...state.completedMissions, id] })),
+  setSpawnPoint: (spawnPoint) => set({ spawnPoint }),
   setDialogueView: (dialogueView) => set({ dialogueView }),
   setTalkPrompt: (talkPrompt) => set((state) => (state.talkPrompt === talkPrompt ? state : { talkPrompt })),
   setStoryBanner: (storyBanner) => set({ storyBanner }),

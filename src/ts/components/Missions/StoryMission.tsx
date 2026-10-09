@@ -9,13 +9,20 @@ import StoryNpc, { type StoryNpcProps } from './StoryNpc';
 import { setDialogueHandlers, talkState, type DialogueTree } from '../../lib/dialogue';
 import {
   ESCAPE_TIME_S,
+  FRANCO_REWARD,
+  MISSION_1,
+  MISSION_2,
+  MISSION_TITLES,
   OBJECTIVES,
   STORY_TITLE,
+  missionOfStep,
+  stepFromCompleted,
   storyDialogue,
   type StoryActions,
   type StoryState,
   type StoryStep,
 } from '../../missions/storyMission';
+import { RUNWAY_CENTER } from '../Environment/Airport';
 import {
   AMBUSH,
   BAR,
@@ -117,16 +124,61 @@ const NPCS: NpcDef[] = [
     talkClip: 'Idle_Talking',
   },
 ];
-const NPC_BY_ID = Object.fromEntries(NPCS.map((n) => [n.id, n]));
+const NPC_BY_ID: Record<string, NpcDef> = Object.fromEntries(NPCS.map((n) => [n.id, n]));
+
+// --- Missione 2: Franco, il ragioniere in fuga, all'aeroporto -------------
+const FRANCO_START: [number, number] = [RUNWAY_CENTER[0] + 34, RUNWAY_CENTER[1] + 15];
+const FRANCO_SEE_DIST = 16; // m: ti vede e scappa
+const FRANCO_CATCH_DIST = 1.7;
+const FRANCO_LOST_DIST = 75; // piu' lontano di cosi': e' scappato
+// corre piu' della corsa leggera (3.2), meno dello scatto pieno (4.8): per
+// prenderlo si preme X piu' volte; dopo un po' si stanca
+const FRANCO_SPEED = 4.3;
+const FRANCO_TIRED_SPEED = 3.3;
+const FRANCO_LEAVE_SPEED = 1.4; // dopo: se ne va camminando
+const FRANCO_GONE_DIST = 30;
+const FRANCO_TIRED_AFTER_S = 22;
+// dove puo' correre: il prato dell'aeroporto (non torna in citta')
+const FRANCO_BOUNDS = { minX: -95, maxX: 95, minZ: -305, maxZ: -222 };
+// i Serpenti che arrivano quando hai il libro
+const FRANCO_SERPENTI: Array<[number, number]> = [
+  [-22, 26],
+  [22, 26],
+  [0, 32],
+];
+const FRANCO_DEF: NpcDef = {
+  id: 'franco',
+  name: 'Franco',
+  color: '#00838f',
+  x: FRANCO_START[0],
+  z: FRANCO_START[1],
+  yaw: -Math.PI / 2,
+  clip: 'Kimodo_wait_impatient',
+  talkClip: 'Idle_Talking',
+};
+NPC_BY_ID.franco = FRANCO_DEF;
 
 // a chi va la freccia gialla (il prossimo personaggio da cercare)
-const MARKER_NPC: Partial<Record<StoryStep, string>> = { meetVito: 'vito', findLucky: 'lucky', escape: 'vito' };
+const MARKER_NPC: Partial<Record<StoryStep, string>> = {
+  meetVito: 'vito',
+  findLucky: 'lucky',
+  escape: 'vito',
+  m2_offer: 'vito',
+  m2_airport: 'franco',
+  m2_chase: 'franco',
+  m2_return: 'vito',
+};
+const VITO_SPOT: [number, number] = [BAR.x, BAR_FRONT_Z - 1];
 const TARGET: Record<StoryStep, [number, number] | null> = {
-  meetVito: [BAR.x, BAR_FRONT_Z - 1],
+  meetVito: VITO_SPOT,
   findLucky: [KIOSK.x, KIOSK.z - 2],
   warehouse: PACKAGE_POS,
-  escape: [BAR.x, BAR_FRONT_Z - 1],
-  done: null,
+  escape: VITO_SPOT,
+  m2_offer: VITO_SPOT,
+  m2_airport: FRANCO_START,
+  m2_chase: null, // (il segnale segue Franco, vedi useFrame)
+  m2_return: VITO_SPOT,
+  m2_done: null,
 };
 
 interface SpawnedEnemy {
@@ -137,11 +189,23 @@ interface SpawnedEnemy {
 
 const StoryMission: React.FC = () => {
   const input = useInput();
-  const [step, setStepState] = useState<StoryStep>('meetVito');
+  // si riparte dalla missione non ancora finita (salvataggio, lib/saveGame.ts)
+  const [step, setStepState] = useState<StoryStep>(() => stepFromCompleted(useStore.getState().completedMissions));
   const [talking, setTalking] = useState<string | null>(null);
   const [enemies, setEnemies] = useState<SpawnedEnemy[]>([]);
   const [hasPackage, setHasPackage] = useState(false);
-  const story = useRef({ step: 'meetVito' as StoryStep, reward: 300, greedy: false, snitched: false, gen: 0 });
+  const story = useRef({
+    step: stepFromCompleted(useStore.getState().completedMissions),
+    reward: 300,
+    greedy: false,
+    snitched: false,
+    gen: 0,
+    francoFate: null as 'free' | 'robbed' | null,
+  });
+  // Franco: posizione (la legge StoryNpc a ogni frame), cosa fa, da quanto corre
+  const franco = useRef({ x: FRANCO_START[0], z: FRANCO_START[1], yaw: FRANCO_DEF.yaw, run: 0 });
+  const [francoMode, setFrancoMode] = useState<'wait' | 'flee' | 'caught' | 'leave' | 'gone'>('wait');
+  const lastTargetT = useRef(-1);
   const timerRef = useRef(0);
   const failRef = useRef<{ t: number } | null>(null);
   const dlg = useRef<{ npc: string; tree: DialogueTree; node: string } | null>(null);
@@ -152,7 +216,7 @@ const StoryMission: React.FC = () => {
     const st = useStore.getState();
     // Lucky ha fatto la spia: lo si dice (i Serpenti aspettano fuori)
     const extra = s === 'warehouse' && story.current.snitched ? ' Lucky ha avvisato i Serpenti: ti aspettano al cancello.' : '';
-    st.setMissionInfo(STORY_TITLE, OBJECTIVES[s] + extra);
+    st.setMissionInfo(MISSION_TITLES[missionOfStep(s)] ?? STORY_TITLE, OBJECTIVES[s] + extra);
     st.setMissionTargetPos(TARGET[s]);
   }, []);
 
@@ -198,16 +262,34 @@ const StoryMission: React.FC = () => {
         timerRef.current = 0;
         useStore.getState().setMissionTimeRemaining(0);
       }
-      if (next === 'done') {
+      if (next === 'm2_offer' || next === 'm2_done') setEnemies([]);
+      if (next === 'm2_airport') {
+        // Franco al suo posto, che aspetta
+        franco.current.x = FRANCO_START[0];
+        franco.current.z = FRANCO_START[1];
+        franco.current.yaw = FRANCO_DEF.yaw;
+        franco.current.run = 0;
+        lastTargetT.current = -1;
+        story.current.francoFate = null;
+        setFrancoMode('wait');
         setEnemies([]);
-        useStore.getState().setMissionTargetPos(null);
+      }
+      if (next === 'm2_return') {
+        // col libro arrivano i Serpenti
+        const s = story.current;
+        s.gen++;
+        const fx = franco.current.x;
+        const fz = franco.current.z;
+        setEnemies(
+          FRANCO_SERPENTI.map(([ox, oz], i) => ({ id: `serpente-${s.gen}-f${i}`, pos: [fx + ox, 0, fz + oz] as [number, number, number] }))
+        );
       }
     },
     [setObjective, spawnGuards]
   );
 
   useEffect(() => {
-    setObjective('meetVito');
+    setObjective(story.current.step);
     return () => {
       const st = useStore.getState();
       st.setMissionTargetPos(null);
@@ -237,10 +319,26 @@ const StoryMission: React.FC = () => {
       },
       complete: () => {
         const s = story.current;
-        useStore.getState().addCash(s.reward);
+        const st = useStore.getState();
+        st.addCash(s.reward);
+        st.addCompletedMission(MISSION_1);
         setHasPackage(false);
-        setStep('done');
+        setStep('m2_offer');
         banner('MISSIONE COMPIUTA', `${STORY_TITLE}   +${s.reward}$`, '#ffd54a');
+      },
+      setFrancoFate: (f) => {
+        story.current.francoFate = f;
+        // "Sparisco": se ne va a piedi e, lontano, non si vede piu'
+        setFrancoMode('leave');
+        setStep('m2_return');
+        banner('HAI IL LIBRO DEI CONTI', 'Arrivano i Serpenti!', '#76ff03');
+      },
+      complete2: () => {
+        const st = useStore.getState();
+        st.addCash(FRANCO_REWARD);
+        st.addCompletedMission(MISSION_2);
+        setStep('m2_done');
+        banner('MISSIONE COMPIUTA', `${MISSION_TITLES[MISSION_2]}   +${FRANCO_REWARD}$`, '#ffd54a');
       },
     }),
     [setStep]
@@ -278,6 +376,8 @@ const StoryMission: React.FC = () => {
         snitched: story.current.snitched,
         cash: st.cash,
         health: st.health,
+        m1Done: st.completedMissions.includes(MISSION_1),
+        francoFate: story.current.francoFate,
       };
       const tree = storyDialogue(npc, s, actions);
       if (!tree) return;
@@ -330,6 +430,14 @@ const StoryMission: React.FC = () => {
           near = n.id;
         }
       }
+      // (preso ma col dialogo chiuso: ci si riparla)
+      if (s.step.startsWith('m2_') && s.step !== 'm2_offer' && francoMode === 'caught') {
+        const d = Math.hypot(franco.current.x - pp[0], franco.current.z - pp[2]);
+        if (d < TALK_DIST && d < best) {
+          best = d;
+          near = 'franco';
+        }
+      }
       if (s.step === 'warehouse' && !hasPackage) {
         const d = Math.hypot(PACKAGE_POS[0] - pp[0], PACKAGE_POS[1] - pp[2]);
         if (d < PACKAGE_DIST && d < best) near = 'package';
@@ -347,7 +455,77 @@ const StoryMission: React.FC = () => {
     // allontanandosi il dialogo si chiude
     if (dlg.current) {
       const n = NPC_BY_ID[dlg.current.npc];
-      if (n && Math.hypot(n.x - pp[0], n.z - pp[2]) > DIALOGUE_LEAVE_DIST) show(null);
+      const nx = dlg.current.npc === 'franco' ? franco.current.x : n?.x;
+      const nz = dlg.current.npc === 'franco' ? franco.current.z : n?.z;
+      if (nx !== undefined && nz !== undefined && Math.hypot(nx - pp[0], nz - pp[2]) > DIALOGUE_LEAVE_DIST) show(null);
+    }
+
+    // --- Franco ---
+    const fr = franco.current;
+    const fd = Math.hypot(fr.x - pp[0], fr.z - pp[2]);
+    if (s.step === 'm2_airport' && !failRef.current && fd < FRANCO_SEE_DIST) {
+      // ti ha visto: scappa
+      setFrancoMode('flee');
+      setStep('m2_chase');
+      banner('FRANCO SCAPPA!', 'Premi X più volte per scattare', '#ffd54a');
+    }
+    if (francoMode === 'leave') {
+      // cammina via dal giocatore, dentro il prato; a 30 m sparisce
+      let dx = fr.x - pp[0];
+      let dz = fr.z - pp[2];
+      const l = Math.hypot(dx, dz) || 1;
+      dx /= l;
+      dz /= l;
+      const B = FRANCO_BOUNDS;
+      fr.x = Math.min(B.maxX, Math.max(B.minX, fr.x + dx * FRANCO_LEAVE_SPEED * delta));
+      fr.z = Math.min(B.maxZ, Math.max(B.minZ, fr.z + dz * FRANCO_LEAVE_SPEED * delta));
+      fr.yaw = Math.atan2(dx, dz);
+      if (fd > FRANCO_GONE_DIST) setFrancoMode('gone');
+    }
+    if (s.step === 'm2_chase' && !failRef.current) {
+      if (fd < FRANCO_CATCH_DIST && onFoot && francoMode === 'flee') {
+        setFrancoMode('caught');
+        openDialogue('franco');
+      } else if (francoMode === 'flee') {
+        fr.run += delta;
+        const speed = fr.run > FRANCO_TIRED_AFTER_S ? FRANCO_TIRED_SPEED : FRANCO_SPEED;
+        // via dal giocatore, con un po' di zig-zag, dentro il prato
+        let dx = fr.x - pp[0];
+        let dz = fr.z - pp[2];
+        const l = Math.hypot(dx, dz) || 1;
+        dx /= l;
+        dz /= l;
+        const wig = Math.sin(fr.run * 1.3) * 0.35;
+        let mx = dx - dz * wig;
+        let mz = dz + dx * wig;
+        const B = FRANCO_BOUNDS;
+        const edge = 12;
+        if (fr.x < B.minX + edge) mx += (B.minX + edge - fr.x) / edge;
+        if (fr.x > B.maxX - edge) mx -= (fr.x - (B.maxX - edge)) / edge;
+        if (fr.z < B.minZ + edge) mz += (B.minZ + edge - fr.z) / edge;
+        if (fr.z > B.maxZ - edge) mz -= (fr.z - (B.maxZ - edge)) / edge;
+        // l'aereo parcheggiato in mezzo alla pista: ci gira intorno
+        const ax = fr.x - RUNWAY_CENTER[0];
+        const az = fr.z - RUNWAY_CENTER[1];
+        const ad = Math.hypot(ax, az);
+        if (ad < 14) {
+          mx += (ax / (ad || 1)) * (14 - ad) * 0.3;
+          mz += (az / (ad || 1)) * (14 - ad) * 0.3;
+        }
+        const ml = Math.hypot(mx, mz) || 1;
+        fr.x = Math.min(B.maxX, Math.max(B.minX, fr.x + (mx / ml) * speed * delta));
+        fr.z = Math.min(B.maxZ, Math.max(B.minZ, fr.z + (mz / ml) * speed * delta));
+        fr.yaw = Math.atan2(mx, mz);
+        // (il segnale sulla minimappa lo segue, 4 volte al secondo)
+        if (fr.run - lastTargetT.current > 0.25) {
+          lastTargetT.current = fr.run;
+          st.setMissionTargetPos([fr.x, fr.z]);
+        }
+        if (fd > FRANCO_LOST_DIST) {
+          failRef.current = { t: 3 };
+          banner('MISSIONE FALLITA', "Franco è scappato. Torna all'aeroporto e riprova.", '#ff5252');
+        }
+      }
     }
 
     // fallimento: morto durante il colpo, o tempo scaduto con il pacco
@@ -356,8 +534,12 @@ const StoryMission: React.FC = () => {
       // si riparte quando ci si e' rialzati
       if (failRef.current.t <= 0 && st.health > 0) {
         failRef.current = null;
-        setStep('warehouse');
+        setStep(s.step.startsWith('m2_') ? 'm2_airport' : 'warehouse');
       }
+    } else if ((s.step === 'm2_chase' || s.step === 'm2_return') && st.health <= 0) {
+      failRef.current = { t: 4 };
+      setEnemies([]);
+      banner('MISSIONE FALLITA', "Sei stato ucciso. Si ricomincia dall'aeroporto.", '#ff5252');
     } else if (s.step === 'warehouse' || s.step === 'escape') {
       let why = '';
       if (st.health <= 0) why = 'Sei stato ucciso. Si ricomincia dal deposito.';
@@ -393,6 +575,26 @@ const StoryMission: React.FC = () => {
       {NPCS.map(({ id, ...n }) => (
         <StoryNpc key={id} {...n} talking={talking === id} marker={markerNpc === id && talking !== id} />
       ))}
+      {/* Franco: solo nella missione 2 (dopo il libro se ne va a piedi) */}
+      {step.startsWith('m2_') && step !== 'm2_offer' && (
+        <StoryNpc
+          {...FRANCO_DEF}
+          follow={franco.current}
+          clip={
+            francoMode === 'flee'
+              ? 'Kimodo_panic_run'
+              : francoMode === 'caught'
+                ? 'Kimodo_out_of_breath'
+                : francoMode === 'leave' || francoMode === 'gone'
+                  ? 'Walk'
+                  : FRANCO_DEF.clip
+          }
+          clipSpeed={francoMode === 'flee' ? 1.15 : 1}
+          talking={talking === 'franco'}
+          marker={markerNpc === 'franco' && talking !== 'franco'}
+          hidden={step === 'm2_done' || francoMode === 'gone'}
+        />
+      )}
       {step === 'warehouse' && !hasPackage && (
         <group position={[PACKAGE_POS[0], py, PACKAGE_POS[1]]}>
           {/* la cassa con sopra il pacco */}

@@ -35,13 +35,35 @@ export interface StoryNpcProps {
   // freccia gialla sopra la testa: e' lui il prossimo obiettivo
   marker?: boolean;
   watch?: boolean;
+  // personaggio che si muove (Franco che scappa): posizione e direzione
+  // scritte da fuori a ogni frame; niente collider fisso
+  follow?: { x: number; z: number; yaw: number };
+  // velocita' della clip (corsa)
+  clipSpeed?: number;
+  hidden?: boolean;
 }
 
 const NAME_DIST = 14; // m: il nome si vede da qui
 const FAR_DIST = 70; // oltre: animazione a scatti, poi ferma
 const _v = new THREE.Vector3();
 
-const StoryNpc: React.FC<StoryNpcProps> = ({ name, color, x, z, yaw, clip, talkClip, talking, seated, y = 0, marker, watch }) => {
+const StoryNpc: React.FC<StoryNpcProps> = ({
+  name,
+  color,
+  x,
+  z,
+  yaw,
+  clip,
+  talkClip,
+  talking,
+  seated,
+  y = 0,
+  marker,
+  watch,
+  follow,
+  clipSpeed = 1,
+  hidden,
+}) => {
   const { scene } = useGLTF(MANNEQUIN_URL);
   const { animations: baseAnims } = useGLTF(MANNEQUIN_BASE_ANIMS_URL);
   const { animations: addonAnims } = useGLTF(MANNEQUIN_ADDON_ANIMS_URL);
@@ -81,6 +103,9 @@ const StoryNpc: React.FC<StoryNpcProps> = ({ name, color, x, z, yaw, clip, talkC
     curRef.current?.fadeOut(0.3);
     curRef.current = a;
   }, [want, clips, mixer]);
+  useEffect(() => {
+    curRef.current?.setEffectiveTimeScale(clipSpeed);
+  }, [clipSpeed, want]);
   useEffect(
     () => () => {
       mixer.stopAllAction();
@@ -93,9 +118,14 @@ const StoryNpc: React.FC<StoryNpcProps> = ({ name, color, x, z, yaw, clip, talkC
   useFrame((state, delta) => {
     const g = groupRef.current;
     if (!g) return;
+    g.visible = !hidden;
+    if (hidden) return;
+    const px = follow ? follow.x : x;
+    const pz = follow ? follow.z : z;
+    if (follow) g.position.set(px, getTerrainHeight(px, pz) + y, pz);
     const pp = useStore.getState().playerPos;
-    const dx = pp[0] - x;
-    const dz = pp[2] - z;
+    const dx = pp[0] - px;
+    const dz = pp[2] - pz;
     const d = Math.hypot(dx, dz);
     // lontano: l'animazione si aggiorna meno spesso
     acc.current += delta;
@@ -104,7 +134,7 @@ const StoryNpc: React.FC<StoryNpcProps> = ({ name, color, x, z, yaw, clip, talkC
       acc.current = 0;
     }
     // si gira verso il giocatore mentre ci parla (in piedi)
-    let target = yaw;
+    let target = follow ? follow.yaw : yaw;
     if (!seated && (talking || (watch && d < 6)) && d > 0.3) target = Math.atan2(dx, dz);
     let a = target - g.rotation.y;
     a = Math.atan2(Math.sin(a), Math.cos(a));
@@ -123,9 +153,11 @@ const StoryNpc: React.FC<StoryNpcProps> = ({ name, color, x, z, yaw, clip, talkC
   return (
     <group ref={groupRef} position={[x, groundY, z]} rotation={[0, yaw, 0]}>
       <primitive object={clone} />
-      <RigidBody type="fixed" colliders={false} position={[0, seated ? 0.6 : 0.9, 0]}>
-        <CapsuleCollider args={[seated ? 0.25 : 0.55, 0.3]} />
-      </RigidBody>
+      {!follow && (
+        <RigidBody type="fixed" colliders={false} position={[0, seated ? 0.6 : 0.9, 0]}>
+          <CapsuleCollider args={[seated ? 0.25 : 0.55, 0.3]} />
+        </RigidBody>
+      )}
       {marker && (
         <mesh ref={markerRef} position={[0, 2.35, 0]} rotation={[Math.PI, 0, 0]}>
           <coneGeometry args={[0.18, 0.4, 4]} />

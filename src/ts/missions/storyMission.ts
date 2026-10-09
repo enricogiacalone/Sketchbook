@@ -16,7 +16,23 @@ import type { DialogueTree } from '../lib/dialogue';
 // funzione che riceve lo stato della storia e le azioni (StoryMission.tsx
 // le esegue: soldi, passo della missione...).
 
-export type StoryStep = 'meetVito' | 'findLucky' | 'warehouse' | 'escape' | 'done';
+// missione 1 "La ricetta di nonna Rosa": meetVito -> findLucky -> warehouse ->
+// escape; missione 2 "Il ragioniere in fuga": m2_offer -> m2_airport ->
+// m2_chase -> m2_return -> m2_done
+export type StoryStep =
+  'meetVito' | 'findLucky' | 'warehouse' | 'escape' | 'm2_offer' | 'm2_airport' | 'm2_chase' | 'm2_return' | 'm2_done';
+
+// id delle missioni (salvate tra quelle completate, lib/saveGame.ts)
+export const MISSION_1 = 'ricetta';
+export const MISSION_2 = 'ragioniere';
+export const MISSION_TITLES: Record<string, string> = {
+  [MISSION_1]: 'La ricetta di nonna Rosa',
+  [MISSION_2]: 'Il ragioniere in fuga',
+};
+export const missionOfStep = (s: StoryStep) => (s.startsWith('m2_') ? MISSION_2 : MISSION_1);
+// da dove si riparte, date le missioni gia' completate
+export const stepFromCompleted = (done: string[]): StoryStep =>
+  done.includes(MISSION_2) ? 'm2_done' : done.includes(MISSION_1) ? 'm2_offer' : 'meetVito';
 
 export interface StoryState {
   step: StoryStep;
@@ -25,6 +41,10 @@ export interface StoryState {
   snitched: boolean;
   cash: number;
   health: number;
+  // missione 1 finita (le battute della gente cambiano)
+  m1Done: boolean;
+  // cosa si e' fatto di Franco: lasciato andare o anche derubato
+  francoFate: 'free' | 'robbed' | null;
 }
 
 export interface StoryActions {
@@ -34,9 +54,13 @@ export interface StoryActions {
   heal: (amount: number) => void;
   setSnitched: () => void;
   complete: () => void;
+  setFrancoFate: (f: 'free' | 'robbed') => void;
+  complete2: () => void;
 }
 
-export const STORY_TITLE = 'La ricetta di nonna Rosa';
+export const STORY_TITLE = MISSION_TITLES[MISSION_1];
+export const FRANCO_REWARD = 400;
+export const FRANCO_POCKET = 150;
 export const ESCAPE_TIME_S = 180;
 export const APPLE_PRICE = 10;
 export const LUCKY_PRICE = 100;
@@ -46,7 +70,11 @@ export const OBJECTIVES: Record<StoryStep, string> = {
   findLucky: "Trova Lucky all'edicola della Piazza del Mercato (nord-ovest).",
   warehouse: 'Recupera il pacco al deposito dei Serpenti (sud-est).',
   escape: 'Riporta il pacco a Vito prima che i Serpenti ti riprendano!',
-  done: '',
+  m2_offer: 'Vito ha un altro lavoro per te: passa al Bar Da Vito.',
+  m2_airport: "Trova Franco, il ragioniere di Vito, all'aeroporto (sud, fuori città).",
+  m2_chase: 'Franco scappa! Prendilo (premi X più volte per scattare).',
+  m2_return: 'Riporta il libro dei conti a Vito. I Serpenti lo vogliono!',
+  m2_done: '',
 };
 
 export function storyDialogue(npc: string, s: StoryState, a: StoryActions): DialogueTree | null {
@@ -123,7 +151,98 @@ export function storyDialogue(npc: string, s: StoryState, a: StoryActions): Dial
             next: null,
           },
         };
+      if (s.step === 'm2_offer')
+        return {
+          start: {
+            text: 'Ah, sei tu. Ho un altro problema, e stavolta è una faccenda di famiglia.',
+            options: [
+              { label: 'Ti ascolto.', goto: 'franco' },
+              { label: 'Prima un caffè.', goto: 'coffee' },
+              { label: 'Non adesso.', goto: 'later' },
+            ],
+          },
+          coffee: {
+            text: 'Gina! Un caffè per il mio amico. ...Ecco, così ragioni meglio.',
+            onEnter: () => a.heal(10),
+            next: 'franco',
+          },
+          later: { text: 'Quando hai tempo. Ma non metterci troppo.', next: null },
+          franco: {
+            text: "Franco, il mio ragioniere. È sparito stamattina con il libro dei conti. Se quel libro finisce ai Serpenti, sono finito anch'io.",
+            next: 'where',
+          },
+          where: {
+            text: "Un tassista l'ha visto all'aeroporto, fuori città, a sud. Franco non è un duro: appena ti vede scappa. Ma corre come un ragioniere.",
+            options: [
+              { label: 'Lo prendo io.', goto: 'go' },
+              { label: 'Quanto paghi stavolta?', goto: 'pay' },
+            ],
+          },
+          pay: { text: `${FRANCO_REWARD}. E un favore, quando ti servirà. I favori di Vito valgono più dei soldi.`, next: 'go' },
+          go: {
+            text: 'Portami il libro. E Franco... fai tu. Niente sangue però: è pur sempre mio cugino.',
+            onEnter: () => a.setStep('m2_airport'),
+            next: null,
+          },
+        };
+      if (s.step === 'm2_airport' || s.step === 'm2_chase')
+        return { start: { text: "L'aeroporto è a sud, fuori città. Prendi una macchina e sbrigati, prima che Franco salga su un aereo." } };
+      if (s.step === 'm2_return')
+        return {
+          start: {
+            text: 'Il libro! Fammi vedere... ci sono tutte le pagine?',
+            options: [
+              { label: 'Tutte. Franco non darà più problemi.', goto: 'paid' },
+              { label: 'Franco dice che i Serpenti lo minacciavano.', goto: 'threat' },
+            ],
+          },
+          threat: {
+            text:
+              s.francoFate === 'robbed'
+                ? 'Lo so. E so anche che gli hai alleggerito le tasche. Non mi piace, ma non ti chiederò indietro niente.'
+                : 'Lo so. Ha avuto paura, e la paura fa fare cose stupide. Hai fatto bene a lasciarlo andare.',
+            next: 'paid',
+          },
+          paid: {
+            text: `${FRANCO_REWARD}$, come d'accordo. Sai, comincio a fidarmi di te.`,
+            onEnter: a.complete2,
+            next: null,
+          },
+        };
+      if (s.step === 'm2_done') return { start: { text: 'Per oggi basta così. Goditi la città... e i soldi. Ma resta nei paraggi.' } };
       return { start: { text: 'Ottimo lavoro, ragazzo. Torna più tardi: per uno come te ho sempre qualcosa da fare.' } };
+
+    case 'franco':
+      if (s.step !== 'm2_chase') return { start: { text: '...Lasciami in pace. Ho già dato.' } };
+      return {
+        start: {
+          text: 'Basta, basta! Non ce la faccio più... Sono un ragioniere, non un maratoneta!',
+          options: [
+            { label: 'Il libro dei conti. Subito.', goto: 'why' },
+            { label: 'Perché sei scappato?', goto: 'why' },
+          ],
+        },
+        why: {
+          text: 'I Serpenti mi hanno minacciato: o il libro, o... Volevo prendere un aereo e sparire. Tieni, il libro. Ti prego, non portarmi da Vito.',
+          options: [
+            {
+              label: 'Vattene. Non ti ho visto.',
+              goto: 'free',
+              action: () => a.setFrancoFate('free'),
+            },
+            {
+              label: `Vattene... ma i soldi in tasca restano a me (+${FRANCO_POCKET}$).`,
+              goto: 'robbed',
+              action: () => {
+                a.setFrancoFate('robbed');
+                a.pay(-FRANCO_POCKET);
+              },
+            },
+          ],
+        },
+        free: { text: "Grazie... Di' a Vito che mi dispiace. E stai attento: i Serpenti sono già qui.", next: null },
+        robbed: { text: 'Ladro! ...Va bene, va bene, prendi. Sparisco. E occhio: i Serpenti sono già qui.', next: null },
+      };
 
     case 'lucky':
       if (s.step === 'findLucky')
@@ -161,12 +280,12 @@ export function storyDialogue(npc: string, s: StoryState, a: StoryActions): Dial
           threat2: { speaker: '', text: '(Appena ti giri, Lucky tira fuori il telefono e chiama qualcuno...)', next: null },
         };
       if (s.step === 'meetVito') return { start: { text: 'Giornali, riviste, biglietti del bus... Cerchi qualcosa? No? Allora circola.' } };
-      if (s.step === 'done')
+      if (s.m1Done)
         return { start: { text: "Ho sentito che ai Serpenti è andata male. Bel lavoro. Non dire a nessuno che te l'ho detto." } };
       return { start: { text: 'Io non so niente, non ho visto niente, non ti conosco!' } };
 
     case 'gina':
-      if (s.step === 'done')
+      if (s.m1Done)
         return { start: { text: 'Ho saputo della storia dei cannoli. In questo quartiere le notizie corrono più delle macchine.' } };
       return {
         start: {
@@ -202,10 +321,9 @@ export function storyDialogue(npc: string, s: StoryState, a: StoryActions): Dial
         },
         apple: { text: 'Tieni, la più bella del banco. Vedrai che ti senti meglio.', next: null },
         biz: {
-          text:
-            s.step === 'done'
-              ? 'Meglio! Da quando i Serpenti si sono calmati, la gente è tornata a comprare.'
-              : 'Male. I Serpenti passano ogni settimana a chiedere il pizzo. Se qualcuno desse loro una lezione...',
+          text: s.m1Done
+            ? 'Meglio! Da quando i Serpenti si sono calmati, la gente è tornata a comprare.'
+            : 'Male. I Serpenti passano ogni settimana a chiedere il pizzo. Se qualcuno desse loro una lezione...',
           next: null,
         },
       };
@@ -217,7 +335,7 @@ export function storyDialogue(npc: string, s: StoryState, a: StoryActions): Dial
             text: 'Vai dai Serpenti? Prendi una macchina, il deposito è lontano. E stai basso: dietro i container non ti vedono.',
           },
         };
-      if (s.step === 'done') return { start: { text: 'Hai visto? Già sembra più tranquillo. Come ai miei tempi.' } };
+      if (s.m1Done) return { start: { text: 'Hai visto? Già sembra più tranquillo. Come ai miei tempi.' } };
       return {
         start: {
           text: 'Ai miei tempi il quartiere era tranquillo. Adesso ci sono quei Serpenti... stanno nel deposito a sud-est, giorno e notte.',

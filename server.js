@@ -126,6 +126,77 @@ app.get("/api/load", (req, res) => {
   });
 });
 
+// --- Salvataggi del gioco (SQLite) ------------------------------------------
+// "colleghiamo il db per ricordare dove mi trovo, le missioni completate, i
+// soldi accumulati e la struttura della citta'":
+//  - world: il seme della citta' (src/ts/lib/worldSeed.ts genera sempre la
+//    stessa citta' dallo stesso seme); POST /api/world/reseed ne fa una nuova
+//  - progress: per giocatore (il nome del menu iniziale) un JSON con
+//    posizione, soldi e missioni completate (src/ts/lib/saveGame.ts)
+db.run(`CREATE TABLE IF NOT EXISTS world (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+db.run(
+  `CREATE TABLE IF NOT EXISTS progress (player TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL)`
+);
+
+const newSeed = () => Math.floor(Math.random() * 2147483646) + 1;
+
+app.get("/api/world", (req, res) => {
+  db.get(`SELECT value FROM world WHERE key = 'seed'`, [], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (row) return res.json({ seed: Number(row.value) });
+    const seed = newSeed();
+    db.run(`INSERT OR IGNORE INTO world (key, value) VALUES ('seed', ?)`, [String(seed)], (e) => {
+      if (e) return res.status(500).json({ error: e.message });
+      // (se due richieste arrivano insieme vince la prima: la si rilegge)
+      db.get(`SELECT value FROM world WHERE key = 'seed'`, [], (e2, r2) =>
+        e2 ? res.status(500).json({ error: e2.message }) : res.json({ seed: Number(r2.value) })
+      );
+    });
+  });
+});
+
+app.post("/api/world/reseed", (req, res) => {
+  const seed = Number.isInteger(req.body?.seed) && req.body.seed > 0 ? req.body.seed : newSeed();
+  db.run(`INSERT OR REPLACE INTO world (key, value) VALUES ('seed', ?)`, [String(seed)], (err) =>
+    err ? res.status(500).json({ error: err.message }) : res.json({ seed })
+  );
+});
+
+const validPlayer = (p) => typeof p === "string" && p.length > 0 && p.length <= 40;
+
+app.get("/api/progress/:player", (req, res) => {
+  if (!validPlayer(req.params.player)) return res.status(400).json({ error: "nome non valido" });
+  db.get(`SELECT data, updated_at FROM progress WHERE player = ?`, [req.params.player], (err, row) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(row ? { data: JSON.parse(row.data), updatedAt: row.updated_at } : { data: null });
+  });
+});
+
+// PUT (e POST, per navigator.sendBeacon alla chiusura della pagina)
+const saveProgress = (req, res) => {
+  if (!validPlayer(req.params.player)) return res.status(400).json({ error: "nome non valido" });
+  let data = req.body?.data;
+  // sendBeacon manda testo semplice
+  if (data === undefined && typeof req.body === "string") {
+    try {
+      data = JSON.parse(req.body).data;
+    } catch {
+      data = undefined;
+    }
+  }
+  if (!data || typeof data !== "object") return res.status(400).json({ error: "dati mancanti" });
+  const json = JSON.stringify(data);
+  if (json.length > 20000) return res.status(413).json({ error: "troppo grande" });
+  db.run(
+    `INSERT INTO progress (player, data, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(player) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+    [req.params.player, json, Date.now()],
+    (err) => (err ? res.status(500).json({ error: err.message }) : res.json({ success: true }))
+  );
+};
+app.put("/api/progress/:player", saveProgress);
+app.post("/api/progress/:player", express.text({ type: "text/plain" }), saveProgress);
+
 // For any other requests, serve the index.html from the 'build' directory
 app.use((req, res) => {
   res.sendFile(path.join(process.cwd(), "build", "index.html"));

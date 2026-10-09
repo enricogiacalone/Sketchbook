@@ -9,6 +9,7 @@ import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import Crowd from '../city/CityCrowd';
 import VideoBillboardScreen from './VideoBillboardScreen';
 import Car from '../Vehicles/Car';
+import { worldRng } from '../../lib/worldSeed';
 
 // Street-level detail pass -- benches/trash cans/hydrants/signs along the
 // sidewalks, plus a few statically-parked cars tucked against the curb.
@@ -239,6 +240,8 @@ const CityDetails: React.FC = () => {
     const carsArr: Array<{ x: number; z: number; rotationY: number }> = [];
     const billboardsArr: Array<{ x: number; z: number; rotationY: number; schemeIndex: number }> = [];
     let schemeCounter = 0;
+    // sempre gli stessi a parita' di seme della citta' (lib/worldSeed.ts)
+    const rnd = worldRng('city-details');
 
     for (let i = -GRID_RADIUS; i <= GRID_RADIUS; i++) {
       for (let j = -GRID_RADIUS; j <= GRID_RADIUS; j++) {
@@ -251,7 +254,7 @@ const CityDetails: React.FC = () => {
         // a bench + trash can pair.
         {
           const edgeZ = blockZ - BLOCK_HALF + SIDEWALK_CENTER_OFFSET;
-          const benchX = blockX - EDGE_SLOT_OFFSET + Math.random() * 4;
+          const benchX = blockX - EDGE_SLOT_OFFSET + rnd() * 4;
           furnitureArr.push({ kind: 'bench', x: benchX, z: edgeZ, rotationY: Math.PI });
           furnitureArr.push({ kind: 'trash', x: benchX + 2.2, z: edgeZ, rotationY: 0 });
         }
@@ -259,27 +262,27 @@ const CityDetails: React.FC = () => {
         // South edge: a hydrant + street sign pair.
         {
           const edgeZ = blockZ + BLOCK_HALF - SIDEWALK_CENTER_OFFSET;
-          const hydrantX = blockX + EDGE_SLOT_OFFSET - Math.random() * 4;
+          const hydrantX = blockX + EDGE_SLOT_OFFSET - rnd() * 4;
           furnitureArr.push({ kind: 'hydrant', x: hydrantX, z: edgeZ, rotationY: 0 });
           furnitureArr.push({
             kind: 'sign',
             x: hydrantX - 2.5,
             z: edgeZ,
             rotationY: Math.PI / 2,
-            color: SIGN_COLORS[Math.floor(Math.random() * SIGN_COLORS.length)],
+            color: SIGN_COLORS[Math.floor(rnd() * SIGN_COLORS.length)],
           });
         }
 
         // West/East edges: each has a chance of one parked car tucked
         // against the curb, oriented along the road (length along Z).
-        if (Math.random() < 0.6) {
+        if (rnd() < 0.6) {
           const edgeX = blockX - BLOCK_HALF + (ROAD_WIDTH / 2 - 0.9);
-          const carZ = blockZ - EDGE_SLOT_OFFSET + Math.random() * (EDGE_SLOT_OFFSET * 2);
+          const carZ = blockZ - EDGE_SLOT_OFFSET + rnd() * (EDGE_SLOT_OFFSET * 2);
           carsArr.push({ x: edgeX, z: carZ, rotationY: Math.PI / 2 });
         }
-        if (Math.random() < 0.6) {
+        if (rnd() < 0.6) {
           const edgeX = blockX + BLOCK_HALF - (ROAD_WIDTH / 2 - 0.9);
-          const carZ = blockZ - EDGE_SLOT_OFFSET + Math.random() * (EDGE_SLOT_OFFSET * 2);
+          const carZ = blockZ - EDGE_SLOT_OFFSET + rnd() * (EDGE_SLOT_OFFSET * 2);
           carsArr.push({ x: edgeX, z: carZ, rotationY: -Math.PI / 2 });
         }
 
@@ -287,7 +290,7 @@ const CityDetails: React.FC = () => {
         // outward, so it's visible approaching the city from a distance.
         const isOuterI = Math.abs(i) === GRID_RADIUS;
         const isOuterJ = Math.abs(j) === GRID_RADIUS;
-        if ((isOuterI || isOuterJ) && Math.random() < 0.5) {
+        if ((isOuterI || isOuterJ) && rnd() < 0.5) {
           let bx = blockX,
             bz = blockZ,
             rotationY = 0;

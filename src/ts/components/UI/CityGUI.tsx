@@ -3,6 +3,8 @@ import { useStore } from '../../store';
 import { acquireDebugGui, debugSection, releaseDebugGui } from '../../lib/debugGui';
 import { CROWD_MAX_SLOTS, crowdSlotCount, crowdSlots } from '../city/crowdSim';
 import { realBuildingsInfo } from '../Environment/City';
+import { getWorldSeed, reseedWorld } from '../../lib/worldSeed';
+import { deleteSave, saveGame } from '../../lib/saveGame';
 
 // Cartella "Citta'" (pannello Debug > Playground): "mettimi un hud
 // con cui configurare il numero di corpi veri, e anche uno per aumentare i
@@ -58,6 +60,15 @@ const CityGUI: React.FC = () => {
     folder.add(bind, 'attiva').name('Passanti: ragdoll attiva').listen();
     folder.add(bind, 'palazzi', 20, 250, 5).name('Palazzi veri entro (m)').listen();
     folder.add(info, 'palazziInfo').name('  palazzi veri').listen().disable();
+    // la citta' e' sempre la stessa (seme nel database, lib/worldSeed.ts)
+    folder
+      .add({ seme: String(getWorldSeed()) }, 'seme')
+      .name('Seme della città')
+      .disable();
+    folder.add({ f: () => reseedWorld() }, 'f').name('Nuova città (cambia seme)');
+    // salvataggio (lib/saveGame.ts)
+    folder.add({ f: () => saveGame() }, 'f').name('Salva adesso');
+    folder.add({ f: () => deleteSave() }, 'f').name('Cancella salvataggio');
     return () => {
       folder.destroy();
       releaseDebugGui();
