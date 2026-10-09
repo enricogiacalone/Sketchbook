@@ -14,6 +14,7 @@ import WeaponWheelController from '../UI/WeaponWheelController';
 import { FighterData, AnimCatalog } from './SquadArenaTypes';
 import type { PunchingBagHandle } from './PunchingBag';
 import { useStore } from '../../store';
+import { coverState } from '../../lib/coverState';
 import { locomotionTuning as LT, RUN_CLIP, timeScaleFor, speedFor, strafeClipFor, CLIP_GROUND_SPEED } from './locomotion';
 import { LEFT_CONTACT, newLocoState, stepLoco, locoWeights } from './gtaLocomotion';
 import { useRapier } from '@react-three/rapier';
@@ -186,17 +187,65 @@ const HIP_FIRE_FACING_RUN = 1.5; // rad
 // copertura: quanto lontano si cerca il muro, da che altezza e' "alto",
 // distanza della schiena dal muro, velocita' (di lato e per arrivarci),
 // quanto spingere via per uscire; la clip (schiena al muro, mani piatte)
-// si ferma da COVER_CLIP_HOLD_AT in poi
+// si usa da coverClipHoldAt in poi (vedi coverBackToWall)
 const COVER_REACH = 1.8;
 const COVER_MIN_HEIGHT = 1.8;
-const COVER_BACK_GAP = 0.3;
+const COVER_BACK_GAP = 0.42; // ~ il raggio del corpo (piu' vicino non ci si arriva)
 const COVER_MOVE_SPEED = 1.3;
 const COVER_SNAP_SPEED = 4;
+const COVER_SNAP_TOL = 0.08; // m: arrivati al muro (sotto, si scorre di lato)
+// il modello si sposta verso il muro di tanto, oltre al corpo fisico
+const COVER_VISUAL_PULL = 0.22;
 const COVER_LEAVE_S = 0.25;
 const COVER_CLIP = 'Kimodo_cover_wall';
-const COVER_CLIP_HOLD_AT = 0.9;
+let coverClipHoldAt = 0.9; // s: ricalcolato da coverBackToWall
+
+// "quando sta nascosto deve stare spalle al muro": la clip Kimodo parte
+// rivolta al muro e nel primo secondo e mezzo si gira di ~170 gradi per
+// metterci la schiena (misurato sul bacino). Il personaggio pero' e' gia'
+// girato con la schiena al muro (e scorre di lato cosi'), quindi la svolta
+// della clip lo rimetteva con la faccia al muro. Qui una copia della clip
+// senza la svolta: al bacino (e al suo spostamento) si toglie la rotazione
+// verticale tra il primo e l'ultimo fotogramma; e la si usa da quando la
+// svolta e' finita (prima il bacino girerebbe all'indietro).
+function coverBackToWall(clip: THREE.AnimationClip): THREE.AnimationClip {
+  const c = clip.clone();
+  const qt = c.tracks.find((t) => /(^|\.|\/)pelvis\.quaternion$/.test(t.name)) as THREE.QuaternionKeyframeTrack | undefined;
+  if (!qt) return c;
+  const v = qt.values;
+  const n = v.length / 4;
+  const q0 = new THREE.Quaternion().fromArray(v, 0);
+  const qEnd = new THREE.Quaternion().fromArray(v, (n - 1) * 4);
+  // rotazione tra inizio e fine, solo la parte attorno all'alto del rig (Z)
+  const r = qEnd.clone().multiply(q0.clone().invert());
+  const fix = new THREE.Quaternion(0, 0, r.z, r.w).normalize().invert();
+  const q = new THREE.Quaternion();
+  for (let i = 0; i < n; i++) {
+    q.fromArray(v, i * 4).premultiply(fix);
+    q.toArray(v, i * 4);
+  }
+  const pt = c.tracks.find((t) => /(^|\.|\/)pelvis\.position$/.test(t.name));
+  if (pt) {
+    const p = new THREE.Vector3();
+    for (let i = 0; i < pt.values.length; i += 3) {
+      p.fromArray(pt.values, i).applyQuaternion(fix);
+      p.toArray(pt.values, i);
+    }
+  }
+  // da quando il bacino e' a meno di 20 gradi dalla posa finale
+  const last = new THREE.Quaternion().fromArray(v, (n - 1) * 4);
+  for (let i = 0; i < n; i++) {
+    if (q.fromArray(v, i * 4).angleTo(last) < THREE.MathUtils.degToRad(20)) {
+      coverClipHoldAt = qt.times[i];
+      break;
+    }
+  }
+  return c;
+}
 const _cvDir = new THREE.Vector3();
 const _cvN = new THREE.Vector3();
+const _cvBestN = new THREE.Vector3();
+const _cvBestP = new THREE.Vector3();
 const _cvP = new THREE.Vector3();
 const _cvT = new THREE.Vector3();
 const _cvO = new THREE.Vector3();
@@ -535,6 +584,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
 
   // copertura (vedi il blocco "Copertura alla GTA" nello useFrame)
   const coverRef = useRef({ on: false, peek: false, nx: 0, nz: 1, tx: 0, tz: 0, awayT: 0, lastT: 0 });
+  // 0 = busto staccato dalla telecamera (in copertura), 1 = la segue
+  const coverTwistRef = useRef(1);
+  // quanto il modello e' spostato verso il muro (m)
+  const coverPullRef = useRef(0);
   // raggio contro i soli collider fissi (muri, container: niente personaggi,
   // auto o oggetti che si muovono): distanza o -1, normale in _cvRayN
   const fixedRay = (ox: number, oy: number, oz: number, dx: number, dz: number, len: number): number => {
@@ -547,17 +600,19 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   };
   // un muro alto davanti, in direzione dir: piu' alto della testa e quasi
   // verticale. Punto (al petto) in _cvP, normale (orizzontale) in _cvN
-  const findCoverWall = (dir: THREE.Vector3): boolean => {
+  const findCoverWall = (dir: THREE.Vector3): number => {
     const fy = travRef.current.feetY;
     const px = data.position.x;
     const pz = data.position.z;
     const d1 = fixedRay(px, fy + 1.2, pz, dir.x, dir.z, COVER_REACH);
-    if (d1 < 0 || Math.abs(_cvRayN.y) > 0.35) return false;
+    if (d1 < 0 || Math.abs(_cvRayN.y) > 0.35) return -1;
     _cvN.set(_cvRayN.x, 0, _cvRayN.z).normalize();
     _cvP.set(px + dir.x * d1, 0, pz + dir.z * d1);
     // "solo quelli alti": deve esserci anche sopra la testa
     const d2 = fixedRay(px, fy + COVER_MIN_HEIGHT, pz, dir.x, dir.z, COVER_REACH + 0.4);
-    return d2 >= 0 && Math.abs(d2 - d1) < 0.5;
+    // (e la normale deve guardare verso di noi: non il retro di qualcosa)
+    if (_cvN.x * dir.x + _cvN.z * dir.z > -0.3) return -1;
+    return d2 >= 0 && Math.abs(d2 - d1) < 0.5 ? d1 : -1;
   };
   // c'e' muro alle spalle del punto p (dietro = -n)? aggiorna _cvN e _cvP
   const wallBehind = (p: THREE.Vector3, n: THREE.Vector3): boolean => {
@@ -642,7 +697,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     const actMap: Record<string, THREE.AnimationAction> = {};
     const cMap: Record<string, THREE.AnimationClip> = {};
 
-    animations.forEach((clip) => {
+    animations.forEach((clip0) => {
+      const clip = clip0.name === COVER_CLIP ? coverBackToWall(clip0) : clip0;
       const action = animMixer.clipAction(clip);
       actMap[clip.name] = action;
       cMap[clip.name] = clip;
@@ -1629,10 +1685,15 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       0,
       1
     );
+    // "quando mi nascondo dietro un muro l'allaccio tra torso e orbit va
+    // disabilitato": in copertura il busto resta quello della clip (schiena
+    // al muro); sporgendosi a mirare torna a seguire la telecamera
+    const cvT = coverRef.current;
+    coverTwistRef.current = THREE.MathUtils.clamp(coverTwistRef.current + (cvT.on && !cvT.peek ? -1 : 1) * delta * 6, 0, 1);
     if (!tPoseBench && !benchClip && !traving() && !inCarBody())
       ragdoll.applySpineLean(
-        THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX),
-        THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX) * (isGun() ? gunTwistRef.current : 1),
+        THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX) * coverTwistRef.current,
+        THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX) * (isGun() ? gunTwistRef.current : 1) * coverTwistRef.current,
         spineLeanWRef.current
       );
     // Fucile: e' agganciato al petto (calcio alla spalla, vedi
@@ -1796,7 +1857,15 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       const groundY = groundBase(data.position.x, data.position.z);
       data.position.y = tr.feetY - groundY;
       // (rialzo da terra: il modello parte alzato, vedi useKnockdown)
-      groupRef.current!.position.set(data.position.x, tr.feetY + getUpLift(), data.position.z);
+      // in copertura il modello si avvicina al muro piu' del corpo fisico
+      // (la capsula non ci arriva): schiena appoggiata, non a mezzo metro
+      const cvA = coverRef.current;
+      coverPullRef.current += ((cvA.on ? COVER_VISUAL_PULL : 0) - coverPullRef.current) * Math.min(1, 10 * (1 / 60));
+      groupRef.current!.position.set(
+        data.position.x - cvA.nx * coverPullRef.current,
+        tr.feetY + getUpLift(),
+        data.position.z - cvA.nz * coverPullRef.current
+      );
       // tutta la rotazione, non solo .y: in auto il gruppo prende il
       // quaternione del sedile, e per un'imbardata oltre i 90 gradi three la
       // scompone in Euler XYZ come (±PI, PI - imbardata, ±PI). Scesi
@@ -2357,18 +2426,40 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     {
       const cv = coverRef.current;
       const now = performance.now();
+      coverState.on = false;
       // tornati a piedi da altro (auto, drone, KO...): la copertura e' finita
       if (cv.on && now - cv.lastT > 250) cv.on = false;
       cv.lastT = now;
       const pressed = input.consumeJustPressed('cover');
       const free = travRef.current.mode === 'ground' && !isDodgingRef.current && data.attackLock <= 0;
       if (!cv.on && pressed && free) {
-        // verso dove si cerca il muro: la levetta, se no dove guarda la camera
-        _cvDir
-          .copy(_moveDir.lengthSq() > 0.0001 ? _moveDir : _forward)
-          .setY(0)
-          .normalize();
-        if (findCoverWall(_cvDir)) {
+        // dove si cerca il muro: la levetta, dove guarda la camera, dove
+        // guarda il personaggio (ognuna con un ventaglio di +-35 gradi); vince
+        // il muro alto piu' vicino
+        let bestD = Infinity;
+        const dirs: Array<[number, number]> = [];
+        if (_moveDir.lengthSq() > 0.0001) dirs.push([_moveDir.x, _moveDir.z]);
+        dirs.push([_forward.x, _forward.z], [-Math.sin(data.rotation), -Math.cos(data.rotation)]);
+        // anche alle spalle (appena usciti dalla copertura, o arrivati
+        // camminando all'indietro contro il muro)
+        dirs.push([Math.sin(data.rotation), Math.cos(data.rotation)]);
+        for (const [bx, bz] of dirs) {
+          const l = Math.hypot(bx, bz) || 1;
+          for (const off of [0, -0.6, 0.6]) {
+            const c = Math.cos(off);
+            const sn = Math.sin(off);
+            _cvDir.set((bx * c - bz * sn) / l, 0, (bx * sn + bz * c) / l);
+            const d = findCoverWall(_cvDir);
+            if (d >= 0 && d < bestD) {
+              bestD = d;
+              _cvBestN.copy(_cvN);
+              _cvBestP.copy(_cvP);
+            }
+          }
+        }
+        if (bestD < Infinity) {
+          _cvN.copy(_cvBestN);
+          _cvP.copy(_cvBestP);
           cv.on = true;
           cv.peek = false;
           cv.awayT = 0;
@@ -2378,17 +2469,21 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
           cv.tz = _cvP.z + _cvN.z * COVER_BACK_GAP;
           // vicino a un muro Q non e' il pugno
           input.consumeJustPressed('yawLeft');
-          transitionToAnimation(COVER_CLIP, 0.25, false, 1, COVER_CLIP_HOLD_AT);
+          transitionToAnimation(COVER_CLIP, 0.25, false, 1, coverClipHoldAt);
         }
       } else if (cv.on && (pressed || input.consumeJustPressed('jump') || !free)) {
         cv.on = false;
+        // uscendo con Q non parte anche il pugno
+        if (pressed) input.consumeJustPressed('yawLeft');
         transitionToAnimation(idleName(), 0.25, true);
       }
       if (cv.on) {
         _cvN.set(cv.nx, 0, cv.nz);
         // spingendo via dal muro per un attimo si esce
         const away = _moveDir.lengthSq() > 0.0001 ? _moveDir.dot(_cvN) / Math.max(1e-3, _moveDir.length()) : 0;
-        cv.awayT = away > 0.7 ? cv.awayT + delta : 0;
+        // (solo spingendo quasi dritti via dal muro: con la telecamera di
+        // lato, destra e sinistra dello schermo hanno anche un po' di "via")
+        cv.awayT = away > 0.92 ? cv.awayT + delta : 0;
         if (cv.awayT > COVER_LEAVE_S) {
           cv.on = false;
           transitionToAnimation(idleName(), 0.25, true);
@@ -2401,7 +2496,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       } else if (cv.on) {
         if (cv.peek) {
           cv.peek = false;
-          transitionToAnimation(COVER_CLIP, 0.2, false, 1, COVER_CLIP_HOLD_AT);
+          transitionToAnimation(COVER_CLIP, 0.2, false, 1, coverClipHoldAt);
         }
         const dt = delta * globalSpeed;
         // schiena al muro: si guarda dalla parte opposta
@@ -2411,14 +2506,23 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
         const ez = cv.tz - data.position.z;
         const ed = Math.hypot(ex, ez);
         let moving = false;
-        if (ed > 0.03) {
+        if (ed > COVER_SNAP_TOL) {
           const st = Math.min(ed, COVER_SNAP_SPEED * dt);
+          const bx = data.position.x;
+          const bz = data.position.z;
           resolveAndApplyMovement((ex / ed) * st, (ez / ed) * st);
+          // il corpo tocca gia' il muro (la capsula e' piu' larga dello
+          // spazio previsto): si e' arrivati, si resta dove si e'
+          if (Math.hypot(data.position.x - bx, data.position.z - bz) < st * 0.3) {
+            cv.tx = data.position.x;
+            cv.tz = data.position.z;
+          }
         } else {
           // di lato lungo il muro: destra del personaggio = n x su
           _cvT.crossVectors(_cvN, _worldUp).normalize();
           const side = _moveDir.dot(_cvT);
-          if (Math.abs(side) > 0.3) {
+          if (Math.abs(side) > 0.2) {
+            coverState.side = Math.sign(side);
             const step = Math.sign(side) * COVER_MOVE_SPEED * dt;
             // il muro continua? (allo spigolo ci si ferma)
             _cvO.set(
@@ -2442,8 +2546,13 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
             }
           }
         }
-        if (!moving && ed <= 0.03 && data.currentAnim !== COVER_CLIP) transitionToAnimation(COVER_CLIP, 0.2, false, 1, COVER_CLIP_HOLD_AT);
+        if (!moving && ed <= COVER_SNAP_TOL && data.currentAnim !== COVER_CLIP)
+          transitionToAnimation(COVER_CLIP, 0.2, false, 1, coverClipHoldAt);
         data.state = 'In copertura';
+        coverState.on = true;
+        coverState.t = now;
+        coverState.nx = cv.nx;
+        coverState.nz = cv.nz;
         applyTransform();
         return;
       }

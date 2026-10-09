@@ -113,29 +113,37 @@ export const useInput = () => {
   const keyboardActions = useRef<Record<Action, boolean>>(emptyActionMap());
   const gamepadActions = useRef<Record<Action, boolean>>(emptyActionMap());
 
+  // Stato unito (tastiera + pad) tenuto qui e non dentro l'updater di
+  // setInput: React in sviluppo (StrictMode) chiama gli updater due volte,
+  // anche piu' tardi, e il "premuto adesso" tornava vero dopo essere gia'
+  // stato letto -- un tasto premuto una volta valeva due (la copertura si
+  // apriva e si richiudeva subito, Q faceva anche il pugno).
+  const mergedRef = useRef<Record<Action, boolean>>(emptyActionMap());
   const applyMerged = () => {
-    setInput((prev) => {
-      let didChange = false;
-      const next = { ...prev };
-      for (const action of ACTION_NAMES) {
-        const value = keyboardActions.current[action] || gamepadActions.current[action];
-        if (value !== prev[action]) {
-          if (value && !prev[action]) {
-            justPressed.current[action] = true;
-            if (action === 'shift') {
-              const t = performance.now();
-              const taps = shiftTaps.current;
-              taps.push(t);
-              while (taps.length && t - taps[0] > SPRINT_TAP_WINDOW_MS) taps.shift();
-            }
+    const prev = mergedRef.current;
+    let didChange = false;
+    const next = { ...prev };
+    for (const action of ACTION_NAMES) {
+      const value = keyboardActions.current[action] || gamepadActions.current[action];
+      if (value !== prev[action]) {
+        if (value && !prev[action]) {
+          justPressed.current[action] = true;
+          if (action === 'shift') {
+            const t = performance.now();
+            const taps = shiftTaps.current;
+            taps.push(t);
+            while (taps.length && t - taps[0] > SPRINT_TAP_WINDOW_MS) taps.shift();
           }
-          if (!value) justPressed.current[action] = false;
-          next[action] = value;
-          didChange = true;
         }
+        if (!value) justPressed.current[action] = false;
+        next[action] = value;
+        didChange = true;
       }
-      return didChange ? next : prev;
-    });
+    }
+    if (didChange) {
+      mergedRef.current = next;
+      setInput(next);
+    }
   };
 
   const keys: Record<string, Action> = {

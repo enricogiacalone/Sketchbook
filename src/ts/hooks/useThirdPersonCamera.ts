@@ -9,6 +9,7 @@ import { useInput } from './useInput';
 import { droneMouseDelta, droneShake, droneCamPose } from '../lib/droneFlight';
 import { aimLock, collectAimTargets, type AimTarget } from '../lib/aimTargets';
 import { physicsBridge } from '../lib/physicsBridge';
+import { coverState } from '../lib/coverState';
 import type { Ray } from '@dimforge/rapier3d-compat';
 
 const HELI_CAM_RADIUS = 8;
@@ -17,6 +18,8 @@ const MAX_RADIUS = 10;
 const FOCUS_Y_OFFSET = 0.4;
 const _focusTarget = new THREE.Vector3();
 const DUEL_START_RADIUS = 1.8;
+// a piedi la camera torna dietro al personaggio solo se si muove (m/s)
+const FOOT_RECENTER_MIN_SPEED = 0.5;
 const DUEL_START_PHI = 10; // degrees
 
 const SHOULDER_OFFSET_HIP = 0.45;
@@ -167,6 +170,8 @@ export const useThirdPersonCamera = () => {
 
   const lastManualInputTime = useRef(performance.now());
   const effectiveCollisionRadius = useRef(cameraPlayerRadius);
+  const footPrev = useRef(new THREE.Vector3());
+  const footSpeed = useRef(0);
 
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -391,8 +396,21 @@ export const useThirdPersonCamera = () => {
       return;
     }
 
+    // In copertura (lib/coverState.ts) la telecamera resta dove la metti:
+    // "disabilita l'autocalibratura della camera mentre nascosto"
+    const inCover = isFootController && coverState.on && performance.now() - coverState.t < 200;
+
     // 1. Soft Auto-Centering on Foot (GTA IV style)
-    if (isFootController && !gunOn && performance.now() - lastManualInputTime.current > 1500) {
+    // "deve attivarsi solo quando sto camminando o correndo, non da fermo":
+    // velocita' del personaggio (dal suo spostamento, smussata)
+    if (isFootController) {
+      if (footPrev.current.lengthSq() === 0) footPrev.current.copy(targetObj.position);
+      const v = Math.hypot(targetObj.position.x - footPrev.current.x, targetObj.position.z - footPrev.current.z) / Math.max(delta, 0.001);
+      footPrev.current.copy(targetObj.position);
+      footSpeed.current += (Math.min(v, 15) - footSpeed.current) * (1 - Math.exp(-delta * 8));
+    }
+    const footMoving = footSpeed.current > FOOT_RECENTER_MIN_SPEED;
+    if (isFootController && footMoving && !gunOn && !inCover && performance.now() - lastManualInputTime.current > 1500) {
       const charHeadingDeg = THREE.MathUtils.radToDeg(targetObj.rotation.y);
       if (!isNaN(charHeadingDeg)) {
         let diff = (charHeadingDeg - theta.current) % 360;
