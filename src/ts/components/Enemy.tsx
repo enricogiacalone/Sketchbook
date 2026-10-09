@@ -31,6 +31,12 @@ interface EnemyProps {
   onGiveUp: (id: string) => void;
   // vita con cui parte (un passante gia' ferito resta ferito)
   initialHp?: number;
+  // di guardia (missioni, StoryMission.tsx): fermo dov'e', rivolto verso
+  // `facing`, finche' non ti vede da vicino, non viene colpito o qualcuno
+  // del suo gruppo da' l'allarme (alert condiviso tra le guardie)
+  guard?: { alert: { on: boolean }; facing?: number };
+  // chiamato una volta quando muore
+  onDeath?: (id: string) => void;
 }
 
 const ENEMY_COLOR = '#c62828';
@@ -50,6 +56,7 @@ const SHOT_DAMAGE_LIMB = 8;
 const SHOT_HIT_SPEED = 2.5;
 const SHOT_WORLD_IMPULSE = 0.6;
 const GIVE_UP_TIME = 15;
+const GUARD_ALERT_DIST = 18; // m: una guardia ti vede da qui
 const CORPSE_S = 25;
 // altezza del petto del giocatore (manichino) sopra i piedi: dove si mira.
 // playerPos e' 0.5 m sopra i piedi (PlayerCombatSoldier.tsx).
@@ -61,7 +68,7 @@ const _muzzle = new THREE.Vector3();
 const _aim = new THREE.Vector3();
 const _perp = new THREE.Vector3();
 
-const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp }) => {
+const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp, guard, onDeath }) => {
   const actor = useMannequinActor({
     id,
     name: 'Nemico',
@@ -84,7 +91,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
   const [gone, setGone] = useState(false);
 
   const st = useRef({
-    mode: 'chase' as 'chase' | 'shoot',
+    mode: (guard ? 'guard' : 'chase') as 'guard' | 'chase' | 'shoot',
     fireCd: 0.6 + Math.random() * 0.6,
     shootAnim: 0,
     giveUp: 0,
@@ -111,6 +118,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
         pistol.setVisible(false);
         // fuori dalla minimappa e dagli obiettivi delle missioni subito
         useStore.getState().removeEntity(id);
+        onDeath?.(id);
       }
       if (!s.corpseDone && actor.deadFor() > CORPSE_S) {
         s.corpseDone = true;
@@ -137,6 +145,21 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp 
     const dx = pp[0] - data.position.x;
     const dz = pp[2] - data.position.z;
     const dist = Math.hypot(dx, dz);
+
+    // di guardia: fermo finche' non scatta l'allarme
+    if (s.mode === 'guard') {
+      if (guard?.alert.on || dist < GUARD_ALERT_DIST || res === 'hurt') {
+        s.mode = dist < FIRE_RANGE ? 'shoot' : 'chase';
+        if (guard) guard.alert.on = true;
+      } else {
+        actor.play('Pistol_Idle', 0.3);
+        if (guard?.facing !== undefined) g.rotation.y = guard.facing;
+        const gy = getTerrainHeight(data.position.x, data.position.z) + getRoadOffset(data.position.x, data.position.z);
+        g.position.set(data.position.x, gy, data.position.z);
+        data.rotation = g.rotation.y + Math.PI;
+        return;
+      }
+    }
 
     // si gira verso il giocatore
     if (dist > 0.01) {

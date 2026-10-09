@@ -18,7 +18,9 @@ import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from './compone
 import Road from './components/Environment/Road';
 import Terrain from './components/Environment/Terrain';
 import UFO from './components/Environment/UFO';
-import MissionManager from './components/Missions/MissionManager';
+// (la vecchia catena di 3 missioni, MissionManager.tsx, e' sostituita dalla
+// missione con i personaggi: Missions/StoryMission.tsx)
+import StoryMission from './components/Missions/StoryMission';
 import SoldierSpawner from './components/SoldierSpawner';
 import Airplane from './components/Vehicles/Airplane'; // Import Airplane
 import Car from './components/Vehicles/Car'; // Import Car
@@ -227,7 +229,7 @@ const Scene: React.FC = () => {
           <TreeBatches />
           <CityDetails />
           <Collectibles />
-          <MissionManager />
+          <StoryMission />
         </Suspense>
       )}
     </>

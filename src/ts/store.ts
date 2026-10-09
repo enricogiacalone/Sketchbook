@@ -19,6 +19,16 @@ export type SeatKind = 'driver' | 'passenger' | null;
 // HUD, the minimap blip, and the in-world marker meshes all read.
 export type MissionStatus = 'inactive' | 'active' | 'success' | 'failed' | 'allComplete';
 
+// una battuta del dialogo aperto (Missions/StoryMission.tsx la scrive,
+// UI/DialogueBox.tsx la disegna e rimanda le scelte a lib/dialogue.ts)
+export interface DialogueView {
+  speaker: string;
+  color: string;
+  text: string;
+  // vuoto: si va avanti con Invio / X
+  options: Array<{ label: string; disabled?: boolean }>;
+}
+
 export interface EntityInfo {
   id: string;
   type: 'player' | 'enemy' | 'car' | 'airplane' | 'helicopter' | 'ufo';
@@ -349,11 +359,23 @@ interface GameState {
   // elimination target) -- null when the active mission has no fixed
   // point (the survive-a-wave stage) or when no mission is active.
   missionTargetPos: [number, number] | null;
+  // "crea una missione interessante con personaggi con cui parlare e robe da
+  // fare" (Missions/StoryMission.tsx): soldi del giocatore, dialogo aperto
+  // (lo disegna UI/DialogueBox.tsx), personaggio a cui si puo' parlare
+  // adesso (UI/StoryHUD.tsx mostra il tasto) e banner di fine missione
+  cash: number;
+  dialogueView: DialogueView | null;
+  talkPrompt: string | null;
+  storyBanner: { title: string; subtitle: string; color: string; until: number } | null;
   setMissionStage: (stage: number) => void;
   setMissionStatus: (status: MissionStatus) => void;
   setMissionInfo: (title: string, briefing: string) => void;
   setMissionTimeRemaining: (t: number) => void;
   setMissionTargetPos: (pos: [number, number] | null) => void;
+  addCash: (amount: number) => void;
+  setDialogueView: (view: DialogueView | null) => void;
+  setTalkPrompt: (prompt: string | null) => void;
+  setStoryBanner: (banner: GameState['storyBanner']) => void;
   setCurrentControllable: (type: ControllableType, id?: string | null, seatType?: SeatKind, seatName?: string | null) => void;
   setIsVehicleTransitioning: (transitioning: boolean, entityId?: string | null, doorName?: string | null) => void;
   setDoorOpen: (vehicleId: string, doorName: string, open: boolean) => void;
@@ -549,6 +571,10 @@ export const useStore = create<GameState>((set) => ({
   missionBriefing: '',
   missionTimeRemaining: 0,
   missionTargetPos: null,
+  cash: 200,
+  dialogueView: null,
+  talkPrompt: null,
+  storyBanner: null,
   entities: new Map(),
   setHealth: (health) => set({ health }),
   setMaxHealth: (maxHealth) => set({ maxHealth }),
@@ -559,6 +585,10 @@ export const useStore = create<GameState>((set) => ({
   setMissionInfo: (title, briefing) => set({ missionTitle: title, missionBriefing: briefing }),
   setMissionTimeRemaining: (t) => set({ missionTimeRemaining: t }),
   setMissionTargetPos: (pos) => set({ missionTargetPos: pos }),
+  addCash: (amount) => set((state) => ({ cash: Math.max(0, state.cash + amount) })),
+  setDialogueView: (dialogueView) => set({ dialogueView }),
+  setTalkPrompt: (talkPrompt) => set((state) => (state.talkPrompt === talkPrompt ? state : { talkPrompt })),
+  setStoryBanner: (storyBanner) => set({ storyBanner }),
   setCurrentControllable: (type, id = null, seatType = null, seatName = null) =>
     set({
       currentControllable: type,

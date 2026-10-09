@@ -183,6 +183,24 @@ const HIP_FIRE_HOLD_S = 0.9;
 const HIP_FIRE_WAIT_S = 0.25;
 const HIP_FIRE_FACING = 0.35; // rad
 const HIP_FIRE_FACING_RUN = 1.5; // rad
+// copertura: quanto lontano si cerca il muro, da che altezza e' "alto",
+// distanza della schiena dal muro, velocita' (di lato e per arrivarci),
+// quanto spingere via per uscire; la clip (schiena al muro, mani piatte)
+// si ferma da COVER_CLIP_HOLD_AT in poi
+const COVER_REACH = 1.8;
+const COVER_MIN_HEIGHT = 1.8;
+const COVER_BACK_GAP = 0.3;
+const COVER_MOVE_SPEED = 1.3;
+const COVER_SNAP_SPEED = 4;
+const COVER_LEAVE_S = 0.25;
+const COVER_CLIP = 'Kimodo_cover_wall';
+const COVER_CLIP_HOLD_AT = 0.9;
+const _cvDir = new THREE.Vector3();
+const _cvN = new THREE.Vector3();
+const _cvP = new THREE.Vector3();
+const _cvT = new THREE.Vector3();
+const _cvO = new THREE.Vector3();
+const _cvRayN = new THREE.Vector3();
 // mirando si corre fin di lato (il busto gira fino a SPINE_TWIST_MAX, il
 // resto lo prende il braccio); piu' indietro si cammina di lato in mira.
 // AIM_RUN_HYST evita di saltare avanti e indietro tra le due sul confine
@@ -514,6 +532,46 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   const armBonesRef = useRef<{ l: Arm; r: Arm } | null>(null);
   const rifleRaiseRef = useRef(0);
   const isGun = () => weaponRef.current === 'pistol' || weaponRef.current === 'rifle';
+
+  // copertura (vedi il blocco "Copertura alla GTA" nello useFrame)
+  const coverRef = useRef({ on: false, peek: false, nx: 0, nz: 1, tx: 0, tz: 0, awayT: 0, lastT: 0 });
+  // raggio contro i soli collider fissi (muri, container: niente personaggi,
+  // auto o oggetti che si muovono): distanza o -1, normale in _cvRayN
+  const fixedRay = (ox: number, oy: number, oz: number, dx: number, dz: number, len: number): number => {
+    const R = rapier as any;
+    const flags = R.QueryFilterFlags.EXCLUDE_DYNAMIC | R.QueryFilterFlags.EXCLUDE_KINEMATIC | R.QueryFilterFlags.EXCLUDE_SENSORS;
+    const hit = world.castRayAndGetNormal(new R.Ray({ x: ox, y: oy, z: oz }, { x: dx, y: 0, z: dz }), len, true, flags);
+    if (!hit) return -1;
+    _cvRayN.set(hit.normal.x, hit.normal.y, hit.normal.z);
+    return (hit as any).timeOfImpact ?? (hit as any).toi ?? 0;
+  };
+  // un muro alto davanti, in direzione dir: piu' alto della testa e quasi
+  // verticale. Punto (al petto) in _cvP, normale (orizzontale) in _cvN
+  const findCoverWall = (dir: THREE.Vector3): boolean => {
+    const fy = travRef.current.feetY;
+    const px = data.position.x;
+    const pz = data.position.z;
+    const d1 = fixedRay(px, fy + 1.2, pz, dir.x, dir.z, COVER_REACH);
+    if (d1 < 0 || Math.abs(_cvRayN.y) > 0.35) return false;
+    _cvN.set(_cvRayN.x, 0, _cvRayN.z).normalize();
+    _cvP.set(px + dir.x * d1, 0, pz + dir.z * d1);
+    // "solo quelli alti": deve esserci anche sopra la testa
+    const d2 = fixedRay(px, fy + COVER_MIN_HEIGHT, pz, dir.x, dir.z, COVER_REACH + 0.4);
+    return d2 >= 0 && Math.abs(d2 - d1) < 0.5;
+  };
+  // c'e' muro alle spalle del punto p (dietro = -n)? aggiorna _cvN e _cvP
+  const wallBehind = (p: THREE.Vector3, n: THREE.Vector3): boolean => {
+    const fy = travRef.current.feetY;
+    const d1 = fixedRay(p.x, fy + 1.2, p.z, -n.x, -n.z, COVER_BACK_GAP + 0.6);
+    if (d1 < 0 || Math.abs(_cvRayN.y) > 0.35) return false;
+    const nx = _cvRayN.x;
+    const nz = _cvRayN.z;
+    const d2 = fixedRay(p.x, fy + COVER_MIN_HEIGHT, p.z, -n.x, -n.z, COVER_BACK_GAP + 1);
+    if (d2 < 0) return false;
+    _cvP.set(p.x - n.x * d1, 0, p.z - n.z * d1);
+    n.set(nx, 0, nz).normalize();
+    return true;
+  };
   const gunKind = (): GunKind => (weaponRef.current === 'rifle' ? 'rifle' : 'pistol');
   const gunApi = (k: GunKind = gunKind()): GunModelApi => (k === 'rifle' ? rifle : pistol);
   const reloadLeftRef = useRef(0);
@@ -2289,6 +2347,107 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     }
     _toOpponent.y = 0;
     if (_toOpponent.lengthSq() > 0.0001) _toOpponent.normalize();
+
+    // --- Copertura alla GTA: "nascondersi dietro i muri, al momento solo
+    // quelli alti". Q / R1 vicino a un muro alto (piu' alto della testa):
+    // ci si mette con la schiena contro (Kimodo_cover_wall), si scorre di
+    // lato lungo il muro (fino allo spigolo), mirando ci si sporge (si mira
+    // da li' senza muoversi), di nuovo Q / R1, un salto o spingendo via
+    // dal muro si esce.
+    {
+      const cv = coverRef.current;
+      const now = performance.now();
+      // tornati a piedi da altro (auto, drone, KO...): la copertura e' finita
+      if (cv.on && now - cv.lastT > 250) cv.on = false;
+      cv.lastT = now;
+      const pressed = input.consumeJustPressed('cover');
+      const free = travRef.current.mode === 'ground' && !isDodgingRef.current && data.attackLock <= 0;
+      if (!cv.on && pressed && free) {
+        // verso dove si cerca il muro: la levetta, se no dove guarda la camera
+        _cvDir
+          .copy(_moveDir.lengthSq() > 0.0001 ? _moveDir : _forward)
+          .setY(0)
+          .normalize();
+        if (findCoverWall(_cvDir)) {
+          cv.on = true;
+          cv.peek = false;
+          cv.awayT = 0;
+          cv.nx = _cvN.x;
+          cv.nz = _cvN.z;
+          cv.tx = _cvP.x + _cvN.x * COVER_BACK_GAP;
+          cv.tz = _cvP.z + _cvN.z * COVER_BACK_GAP;
+          // vicino a un muro Q non e' il pugno
+          input.consumeJustPressed('yawLeft');
+          transitionToAnimation(COVER_CLIP, 0.25, false, 1, COVER_CLIP_HOLD_AT);
+        }
+      } else if (cv.on && (pressed || input.consumeJustPressed('jump') || !free)) {
+        cv.on = false;
+        transitionToAnimation(idleName(), 0.25, true);
+      }
+      if (cv.on) {
+        _cvN.set(cv.nx, 0, cv.nz);
+        // spingendo via dal muro per un attimo si esce
+        const away = _moveDir.lengthSq() > 0.0001 ? _moveDir.dot(_cvN) / Math.max(1e-3, _moveDir.length()) : 0;
+        cv.awayT = away > 0.7 ? cv.awayT + delta : 0;
+        if (cv.awayT > COVER_LEAVE_S) {
+          cv.on = false;
+          transitionToAnimation(idleName(), 0.25, true);
+        }
+      }
+      if (cv.on && isGun() && input.secondary) {
+        // mirando ci si sporge: si mira da qui (sotto, come sempre), fermi
+        cv.peek = true;
+        _moveDir.set(0, 0, 0);
+      } else if (cv.on) {
+        if (cv.peek) {
+          cv.peek = false;
+          transitionToAnimation(COVER_CLIP, 0.2, false, 1, COVER_CLIP_HOLD_AT);
+        }
+        const dt = delta * globalSpeed;
+        // schiena al muro: si guarda dalla parte opposta
+        data.rotation = Math.atan2(-cv.nx, -cv.nz);
+        // arrivare al muro (scivolando, non di colpo)
+        const ex = cv.tx - data.position.x;
+        const ez = cv.tz - data.position.z;
+        const ed = Math.hypot(ex, ez);
+        let moving = false;
+        if (ed > 0.03) {
+          const st = Math.min(ed, COVER_SNAP_SPEED * dt);
+          resolveAndApplyMovement((ex / ed) * st, (ez / ed) * st);
+        } else {
+          // di lato lungo il muro: destra del personaggio = n x su
+          _cvT.crossVectors(_cvN, _worldUp).normalize();
+          const side = _moveDir.dot(_cvT);
+          if (Math.abs(side) > 0.3) {
+            const step = Math.sign(side) * COVER_MOVE_SPEED * dt;
+            // il muro continua? (allo spigolo ci si ferma)
+            _cvO.set(
+              data.position.x + _cvT.x * (step + Math.sign(side) * 0.25),
+              0,
+              data.position.z + _cvT.z * (step + Math.sign(side) * 0.25)
+            );
+            if (wallBehind(_cvO, _cvN)) {
+              resolveAndApplyMovement(_cvT.x * step, _cvT.z * step);
+              moving = true;
+              // il muro puo' girare piano: normale e distanza aggiornate
+              _cvO.set(data.position.x, 0, data.position.z);
+              if (wallBehind(_cvO, _cvN)) {
+                cv.nx = _cvN.x;
+                cv.nz = _cvN.z;
+              }
+              cv.tx = _cvP.x + cv.nx * COVER_BACK_GAP;
+              cv.tz = _cvP.z + cv.nz * COVER_BACK_GAP;
+              const clip = strafeClipFor(side > 0);
+              transitionToAnimation(clip, 0.15, true, timeScaleFor(clip, COVER_MOVE_SPEED));
+            }
+          }
+        }
+        if (!moving && ed <= 0.03 && data.currentAnim !== COVER_CLIP) transitionToAnimation(COVER_CLIP, 0.2, false, 1, COVER_CLIP_HOLD_AT);
+        data.state = 'In copertura';
+        applyTransform();
+        return;
+      }
+    }
 
     // Facing: "guardare l'avversario se tengo premuto l1. si accancia
     // all'avversario piu' vicino" -- lock-on is now a HELD modifier

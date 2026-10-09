@@ -19,6 +19,8 @@ import {
 import { useTreeTemplates, TreeInstance, TreeTemplate, Flowers } from './ParkTrees';
 import { RealGrassPatch } from './RealGrass';
 import { StaticInstances } from './StaticInstances';
+import { MarketPlaza, WarehouseYard } from './StoryPlaces';
+import { MARKET } from '../../missions/storyPlaces';
 
 const _windowDummy = new THREE.Object3D();
 const _windowColor = new THREE.Color();
@@ -1097,7 +1099,28 @@ const City: React.FC = () => {
       {courtyards.map((c, i) => (
         <GreenCourtyard key={`court-${i}`} x={c.x} z={c.z} treeTemplates={treeTemplates} />
       ))}
-      {plazas.map((p, i) => (
+      {/* "modifica un po' la citta'": la prima piazza e' il mercato, la
+          seconda il deposito dei Serpenti (StoryPlaces.tsx, la missione di
+          Missions/StoryMission.tsx) */}
+      <MarketPlaza />
+      {treeTemplates.length > 0 &&
+        [
+          [-17, -17],
+          [17, -17],
+          [-17, 17],
+          [17, 17],
+        ].map(([ox, oz], i) => (
+          <TreeInstance
+            key={`market-tree-${i}`}
+            x={MARKET.x + ox}
+            z={MARKET.z + oz}
+            rotationY={i * 1.7}
+            scale={0.24}
+            template={treeTemplates[i % treeTemplates.length]}
+          />
+        ))}
+      <WarehouseYard />
+      {plazas.slice(2).map((p, i) => (
         <React.Fragment key={`plaza-${i}`}>
           <group position={[p.x, getTerrainHeight(p.x, p.z), p.z]}>
             <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>

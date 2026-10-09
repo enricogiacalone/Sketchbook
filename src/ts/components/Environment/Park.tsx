@@ -5,6 +5,8 @@ import { RealGrassPatch } from './RealGrass';
 import { getTerrainHeight } from './Terrain';
 import { streetLampBulbMaterial } from './Road';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
+import { BAR } from '../../missions/storyPlaces';
+import { BarDaVito } from './StoryPlaces';
 
 const BLOCK_MIN = 0;
 const BLOCK_MAX = 60;
@@ -19,6 +21,8 @@ const PATH_WIDTH = 3;
 const KEEP_CLEAR: Array<[number, number, number]> = [
   [10, 0, 10],
   [0, 60, 10],
+  // Bar Da Vito (StoryPlaces.tsx) e i suoi tavolini
+  [BAR.x, BAR.z - 1, 9],
 ];
 
 const isFreeSpot = (x: number, z: number, placed: Array<[number, number]>, minSpacing: number): boolean => {
@@ -272,7 +276,12 @@ const Park: React.FC = () => {
   // Same bounds/avoid-fountain settings as the old inline ParkGrass/flower
   // generation -- just delegated to the shared components now.
   const grassAvoid = useMemo(() => {
-    const zones = [{ x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH }];
+    const zones = [
+      { x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH },
+      // niente erba dentro il bar e sul dehors
+      { x: BAR.x - 2.5, z: BAR.z - 1.5, radius: 5 },
+      { x: BAR.x + 2.5, z: BAR.z - 1.5, radius: 5 },
+    ];
     for (let x = CENTER_X + FOUNTAIN_RADIUS; x <= AREA_MAX; x += 1.5) {
       zones.push({ x, z: CENTER_Z, radius: PATH_WIDTH / 2 + 0.4 });
     }
@@ -289,7 +298,11 @@ const Park: React.FC = () => {
   }, []);
 
   const flowerAvoid = useMemo(() => {
-    const zones = [{ x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH + 1 }];
+    const zones = [
+      { x: CENTER_X, z: CENTER_Z, radius: FOUNTAIN_RADIUS + PATH_WIDTH + 1 },
+      { x: BAR.x - 2.5, z: BAR.z - 1.5, radius: 5.5 },
+      { x: BAR.x + 2.5, z: BAR.z - 1.5, radius: 5.5 },
+    ];
     for (let x = CENTER_X + FOUNTAIN_RADIUS; x <= AREA_MAX; x += 2) {
       zones.push({ x, z: CENTER_Z, radius: PATH_WIDTH / 2 + 0.8 });
     }
@@ -309,6 +322,7 @@ const Park: React.FC = () => {
     <group>
       <RealGrassPatch minX={AREA_MIN} maxX={AREA_MAX} minZ={AREA_MIN} maxZ={AREA_MAX} avoid={grassAvoid} />
       <Fountain />
+      <BarDaVito />
       <Paths />
       {trees.map((t, i) => (
         <TreeInstance key={i} x={t.x} z={t.z} rotationY={t.rotationY} scale={t.scale} template={treeTemplates[t.templateIndex]} />

@@ -2,9 +2,12 @@ import { useEffect, useState, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useStore } from '../store';
 import { dronePad } from '../lib/droneFlight';
+import { talkState } from '../lib/dialogue';
 
 const STICK_DEADZONE = 0.25;
 const DRONE_HOLD_MS = 500;
+// azioni che restano attive col dialogo aperto (ci si puo' allontanare)
+const DIALOGUE_FREE_ACTIONS = new Set<string>(['forward', 'backward', 'left', 'right', 'shift']);
 const SPRINT_TAP_WINDOW_MS = 900;
 
 const ACTION_NAMES = [
@@ -43,6 +46,12 @@ const ACTION_NAMES = [
   'musicSchermo',
   // capriola del duello: Spazio adesso e' il salto (PlayerCombatSoldier)
   'dodge',
+  // parla con un personaggio / prendi un oggetto (Missions/StoryMission.tsx):
+  // T, o Triangolo sul pad quando si e' vicini a qualcuno
+  'talk',
+  // copertura dietro un muro alto (PlayerCombatSoldier.tsx): Q, R1 sul pad
+  // (come in GTA V; lontano da un muro restano il pugno / la parata)
+  'cover',
 ] as const;
 type Action = (typeof ACTION_NAMES)[number];
 
@@ -76,6 +85,8 @@ const emptyActionMap = (): Record<Action, boolean> => ({
   musicCubi: false,
   musicSchermo: false,
   dodge: false,
+  talk: false,
+  cover: false,
 });
 
 export const useInput = () => {
@@ -157,6 +168,7 @@ export const useInput = () => {
     KeyJ: 'musicCubi',
     KeyK: 'musicSchermo',
     KeyV: 'dodge',
+    KeyT: 'talk',
     KeyZ: 'secondary',
     KeyN: 'secondary',
     ControlRight: 'secondary',
@@ -173,6 +185,10 @@ export const useInput = () => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
       const action = keys[e.code];
+      // dialogo aperto: si puo' solo camminare (i tasti li legge DialogueBox)
+      if (talkState.open && action && !DIALOGUE_FREE_ACTIONS.has(action)) return;
+      // Q e' anche la copertura (vicino a un muro vince lei)
+      if (e.code === 'KeyQ') keyboardActions.current.cover = true;
       if (action) {
         keyboardActions.current[action] = true;
         applyMerged();
@@ -180,6 +196,7 @@ export const useInput = () => {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'KeyQ') keyboardActions.current.cover = false;
       const action = keys[e.code];
       if (action) {
         keyboardActions.current[action] = false;
@@ -194,6 +211,8 @@ export const useInput = () => {
         // schermo della scena": conta solo il clic sulla scena (il canvas, o
         // col mouse catturato), non quello sul pannello Debug o sui bottoni
         if (!document.pointerLockElement && !(e.target instanceof HTMLCanvasElement)) return;
+        // dialogo aperto: il clic non spara
+        if (talkState.open) return;
         const action = e.button === 0 ? 'primary' : (e.button === 2 ? 'secondary' : null);
         if (action) {
             keyboardActions.current[action] = true;
@@ -463,6 +482,18 @@ export const useInput = () => {
     }
     g.camera = selectTap && !inDrone;
     g.fly = selectHold || (inDrone && b(3));
+    // R1: copertura (a piedi)
+    g.cover = b(5) && !inCar && !flying && !inDrone;
+    // vicino a un personaggio (lib/dialogue.ts): Triangolo parla, non sale
+    // in auto; col dialogo aperto i tasti li legge DialogueBox
+    g.talk = false;
+    if (!inCar && !flying && !inDrone && (talkState.near || talkState.open)) {
+      g.talk = b(3) && !talkState.open;
+      g.enter = false;
+    }
+    if (talkState.open) {
+      for (const a of ACTION_NAMES) if (!DIALOGUE_FREE_ACTIONS.has(a)) g[a] = false;
+    }
     // Start: pausa (la gestisce GameFreeze.tsx anche a gioco fermo)
     g.pause = b(9);
 

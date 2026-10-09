@@ -18,6 +18,8 @@ import ToonStyle from './components/Environment/ToonStyle';
 import WorldFog from './components/Environment/WorldFog';
 import ThirdPersonCamera from './components/ThirdPersonCamera';
 import PhysicsBridge from './components/PhysicsBridge';
+import StoryHUD from './components/UI/StoryHUD';
+import DialogueBox from './components/UI/DialogueBox';
 import ChatInput from './components/UI/ChatInput';
 import CollectiblesCounter from './components/UI/CollectiblesCounter';
 import CameraCalibrationGUI from './components/UI/CameraCalibrationGUI';
@@ -31,7 +33,6 @@ import GraphicsGUI from './components/UI/GraphicsGUI';
 import CityGUI from './components/UI/CityGUI';
 import Loader from './components/UI/Loader'; // Helper to track loading
 import LoadingScreen from './components/UI/LoadingScreen';
-import MissionHUD from './components/UI/MissionHUD';
 import RagdollBenchGUI from './components/UI/RagdollBenchGUI';
 import RagdollBenchOverlay from './components/UI/RagdollBenchOverlay';
 import ScenariosGUI from './components/UI/ScenariosGUI';
@@ -293,6 +294,8 @@ const App: React.FC = () => {
       <WeaponWheel />
       <RagdollBenchGUI />
       <WeaponHUD />
+      <StoryHUD />
+      <DialogueBox />
       <RagdollBenchOverlay />
 
       {/* UI overlays */}
@@ -302,7 +305,6 @@ const App: React.FC = () => {
           <Controls />
           <ChatInput />
           <GamepadDebug />
-          <MissionHUD />
           <StatusBars />
         </>
       )}

@@ -39,6 +39,11 @@ export const CITY_PLAYER_ID = 'player';
 const SPAWN_X = 0;
 const SPAWN_Z = 0;
 const GLOBAL_SPEED = 1.0;
+// vita che si recupera da sola (GTA V): dopo REGEN_DELAY_S senza colpi,
+// REGEN_PER_S punti al secondo fino a REGEN_CAP della vita massima
+const REGEN_DELAY_S = 5;
+const REGEN_PER_S = 4;
+const REGEN_CAP = 0.5;
 
 const _wp = new THREE.Vector3();
 const _wq = new THREE.Quaternion();
@@ -355,8 +360,31 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
 
   // --- ogni frame ------------------------------------------------------------
   const lastHpRef = useRef(data.hp);
-  useFrame(() => {
+  const regenRef = useRef({ lastHp: data.hp, quiet: 0, acc: 0 });
+  useFrame((_state, delta) => {
     const st = useStore.getState();
+    // "la vita si recupera se ferito come in GTA" (GTA V): dopo qualche
+    // secondo senza colpi risale piano, ma solo fino a meta'; il resto lo
+    // ridanno le cure (la frutta di Salvo, i collezionabili)
+    {
+      const rg = regenRef.current;
+      const hp = Math.min(data.hp, st.health);
+      if (hp < rg.lastHp || data.isDead) {
+        rg.quiet = 0;
+        rg.acc = 0;
+      } else rg.quiet += delta;
+      const cap = maxHp.current * REGEN_CAP;
+      if (!data.isDead && hp > 0 && hp < cap && rg.quiet > REGEN_DELAY_S && !st.isPaused) {
+        rg.acc += REGEN_PER_S * delta;
+        if (rg.acc >= 1) {
+          const add = Math.floor(rg.acc);
+          rg.acc -= add;
+          // a punti interi: la barra della vita non si ridisegna a ogni frame
+          st.setHealth(Math.min(cap, Math.round(hp) + add));
+        }
+      }
+      rg.lastHp = Math.min(data.hp, useStore.getState().health);
+    }
     // vita <-> barra della vita: danni/cure da altre parti del gioco
     // (store.takeDamage, collezionabili) arrivano al manichino e viceversa
     if (st.health !== lastHpRef.current) {
