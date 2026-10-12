@@ -3,9 +3,6 @@ import { useStore } from '../../store';
 import { acquireDebugGui, debugSection, releaseDebugGui } from '../../lib/debugGui';
 import { adaptiveResInfo } from '../Environment/AdaptiveResolution';
 
-// Sezione "Grafica" del pannello Debug (comune a tutte le scene): le stesse
-// caselle del menu iniziale, per cambiarle durante la partita, e l'HUD di
-// gioco (prima stava nella cartella "Arena").
 const GraphicsGUI: React.FC = () => {
   useEffect(() => {
     acquireDebugGui();
@@ -30,14 +27,41 @@ const GraphicsGUI: React.FC = () => {
       set adattiva(v: boolean) {
         st().setAdaptiveResolution(v);
       },
-      // "togli tutta la merda ui in piu' che nn c'entra con questo test..
-      // mettila disabilitata di default ma abilitabile tramite checkbox":
-      // Controls/StatusBars/MissionHUD/Minimap (App.tsx)
-      get hud() {
-        return st().showGameplayHud;
+      get collectibles() {
+        return st().showCollectiblesCounter;
       },
-      set hud(v: boolean) {
-        st().setShowGameplayHud(v);
+      set collectibles(v: boolean) {
+        st().setShowCollectiblesCounter(v);
+      },
+      get controls() {
+        return st().showControls;
+      },
+      set controls(v: boolean) {
+        st().setShowControls(v);
+      },
+      get chat() {
+        return st().showChatInput;
+      },
+      set chat(v: boolean) {
+        st().setShowChatInput(v);
+      },
+      get gamepadDebug() {
+        return st().showGamepadDebug;
+      },
+      set gamepadDebug(v: boolean) {
+        st().setShowGamepadDebug(v);
+      },
+      get statusBars() {
+        return st().showStatusBars;
+      },
+      set statusBars(v: boolean) {
+        st().setShowStatusBars(v);
+      },
+      get npcChat() {
+        return st().showNpcChat;
+      },
+      set npcChat(v: boolean) {
+        st().setShowNpcChat(v);
       },
     };
     const ctrls = [
@@ -46,7 +70,12 @@ const GraphicsGUI: React.FC = () => {
       folder.add(bind, 'adattiva').name('Risoluzione adattiva').listen(),
       folder.add(adaptiveResInfo, 'dpr').name('  risoluzione (dpr)').listen().disable(),
       folder.add(adaptiveResInfo, 'fps').name('  fps').listen().disable(),
-      folder.add(bind, 'hud').name('Mostra HUD di gioco').listen(),
+      folder.add(bind, 'collectibles').name('HUD: Contatore Collezionabili').listen(),
+      folder.add(bind, 'controls').name('HUD: Controlli').listen(),
+      folder.add(bind, 'chat').name('HUD: Chat di Gioco').listen(),
+      folder.add(bind, 'gamepadDebug').name('HUD: Debug Gamepad').listen(),
+      folder.add(bind, 'statusBars').name('HUD: Barre di Stato').listen(),
+      folder.add(bind, 'npcChat').name('HUD: Chat Passanti NPC').listen(),
     ];
     return () => {
       ctrls.forEach((c) => c.destroy());

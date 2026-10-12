@@ -210,10 +210,31 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   // --- animazioni: azioni create quando servono -------------------------
   const actionsRef = useRef<Record<string, THREE.AnimationAction>>({});
   const curRef = useRef<string | null>(null);
+  const curLegsRef = useRef<string | null>(null);
+  const curUpperRef = useRef<string | null>(null);
+
+  // Split clip per separare gambe e parte superiore (busto/braccia)
+  const LOWER_BODY_BONE = /^(root|pelvis|thigh|calf|foot|ball)/i;
+  const splitClip = (clip: THREE.AnimationClip, part: 'legs' | 'upper'): THREE.AnimationClip => {
+    const tracks = clip.tracks.filter((t) => {
+      const bone = t.name.split('.')[0];
+      const lower = LOWER_BODY_BONE.test(bone);
+      return part === 'legs' ? lower : !lower;
+    });
+    return new THREE.AnimationClip(`${clip.name}__${part}`, clip.duration, tracks);
+  };
 
   // startAt: da che punto della clip partire (s), per riprendere il passo
   // di una sagoma della folla senza salti
   const play = (name: string, fade = 0.2, loop = true, timeScale = 1, startAt?: number) => {
+    // Se c'erano layer split attivi, puliscili
+    if (curLegsRef.current || curUpperRef.current) {
+      if (curLegsRef.current && actionsRef.current[curLegsRef.current]) actionsRef.current[curLegsRef.current].fadeOut(fade);
+      if (curUpperRef.current && actionsRef.current[curUpperRef.current]) actionsRef.current[curUpperRef.current].fadeOut(fade);
+      curLegsRef.current = null;
+      curUpperRef.current = null;
+    }
+
     const clip = clips[name];
     if (!clip) return;
     const acts = actionsRef.current;
@@ -230,6 +251,66 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     a.fadeIn(fade).play();
     curRef.current = name;
     data.currentAnim = name;
+  };
+
+  // Riproduce due animazioni combinate: una per le gambe e una per la parte superiore
+  const playSplit = (legsName: string, upperName: string, fade = 0.2, timeScale = 1) => {
+    if (curRef.current) {
+      if (actionsRef.current[curRef.current]) actionsRef.current[curRef.current].fadeOut(fade);
+      curRef.current = null;
+    }
+
+    const legsKey = `${legsName}__legs`;
+    const upperKey = `${upperName}__upper`;
+
+    if (curLegsRef.current === legsKey && curUpperRef.current === upperKey) {
+      // Già attive, aggiorna eventuale timeScale
+      const la = actionsRef.current[legsKey];
+      if (la) la.setEffectiveTimeScale(timeScale);
+      return;
+    }
+
+    const acts = actionsRef.current;
+    
+    // Setup gambe
+    let lClip = clips[legsKey];
+    if (!lClip && clips[legsName]) {
+      lClip = splitClip(clips[legsName], 'legs');
+      clips[legsKey] = lClip;
+    }
+    if (lClip) {
+      const la = (acts[legsKey] ??= mixer.clipAction(lClip));
+      la.setEffectiveTimeScale(timeScale);
+      if (curLegsRef.current && curLegsRef.current !== legsKey && acts[curLegsRef.current]) {
+        acts[curLegsRef.current].fadeOut(fade);
+      }
+      la.reset();
+      la.setLoop(THREE.LoopRepeat, Infinity);
+      la.setEffectiveWeight(1);
+      la.fadeIn(fade).play();
+      curLegsRef.current = legsKey;
+    }
+
+    // Setup parte superiore
+    let uClip = clips[upperKey];
+    if (!uClip && clips[upperName]) {
+      uClip = splitClip(clips[upperName], 'upper');
+      clips[upperKey] = uClip;
+    }
+    if (uClip) {
+      const ua = (acts[upperKey] ??= mixer.clipAction(uClip));
+      ua.setEffectiveTimeScale(1);
+      if (curUpperRef.current && curUpperRef.current !== upperKey && acts[curUpperRef.current]) {
+        acts[curUpperRef.current].fadeOut(fade);
+      }
+      ua.reset();
+      ua.setLoop(THREE.LoopRepeat, Infinity);
+      ua.setEffectiveWeight(1);
+      ua.fadeIn(fade).play();
+      curUpperRef.current = upperKey;
+    }
+
+    data.currentAnim = `${legsName}+${upperName}`;
   };
 
   const hasClip = (name: string) => !!clips[name];
@@ -607,6 +688,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     modelRootRef,
     ragdoll,
     play,
+    playSplit,
     hasClip,
     clipDuration,
     beginFrame,

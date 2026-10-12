@@ -1,17 +1,11 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getTerrainHeight } from './Terrain';
 import { getRoadOffset } from './Road';
 import { useStore } from '../../store';
 import { useMannequinActor } from '../city/useMannequinActor';
-
-// Passante: cammina avanti e indietro sul suo tratto di marciapiede, si
-// ferma un attimo alle estremita' (telefono, braccia conserte...). E' il
-// manichino del giocatore (useMannequinActor): si puo' colpire, cade in
-// ragdoll, lo si puo' investire. Se lo colpisci o gli vai addosso diventa
-// un nemico (CityDetails.tsx monta Enemy.tsx al suo posto); se muore resta
-// a terra un po' e poi torna al suo percorso.
+import SpeechBubble from '../UI/SpeechBubble';
 
 interface PedestrianProps {
   id: string;
@@ -25,15 +19,11 @@ interface PedestrianProps {
   onBecomeEnemy: (id: string, position: [number, number, number], hp?: number) => void;
 }
 
-// colori "civili" (tinta emissiva sul manichino)
 const CIVILIAN_COLORS = ['#8d6e63', '#607d8b', '#9e9d24', '#6d4c41', '#78909c', '#a1887f', '#5d4037', '#827717', '#455a64'];
 const WALK_CLIPS = ['Walk'];
 const IDLE_CLIPS = ['Idle_A', 'Idle_TalkingPhone', 'Idle_FoldArms', 'Idle_Talking', 'Idle_Subtle'];
-// la velocita' "a terra" delle camminate (m/s, per non far scivolare i piedi)
 const WALK_BASE_SPEED: Record<string, number> = { Walk: 0.73 };
-// tempo a terra da morto prima di tornare a camminare
 const CORPSE_S = 30;
-// vicinanza che lo fa arrabbiare (a piedi; in auto conta l'investimento)
 const ANGER_RADIUS = 1.1;
 
 const hash = (s: string) => {
@@ -47,7 +37,6 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
   const color = customColor ?? CIVILIAN_COLORS[h % CIVILIAN_COLORS.length];
   const walkClip = WALK_CLIPS[h % WALK_CLIPS.length];
   const idleClip = IDLE_CLIPS[(h >> 3) % IDLE_CLIPS.length];
-  // passo naturale: le camminate del rig sono lente, non accelerarle troppo
   const walkSpeed = Math.min(1.05, speed * 0.85);
 
   const start = useMemo(() => new THREE.Vector3(x1, 0, z1), [x1, z1]);
@@ -74,14 +63,17 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
   const becameEnemy = useRef(false);
   const scratch = useRef(new THREE.Vector3());
 
-  useFrame((_state, delta) => {
+  const [speechMsg, setSpeechMsg] = useState<string>('');
+  const lastSpokenTime = useRef(-99);
+  const lastProcessedPlayerMsg = useRef('');
+
+  useFrame((state, delta) => {
     const g = groupRef.current;
     if (!g || segmentLength < 0.01) return;
     const res = actor.beginFrame(delta, data.position);
 
     if (res === 'dead') {
       if (actor.deadFor() > CORPSE_S) {
-        // torna al suo percorso, dall'inizio
         actor.revive();
         t.current = 0;
         dir.current = 1;
@@ -89,7 +81,6 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
     }
 
     if (res === 'down') {
-      // KO: a terra e poi si rialza (poi 'hurt': si arrabbia)
       actor.holdRoot(g);
       return;
     }
@@ -100,7 +91,27 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
       return;
     }
 
-    if (pauseTimer.current > 0) {
+    const st = useStore.getState();
+    const pp = st.playerPos;
+    const pos = scratch.current.lerpVectors(start, end, t.current);
+    const y = getTerrainHeight(pos.x, pos.z) + getRoadOffset(pos.x, pos.z);
+
+    // If speaking, stop, play talking animation, and look at player
+    if (speechMsg) {
+      pauseTimer.current = Math.max(pauseTimer.current, 1.0);
+      const talkClip = actor.hasClip('Idle_Talking') ? 'Idle_Talking' : idleClip;
+      actor.play(talkClip, 0.3);
+
+      // Look at player
+      const dx = pp[0] - pos.x;
+      const dz = pp[2] - pos.z;
+      if (Math.hypot(dx, dz) > 0.01) {
+        const want = Math.atan2(dx, dz);
+        let a = want - g.rotation.y;
+        a = Math.atan2(Math.sin(a), Math.cos(a));
+        g.rotation.y += a * Math.min(1, delta * 10);
+      }
+    } else if (pauseTimer.current > 0) {
       pauseTimer.current -= delta;
       actor.play(idleClip, 0.3);
     } else {
@@ -118,29 +129,72 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
       actor.play(clip, 0.3, true, walkSpeed / (WALK_BASE_SPEED[clip] ?? 0.73));
     }
 
-    const pos = scratch.current.lerpVectors(start, end, t.current);
-    const y = getTerrainHeight(pos.x, pos.z) + getRoadOffset(pos.x, pos.z);
-    const facing = dir.current >= 0 ? end : start;
-    const dx = facing.x - pos.x;
-    const dz = facing.z - pos.z;
-    if (Math.hypot(dx, dz) > 0.01) {
-      const want = Math.atan2(dx, dz);
-      let a = want - g.rotation.y;
-      a = Math.atan2(Math.sin(a), Math.cos(a));
-      g.rotation.y += a * Math.min(1, delta * 8);
+    if (!speechMsg) {
+      const facing = dir.current >= 0 ? end : start;
+      const dx = facing.x - pos.x;
+      const dz = facing.z - pos.z;
+      if (Math.hypot(dx, dz) > 0.01) {
+        const want = Math.atan2(dx, dz);
+        let a = want - g.rotation.y;
+        a = Math.atan2(Math.sin(a), Math.cos(a));
+        g.rotation.y += a * Math.min(1, delta * 8);
+      }
     }
+
     g.position.set(pos.x, y, pos.z);
     data.position.set(pos.x, 0, pos.z);
-    // convenzione dei combattenti: avanti = (-sin, -cos)
     data.rotation = g.rotation.y + Math.PI;
 
+    const hx = pp[0] - pos.x;
+    const hz = pp[2] - pos.z;
+    const distSq = hx * hx + hz * hz;
+
+    // Proximity greeting (within 6m, random chance / cooldown)
+    if (distSq < 36 && state.clock.elapsedTime - lastSpokenTime.current > 10 && !speechMsg && Math.random() < 0.05) {
+      lastSpokenTime.current = state.clock.elapsedTime;
+      pauseTimer.current = 8;
+      console.log('[Ollama NPC] Pedestrian near player, requesting greeting...', id);
+      fetch('/api/ollama', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: "Sei un passante NPC nella città 3D di Sketchbook. Dì una frase casuale o un commento spontaneo al giocatore che ti passa vicino in italiano (massimo 10 parole)." })
+      })
+      .then(res => res.json())
+      .then(data => {
+        console.log('[Ollama NPC] Greeting response:', data);
+        if (data.response) {
+          setSpeechMsg(data.response.trim());
+          setTimeout(() => setSpeechMsg(''), 7000);
+        }
+      })
+      .catch((err) => console.error('[Ollama NPC] Greeting error:', err));
+    }
+
+    // Check if player typed in chat (within 8m)
+    if (distSq < 64 && st.playerMessage && st.playerMessage !== lastProcessedPlayerMsg.current) {
+      lastProcessedPlayerMsg.current = st.playerMessage;
+      lastSpokenTime.current = state.clock.elapsedTime;
+      pauseTimer.current = 9;
+      console.log('[Ollama NPC] Pedestrian heard chat:', st.playerMessage, 'from pedestrian', id);
+      fetch('/api/ollama', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: `Sei un passante NPC nella città 3D di Sketchbook. Il giocatore ti ha appena scritto in chat: '${st.playerMessage}'. Rispondi in italiano in modo breve e in-character (massimo 15 parole).` })
+      })
+      .then(res => res.json())
+      .then(data => {
+        console.log('[Ollama NPC] Chat response:', data);
+        if (data.response) {
+          setSpeechMsg(data.response.trim());
+          setTimeout(() => setSpeechMsg(''), 8000);
+        }
+      })
+      .catch((err) => console.error('[Ollama NPC] Chat error:', err));
+    }
+
     // chi gli va addosso a piedi lo fa arrabbiare
-    const st = useStore.getState();
     if (st.currentControllable === 'player' && !becameEnemy.current) {
-      const pp = st.playerPos;
-      const hx = pp[0] - pos.x;
-      const hz = pp[2] - pos.z;
-      if (hx * hx + hz * hz < ANGER_RADIUS * ANGER_RADIUS) {
+      if (distSq < ANGER_RADIUS * ANGER_RADIUS) {
         becameEnemy.current = true;
         onBecomeEnemy(id, [pos.x, y, pos.z]);
       }
@@ -150,6 +204,7 @@ const Pedestrian: React.FC<PedestrianProps> = ({ id, x1, z1, x2, z2, speed = 1.2
   return (
     <group ref={groupRef} position={[p0.x, getTerrainHeight(p0.x, p0.z) + getRoadOffset(p0.x, p0.z), p0.z]}>
       <primitive object={actor.clone} />
+      {speechMsg && <SpeechBubble message={speechMsg} position={[0, 2.3, 0]} />}
     </group>
   );
 };

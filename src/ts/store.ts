@@ -309,6 +309,12 @@ interface GameState {
   // test sul ragdoll nel duello: default OFF, riattivabile dal pannello
   // Arena come showPhysicsDebug qui sopra.
   showGameplayHud: boolean;
+  showCollectiblesCounter: boolean;
+  showControls: boolean;
+  showChatInput: boolean;
+  showGamepadDebug: boolean;
+  showStatusBars: boolean;
+  showNpcChat: boolean;
   // "fai un checkbox in cui il ragdoll diventa passivo e cade
   // stramazzato" -- spegne di netto i motori PD del layer ragdoll attivo
   // (nessuna coppia/molla che insegue l'animazione) cosi' il corpo resta
@@ -370,6 +376,7 @@ interface GameState {
   completedMissions: string[];
   spawnPoint: [number, number, number, number] | null;
   dialogueView: DialogueView | null;
+  activeNpcId: string | null;
   talkPrompt: string | null;
   storyBanner: { title: string; subtitle: string; color: string; until: number } | null;
   setMissionStage: (stage: number) => void;
@@ -384,6 +391,7 @@ interface GameState {
   addCompletedMission: (id: string) => void;
   setSpawnPoint: (p: [number, number, number, number] | null) => void;
   setDialogueView: (view: DialogueView | null) => void;
+  setActiveNpcId: (id: string | null) => void;
   setTalkPrompt: (prompt: string | null) => void;
   setStoryBanner: (banner: GameState['storyBanner']) => void;
   setCurrentControllable: (type: ControllableType, id?: string | null, seatType?: SeatKind, seatName?: string | null) => void;
@@ -465,6 +473,12 @@ interface GameState {
   setDebugOrthoCameraAngleDeg: (deg: number) => void;
   setRagdollBench: (partial: Partial<RagdollBenchSettings>) => void;
   setShowGameplayHud: (active: boolean) => void;
+  setShowCollectiblesCounter: (v: boolean) => void;
+  setShowControls: (v: boolean) => void;
+  setShowChatInput: (v: boolean) => void;
+  setShowGamepadDebug: (v: boolean) => void;
+  setShowStatusBars: (v: boolean) => void;
+  setShowNpcChat: (v: boolean) => void;
   setRagdollPassive: (active: boolean) => void;
   setEuphoriaRagdollEnabled: (active: boolean) => void;
   registerBagHit: (radialOffset: number, heightOffset: number, hand: 'hand_l' | 'hand_r') => void;
@@ -569,6 +583,12 @@ export const useStore = create<GameState>((set) => ({
   debugOrthoCameraAngleDeg: 0,
   ragdollBench: { ...DEFAULT_RAGDOLL_BENCH },
   showGameplayHud: false,
+  showCollectiblesCounter: false,
+  showControls: false,
+  showChatInput: false,
+  showGamepadDebug: false,
+  showStatusBars: false,
+  showNpcChat: false,
   ragdollPassive: false,
   euphoriaRagdollEnabled: true,
   bagHitCount: 0,
@@ -586,6 +606,7 @@ export const useStore = create<GameState>((set) => ({
   completedMissions: [],
   spawnPoint: null,
   dialogueView: null,
+  activeNpcId: null,
   talkPrompt: null,
   storyBanner: null,
   entities: new Map(),
@@ -606,6 +627,7 @@ export const useStore = create<GameState>((set) => ({
     set((state) => (state.completedMissions.includes(id) ? state : { completedMissions: [...state.completedMissions, id] })),
   setSpawnPoint: (spawnPoint) => set({ spawnPoint }),
   setDialogueView: (dialogueView) => set({ dialogueView }),
+  setActiveNpcId: (activeNpcId) => set({ activeNpcId }),
   setTalkPrompt: (talkPrompt) => set((state) => (state.talkPrompt === talkPrompt ? state : { talkPrompt })),
   setStoryBanner: (storyBanner) => set({ storyBanner }),
   setCurrentControllable: (type, id = null, seatType = null, seatName = null) =>
@@ -716,6 +738,12 @@ export const useStore = create<GameState>((set) => ({
   setDebugOrthoCameraAngleDeg: (debugOrthoCameraAngleDeg) => set({ debugOrthoCameraAngleDeg }),
   setRagdollBench: (partial) => set((state) => ({ ragdollBench: { ...state.ragdollBench, ...partial } })),
   setShowGameplayHud: (showGameplayHud) => set({ showGameplayHud }),
+  setShowCollectiblesCounter: (showCollectiblesCounter) => set({ showCollectiblesCounter }),
+  setShowControls: (showControls) => set({ showControls }),
+  setShowChatInput: (showChatInput) => set({ showChatInput }),
+  setShowGamepadDebug: (showGamepadDebug) => set({ showGamepadDebug }),
+  setShowStatusBars: (showStatusBars) => set({ showStatusBars }),
+  setShowNpcChat: (showNpcChat) => set({ showNpcChat }),
   setRagdollPassive: (ragdollPassive) => set({ ragdollPassive }),
   setEuphoriaRagdollEnabled: (euphoriaRagdollEnabled) => set({ euphoriaRagdollEnabled }),
   registerBagHit: (radialOffset, heightOffset, hand) =>

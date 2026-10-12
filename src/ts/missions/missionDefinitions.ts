@@ -42,28 +42,34 @@ const PARK_CENTER: [number, number] = [CITY_BLOCK_SIZE / 2, CITY_BLOCK_SIZE / 2]
 
 export const MISSIONS: MissionDef[] = [
   {
-    id: "courier",
-    title: "Missione 1: Corriere",
-    briefing: "Sali su un veicolo e portalo all'aeroporto (marcatore sulla mappa) entro 90 secondi.",
-    type: "drive",
-    timeLimit: 90,
-    targetPos: RUNWAY_CENTER,
-    arriveRadius: 20,
+    "id": "mission1",
+    "title": "Missione 1: Raccogli il Tesoro",
+    "briefing": "Porta il tesoro dal centro della città alla base principale.",
+    "type": "drive",
+    "timeLimit": 90,
+    "targetPos": [
+      100,
+      100
+    ],
+    "arriveRadius": 20
   },
   {
-    id: "hit",
-    title: "Missione 2: Bersaglio",
-    briefing: "Elimina il bersaglio segnalato sulla mappa entro 60 secondi.",
-    type: "eliminate",
-    timeLimit: 60,
-    targetPos: PARK_CENTER,
+    "id": "mission2",
+    "title": "Missione 2: Distruggi il Nemico",
+    "briefing": "Elimina tutti gli ostacoli e i nemici per aprire il passaggio.",
+    "type": "eliminate",
+    "timeLimit": 60,
+    "targetPos": [
+      200,
+      200
+    ]
   },
   {
-    id: "lastStand",
-    title: "Missione 3: Ultima resistenza",
-    briefing: "Resisti all'assalto per 30 secondi senza morire.",
-    type: "survive",
-    timeLimit: 30,
-    waveCount: 4,
-  },
+    "id": "mission3",
+    "title": "Missione 3: Sopravvivi al Tornado",
+    "briefing": "Sopravvivi a quattro onde di rovine cadenti per raggiungere la zona sicura.",
+    "type": "survive",
+    "timeLimit": 30,
+    "waveCount": 4
+  }
 ];

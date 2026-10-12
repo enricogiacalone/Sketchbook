@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useStore } from '../../store';
@@ -17,13 +17,9 @@ import {
 import { applyFighterHit } from '../Environment/weapons/shootableRegistry';
 import { K, KIMODO_CLIPS } from '../../lib/kimodo';
 import { CLIP_GROUND_SPEED } from '../Environment/locomotion';
-
-// Un corpo vero del pool della folla: il manichino completo (fisica,
-// animazioni, ragdoll, colpibile, investibile) prestato di volta in volta
-// all'agente della folla piu' vicino al giocatore (crowd.ts). Senza agente
-// "dorme": fuori dal mondo fisico, non disegnato, nessun costo.
-// Se lo colpisci o gli vai addosso diventa un nemico (Crowd.tsx monta
-// Enemy.tsx al suo posto); se muore resta a terra e poi torna a camminare.
+import SpeechBubble from '../UI/SpeechBubble';
+import { getTerrainHeight } from '../Environment/Terrain';
+import { getRoadOffset } from '../Environment/Road';
 
 const CORPSE_S = 30;
 const CORPSE_FAR_S = 8;
@@ -37,29 +33,52 @@ interface Props {
 }
 
 const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
+  const npcId = `crowd-${slot}`;
   const actor = useMannequinActor({
-    id: `crowd-slot-${slot}`,
+    id: npcId,
     name: 'Passante',
     team: `CIVILIAN_crowd_${slot}`,
     color: '#607d8b',
     hp: 60,
     x: 0,
     z: -1000,
-    // ragdoll attiva (barcolla, reagisce ai colpi, cade "viva") da vicino:
-    // casella nel pannello Debug > Citta'
     enableActiveRagdoll: useStore((s) => s.crowdActiveRagdoll),
   });
   const { data } = actor;
   const groupRef = useRef<THREE.Group>(null);
   const agentRef = useRef<CrowdAgent | null>(null);
-  const handled = useRef(false); // gia' passato a nemico/morto
+  const handled = useRef(false);
   const deadAgent = useRef<CrowdAgent | null>(null);
-  // sta camminando (null = appena preso il corpo) e primo frame col corpo
   const walkingRef = useRef<boolean | null>(null);
   const takeoverRef = useRef(false);
   const lastPlayer = useRef<[number, number] | null>(null);
 
-  // nasce addormentato
+  const [speechMsg, setSpeechMsg] = useState<string>('');
+  const lastSpokenTime = useRef(-99);
+  const lastCheckTime = useRef(0);
+  const lastProcessedPlayerMsg = useRef('');
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const customActionRef = useRef<'none' | 'follow' | 'attack'>('none');
+
+  const clearConversation = () => {
+    setSpeechMsg('');
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = null;
+    const st = useStore.getState();
+    if (st.activeNpcId === npcId) {
+      st.setActiveNpcId(null);
+    }
+  };
+
+  const resetConversationTimeout = (agent: CrowdAgent) => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    agent.pause = 30;
+    timeoutRef.current = setTimeout(() => {
+      agent.pause = 0;
+      clearConversation();
+    }, 30000);
+  };
+
   useEffect(() => {
     actor.sleep();
     actor.setInspectExtra(() => {
@@ -69,8 +88,6 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // smontato (meno corpi veri dal pannello): l'agente torna sagoma, il morto
-  // torna a camminare
   useEffect(
     () => () => {
       const dead = deadAgent.current;
@@ -80,29 +97,34 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
         if (crowdSlots[slot] === dead) crowdSlots[slot] = null;
       }
       const a = agentRef.current;
-      if (a && a.slot === slot) a.slot = -1;
+      if (a && a.slot === slot) {
+        a.slot = -1;
+        a.gone = false;
+      }
       if (crowdSlots[slot] === a) crowdSlots[slot] = null;
+      clearConversation();
     },
-    [slot]
+    [slot, npcId]
   );
 
   const release = () => {
     const a = agentRef.current;
-    if (a) a.slot = -1;
+    if (a) {
+      a.slot = -1;
+      a.gone = false;
+    }
     if (crowdSlots[slot] === a) crowdSlots[slot] = null;
     agentRef.current = null;
     actor.sleep();
+    clearConversation();
   };
 
-  useFrame((_state, delta) => {
+  useFrame((state, delta) => {
     const g = groupRef.current;
     if (!g) return;
 
-    // morto: il corpo resta a terra il suo tempo, poi l'agente torna a
-    // camminare e il corpo torna libero
     if (deadAgent.current) {
       const res = actor.beginFrame(delta, data.position);
-      // morto lontano (colpito da lontano): il corpo torna libero prima
       const corpseS = deadAgent.current.dist > CROWD_RELEASE_DIST ? CORPSE_FAR_S : CORPSE_S;
       if (res === 'dead' && actor.deadFor() < corpseS) return;
       actor.revive();
@@ -114,23 +136,22 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
 
     const want = crowdSlots[slot];
     if (want !== agentRef.current) {
-      if (agentRef.current && agentRef.current.slot === slot) agentRef.current.slot = -1;
+      if (agentRef.current && agentRef.current.slot === slot) {
+        agentRef.current.slot = -1;
+        agentRef.current.gone = false;
+      }
       agentRef.current = want;
       handled.current = false;
       if (!want) {
         actor.sleep();
         return;
       }
-      // prende il posto della sagoma: stessa posizione, stesso colore,
-      // stessa posa (stesso punto del passo, senza dissolvenza)
       actor.setTint(want.color);
       actor.wake(want.x, want.z);
       g.position.set(want.x, want.y, want.z);
       g.rotation.y = want.yaw;
       walkingRef.current = null;
       takeoverRef.current = true;
-      // colpito da lontano quando era una sagoma (crowdSim.promoteCrowdAgent):
-      // il colpo arriva al corpo vero adesso
       const h = want.pendingHit;
       if (h) {
         want.pendingHit = null;
@@ -154,14 +175,12 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
 
     const res = actor.beginFrame(delta, data.position);
     if (res === 'dead') {
-      // investito o ucciso sul colpo: l'agente aspetta col suo corpo
       a.gone = true;
       deadAgent.current = a;
+      clearConversation();
       return;
     }
     if (res === 'down') {
-      // KO: il corpo resta a terra e si rialza dove e' caduto (poi 'hurt':
-      // si arrabbia e diventa un nemico li'); l'agente intanto non conta
       a.pause = Math.max(a.pause, 1);
       actor.holdRoot(g);
       return;
@@ -174,58 +193,192 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
       return;
     }
 
-    if (a.fear > 0) {
-      // panico: accucciato (una volta, poi resta giu') o in fuga
-      if (isCowering(a)) {
-        if (actor.hasClip(K.cower)) actor.play(K.cower, 0.25, false);
-        else actor.play('Idle_A', 0.3);
-      } else {
-        const run = actor.hasClip(K.panicRun) ? K.panicRun : 'Run_Female';
-        const base = KIMODO_CLIPS[run]?.speed || CLIP_GROUND_SPEED[run] || 3.8;
-        actor.play(run, 0.2, true, PANIC_SPEED / base);
-      }
-    } else {
-      // fermo (pausa, o in attesa dietro a qualcuno / davanti a un'auto),
-      // con un margine per non alternare passo e attesa a ogni frame
-      const walking = a.pause <= 0 && (walkingRef.current === false ? a.curSpeed > 0.3 : a.curSpeed > 0.1);
-      walkingRef.current = walking;
-      const fade = takeoverRef.current ? 0 : 0.3;
-      if (!walking) {
-        const idle = actor.hasClip(a.idleClip) && a.pause > 0 ? a.idleClip : 'Idle_A';
-        // al cambio sagoma -> corpo, dallo stesso punto della posa della sagoma
-        actor.play(idle, fade, true, 1, takeoverRef.current ? IDLE_POSE_AT * actor.clipDuration(idle) : undefined);
-      } else {
-        const clip = actor.hasClip(a.walkClip) ? a.walkClip : 'Walk';
-        // stesso punto del ciclo della sagoma (a.gait) quando prende il corpo
-        actor.play(
-          clip,
-          fade,
-          true,
-          a.curSpeed / (WALK_BASE_SPEED[clip] ?? 0.73),
-          takeoverRef.current ? a.gait * actor.clipDuration(clip) : undefined
-        );
-      }
-    }
-    takeoverRef.current = false;
-    let d = a.yaw - g.rotation.y;
-    d = Math.atan2(Math.sin(d), Math.cos(d));
-    g.rotation.y += d * Math.min(1, delta * 8);
-    g.position.set(a.x, a.y, a.z);
-    data.position.set(a.x, 0, a.z);
-    // convenzione dei combattenti: avanti = (-sin, -cos)
-    data.rotation = g.rotation.y + Math.PI;
-
-    // chi gli va addosso a piedi lo fa arrabbiare -- solo se e' il
-    // giocatore a venirgli contro (prima bastava che il passante, camminando,
-    // gli passasse vicino: diventava nemico da solo)
     const st = useStore.getState();
     const pp = st.playerPos;
+    const hx = pp[0] - a.x;
+    const hz = pp[2] - a.z;
+    const distSq = hx * hx + hz * hz;
+
+    const activeNpcId = st.activeNpcId;
+    const canTalk = !activeNpcId || activeNpcId === npcId;
+
+    // Custom Agent Actions (Smooth Companion Follow Path & Animation)
+    if (customActionRef.current === 'follow') {
+      a.gone = true;
+      const targetX = pp[0] - Math.sin(st.playerYaw || 0) * 1.5;
+      const targetZ = pp[2] - Math.cos(st.playerYaw || 0) * 1.5;
+      const fdx = targetX - a.x;
+      const fdz = targetZ - a.z;
+      const fdist = Math.hypot(fdx, fdz);
+
+      if (fdist > 0.8) {
+        const speed = 3.2;
+        const vx = fdx / fdist;
+        const vz = fdz / fdist;
+        a.x += vx * speed * delta;
+        a.z += vz * speed * delta;
+        a.y = getTerrainHeight(a.x, a.z) + getRoadOffset(a.x, a.z);
+
+        const targetYaw = Math.atan2(vx, vz);
+        let d = targetYaw - g.rotation.y;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        g.rotation.y += d * Math.min(1, delta * 12);
+
+        a.pause = 0;
+        const clip = actor.hasClip('Walk') ? 'Walk' : 'Idle_A';
+        actor.play(clip, 0.3, true, speed / (WALK_BASE_SPEED[clip] ?? 0.73));
+      } else {
+        const idle = actor.hasClip('Idle_A') ? 'Idle_A' : 'Walk';
+        actor.play(idle, 0.3);
+        const dx = pp[0] - a.x;
+        const dz = pp[2] - a.z;
+        if (Math.hypot(dx, dz) > 0.01) {
+          const targetYaw = Math.atan2(dx, dz);
+          let d = targetYaw - g.rotation.y;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          g.rotation.y += d * Math.min(1, delta * 10);
+        }
+      }
+    }
+
+    // Throttled proximity check (every 3 seconds)
+    if (canTalk && distSq < 36 && state.clock.elapsedTime - lastCheckTime.current > 3 && !speechMsg) {
+      lastCheckTime.current = state.clock.elapsedTime;
+      if (state.clock.elapsedTime - lastSpokenTime.current > 20 && Math.random() < 0.3) {
+        lastSpokenTime.current = state.clock.elapsedTime;
+        st.setActiveNpcId(npcId);
+        resetConversationTimeout(a);
+        
+        fetch('/api/ollama', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: "Sei un passante NPC nella città 3D di Sketchbook. Dì una frase casuale o un saluto spontaneo al giocatore che ti passa vicino in italiano (massimo 10 parole)." })
+        })
+        .then(res => res.json())
+        .then(data => {
+          if (data.response) {
+            setSpeechMsg(data.response.trim());
+            resetConversationTimeout(a);
+          } else {
+            clearConversation();
+          }
+        })
+        .catch(() => clearConversation());
+      }
+    }
+
+    // Check if player typed in chat (Ollama Agent Command Processing)
+    if (canTalk && distSq < 64 && st.playerMessage && st.playerMessage !== lastProcessedPlayerMsg.current) {
+      lastProcessedPlayerMsg.current = st.playerMessage;
+      lastSpokenTime.current = state.clock.elapsedTime;
+      st.setActiveNpcId(npcId);
+      resetConversationTimeout(a);
+
+      fetch('/api/ollama', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          prompt: `Sei un passante NPC intelligente in Sketchbook con percezione del mondo (posizione x=${a.x.toFixed(1)}, z=${a.z.toFixed(1)}). Il giocatore ti ha ordinato: '${st.playerMessage}'. 
+          Analizza il comando. Se ti chiede di seguirmi, muoverti o attaccare/uccidere, decidi l'azione.
+          Rispondi ESATTAMENTE in formato JSON valido:
+          {
+            "dialogue": "Tua risposta in-character in italiano (max 12 parole)",
+            "action": "none" | "follow" | "attack"
+          }` 
+        })
+      })
+      .then(res => res.json())
+      .then(data => {
+        try {
+          let text = data.response || "{}";
+          text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+          const parsed = JSON.parse(text);
+          if (parsed.dialogue) {
+            setSpeechMsg(parsed.dialogue.trim());
+            resetConversationTimeout(a);
+          }
+          if (parsed.action === 'follow') {
+            customActionRef.current = 'follow';
+            a.gone = true;
+            console.log('[Ollama Agent] NPC now following player with correct animation and rotation!');
+          } else if (parsed.action === 'attack') {
+            customActionRef.current = 'attack';
+            handled.current = true;
+            a.gone = true;
+            onBecomeEnemy(a, [a.x, a.y, a.z]);
+            release();
+          }
+        } catch (e) {
+          if (data.response) {
+            setSpeechMsg(data.response.trim());
+            resetConversationTimeout(a);
+          }
+        }
+      })
+      .catch(() => clearConversation());
+    }
+
+    // If speaking and not following, stop and look at player
+    if (speechMsg && customActionRef.current !== 'follow') {
+      a.pause = Math.max(a.pause, 1.5);
+      const talkClip = actor.hasClip('Idle_Talking') ? 'Idle_Talking' : 'Idle_A';
+      actor.play(talkClip, 0.3);
+
+      const dx = pp[0] - a.x;
+      const dz = pp[2] - a.z;
+      if (Math.hypot(dx, dz) > 0.01) {
+        const wantYaw = Math.atan2(dx, dz);
+        let d = wantYaw - g.rotation.y;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        g.rotation.y += d * Math.min(1, delta * 10);
+      }
+    } else if (customActionRef.current !== 'follow') {
+      if (a.fear > 0) {
+        if (isCowering(a)) {
+          if (actor.hasClip(K.cower)) actor.play(K.cower, 0.25, false);
+          else actor.play('Idle_A', 0.3);
+        } else {
+          const runClip = actor.hasClip('Run_Female') ? 'Run_Female' : (actor.hasClip('Walk') ? 'Walk' : 'Idle_A');
+          const panicUpper = actor.hasClip(K.panicRun) ? K.panicRun : runClip;
+          const base = KIMODO_CLIPS[runClip]?.speed || CLIP_GROUND_SPEED[runClip] || 3.8;
+          actor.playSplit(runClip, panicUpper, 0.2, PANIC_SPEED / base);
+        }
+      } else {
+        const walking = a.pause <= 0 && (walkingRef.current === false ? a.curSpeed > 0.3 : a.curSpeed > 0.1);
+        walkingRef.current = walking;
+        const fade = takeoverRef.current ? 0 : 0.3;
+        if (!walking) {
+          const idle = actor.hasClip(a.idleClip) && a.pause > 0 ? a.idleClip : 'Idle_A';
+          actor.play(idle, fade, true, 1, takeoverRef.current ? IDLE_POSE_AT * actor.clipDuration(idle) : undefined);
+        } else {
+          const clip = actor.hasClip(a.walkClip) ? a.walkClip : 'Walk';
+          actor.play(
+            clip,
+            fade,
+            true,
+            a.curSpeed / (WALK_BASE_SPEED[clip] ?? 0.73),
+            takeoverRef.current ? a.gait * actor.clipDuration(clip) : undefined
+          );
+        }
+      }
+    }
+
+    takeoverRef.current = false;
+    if (!speechMsg && customActionRef.current !== 'follow') {
+      let d = a.yaw - g.rotation.y;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      g.rotation.y += d * Math.min(1, delta * 8);
+    }
+
+    g.position.set(a.x, a.y, a.z);
+    data.position.set(a.x, 0, a.z);
+    data.rotation = g.rotation.y + Math.PI;
+
     const lp = lastPlayer.current;
     lastPlayer.current = [pp[0], pp[2]];
-    if (st.currentControllable === 'player' && !handled.current && lp) {
+    if (st.currentControllable === 'player' && !handled.current && lp && customActionRef.current !== 'follow') {
       const hx = pp[0] - a.x;
       const hz = pp[2] - a.z;
-      // spostamento del giocatore in questo frame verso il passante
       const towards = -((pp[0] - lp[0]) * hx + (pp[2] - lp[1]) * hz) / Math.max(1e-3, Math.hypot(hx, hz));
       if (hx * hx + hz * hz < ANGER_RADIUS * ANGER_RADIUS && towards > 0.5 * delta) {
         handled.current = true;
@@ -239,6 +392,7 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
   return (
     <group ref={groupRef} position={[0, -1000, 0]}>
       <primitive object={actor.clone} />
+      {speechMsg && <SpeechBubble message={speechMsg} position={[0, 2.3, 0]} />}
     </group>
   );
 };

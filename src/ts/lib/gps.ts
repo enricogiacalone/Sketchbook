@@ -266,3 +266,8 @@ export function routeEta(lengthM: number, inVehicle: boolean) {
   const speed = inVehicle ? 14 : 4.5; // m/s
   return lengthM / speed;
 }
+
+// per i test dalla console: __gps.state, __gps.set([x, z]), __gps.route(a, b)
+if (typeof window !== 'undefined') {
+  (window as any).__gps = { state: gps, set: setWaypoint, route: findRoute };
+}

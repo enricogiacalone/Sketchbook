@@ -13,6 +13,7 @@ const port = process.env.PORT || 3000;
 
 const app = express();
 app.use(cors()); // Enable CORS for all routes
+app.use(express.json()); // Parse JSON bodies
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -36,6 +37,52 @@ function getLocalIP() {
 
 app.get("/api/config", (req, res) => {
   res.json({ ip: getLocalIP(), port: port });
+});
+
+app.post("/api/ollama", (req, res) => {
+  const { prompt, model } = req.body;
+  if (!prompt) {
+    return res.status(400).json({ error: "Prompt is required" });
+  }
+
+  const data = JSON.stringify({
+    model: model || "qwen2.5-coder:14b",
+    prompt: prompt,
+    stream: false,
+    options: {
+      num_predict: 64,
+      temperature: 0.7
+    }
+  });
+
+  const ollamaReq = http.request({
+    hostname: 'localhost',
+    port: 11434,
+    path: '/api/generate',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(data)
+    }
+  }, (ollamaRes) => {
+    let body = '';
+    ollamaRes.on('data', (chunk) => body += chunk);
+    ollamaRes.on('end', () => {
+      try {
+        const json = JSON.parse(body);
+        res.json(json);
+      } catch (e) {
+        res.json({ response: body });
+      }
+    });
+  });
+
+  ollamaReq.on('error', (error) => {
+    res.status(500).json({ error: error.message });
+  });
+
+  ollamaReq.write(data);
+  ollamaReq.end();
 });
 
 app.get("/controller", (req, res) => {
@@ -69,9 +116,6 @@ const db = new sqlite3.Database("./gamestate.db", (err) => {
     );
   }
 });
-
-// Middleware to parse JSON bodies
-app.use(express.json());
 
 // Serve static files from the 'build' directory
 app.use(express.static(path.join(process.cwd(), "build")));

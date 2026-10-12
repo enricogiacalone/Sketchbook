@@ -17,6 +17,7 @@ import PoliceWalkers from './components/Environment/PoliceWalkers';
 import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from './components/Environment/RaceTrack';
 import Road from './components/Environment/Road';
 import Terrain from './components/Environment/Terrain';
+import OllamaProps from './components/Environment/OllamaProps';
 import UFO from './components/Environment/UFO';
 // (la vecchia catena di 3 missioni, MissionManager.tsx, e' sostituita dalla
 // missione con i personaggi: Missions/StoryMission.tsx)
@@ -97,6 +98,7 @@ const Scene: React.FC = () => {
   return (
     <>
       <Terrain />
+      <OllamaProps />
       {isRaceTest && <RaceTrack />}
       {!isCleanTest && <Road />}
       {!isCleanTest && <PoliceWalkers />}

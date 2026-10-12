@@ -21,6 +21,8 @@ import PhysicsBridge from './components/PhysicsBridge';
 import SaveGameManager from './components/SaveGameManager';
 import { loadGame } from './lib/saveGame';
 import StoryHUD from './components/UI/StoryHUD';
+import MissionHUD from './components/UI/MissionHUD';
+import NpcChatOverlay from './components/UI/NpcChatOverlay';
 import DialogueBox from './components/UI/DialogueBox';
 import ChatInput from './components/UI/ChatInput';
 import CollectiblesCounter from './components/UI/CollectiblesCounter';
@@ -32,6 +34,7 @@ import DroneHUD from './components/UI/DroneHUD';
 import DuelHUD from './components/UI/DuelHUD';
 import GamepadDebug from './components/UI/GamepadDebug';
 import GraphicsGUI from './components/UI/GraphicsGUI';
+import OllamaGUI from './components/UI/OllamaGUI';
 import CityGUI from './components/UI/CityGUI';
 import Loader from './components/UI/Loader'; // Helper to track loading
 import LoadingScreen from './components/UI/LoadingScreen';
@@ -54,7 +57,20 @@ const App: React.FC = () => {
   // "Laboratorio cervello mosca" (WelcomeScreen): scena a parte, vedi src/ts/flyLab
   const [labMode, setLabMode] = useState(false);
   const [userName, setUserName] = useState('');
-  const { isLoading, setIsLoading, isPaused, physicsPaused, setPaused, testScene, showGameplayHud } = useStore(
+  const {
+    isLoading,
+    setIsLoading,
+    isPaused,
+    physicsPaused,
+    setPaused,
+    testScene,
+    showCollectiblesCounter,
+    showControls,
+    showChatInput,
+    showGamepadDebug,
+    showStatusBars,
+    showNpcChat,
+  } = useStore(
     useShallow((state) => ({
       isLoading: state.isLoading,
       setIsLoading: state.setIsLoading,
@@ -62,7 +78,12 @@ const App: React.FC = () => {
       physicsPaused: state.physicsPaused,
       setPaused: state.setPaused,
       testScene: state.testScene,
-      showGameplayHud: state.showGameplayHud,
+      showCollectiblesCounter: state.showCollectiblesCounter,
+      showControls: state.showControls,
+      showChatInput: state.showChatInput,
+      showGamepadDebug: state.showGamepadDebug,
+      showStatusBars: state.showStatusBars,
+      showNpcChat: state.showNpcChat,
     }))
   );
   const renderDpr = useStore((state) => state.renderDpr);
@@ -301,6 +322,7 @@ const App: React.FC = () => {
       <DroneHUD />
       <DuelHUD />
       <GraphicsGUI />
+      <OllamaGUI />
       <CityGUI />
       <ScenariosGUI />
       <Minimap />
@@ -308,18 +330,20 @@ const App: React.FC = () => {
       <RagdollBenchGUI />
       <WeaponHUD />
       <StoryHUD />
+      <MissionHUD />
+      {showNpcChat && <NpcChatOverlay />}
       <SaveGameManager />
       <DialogueBox />
       <RagdollBenchOverlay />
 
       {/* UI overlays */}
-      {isJoined && showGameplayHud && (
+      {isJoined && (
         <>
-          <CollectiblesCounter />
-          <Controls />
-          <ChatInput />
-          <GamepadDebug />
-          <StatusBars />
+          {showCollectiblesCounter && <CollectiblesCounter />}
+          {showControls && <Controls />}
+          {showChatInput && <ChatInput />}
+          {showGamepadDebug && <GamepadDebug />}
+          {showStatusBars && <StatusBars />}
         </>
       )}
 
