@@ -12,6 +12,7 @@ import ParkingLots from './ParkingLots';
 import StreetProps from './StreetProps';
 import CityServices from './CityServices';
 import { worldRng } from '../../lib/worldSeed';
+import { spawnCrowdScenes } from '../city/crowdScenes';
 
 // Street-level detail pass -- benches/trash cans/hydrants/signs along the
 // sidewalks, plus a few statically-parked cars tucked against the curb.
@@ -235,8 +236,13 @@ const Billboard: React.FC<{ x: number; z: number; rotationY: number; schemeIndex
 
 const SIGN_COLORS = ['#1565c0', '#2e7d32', '#f9a825', '#ef6c00'];
 
-const CityDetails: React.FC = () => {
-  const { furniture, parkedCars, billboards } = useMemo(() => {
+// Arredo, auto (non piu' usate) e cartelloni, calcolati una volta sola: li usa
+// anche la folla (le panchine dove ci si siede: city/crowdScenes.ts).
+export type CityFurniture = Array<{ kind: 'bench' | 'trash' | 'hydrant' | 'sign'; x: number; z: number; rotationY: number; color?: string }>;
+let cityDetailsCache: { furniture: CityFurniture; parkedCars: Array<{ x: number; z: number; rotationY: number }>; billboards: Array<{ x: number; z: number; rotationY: number; schemeIndex: number }> } | null = null;
+export function buildCityDetails() {
+  if (cityDetailsCache) return cityDetailsCache;
+
     const furnitureArr: Array<{ kind: 'bench' | 'trash' | 'hydrant' | 'sign'; x: number; z: number; rotationY: number; color?: string }> =
       [];
     const carsArr: Array<{ x: number; z: number; rotationY: number }> = [];
@@ -316,7 +322,16 @@ const CityDetails: React.FC = () => {
       }
     }
 
-    return { furniture: furnitureArr, parkedCars: carsArr, billboards: billboardsArr };
+  cityDetailsCache = { furniture: furnitureArr, parkedCars: carsArr, billboards: billboardsArr };
+  return cityDetailsCache;
+}
+
+const CityDetails: React.FC = () => {
+  const { furniture, billboards } = useMemo(() => {
+    const d = buildCityDetails();
+    // gente seduta sulle panchine, nelle pensiline, che balla...: prima che la folla monti
+    spawnCrowdScenes(d.furniture);
+    return d;
   }, []);
 
   return (

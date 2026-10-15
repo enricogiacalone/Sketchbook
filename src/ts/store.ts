@@ -12,12 +12,8 @@ export type ControllableType = 'player' | 'car' | 'airplane' | 'helicopter' | 'd
 // rides along.
 export type SeatKind = 'driver' | 'passenger' | null;
 
-// "crea una missione come in gta" -- a short chain of GTA-style
-// objectives (drive somewhere / eliminate a target / survive a wave).
-// MissionManager.tsx owns the actual per-frame state machine (timers,
-// spawning, success/fail checks); this is just the mirror of it that the
-// HUD, the minimap blip, and the in-world marker meshes all read.
-export type MissionStatus = 'inactive' | 'active' | 'success' | 'failed' | 'allComplete';
+// Missioni della storia (Missions/StoryMission.tsx, HeistMission.tsx): scrivono
+// titolo, obiettivo, tempo e segnale sulla minimappa; li legge UI/StoryHUD.tsx.
 
 // una battuta del dialogo aperto (Missions/StoryMission.tsx la scrive,
 // UI/DialogueBox.tsx la disegna e rimanda le scelte a lib/dialogue.ts)
@@ -356,11 +352,6 @@ interface GameState {
   // value (classic lost-update), same reason Enemy.tsx's local
   // setHealth(prev => ...) uses the updater form.
   takeDamage: (amount: number) => void;
-  // Index into MissionManager.tsx's MISSIONS array -- which objective is
-  // current/next. Stays the same across a 'failed' status (retry the same
-  // stage) and only advances after a 'success'.
-  missionStage: number;
-  missionStatus: MissionStatus;
   missionTitle: string;
   missionBriefing: string;
   missionTimeRemaining: number;
@@ -386,8 +377,6 @@ interface GameState {
   setWanted: (level: number, searching: boolean) => void;
   talkPrompt: string | null;
   storyBanner: { title: string; subtitle: string; color: string; until: number } | null;
-  setMissionStage: (stage: number) => void;
-  setMissionStatus: (status: MissionStatus) => void;
   setMissionInfo: (title: string, briefing: string) => void;
   setMissionTimeRemaining: (t: number) => void;
   setMissionTargetPos: (pos: [number, number] | null) => void;
@@ -603,8 +592,6 @@ export const useStore = create<GameState>((set) => ({
   bagLastHitRadialOffset: null,
   bagLastHitHeightOffset: null,
   bagLastHitHand: null,
-  missionStage: 0,
-  missionStatus: 'inactive',
   missionTitle: '',
   missionBriefing: '',
   missionTimeRemaining: 0,
@@ -625,8 +612,6 @@ export const useStore = create<GameState>((set) => ({
   setMaxHealth: (maxHealth) => set({ maxHealth }),
   setArmor: (armor) => set({ armor }),
   takeDamage: (amount) => set((state) => ({ health: Math.max(0, state.health - amount) })),
-  setMissionStage: (stage) => set({ missionStage: stage }),
-  setMissionStatus: (status) => set({ missionStatus: status }),
   setMissionInfo: (title, briefing) => set({ missionTitle: title, missionBriefing: briefing }),
   setMissionTimeRemaining: (t) => set({ missionTimeRemaining: t }),
   setMissionTargetPos: (pos) => set({ missionTargetPos: pos }),

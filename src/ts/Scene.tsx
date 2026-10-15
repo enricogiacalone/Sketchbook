@@ -23,6 +23,7 @@ import UFO from './components/Environment/UFO';
 // (la vecchia catena di 3 missioni, MissionManager.tsx, e' sostituita dalla
 // missione con i personaggi: Missions/StoryMission.tsx)
 import StoryMission from './components/Missions/StoryMission';
+import HeistMission from './components/Missions/HeistMission';
 import SoldierSpawner from './components/SoldierSpawner';
 import Airplane from './components/Vehicles/Airplane'; // Import Airplane
 import Car from './components/Vehicles/Car'; // Import Car
@@ -234,6 +235,7 @@ const Scene: React.FC = () => {
           <CityDetails />
           <Collectibles />
           <StoryMission />
+          <HeistMission />
         </Suspense>
       )}
     </>

@@ -138,8 +138,20 @@ export function reportCrime(kind: CrimeKind, x: number, z: number) {
   sync();
 }
 
+// chi e' stato colpito dal giocatore (o dai suoi alleati) e quando: un passante
+// si arrabbia solo con chi l'ha colpito davvero (CrowdPedestrian)
+const playerHitAt = new Map<string, number>();
+export function markPlayerHit(id: string) {
+  playerHitAt.set(id, nowS());
+}
+export function playerHitRecently(id: string, within = 3): boolean {
+  const t = playerHitAt.get(id);
+  return t !== undefined && nowS() - t < within;
+}
+
 // il giocatore (o un suo alleato) ha colpito `target`
 export function reportHit(target: FighterData, killed: boolean) {
+  markPlayerHit(target.id);
   const team = target.team ?? '';
   if (team.startsWith('POLICE')) {
     reportCrime(killed ? 'copKill' : 'copAssault', target.position.x, target.position.z);
@@ -226,3 +238,18 @@ export function addArrest(dt: number) {
 }
 
 export const isViolent = () => performance.now() / 1000 < wanted.violentUntil;
+
+// livello di ricercato imposto (missioni: scatta l'allarme della banca)
+export function setWantedLevel(level: number) {
+  const l = Math.max(0, Math.min(5, Math.round(level)));
+  const pp = useStore.getState().playerPos;
+  wanted.heat = Math.max(wanted.heat, LEVEL_AT[l]);
+  wanted.level = Math.max(wanted.level, l);
+  wanted.searching = false;
+  wanted.searchLeft = 0;
+  wanted.lastX = pp[0];
+  wanted.lastZ = pp[2];
+  wanted.unseenFor = 0;
+  wanted.violentUntil = Math.max(wanted.violentUntil, nowS() + 25);
+  sync();
+}

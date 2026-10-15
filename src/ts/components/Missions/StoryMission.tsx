@@ -23,6 +23,8 @@ import {
   type StoryStep,
 } from '../../missions/storyMission';
 import { RUNWAY_CENTER } from '../Environment/Airport';
+import { heistBus, MISSION_3 } from '../../missions/heist';
+import { missionBus } from '../../lib/missionBus';
 import {
   AMBUSH,
   BAR,
@@ -288,6 +290,33 @@ const StoryMission: React.FC = () => {
     [setObjective, spawnGuards]
   );
 
+  // dal pannello Debug: riparte dalla missione scelta (le precedenti risultano fatte)
+  useEffect(() => {
+    missionBus.jump = (id) => {
+      const st = useStore.getState();
+      failRef.current = null;
+      setEnemies([]);
+      setHasPackage(false);
+      heistBus.active = false;
+      if (id === 'ricetta') {
+        st.setCompletedMissions([]);
+        setStep('meetVito');
+      } else if (id === 'ragioniere') {
+        st.setCompletedMissions([MISSION_1]);
+        setStep('m2_offer');
+      } else {
+        // il colpo: fatte le prime due, Vito lo propone; qui parte subito
+        st.setCompletedMissions([MISSION_1, MISSION_2]);
+        setStep('m2_done');
+        heistBus.active = true;
+        heistBus.start = true;
+      }
+    };
+    return () => {
+      missionBus.jump = null;
+    };
+  }, [setStep]);
+
   useEffect(() => {
     setObjective(story.current.step);
     return () => {
@@ -332,6 +361,10 @@ const StoryMission: React.FC = () => {
         setFrancoMode('leave');
         setStep('m2_return');
         banner('HAI IL LIBRO DEI CONTI', 'Arrivano i Serpenti!', '#76ff03');
+      },
+      startHeist: () => {
+        heistBus.start = true;
+        heistBus.active = true;
       },
       complete2: () => {
         const st = useStore.getState();
@@ -378,6 +411,7 @@ const StoryMission: React.FC = () => {
         health: st.health,
         m1Done: st.completedMissions.includes(MISSION_1),
         francoFate: story.current.francoFate,
+        heist: st.completedMissions.includes(MISSION_3) ? 'done' : heistBus.active ? 'active' : 'none',
       };
       const tree = storyDialogue(npc, s, actions);
       if (!tree) return;
@@ -444,8 +478,11 @@ const StoryMission: React.FC = () => {
       }
     }
     talkState.near = near;
-    st.setTalkPrompt(talkState.open || !near ? null : near === 'package' ? 'Prendi il pacco' : `Parla con ${NPC_BY_ID[near].name}`);
-    if (input.consumeJustPressed('talk') && near && !talkState.open) {
+    st.setTalkPrompt(heistBus.prompt ?? (talkState.open || !near ? null : near === 'package' ? 'Prendi il pacco' : `Parla con ${NPC_BY_ID[near].name}`));
+    const talkPressed = input.consumeJustPressed('talk');
+    // (senza nessuno vicino il tasto serve al colpo: HeistMission.tsx)
+    if (talkPressed && !near && heistBus.prompt) heistBus.talk = true;
+    if (talkPressed && near && !talkState.open) {
       if (near === 'package') {
         setHasPackage(true);
         setStep('escape');

@@ -167,6 +167,7 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
   const groupRef = useRef<THREE.Group>(null);
   const [message, setMessage] = useState('');
   const [gone, setGone] = useState(false);
+  const idHash = useMemo(() => [...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 97, 7), [id]);
 
   const s = useRef({
     mode: 'patrol' as Mode,
@@ -176,6 +177,8 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
     reactT: 0,
     fireCd: 1,
     shootAnim: 0,
+    shots: 0,
+    reloadT: 0,
     sightT: 0,
     sees: false,
     allyTarget: null as string | null,
@@ -581,7 +584,8 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
     const mayShoot = level >= 3 || isViolent() || !!S.allyTarget;
     const engaged = S.mode === 'chase' && S.reactT <= 0 && (S.sees || !!S.allyTarget) && !arrestMode && !hiding && mayShoot;
     if (S.shootAnim > 0) S.shootAnim -= delta;
-    if (engaged && !playerDown) {
+    if (S.reloadT > 0) S.reloadT -= delta;
+    if (engaged && !playerDown && S.reloadT <= 0) {
       S.fireCd -= delta;
       const tAlly = !S.sees && S.allyTarget ? allyRegistry.get(S.allyTarget)?.data ?? null : null;
       const tx = tAlly ? tAlly.position.x : pp[0];
@@ -607,18 +611,28 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
           actor.play('Pistol_Shoot', 0.05, false);
           S.shootAnim = Math.min(0.45, actor.clipDuration('Pistol_Shoot'));
         }
+        // caricatore vuoto: si ricarica (la pistola non spara all'infinito)
+        if (++S.shots >= 10 && actor.hasClip('Pistol_Reload')) {
+          S.shots = 0;
+          S.reloadT = Math.min(2.2, actor.clipDuration('Pistol_Reload'));
+        }
       }
     }
 
     // ---- animazione ---------------------------------------------------------
     const moving = S.mode === 'patrol' ? moveSpeed > 0 : marchYaw !== null;
     if (S.shootAnim <= 0) {
-      if (moving) {
+      if (S.reloadT > 0 && !moving) {
+        actor.play('Pistol_Reload', 0.1, false);
+      } else if (moving) {
         if (moveSpeed > 2.2) actor.play(RUN_CLIP, 0.2, true, timeScaleFor(RUN_CLIP, moveSpeed));
         else {
           const wc = actor.hasClip('Walk') ? 'Walk' : 'Idle_A';
           actor.play(wc, 0.25, true, moveSpeed / (WALK_BASE_SPEED[wc] ?? 0.73));
         }
+      } else if (arrestMode && actor.hasClip('Kimodo_point_shout')) {
+        // "Fermo! Polizia!": indica il giocatore e grida
+        actor.play('Kimodo_point_shout', 0.2);
       } else if (hiding && actor.hasClip('Crouch_Idle')) {
         actor.play('Crouch_Idle', 0.2);
       } else if (look && actor.hasClip(LOOK_CLIP)) {
@@ -626,7 +640,10 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
       } else if (armed) {
         actor.play(actor.hasClip('Pistol_Aim_Neutral') ? 'Pistol_Aim_Neutral' : actor.hasClip('Pistol_Idle') ? 'Pistol_Idle' : 'Idle_A', 0.2);
       } else {
-        actor.play('Idle_A', 0.3);
+        // pattuglia ferma: ogni tanto la radio, le braccia conserte, due passi di stretching
+        const v = Math.floor(performance.now() / 9000 + idHash) % 5;
+        const clip = v === 0 ? 'Idle_TalkingPhone' : v === 1 ? 'Idle_FoldArms' : v === 2 ? 'Kimodo_stretch' : 'Idle_A';
+        actor.play(actor.hasClip(clip) ? clip : 'Idle_A', 0.3);
       }
     }
 

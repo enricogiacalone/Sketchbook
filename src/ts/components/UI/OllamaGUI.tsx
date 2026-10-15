@@ -1,38 +1,25 @@
 import { useEffect } from 'react';
-import { useStore } from '../../store';
 import { acquireDebugGui, debugSection, releaseDebugGui } from '../../lib/debugGui';
-import { MISSIONS } from '../../missions/missionDefinitions';
+import { missionBus } from '../../lib/missionBus';
+import { MISSION_1, MISSION_2, MISSION_TITLES } from '../../missions/storyMission';
+import { MISSION_3, MISSION_3_TITLE } from '../../missions/heist';
 
+// Pannello Debug: le missioni vere del gioco (storia di Vito e il colpo alla
+// banca). Ognuna riparte da capo, con le precedenti segnate come fatte.
 const OllamaGUI: React.FC = () => {
   useEffect(() => {
     acquireDebugGui();
-    const folder = debugSection('playground').addFolder('Missioni Ollama (IA)');
-    const st = () => useStore.getState();
-
+    const folder = debugSection('playground').addFolder('Missioni');
     const obj = {
-      selectMission0: () => {
-        st().setMissionStage(0);
-        st().setMissionStatus('inactive');
-        if (MISSIONS[0]) st().setMissionInfo(MISSIONS[0].title, MISSIONS[0].briefing);
-      },
-      selectMission1: () => {
-        st().setMissionStage(1);
-        st().setMissionStatus('inactive');
-        if (MISSIONS[1]) st().setMissionInfo(MISSIONS[1].title, MISSIONS[1].briefing);
-      },
-      selectMission2: () => {
-        st().setMissionStage(2);
-        st().setMissionStatus('inactive');
-        if (MISSIONS[2]) st().setMissionInfo(MISSIONS[2].title, MISSIONS[2].briefing);
-      },
+      m1: () => missionBus.jump?.(MISSION_1),
+      m2: () => missionBus.jump?.(MISSION_2),
+      m3: () => missionBus.jump?.(MISSION_3),
     };
-
     const ctrls = [
-      folder.add(obj, 'selectMission0').name(MISSIONS[0] ? `▶ ${MISSIONS[0].title}` : '▶ Missione 1'),
-      folder.add(obj, 'selectMission1').name(MISSIONS[1] ? `▶ ${MISSIONS[1].title}` : '▶ Missione 2'),
-      folder.add(obj, 'selectMission2').name(MISSIONS[2] ? `▶ ${MISSIONS[2].title}` : '▶ Missione 3'),
+      folder.add(obj, 'm1').name(`▶ 1. ${MISSION_TITLES[MISSION_1]}`),
+      folder.add(obj, 'm2').name(`▶ 2. ${MISSION_TITLES[MISSION_2]}`),
+      folder.add(obj, 'm3').name(`▶ 3. ${MISSION_3_TITLE}`),
     ];
-
     return () => {
       ctrls.forEach((c) => c.destroy());
       folder.destroy();

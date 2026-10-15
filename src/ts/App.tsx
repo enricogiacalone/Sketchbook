@@ -21,7 +21,6 @@ import PhysicsBridge from './components/PhysicsBridge';
 import SaveGameManager from './components/SaveGameManager';
 import { loadGame } from './lib/saveGame';
 import StoryHUD from './components/UI/StoryHUD';
-import MissionHUD from './components/UI/MissionHUD';
 import NpcChatOverlay from './components/UI/NpcChatOverlay';
 import DialogueBox from './components/UI/DialogueBox';
 import ChatInput from './components/UI/ChatInput';
@@ -341,7 +340,6 @@ const App: React.FC = () => {
       <RagdollBenchGUI />
       <WeaponHUD />
       <StoryHUD />
-      <MissionHUD />
       {showNpcChat && <NpcChatOverlay />}
       <SaveGameManager />
       <DialogueBox />

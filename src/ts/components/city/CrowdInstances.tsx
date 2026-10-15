@@ -5,7 +5,8 @@ import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 import { MeshStandardNodeMaterial } from 'three/webgpu';
 import { attribute } from 'three/tsl';
-import { MANNEQUIN_URL, MANNEQUIN_BASE_ANIMS_URL } from './useMannequinActor';
+import { MANNEQUIN_URL, MANNEQUIN_BASE_ANIMS_URL, MANNEQUIN_ADDON_ANIMS_URL } from './useMannequinActor';
+import { SCENE_CLIPS } from './crowdScenes';
 import { KIMODO_ANIMS_URL, K } from '../../lib/kimodo';
 import {
   crowdAgents,
@@ -139,6 +140,7 @@ const CrowdInstances: React.FC = () => {
   const { scene } = useGLTF(MANNEQUIN_URL);
   const { animations: base } = useGLTF(MANNEQUIN_BASE_ANIMS_URL);
   const { animations: kimodo } = useGLTF(KIMODO_ANIMS_URL);
+  const { animations: addon } = useGLTF(MANNEQUIN_ADDON_ANIMS_URL);
 
   const poses = useMemo<Poses>(() => {
     const rig = SkeletonUtils.clone(scene);
@@ -153,7 +155,7 @@ const CrowdInstances: React.FC = () => {
     if (!sm) return out;
     out.map = ((sm.material as THREE.MeshStandardMaterial).map as THREE.Texture | null) ?? null;
     const src = sm.geometry;
-    const clips = new Map([...base, ...kimodo].map((c) => [c.name, c]));
+    const clips = new Map([...base, ...addon, ...kimodo].map((c) => [c.name, c]));
     const mixer = new THREE.AnimationMixer(rig);
     const add = () => {
       const { pos, nrm } = bakeSkinned(sm, rig);
@@ -183,7 +185,7 @@ const CrowdInstances: React.FC = () => {
     out.walk = sample('Walk', WALK_FRAMES);
     out.run = sample(clips.has(K.panicRun) ? K.panicRun : 'Run_Female', RUN_FRAMES);
     out.cower = sample(clips.has(K.cower) ? K.cower : 'Idle_A', 1, 0.999)[0] ?? -1;
-    for (const name of new Set(['Idle_A', LOOK_CLIP, ...LINGER_CLIPS, ...IDLE_CLIPS])) {
+    for (const name of new Set(['Idle_A', LOOK_CLIP, ...LINGER_CLIPS, ...IDLE_CLIPS, ...SCENE_CLIPS])) {
       const i = sample(name, 1, IDLE_POSE_AT)[0];
       if (i !== undefined) out.idle[name] = i;
     }
@@ -192,7 +194,7 @@ const CrowdInstances: React.FC = () => {
     if (out.cower < 0) out.cower = out.walk[0];
     mixer.stopAllAction();
     return out;
-  }, [scene, base, kimodo]);
+  }, [scene, base, addon, kimodo]);
 
   // stessa resa del corpo vero: texture del manichino + tinta "civile"
   // dell'agente come emissivo (sul corpo vero: emissive = tinta, 0.35)

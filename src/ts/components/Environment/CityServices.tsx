@@ -4,7 +4,7 @@ import { useFrame } from '@react-three/fiber';
 import { useStaticBoxes, type StaticBox } from './staticColliders';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { streetLampBulbMaterial } from './Road';
-import { HOSPITAL, POLICE_STATION } from './streetPropsData';
+import { BANK, HOSPITAL, POLICE_STATION } from './streetPropsData';
 
 // Ospedale e stazione di polizia: edifici veri a ovest, accanto ai parcheggi.
 // E' qui che si ricompare dopo Wasted e Busted (UI/PlayerFate.tsx). Facciata
@@ -69,8 +69,15 @@ function signTexture(text: string, bg: string, fg: string, cross: boolean) {
   g.fillStyle = fg;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.font = 'bold 74px Arial, sans-serif';
-  g.fillText(text, cross ? 280 : 256, 68);
+  // il testo si rimpicciolisce finche' ci sta
+  let fs = 74;
+  const room = cross ? 360 : 460;
+  g.font = `bold ${fs}px Arial, sans-serif`;
+  while (g.measureText(text).width > room && fs > 24) {
+    fs -= 4;
+    g.font = `bold ${fs}px Arial, sans-serif`;
+  }
+  g.fillText(text, cross ? 290 : 256, 68);
   if (cross) {
     g.fillStyle = '#d32f2f';
     g.fillRect(50, 44, 80, 28);
@@ -87,6 +94,8 @@ interface Spec {
   roof: string;
   sign: THREE.CanvasTexture;
   lights: string;
+  // lampeggianti sul tetto (non la banca)
+  beacons?: boolean;
 }
 
 const Service: React.FC<{ spec: Spec }> = ({ spec }) => {
@@ -148,7 +157,8 @@ const Service: React.FC<{ spec: Spec }> = ({ spec }) => {
       <mesh position={[front + 0.08, 5.2, b.z]} rotation={[0, Math.PI / 2, 0]} material={signMat}>
         <planeGeometry args={[9, 2.25]} />
       </mesh>
-      {/* lampeggianti */}
+      {spec.beacons !== false && (
+        <>
       <mesh position={[b.x - 3.5, b.h + 1.85, b.z - 1.2]} material={lightMat}>
         <boxGeometry args={[1.2, 0.5, 0.9]} />
       </mesh>
@@ -160,6 +170,8 @@ const Service: React.FC<{ spec: Spec }> = ({ spec }) => {
         <boxGeometry args={[1.2, 0.5, 0.9]} />
         <meshBasicMaterial ref={blueRef} color="#3d7bff" toneMapped={false} />
       </mesh>
+        </>
+      )}
       {/* striscia gialla/blu sulla porta e attacco con la strada: asfalto davanti all'ingresso */}
       <mesh position={[front + 3.5, 0.04, b.z]} receiveShadow>
         <boxGeometry args={[7, 0.08, 12]} />
@@ -174,6 +186,7 @@ const CityServices: React.FC = () => {
     () => [
       { b: HOSPITAL, wall: '#e8eef2', roof: '#9aa3ab', sign: signTexture('OSPEDALE', '#ffffff', '#c62828', true), lights: '#ffffff' },
       { b: POLICE_STATION, wall: '#6f86b8', roof: '#2a3556', sign: signTexture('POLIZIA', '#1c2c5e', '#ffffff', false), lights: '#ffffff' },
+      { b: BANK, wall: '#d9c9a3', roof: '#6d5d3a', sign: signTexture('BANCA CENTRALE', '#2b2410', '#ffd54f', false), lights: '#ffffff', beacons: false },
     ],
     []
   );

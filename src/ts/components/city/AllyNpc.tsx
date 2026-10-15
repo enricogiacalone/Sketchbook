@@ -106,6 +106,8 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
     searchT: 0,
     fireCd: 0.5,
     shootAnim: 0,
+    shots: 0,
+    reloadT: 0,
     moving: false,
     step: newStepState(),
     prevPX: initialPosition[0],
@@ -314,8 +316,9 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
       } else {
         // a tiro: si ferma, mira e spara
         if (s.shootAnim > 0) s.shootAnim -= delta;
+        if (s.reloadT > 0) s.reloadT -= delta;
         const err = Math.abs(wrap(faceYaw - g.rotation.y));
-        if (s.fireCd <= 0 && err < 0.35) {
+        if (s.fireCd <= 0 && s.reloadT <= 0 && err < 0.35) {
           s.fireCd = FIRE_INTERVAL + Math.random() * 0.4;
           const targetId = t.id;
           npcFire({
@@ -336,6 +339,11 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
           if (actor.hasClip('Pistol_Shoot')) {
             actor.play('Pistol_Shoot', 0.05, false);
             s.shootAnim = Math.min(0.45, actor.clipDuration('Pistol_Shoot'));
+          }
+          // caricatore vuoto: ricarica
+          if (++s.shots >= 10 && actor.hasClip('Pistol_Reload')) {
+            s.shots = 0;
+            s.reloadT = Math.min(2.2, actor.clipDuration('Pistol_Reload'));
           }
         }
       }
@@ -383,7 +391,9 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
     pistol.setVisible(attacking);
     pistol.update(delta);
     if (s.shootAnim <= 0) {
-      if (marchYaw !== null) {
+      if (s.reloadT > 0 && marchYaw === null) {
+        actor.play('Pistol_Reload', 0.1, false);
+      } else if (marchYaw !== null) {
         if (speed > 2) actor.play(RUN_CLIP, 0.2, true, timeScaleFor(RUN_CLIP, speed));
         else {
           const wc = actor.hasClip('Walk') ? 'Walk' : 'Idle_A';
@@ -394,7 +404,10 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
       } else if (look && actor.hasClip(LOOK_CLIP)) {
         actor.play(LOOK_CLIP, 0.3);
       } else {
-        actor.play('Idle_A', 0.3);
+        // fermo accanto al giocatore: ogni tanto un gesto (annuisce, ascolta, braccia conserte)
+        const v = Math.floor(performance.now() / 8000 + id.length * 3) % 5;
+        const clip = v === 0 ? 'Head Nod' : v === 1 ? 'Idle Listening' : v === 2 ? 'Idle_FoldArms' : 'Idle_A';
+        actor.play(actor.hasClip(clip) ? clip : 'Idle_A', 0.3);
       }
     }
 

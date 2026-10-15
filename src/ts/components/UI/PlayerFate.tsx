@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { clearWanted, wanted } from '../../lib/wanted';
-import { playerControl } from '../../lib/playerControl';
+import { fateEvents, playerControl } from '../../lib/playerControl';
 import { talkState } from '../../lib/dialogue';
 import { HOSPITAL_SPAWN, POLICE_SPAWN } from '../Environment/streetPropsData';
 
@@ -33,9 +33,13 @@ const PlayerFate: React.FC = () => {
       let f = fate.current;
       if (!f) {
         if (st.isPaused || st.testScene !== 'none') return;
-        if (st.health <= 0) f = fate.current = { kind: 'wasted', t0: now, moved: false, note: '' };
+        if (st.health <= 0) {
+          f = fate.current = { kind: 'wasted', t0: now, moved: false, note: '' };
+          fateEvents.wasted++;
+        }
         else if (wanted.arrestT >= ARREST_AT && st.currentControllable === 'player') {
           f = fate.current = { kind: 'busted', t0: now, moved: false, note: '' };
+          fateEvents.busted++;
           // niente piu' sparatorie: la polizia ti ha preso
           clearWanted();
           talkState.open = true; // fermo: niente input mentre ti ammanettano

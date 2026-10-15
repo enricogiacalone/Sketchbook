@@ -37,6 +37,9 @@ interface EnemyProps {
   guard?: { alert: { on: boolean }; facing?: number };
   // chiamato una volta quando muore
   onDeath?: (id: string) => void;
+  // con la pistola (default) o a mani nude: i passanti arrabbiati di solito
+  // fanno a pugni, la pistola ce l'hanno in pochi
+  armed?: boolean;
 }
 
 const ENEMY_COLOR = '#c62828';
@@ -56,6 +59,11 @@ const SHOT_DAMAGE_LIMB = 8;
 const SHOT_HIT_SPEED = 2.5;
 const SHOT_WORLD_IMPULSE = 0.6;
 const GIVE_UP_TIME = 15;
+// a mani nude: corre addosso e picchia
+const BRAWL_RANGE = 1.5;
+const BRAWL_COOLDOWN_S = 0.95;
+const BRAWL_DAMAGE = 7;
+const BRAWL_CLIPS = ['Punch_Jab', 'Punch_Cross', 'Melee_Hook'];
 const GUARD_ALERT_DIST = 18; // m: una guardia ti vede da qui
 const CORPSE_S = 25;
 // altezza del petto del giocatore (manichino) sopra i piedi: dove si mira.
@@ -68,7 +76,7 @@ const _muzzle = new THREE.Vector3();
 const _aim = new THREE.Vector3();
 const _perp = new THREE.Vector3();
 
-const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp, guard, onDeath }) => {
+const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp, guard, onDeath, armed = true }) => {
   const actor = useMannequinActor({
     id,
     name: 'Nemico',
@@ -93,6 +101,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp,
   const st = useRef({
     mode: (guard ? 'guard' : 'chase') as 'guard' | 'chase' | 'shoot',
     fireCd: 0.6 + Math.random() * 0.6,
+    punchCd: 0.5,
     shootAnim: 0,
     giveUp: 0,
     gaveUp: false,
@@ -137,7 +146,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp,
       return;
     }
 
-    pistol.setVisible(true);
+    pistol.setVisible(armed);
     pistol.update(delta);
 
     const store = useStore.getState();
@@ -169,9 +178,11 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp,
       g.rotation.y += a * Math.min(1, delta * (s.mode === 'shoot' ? 10 : 6));
     }
 
-    if (s.mode === 'chase' && dist < STOP_RANGE) s.mode = 'shoot';
-    else if (s.mode === 'shoot' && dist > FIRE_RANGE) s.mode = 'chase';
-    if (res === 'hurt' && s.mode === 'chase' && dist < FIRE_RANGE) s.mode = 'shoot';
+    const stopR = armed ? STOP_RANGE : BRAWL_RANGE * 0.85;
+    const fireR = armed ? FIRE_RANGE : 12; // (a mani nude: oltre non lo si insegue piu' di tanto)
+    if (s.mode === 'chase' && dist < stopR) s.mode = 'shoot';
+    else if (s.mode === 'shoot' && dist > (armed ? FIRE_RANGE : BRAWL_RANGE * 1.3)) s.mode = 'chase';
+    if (armed && res === 'hurt' && s.mode === 'chase' && dist < FIRE_RANGE) s.mode = 'shoot';
 
     if (s.mode === 'chase' && dist > 0.01) {
       const step = RUN_SPEED * delta;
@@ -179,6 +190,22 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp,
       data.position.x += c.x;
       data.position.z += c.z;
       actor.play(RUN_CLIP, 0.2, true, timeScaleFor(RUN_CLIP, RUN_SPEED));
+    } else if (!armed) {
+      // a pugni: davanti al giocatore, un colpo ogni tanto
+      s.punchCd -= delta;
+      if (s.shootAnim > 0) s.shootAnim -= delta;
+      else actor.play('Idle_A', 0.2);
+      if (s.punchCd <= 0 && dist <= BRAWL_RANGE && store.health > 0) {
+        s.punchCd = BRAWL_COOLDOWN_S + Math.random() * 0.4;
+        const clip = BRAWL_CLIPS[Math.floor(Math.random() * BRAWL_CLIPS.length)];
+        if (actor.hasClip(clip)) {
+          actor.play(clip, 0.05, false);
+          s.shootAnim = Math.min(0.6, actor.clipDuration(clip));
+        }
+        _aim.set(dx, 0, dz).normalize();
+        _muzzle.set(pp[0], pp[1], pp[2]);
+        damageFighter('player', { segment: 'Torso', damage: BRAWL_DAMAGE, dirWorld: _aim, speed: 1.2, pointWorld: _muzzle });
+      }
     } else {
       s.fireCd -= delta;
       if (s.shootAnim > 0) s.shootAnim -= delta;
@@ -238,7 +265,7 @@ const Enemy: React.FC<EnemyProps> = ({ id, initialPosition, onGiveUp, initialHp,
     }
 
     // rinuncia se non riesce a starti a tiro
-    if (dist <= FIRE_RANGE) s.giveUp = 0;
+    if (dist <= fireR) s.giveUp = 0;
     else {
       s.giveUp += delta;
       if (s.giveUp >= GIVE_UP_TIME && !s.gaveUp) {

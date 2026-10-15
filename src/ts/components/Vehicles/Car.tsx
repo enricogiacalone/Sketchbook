@@ -320,10 +320,11 @@ export const makeTrafficDriver = (): TrafficDriver => ({
   speed: 0,
   upY: 1,
 });
-// Telaio delle auto: membro anche del gruppo Vehicle, e le auto del traffico
-// solo di quello: cosi' si urtano tra loro e col giocatore senza toccare il
-// terreno (Default), che le sospensioni gestiscono con i raggi delle ruote.
-const CAR_CHASSIS_GROUPS = groupsExcluding([CollisionGroups.Default, CollisionGroups.Vehicle], CollisionGroups.Default);
+// Telaio delle auto: le auto normali (giocatore, parcheggiate) sono in Default
+// + Vehicle e toccano tutto come prima; quelle del traffico solo in Vehicle e
+// non toccano il Default (terreno, palazzi: le sospensioni lavorano con i raggi
+// delle ruote), ma urtano le altre auto, il giocatore e i personaggi.
+const CAR_CHASSIS_GROUPS = groupsExcluding([CollisionGroups.Default, CollisionGroups.Vehicle]);
 const TRAFFIC_CAR_GROUPS = groupsExcluding([CollisionGroups.Vehicle], CollisionGroups.Default);
 
 export const DEFAULT_CAR_SCALE = 1.5;
@@ -338,6 +339,35 @@ const REMOTE_CAR_FOLLOW_RATE = 14; // 1/s
 const REMOTE_CAR_SNAP_DIST = 8; // m
 const _remoteCarQ = new THREE.Quaternion();
 const _remoteCarQ2 = new THREE.Quaternion();
+
+// "fammi vedere i collider solidi della macchina": con "Mostra collider fisici"
+// (pannello Debug, showPhysicsDebug) si vedono i due box del telaio (scocca in
+// ciano, abitacolo in arancio) e i quattro attacchi delle sospensioni (punto
+// giallo) con il tratto di molla a riposo (linea).
+const CarColliderDebug: React.FC<{ scale: number; wheelPoints: THREE.Vector3[] }> = ({ scale, wheelPoints }) => (
+  <group>
+    {CHASSIS_SHAPES.map((sh, i) => (
+      <mesh key={i} position={[sh.position[0] * scale, sh.position[1] * scale, sh.position[2] * scale]} renderOrder={999}>
+        <boxGeometry args={[sh.fullDimensions[0] * scale, sh.fullDimensions[1] * scale, sh.fullDimensions[2] * scale]} />
+        <meshBasicMaterial color={i === 0 ? '#00e5ff' : '#ff9800'} wireframe depthTest={false} transparent opacity={0.9} toneMapped={false} />
+      </mesh>
+    ))}
+    {wheelPoints.map((p, i) => (
+      <group key={`w${i}`}>
+        <mesh position={p} renderOrder={999}>
+          <sphereGeometry args={[0.07 * scale, 8, 6]} />
+          <meshBasicMaterial color="#ffee00" depthTest={false} toneMapped={false} />
+        </mesh>
+        <mesh position={[p.x, p.y - SUSPENSION_DEBUG_LEN * scale * 0.5, p.z]} renderOrder={999}>
+          <boxGeometry args={[0.02 * scale, SUSPENSION_DEBUG_LEN * scale, 0.02 * scale]} />
+          <meshBasicMaterial color="#ffee00" depthTest={false} toneMapped={false} />
+        </mesh>
+      </group>
+    ))}
+  </group>
+);
+// (molla a riposo + raggio ruota, in metri del modello: solo per il disegno)
+const SUSPENSION_DEBUG_LEN = SUSPENSION_REST_LENGTH + WHEEL_RADIUS;
 
 const Car: React.FC<CarProps> = ({
   position = [10, 5, 0],
@@ -443,6 +473,7 @@ const Car: React.FC<CarProps> = ({
   // the wheel of a patrol car -- R3F's useFrame always runs the latest
   // render's callback, so reading this same variable inside useFrame below
   // is exactly as fresh as recomputing it there every frame would be.
+  const showColliders = useStore((st) => st.showPhysicsDebug);
   const humanIsDriving = currentControllable === 'car' && controlledEntityId === id && controlledSeatType === 'driver';
   // due tubi di scarico in fondo al paraurti posteriore (scatola bassa di
   // car.glb), un po' sotto la sua meta' altezza
@@ -1434,6 +1465,7 @@ const Car: React.FC<CarProps> = ({
         />
       ))}
       <primitive object={clonedScene} scale={S} />
+      {showColliders && <CarColliderDebug scale={S} wheelPoints={wheelConnectionPoints} />}
       {/* fumo dello scarico (ExhaustSmoke.tsx): solo a motore acceso */}
       {(humanIsDriving || !!driver?.active || (!!patrolRoute && patrolRoute.length >= 2)) && <ExhaustSmoke pipes={exhaustPipes} />}
 

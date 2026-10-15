@@ -34,7 +34,9 @@ import { getShootableCollider, applyFighterHit } from './weapons/shootableRegist
 import { registerFighterBlast, applyKnockdownBlast } from '../../lib/explosions';
 import { raycastProxies } from '../../lib/shotProxies';
 import { crowdAgents, promoteCrowdAgent } from '../city/crowdSim';
-import { reportCrime, reportHit } from '../../lib/wanted';
+import { markPlayerHit, reportCrime, reportHit } from '../../lib/wanted';
+import { BUMP_COOLDOWN_MS, BUMP_DIST, BUMP_HEAVY, BUMP_MEDIUM, BUMP_MIN_SPEED, pushBump, type BumpStrength } from '../../lib/bump';
+import { triggerCameraShake } from '../../lib/cameraShake';
 import { playerControl } from '../../lib/playerControl';
 import { emitShotFx, type ShotSurface } from './weapons/weaponFx';
 import {
@@ -375,6 +377,8 @@ const FACE_TURN_RATE = 0.22;
 // matching this file's siblings (City.tsx's _windowDummy, CombatSoldier's
 // _hitImpulseDir, useRagdoll.ts's _v1/_v2/...).
 const _hitImpulseDir = new THREE.Vector3();
+const _bumpDir = new THREE.Vector3();
+const _bumpPt = new THREE.Vector3();
 const _forward = new THREE.Vector3();
 // Separate from _forward -- this one runs at the very top of useFrame
 // (see the camPitch/applySpineLean block there), before _forward's own
@@ -522,6 +526,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   // e pausa tra un colpo e l'altro dello stesso ostacolo
   const knockVelRef = useRef(new THREE.Vector3());
   const obstacleHitCooldownRef = useRef(0);
+  // spallate ai passanti (lib/bump.ts): ultima per ogni persona
+  const bumpCdRef = useRef(new Map<string, number>());
+  // direzione (rotation del corpo) verso cui guarda la camera, aggiornata ogni frame
+  const camYawRef = useRef(0);
   const spineLeanWRef = useRef(1); // peso della torsione del busto (0 a terra)
   // salto / arrampicata (traversal/traversal.ts): quota dei piedi, modo...
   const travRef = useRef(
@@ -1688,6 +1696,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     camera.getWorldDirection(_camAimDir);
     const camPitch = Math.atan2(_camAimDir.y, Math.sqrt(_camAimDir.x * _camAimDir.x + _camAimDir.z * _camAimDir.z));
     const camYaw = Math.atan2(_camAimDir.x, _camAimDir.z) + Math.PI;
+    camYawRef.current = camYaw;
     let yawDiff = camYaw - data.rotation;
     yawDiff = Math.atan2(Math.sin(yawDiff), Math.cos(yawDiff));
     // (niente torsione verso la camera mentre si salta/arrampica)
@@ -1700,7 +1709,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     if (data.state === 'Si rialza') kd.tick(delta);
     else kd.stopLift();
     spineLeanWRef.current = THREE.MathUtils.clamp(
-      spineLeanWRef.current + (isDown() || data.isDead ? -1 : 1) * (delta / SPINE_LEAN_BLEND_S),
+      spineLeanWRef.current +
+        (isDown() || data.isDead || (isAttackingRef.current && !isGun()) ? -1 : 1) * (delta / (isAttackingRef.current ? 0.1 : SPINE_LEAN_BLEND_S)),
       0,
       1
     );
@@ -2789,8 +2799,32 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       meleeDamageRef.current = PUNCH_DAMAGE;
     }
 
+    // Un pugno parte dritto: il corpo si gira verso chi hai davanti (entro 3 m e
+    // 70 gradi dalla camera) o, senza nessuno, dove guarda la camera. La
+    // torsione verso la camera, che SOSTITUISCE la rotazione della spina della
+    // clip, durante il colpo e' spenta (vedi spineLeanWRef): il pugno e' quello
+    // della clip, teso in avanti.
+    const faceForAttack = () => {
+      let want = camYawRef.current;
+      let best = 3.0;
+      for (const o of opponents) {
+        if (o.isDead || o.id === data.id) continue;
+        const ox = o.position.x - data.position.x;
+        const oz = o.position.z - data.position.z;
+        const od = Math.hypot(ox, oz);
+        if (od > best || od < 0.01) continue;
+        let da = Math.atan2(-ox, -oz) - camYawRef.current;
+        da = Math.atan2(Math.sin(da), Math.cos(da));
+        if (Math.abs(da) > 1.22) continue;
+        best = od;
+        want = Math.atan2(-ox, -oz);
+      }
+      data.rotation = want;
+    };
+
     // Cross (RIGHT arm) -- primary (Left Click / gamepad R2).
     if (input.consumeJustPressed('primary')) {
+      faceForAttack();
       data.state = `Attacco (${animCatalog.attackCross})`;
       data.attackLock = transitionToAnimation(animCatalog.attackCross, 0.1, false);
       // No longer resolved here -- ATTACK_RANGE (root-to-root, generous)
@@ -2812,6 +2846,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // action (L2 only, added specifically for this) OR'd together, so
     // all three inputs throw the same left-handed punch.
     if (input.consumeJustPressed('yawLeft') || input.consumeJustPressed('attackLeft')) {
+      faceForAttack();
       data.state = `Attacco (${animCatalog.attackJab})`;
       data.attackLock = transitionToAnimation(animCatalog.attackJab, 0.1, false);
       isAttackingRef.current = true;
@@ -2823,6 +2858,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // Hook (mixed, not single-arm -- see above) -- E on keyboard,
     // Triangle on gamepad.
     if (input.consumeJustPressed('yawRight')) {
+      faceForAttack();
       data.state = `Attacco (${animCatalog.attackHook})`;
       data.attackLock = transitionToAnimation(animCatalog.attackHook, 0.1, false);
       isAttackingRef.current = true;
@@ -2897,6 +2933,67 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       celebrateRef.current = { delay: 0, left: 0 };
       _bodyFwd.set(-Math.sin(data.rotation), 0, -Math.cos(data.rotation));
       resolveAndApplyMovement(_bodyFwd.x * ls.speed * dtL, _bodyFwd.z * ls.speed * dtL);
+
+      // spallata: contro chi ti sta davanti mentre vai di fretta (a piedi)
+      if (vehRef.current.mode === 'none' && ls.speed >= BUMP_MIN_SPEED && !kd.isDown() && !data.isDead) {
+        const now = performance.now();
+        let hit: FighterData | null = null;
+        let bestD = 1e9;
+        let toward = 0;
+        for (const o of opponents) {
+          if (o.isDead || o.id === data.id) continue;
+          const tm = o.team ?? '';
+          if (!(tm.startsWith('CIVILIAN') || tm.startsWith('POLICE') || tm === 'CITY_ENEMY')) continue;
+          const bx = o.position.x - data.position.x;
+          const bz = o.position.z - data.position.z;
+          const bd = Math.hypot(bx, bz);
+          if (bd > BUMP_DIST || bd < 0.01) continue;
+          const tw = (bx * _bodyFwd.x + bz * _bodyFwd.z) / bd;
+          if (tw < 0.35) continue;
+          if (now - (bumpCdRef.current.get(o.id) ?? 0) < BUMP_COOLDOWN_MS) continue;
+          if (bd < bestD) {
+            bestD = bd;
+            hit = o;
+            toward = tw;
+          }
+        }
+        if (hit) {
+          bumpCdRef.current.set(hit.id, now);
+          const closing = ls.speed * toward;
+          const strength: BumpStrength = closing >= BUMP_HEAVY ? 'heavy' : closing >= BUMP_MEDIUM ? 'medium' : 'light';
+          const bx = hit.position.x - data.position.x;
+          const bz = hit.position.z - data.position.z;
+          const bl = Math.hypot(bx, bz) || 1;
+          const nx = bx / bl;
+          const nz = bz / bl;
+          const shove = strength === 'heavy' ? 1.1 : strength === 'medium' ? 0.7 : 0.35;
+          if (strength === 'heavy') markPlayerHit(hit.id);
+          pushBump({ id: hit.id, strength, px: nx * shove, pz: nz * shove, fromX: data.position.x, fromZ: data.position.z });
+          // chi non e' un passante della folla (poliziotti, nemici) si sposta subito
+          if (!hit.id.startsWith('crowd-')) {
+            hit.position.x += nx * shove * 0.6;
+            hit.position.z += nz * shove * 0.6;
+          }
+          // la spinta sul corpo (ragdoll): barcolla nella tua direzione
+          _bumpDir.set(nx, 0.12, nz).normalize();
+          _bumpPt.set(hit.position.x, 1.15, hit.position.z);
+          applyFighterHit(hit.id, 'Torso', _bumpDir, closing * 5, _bumpPt);
+          if (strength === 'heavy') {
+            // scatto pieno: cade a terra e poi si rialza
+            hit.knockdown = { dirX: nx, dirZ: nz, speed: Math.min(closing * 1.4, 7), up: 0.3 };
+            const tm = hit.team ?? '';
+            if (tm.startsWith('POLICE')) reportCrime('copAssault', hit.position.x, hit.position.z);
+            else if (tm.startsWith('CIVILIAN')) reportCrime('assault', hit.position.x, hit.position.z);
+          }
+          // e tu: perdi lo slancio, scossa, un po' di barcollamento
+          ls.speed *= strength === 'heavy' ? 0.3 : strength === 'medium' ? 0.55 : 0.8;
+          triggerCameraShake(strength === 'heavy' ? 0.5 : strength === 'medium' ? 0.25 : 0.1);
+          if (strength !== 'light') {
+            _bumpDir.set(-nx, 0.1, -nz).normalize();
+            ragdoll.pulseHit(_bumpDir, strength === 'heavy' ? 0.35 : 0.2, 'Torso', hit.position.x, hit.position.z);
+          }
+        }
+      }
       data.state = ls.skidding ? 'Frena' : running ? 'Corre' : 'Si muove';
 
       // fermo / camminata / corsa mescolati, piedi in fase: le due clip del

@@ -12,7 +12,7 @@ import NpcInspector from '../UI/NpcInspector';
 import { CITY_LAYOUT, getBuildingDetails } from '../Environment/City';
 import { ROAD_OFFSETS, ROAD_WIDTH } from '../Environment/Road';
 import { insideStatics, setCrowdStatics } from './crowdObstacles';
-import { getStreetProps, HOSPITAL, POLICE_STATION } from '../Environment/streetPropsData';
+import { BANK, getStreetProps, HOSPITAL, POLICE_STATION } from '../Environment/streetPropsData';
 import { AIM_CHEST_Y, registerAimTargets } from '../../lib/aimTargets';
 import {
   assignCrowdSlots,
@@ -74,7 +74,7 @@ function buildCrowdStatics() {
   const sp = getStreetProps();
   for (const r of sp.crowdRects) rects.push(r);
   for (const c of sp.crowdCircles) circles.push(c);
-  for (const b of [HOSPITAL, POLICE_STATION]) rects.push({ minX: b.x - b.w / 2 - 0.2, maxX: b.x + b.w / 2 + 0.2, minZ: b.z - b.d / 2 - 0.2, maxZ: b.z + b.d / 2 + 0.2 });
+  for (const b of [HOSPITAL, POLICE_STATION, BANK]) rects.push({ minX: b.x - b.w / 2 - 0.2, maxX: b.x + b.w / 2 + 0.2, minZ: b.z - b.d / 2 - 0.2, maxZ: b.z + b.d / 2 + 0.2 });
   setCrowdStatics(rects, circles);
 }
 
@@ -83,7 +83,7 @@ const carColliderOf = new Map<number, number>();
 
 const Crowd: React.FC = () => {
   const [enemies, setEnemies] = useState<
-    Array<{ id: string; agentId: number; agent: CrowdAgent; position: [number, number, number]; hp?: number }>
+    Array<{ id: string; agentId: number; agent: CrowdAgent; position: [number, number, number]; hp?: number; armed?: boolean }>
   >([]);
   const [allies, setAllies] = useState<
     Array<{ id: string; agent: CrowdAgent; position: [number, number, number]; hp: number; order: Order }>
@@ -206,14 +206,14 @@ const Crowd: React.FC = () => {
     }
   });
 
-  const handleBecomeEnemy = useCallback((agent: CrowdAgent, position: [number, number, number], hp?: number) => {
+  const handleBecomeEnemy = useCallback((agent: CrowdAgent, position: [number, number, number], hp?: number, armed = false) => {
     agent.gone = true;
     agent.slot = -1;
     const idx = crowdAgents.indexOf(agent);
     if (idx !== -1) crowdAgents.splice(idx, 1);
 
     setEnemies((prev) =>
-      prev.some((e) => e.agentId === agent.id) ? prev : [...prev, { id: `crowd-enemy-${agent.id}`, agentId: agent.id, agent, position, hp }]
+      prev.some((e) => e.agentId === agent.id) ? prev : [...prev, { id: `crowd-enemy-${agent.id}`, agentId: agent.id, agent, position, hp, armed }]
     );
   }, []);
 
@@ -270,7 +270,7 @@ const Crowd: React.FC = () => {
         <CrowdPedestrian key={s} slot={s} onBecomeEnemy={handleBecomeEnemy} onBecomeAlly={handleBecomeAlly} />
       ))}
       {enemies.map((e) => (
-        <Enemy key={e.id} id={e.id} initialPosition={e.position} initialHp={e.hp} onGiveUp={handleEnemyGiveUp} />
+        <Enemy key={e.id} id={e.id} initialPosition={e.position} initialHp={e.hp} armed={e.armed} onGiveUp={handleEnemyGiveUp} />
       ))}
       {allies.map((a, i) => (
         <AllyNpc key={a.id} id={a.id} index={i} initialPosition={a.position} initialHp={a.hp} order={a.order} onGone={handleAllyGone} />

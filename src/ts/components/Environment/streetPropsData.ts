@@ -15,13 +15,15 @@ export const LOT_RECTS = [-90, 30, 150].map((z) => ({ minX: -163, maxX: -122, mi
 // Ospedale e stazione di polizia (CityServices.tsx): blocchi vuoti a ovest
 export const HOSPITAL = { x: -148, z: -30, w: 30, d: 22, h: 15 };
 export const POLICE_STATION = { x: -148, z: 90, w: 30, d: 22, h: 12 };
+// la Banca Centrale (missione del colpo, missions/heist.ts): angolo sud-ovest
+export const BANK = { x: -148, z: -150, w: 32, d: 24, h: 14 };
 const rectOf = (b: { x: number; z: number; w: number; d: number }, m = 0) => ({
   minX: b.x - b.w / 2 - m,
   maxX: b.x + b.w / 2 + m,
   minZ: b.z - b.d / 2 - m,
   maxZ: b.z + b.d / 2 + m,
 });
-const EXCLUDE = [...LOT_RECTS, rectOf(HOSPITAL, 2), rectOf(POLICE_STATION, 2)];
+const EXCLUDE = [...LOT_RECTS, rectOf(HOSPITAL, 2), rectOf(POLICE_STATION, 2), rectOf(BANK, 2)];
 
 // dove si respawna (davanti agli ingressi, UI/PlayerFate.tsx)
 export const HOSPITAL_SPAWN: [number, number] = [HOSPITAL.x + HOSPITAL.w / 2 + 5, HOSPITAL.z];
@@ -264,6 +266,8 @@ export interface StreetPropsData {
   solids: Array<{ x: number; y: number; z: number; hx: number; hy: number; hz: number }>;
   crowdRects: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }>;
   crowdCircles: Array<{ x: number; z: number; r: number }>;
+  // dove stanno pensiline, chioschi e fioriere (la folla ci si ferma: city/crowdScenes.ts); yaw: dove guarda il lato +z locale
+  spots: Array<{ kind: 'shelter' | 'kiosk' | 'planter' | 'dumpster'; x: number; z: number; yaw: number }>;
 }
 
 const hitsRect = (x0: number, x1: number, z0: number, z1: number, r: { minX: number; maxX: number; minZ: number; maxZ: number }) =>
@@ -274,7 +278,7 @@ let cache: StreetPropsData | null = null;
 export function getStreetProps(): StreetPropsData {
   if (cache) return cache;
   const rnd = worldRng('street-props');
-  const out: StreetPropsData = { parts: {}, plates: [], solids: [], crowdRects: [], crowdCircles: [] };
+  const out: StreetPropsData = { parts: {}, plates: [], solids: [], crowdRects: [], crowdCircles: [], spots: [] };
   const bRects = CITY_LAYOUT.buildings.map((b) => ({
     minX: b.x - b.w / 2 - 0.4,
     maxX: b.x + b.w / 2 + 0.4,
@@ -328,6 +332,7 @@ export function getStreetProps(): StreetPropsData {
         out.plates.push({ atlas: pl.atlas, cell: pl.cell, x: px, y: SW_Y + pl.y, z: pz, ry: yaw, w: pl.w, h: pl.h });
       }
     }
+    if (name === 'shelter' || name === 'kiosk' || name === 'planter' || name === 'dumpster') out.spots.push({ kind: name, x: wx, z: wz, yaw });
     if (name === 'shelter') {
       // manifesto sul retro della pensilina
       const [px, pz] = toW(0, -0.72);

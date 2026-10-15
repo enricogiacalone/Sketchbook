@@ -100,6 +100,12 @@ export interface CrowdAgent {
   // colpito da lontano mentre era una sagoma: il colpo da applicare al
   // corpo vero appena lo prende (vedi promoteCrowdAgent)
   pendingHit: CrowdPendingHit | null;
+  // ancorato a un posto (panchina, pensilina, piazza...): fermo li' con la sua
+  // clip finche' non c'e' panico; vedi crowdScenes.ts
+  anchored: boolean;
+  // clip tra cui cambia ogni tanto (chi e' ancorato non resta sempre uguale)
+  pool: string[] | null;
+  switchT: number;
 }
 
 export interface CrowdPendingHit {
@@ -226,7 +232,33 @@ function makeAgent(id: number, x1: number, z1: number, x2: number, z2: number): 
     stuckT: 0,
     activity: 'walk',
     pendingHit: null,
+    anchored: false,
+    pool: null,
+    switchT: 0,
   };
+}
+
+// Agente fermo a un posto con la sua clip (panchina, pensilina, ballo...).
+// Id alti: non si scontrano con quelli della griglia.
+let anchoredId = 100000;
+export const ANCHOR_PAUSE = 1e9;
+export function spawnAnchoredAgent(x: number, z: number, yaw: number, clip: string, y?: number, pool?: string[]): CrowdAgent {
+  const a = makeAgent(anchoredId++, x, z, x, z);
+  a.len = 0;
+  a.t = 0;
+  a.dir = 1;
+  a.yaw = yaw;
+  a.anchored = true;
+  a.activity = 'linger';
+  a.idleClip = clip;
+  a.pause = ANCHOR_PAUSE;
+  if (pool && pool.length > 1) {
+    a.pool = pool;
+    a.switchT = rand(3, 25); // sfalsati: non cambiano tutti insieme
+  }
+  if (y !== undefined) a.y = y;
+  crowdAgents.push(a);
+  return a;
 }
 
 function makeAgents(): CrowdAgent[] {
@@ -585,6 +617,14 @@ export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdOb
   for (const a of crowdAgents) {
     if (a.gone) continue;
     a.curSpeed = 0;
+    if (a.pool && a.fear <= 0) {
+      a.switchT -= dt;
+      if (a.switchT <= 0) {
+        a.switchT = rand(8, 25);
+        const others = a.pool.filter((c) => c !== a.idleClip);
+        a.idleClip = others[Math.floor(Math.random() * others.length)];
+      }
+    }
     if (a.fear > 0) {
       a.fear -= dt;
       // verso quale capo del tratto ci si allontana dallo sparo
@@ -604,7 +644,7 @@ export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdOb
         a.curSpeed = PANIC_SPEED;
         a.gait = (a.gait + (dt * PANIC_SPEED) / ((WALK_BASE_SPEED[a.walkClip] ?? 0.75) * CROWD_GAIT_CYCLE_S * 2.5)) % 1;
       }
-      if (a.fear <= 0) a.pause = rand(0.5, 1.0); // si riprende un attimo
+      if (a.fear <= 0) a.pause = a.anchored ? ANCHOR_PAUSE : rand(0.5, 1.0); // si riprende un attimo
     } else if (a.pause > 0) {
       a.pause -= dt;
       if (a.pause <= 0) a.activity = 'walk';
@@ -669,7 +709,7 @@ export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdOb
     a.x = nx + a.ox;
     a.z = nz + a.oz;
     // mai dentro muri, pali o auto ferme (rete di sicurezza)
-    if (a.dist < AVOID_DIST) {
+    if (a.dist < AVOID_DIST && !a.anchored) {
       const p = pushOutOfStatics(a.x, a.z, BODY_R);
       let qx = p.x;
       let qz = p.z;
@@ -706,6 +746,7 @@ export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdOb
 // accucciato: solo se troppo vicino allo sparo (evita blocchi innaturali agli angoli)
 export function isCowering(a: CrowdAgent): boolean {
   if (a.fear <= 0) return false;
+  if (a.anchored) return true; // seduto/fermo al suo posto: non scappa, si accovaccia
   return Math.hypot(a.x - a.fearX, a.z - a.fearZ) < COWER_DIST;
 }
 

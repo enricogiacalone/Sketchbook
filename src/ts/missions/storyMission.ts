@@ -26,6 +26,7 @@ export type StoryStep =
 export const MISSION_1 = 'ricetta';
 export const MISSION_2 = 'ragioniere';
 export const MISSION_TITLES: Record<string, string> = {
+  colpo: 'Il colpo del secolo',
   [MISSION_1]: 'La ricetta di nonna Rosa',
   [MISSION_2]: 'Il ragioniere in fuga',
 };
@@ -45,6 +46,8 @@ export interface StoryState {
   m1Done: boolean;
   // cosa si e' fatto di Franco: lasciato andare o anche derubato
   francoFate: 'free' | 'robbed' | null;
+  // il colpo alla banca (missions/heist.ts): non ancora proposto / in corso / fatto
+  heist: 'none' | 'active' | 'done';
 }
 
 export interface StoryActions {
@@ -56,6 +59,7 @@ export interface StoryActions {
   complete: () => void;
   setFrancoFate: (f: 'free' | 'robbed') => void;
   complete2: () => void;
+  startHeist: () => void;
 }
 
 export const STORY_TITLE = MISSION_TITLES[MISSION_1];
@@ -209,6 +213,28 @@ export function storyDialogue(npc: string, s: StoryState, a: StoryActions): Dial
             next: null,
           },
         };
+      if (s.step === 'm2_done' && s.heist === 'none')
+        return {
+          start: {
+            text: "Ah, sei tu. Siediti. Ho un lavoro che farà parlare tutta la città: la Banca Centrale. Una cassaforte, tre milioni, e tutta la polizia alle calcagna.",
+            options: [
+              { label: 'Sono dentro.', goto: 'plan' },
+              { label: 'Ripasso quando sono pronto.', goto: null },
+            ],
+          },
+          plan: {
+            text: "Ascolta bene. Uno: ti serve un'auto per la fuga. Due: da solo ti fanno a pezzi, quindi recluta due complici in strada: apri la chat e di' \"seguimi\" a chi ti sta vicino. Tre: alla banca, fuori dalla porta, c'e' la cassaforte esterna: la forzi e resisti finche' non cede. Quattro: semina la polizia e porta tutto al rifugio, il deposito a sud-est.",
+            options: [{ label: 'Ricevuto. Chi non ci sta, si arrangia.', goto: 'go' }],
+          },
+          go: {
+            text: "Buona fortuna, ragazzo. E non farti prendere: i favori di Vito non arrivano fino in prigione.",
+            onEnter: a.startHeist,
+            next: null,
+          },
+        };
+      if (s.step === 'm2_done' && s.heist === 'active') return { start: { text: 'Cosa ci fai ancora qui? La banca non si svaligia da sola!' } };
+      if (s.step === 'm2_done' && s.heist === 'done')
+        return { start: { text: "Il colpo del secolo... Lo dicono anche alla radio. Per un po' non farti vedere in giro. E grazie, davvero." } };
       if (s.step === 'm2_done') return { start: { text: 'Per oggi basta così. Goditi la città... e i soldi. Ma resta nei paraggi.' } };
       return { start: { text: 'Ottimo lavoro, ragazzo. Torna più tardi: per uno come te ho sempre qualcosa da fare.' } };
 
