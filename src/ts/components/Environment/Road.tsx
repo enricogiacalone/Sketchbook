@@ -336,7 +336,10 @@ const RoadSection: React.FC<RoadSectionProps> = ({ axis, size }) => {
             const y = getTerrainHeight(x, z) + yOffset + 0.01;
 
             dummy.position.set(x, y, z);
-            dummy.rotation.set(-Math.PI / 2, 0, axis === 'x' ? 0 : Math.PI / 2);
+            // (sdraiato a terra; la scala gia' mette il lato lungo (2 m) lungo la strada.
+            // Prima sulle strade lungo Z c'era anche una rotazione di 90 gradi in piu':
+            // le strisce erano di traverso)
+            dummy.rotation.set(-Math.PI / 2, 0, 0);
             dummy.scale.set(axis === 'x' ? 2 : 0.2, axis === 'z' ? 2 : 0.2, 1);
             dummy.updateMatrix();
             self.setMatrixAt(i, dummy.matrix);

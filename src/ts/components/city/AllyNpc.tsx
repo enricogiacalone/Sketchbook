@@ -117,6 +117,7 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
     lastMsg: useStore.getState().playerMessage,
     deadHandled: false,
     sinceNear: 0,
+    warm: 0,
     spokeAt: 0,
   });
 
@@ -399,12 +400,14 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
 
     g.position.set(pos.x, groundOf(pos.x, pos.z), pos.z);
     data.rotation = g.rotation.y + Math.PI;
+    // visibile solo dopo un paio di frame animati: mai un frame a T alla comparsa
+    if (s.warm < 3 && ++s.warm >= 3) g.visible = true;
   });
 
   if (gone) return null;
   return (
     <>
-      <group ref={groupRef} position={[initialPosition[0], groundOf(initialPosition[0], initialPosition[2]), initialPosition[2]]}>
+      <group ref={groupRef} visible={false} position={[initialPosition[0], groundOf(initialPosition[0], initialPosition[2]), initialPosition[2]]}>
         <primitive object={actor.clone} />
         <SpeechBubble message={message} position={[0, 2.4, 0]} />
       </group>

@@ -15,6 +15,13 @@ const _pv = new THREE.Matrix4();
 const _frustum = new THREE.Frustum();
 const _flagSphere = new THREE.Sphere(new THREE.Vector3(), 3);
 
+// La bandiera e' la stessa dappertutto (una decina in citta'): una texture
+// sola, condivisa -- prima ognuna ne disegnava una sua da 1024x672 (~3.5 MB
+// con le mipmap, 35 MB in tutto) uguale a tutte le altre.
+let sharedPeace: THREE.CanvasTexture | null = null;
+// (si tiene per tutta la sessione: 3.5 MB, e con lo StrictMode contare chi la usa non e' affidabile)
+const acquirePeaceTexture = () => (sharedPeace ??= peaceTexture());
+
 function peaceTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = 1024;
@@ -66,13 +73,12 @@ const PeaceFlag: React.FC<{ position: [number, number, number] }> = ({ position 
     geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     geometry.setIndex(idx);
     geometry.computeVertexNormals();
-    return { cloth, geometry, texture: peaceTexture() };
+    return { cloth, geometry, texture: acquirePeaceTexture() };
   }, [px, pz]);
 
   useEffect(() => () => {
     geometry.dispose();
-    texture.dispose();
-  }, [geometry, texture]);
+  }, [geometry]);
 
   useFrame(({ clock, camera }, delta) => {
     // lontana o fuori inquadratura la stoffa non si simula: ~1 ms a

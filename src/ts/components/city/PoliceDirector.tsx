@@ -9,13 +9,18 @@ import PoliceOfficer from './PoliceOfficer';
 // vista, in numero crescente con le stelle (a 4-5 stelle anche unita'
 // speciali).
 
+// Le pattuglie camminano sul marciapiede, come i passanti: le linee sono quelle
+// delle strade (multipli di 60 m) spostate di 4.4 m dal centro, dalla parte
+// del marciapiede (la strada e' larga 8 m, il marciapiede arriva a ~5.5; i
+// pali dei semafori agli incroci sono a 5 m, per questo non piu' vicino).
+const SIDEWALK = 4.4;
 const PATROL_ROUTES = [
-  { id: 'cop-walk-1', x1: -60, z1: -90, x2: -60, z2: 90 },
-  { id: 'cop-walk-2', x1: 60, z1: -90, x2: 60, z2: 90 },
-  { id: 'cop-walk-3', x1: -90, z1: -60, x2: 90, z2: -60 },
-  { id: 'cop-walk-4', x1: -90, z1: 60, x2: 90, z2: 60 },
-  { id: 'cop-walk-5', x1: -120, z1: -120, x2: -120, z2: 120 },
-  { id: 'cop-walk-6', x1: 120, z1: -120, x2: 120, z2: 120 },
+  { id: 'cop-walk-1', x1: -60 + SIDEWALK, z1: -90, x2: -60 + SIDEWALK, z2: 90 },
+  { id: 'cop-walk-2', x1: 60 - SIDEWALK, z1: -90, x2: 60 - SIDEWALK, z2: 90 },
+  { id: 'cop-walk-3', x1: -90, z1: -60 + SIDEWALK, x2: 90, z2: -60 + SIDEWALK },
+  { id: 'cop-walk-4', x1: -90, z1: 60 - SIDEWALK, x2: 90, z2: 60 - SIDEWALK },
+  { id: 'cop-walk-5', x1: -120 + SIDEWALK, z1: -120, x2: -120 + SIDEWALK, z2: 120 },
+  { id: 'cop-walk-6', x1: 120 - SIDEWALK, z1: -120, x2: 120 - SIDEWALK, z2: 120 },
 ];
 
 // quanti rinforzi a piedi per stella (oltre alle pattuglie)

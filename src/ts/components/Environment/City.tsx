@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useStore } from '../../store';
 import { FarBuildings, type FarBuildingItem } from './FarBuildings';
@@ -19,6 +19,8 @@ import {
 import { useTreeTemplates, TreeInstance, TreeTemplate, Flowers } from './ParkTrees';
 import { RealGrassPatch } from './RealGrass';
 import { StaticInstances } from './StaticInstances';
+import { stdMat } from '../../lib/sharedMaterials';
+import { mergeBufferGeometries } from 'three-stdlib';
 import { MarketPlaza, WarehouseYard } from './StoryPlaces';
 import { worldRng } from '../../lib/worldSeed';
 import { MARKET } from '../../missions/storyPlaces';
@@ -439,6 +441,10 @@ export function getBuildingDetails(index: number): BuildingDetails {
   return out;
 }
 
+// vetri delle finestre: geometria e materiale uguali per tutti gli edifici
+const WINDOW_GEO = new THREE.PlaneGeometry(1.3, 1.9);
+const WINDOW_MAT = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide });
+
 const Building: React.FC<{
   cacheKey: number;
   x: number;
@@ -601,6 +607,54 @@ const Building: React.FC<{
   // Muri (e annesso) come collider fissi creati in blocco (staticColliders.ts):
   // pezzi attorno a porta e finestre, oppure per le torri di vetro le pareti
   // piene con solo la porta.
+  // Le 4 pareti in una sola mesh e le 5 fasce della base in un'altra: erano 9
+  // mesh (e 9 materiali) per edificio vicino, e altrettante nel passaggio ombre.
+  const mergedWalls = useMemo(() => {
+    if (style === 'glass' || !wallGeometries) return null;
+    const parts: THREE.BufferGeometry[] = [];
+    const add = (g: THREE.BufferGeometry, px: number, py: number, pz: number, ry: number) => {
+      const c = g.clone();
+      if (ry) c.rotateY(ry);
+      c.translate(px, py, pz);
+      const flat = c.index ? c.toNonIndexed() : c;
+      for (const k of Object.keys(flat.attributes)) if (!['position', 'normal', 'uv'].includes(k)) flat.deleteAttribute(k);
+      parts.push(flat);
+    };
+    add(wallGeometries.back, x, y, z + halfD, 0);
+    add(wallGeometries.front, x, y, z - halfD, 0);
+    add(wallGeometries.side, x - halfW, y, z, Math.PI / 2);
+    add(wallGeometries.side, x + halfW, y, z, -Math.PI / 2);
+    return mergeBufferGeometries(parts);
+  }, [style, wallGeometries, x, y, z, halfW, halfD]);
+  const mergedPlinth = useMemo(() => {
+    const T = BUILDING_WALL_THICKNESS + 0.2;
+    const H = BUILDING_DOOR_HEIGHT;
+    const box = (w: number, d: number, px: number, pz: number) => {
+      const g = new THREE.BoxGeometry(w, H, d).translate(x + px, y + H / 2, z + pz).toNonIndexed();
+      for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+      return g;
+    };
+    return mergeBufferGeometries([
+      box(halfW + 0.15 - doorHalf, T, (-halfW - 0.15 - doorHalf) / 2, -halfD - 0.15),
+      box(halfW + 0.15 - doorHalf, T, (doorHalf + halfW + 0.15) / 2, -halfD - 0.15),
+      box(width + 0.3, T, 0, halfD + 0.15),
+      box(T, depth + 0.3, -halfW - 0.15, 0),
+      box(T, depth + 0.3, halfW + 0.15, 0),
+    ]);
+  }, [x, y, z, halfW, halfD, doorHalf, width, depth]);
+  useEffect(
+    () => () => {
+      mergedWalls?.dispose();
+      mergedPlinth?.dispose();
+    },
+    [mergedWalls, mergedPlinth]
+  );
+  const plinthMaterial = useMemo(
+    () => stdMat({ color: style === 'brick' ? '#3d2c24' : '#1c1f22', roughness: 0.6, metalness: style === 'glass' ? 0.4 : 0.15 }),
+    [style]
+  );
+  const wallMaterial = useMemo(() => stdMat(wallMaterialProps), [wallMaterialProps]);
+
   const wallBoxes = useMemo(() => {
     const g = BUILDING_WALL_GROUPS;
     const T = BUILDING_WALL_THICKNESS / 2;
@@ -653,20 +707,7 @@ const Building: React.FC<{
           {!glassMaterials && <meshStandardMaterial color={color} roughness={0.1} metalness={0.9} side={THREE.DoubleSide} />}
         </mesh>
       ) : (
-        <>
-          <mesh geometry={wallGeometries.back} position={[x, y, z + halfD]} castShadow receiveShadow>
-            <meshStandardMaterial {...wallMaterialProps} />
-          </mesh>
-          <mesh geometry={wallGeometries.front} position={[x, y, z - halfD]} castShadow receiveShadow>
-            <meshStandardMaterial {...wallMaterialProps} />
-          </mesh>
-          <mesh geometry={wallGeometries.side} position={[x - halfW, y, z]} rotation={[0, Math.PI / 2, 0]} castShadow receiveShadow>
-            <meshStandardMaterial {...wallMaterialProps} />
-          </mesh>
-          <mesh geometry={wallGeometries.side} position={[x + halfW, y, z]} rotation={[0, -Math.PI / 2, 0]} castShadow receiveShadow>
-            <meshStandardMaterial {...wallMaterialProps} />
-          </mesh>
-        </>
+        mergedWalls && <mesh geometry={mergedWalls} material={wallMaterial} castShadow receiveShadow />
       )}
 
       {/* Solette, tetto a L, scala a due rampe con pianerottolo, parapetto:
@@ -708,8 +749,8 @@ const Building: React.FC<{
             if (self.instanceColor) self.instanceColor.needsUpdate = true;
           }}
         >
-          <planeGeometry args={[1.3, 1.9]} />
-          <meshBasicMaterial vertexColors toneMapped={false} transparent opacity={0.55} depthWrite={false} side={THREE.DoubleSide} />
+          <primitive object={WINDOW_GEO} attach="geometry" />
+          <primitive object={WINDOW_MAT} attach="material" />
         </instancedMesh>
       )}
 
@@ -730,48 +771,7 @@ const Building: React.FC<{
           back/left/right pieces as the wall colliders (door-height tall,
           not full height) so it doesn't visually paper back over the real
           entrance gap. */}
-      <group position={[x, y, z]}>
-        <mesh position={[(-halfW - 0.15 - doorHalf) / 2, BUILDING_DOOR_HEIGHT / 2, -halfD - 0.15]} castShadow receiveShadow>
-          <boxGeometry args={[halfW + 0.15 - doorHalf, BUILDING_DOOR_HEIGHT, BUILDING_WALL_THICKNESS + 0.2]} />
-          <meshStandardMaterial
-            color={style === 'brick' ? '#3d2c24' : '#1c1f22'}
-            roughness={0.6}
-            metalness={style === 'glass' ? 0.4 : 0.15}
-          />
-        </mesh>
-        <mesh position={[(doorHalf + halfW + 0.15) / 2, BUILDING_DOOR_HEIGHT / 2, -halfD - 0.15]} castShadow receiveShadow>
-          <boxGeometry args={[halfW + 0.15 - doorHalf, BUILDING_DOOR_HEIGHT, BUILDING_WALL_THICKNESS + 0.2]} />
-          <meshStandardMaterial
-            color={style === 'brick' ? '#3d2c24' : '#1c1f22'}
-            roughness={0.6}
-            metalness={style === 'glass' ? 0.4 : 0.15}
-          />
-        </mesh>
-        <mesh position={[0, BUILDING_DOOR_HEIGHT / 2, halfD + 0.15]} castShadow receiveShadow>
-          <boxGeometry args={[width + 0.3, BUILDING_DOOR_HEIGHT, BUILDING_WALL_THICKNESS + 0.2]} />
-          <meshStandardMaterial
-            color={style === 'brick' ? '#3d2c24' : '#1c1f22'}
-            roughness={0.6}
-            metalness={style === 'glass' ? 0.4 : 0.15}
-          />
-        </mesh>
-        <mesh position={[-halfW - 0.15, BUILDING_DOOR_HEIGHT / 2, 0]} castShadow receiveShadow>
-          <boxGeometry args={[BUILDING_WALL_THICKNESS + 0.2, BUILDING_DOOR_HEIGHT, depth + 0.3]} />
-          <meshStandardMaterial
-            color={style === 'brick' ? '#3d2c24' : '#1c1f22'}
-            roughness={0.6}
-            metalness={style === 'glass' ? 0.4 : 0.15}
-          />
-        </mesh>
-        <mesh position={[halfW + 0.15, BUILDING_DOOR_HEIGHT / 2, 0]} castShadow receiveShadow>
-          <boxGeometry args={[BUILDING_WALL_THICKNESS + 0.2, BUILDING_DOOR_HEIGHT, depth + 0.3]} />
-          <meshStandardMaterial
-            color={style === 'brick' ? '#3d2c24' : '#1c1f22'}
-            roughness={0.6}
-            metalness={style === 'glass' ? 0.4 : 0.15}
-          />
-        </mesh>
-      </group>
+      {mergedPlinth && <mesh geometry={mergedPlinth} material={plinthMaterial} castShadow receiveShadow />}
 
       {/* Entrance canopy -- thin overhang + two support posts over the
           main doors, only on wider non-glass buildings. */}
@@ -797,10 +797,13 @@ const Building: React.FC<{
         <group position={[x + annex.ox, y + annex.h / 2, z + annex.oz]}>
           <mesh castShadow receiveShadow>
             <boxGeometry args={[annex.w, annex.h, annex.d]} />
-            <meshStandardMaterial
-              color={color}
-              roughness={style === 'glass' ? 0.1 : style === 'brick' ? 0.85 : 0.6}
-              metalness={style === 'glass' ? 0.9 : style === 'brick' ? 0.05 : 0.25}
+            <primitive
+              object={stdMat({
+                color,
+                roughness: style === 'glass' ? 0.1 : style === 'brick' ? 0.85 : 0.6,
+                metalness: style === 'glass' ? 0.9 : style === 'brick' ? 0.05 : 0.25,
+              })}
+              attach="material"
             />
           </mesh>
         </group>

@@ -21,6 +21,7 @@ import { registerFighterBlast, applyKnockdownBlast } from '../../lib/explosions'
 import { registerShotProxy } from '../../lib/shotProxies';
 import { HIT_SHAPES, rayVsVerticalCapsule } from './crowdSim';
 import { reportCrime } from '../../lib/wanted';
+import { tintedMaterial } from '../../lib/tintMaterials';
 
 // "sostituisci i nemici della citta' con il nostro manichino.. basta
 // boxman": il corpo comune di passanti, nemici e poliziotti -- lo stesso
@@ -133,9 +134,9 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     const c = SkeletonUtils.clone(scene);
     c.traverse((child: any) => {
       if (child.isSkinnedMesh) {
-        child.material = child.material.clone();
-        child.material.emissive = new THREE.Color(color);
-        child.material.emissiveIntensity = 0.35;
+        // materiale condiviso per colore (lib/tintMaterials.ts)
+        child.userData.baseMat = child.material;
+        child.material = tintedMaterial(child.material, color);
         // ragdoll: le ossa possono allontanarsi dal box di culling a riposo
         child.frustumCulled = false;
       }
@@ -159,15 +160,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     return () => {
       // Pulizia memoria GPU e animazioni allo smontaggio del componente
       mixer.stopAllAction();
-      clone.traverse((child: any) => {
-        if (child.isSkinnedMesh && child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach((m: THREE.Material) => m.dispose());
-          } else {
-            child.material.dispose();
-          }
-        }
-      });
+      // (i materiali sono condivisi per colore: non si distruggono qui)
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clone, mixer]);
@@ -265,6 +258,9 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     a.fadeIn(fade).play();
     curRef.current = name;
     data.currentAnim = name;
+    // la posa subito: lontano il mixer gira a 5 fps (o per niente fuori campo) e
+    // fino al prossimo aggiornamento il personaggio resterebbe nella posa a T del rig
+    mixer.update(0);
   };
 
   // Riproduce due animazioni combinate: una per le gambe e una per la parte superiore
@@ -326,6 +322,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     }
 
     data.currentAnim = `${legsName}+${upperName}`;
+    mixer.update(0);
   };
 
   const hasClip = (name: string) => !!clips[name];
@@ -590,7 +587,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
 
   const setTint = (c: THREE.ColorRepresentation) => {
     clone.traverse((child: any) => {
-      if (child.isSkinnedMesh) child.material.emissive.set(c);
+      if (child.isSkinnedMesh) child.material = tintedMaterial(child.userData.baseMat ?? child.material, c);
     });
   };
 

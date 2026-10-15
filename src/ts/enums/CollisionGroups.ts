@@ -12,6 +12,10 @@ export enum CollisionGroups {
   TrimeshColliders = 2,
   Bullet = 3,
   Tornado = 4,
+  // Telai delle auto (Car.tsx): le auto si urtano tra loro (e il traffico con
+  // quelle del giocatore) senza toccare il terreno, che e' nel gruppo Default.
+  // (4 era il Tornado dell'originale, mai usato qui.)
+  Vehicle = 4,
   // Ragdoll rig pieces (useRagdoll.ts) -- own group mainly so a corpse's
   // capsules don't need to reason about anything special to fall onto
   // terrain/roads/buildings like everything else in `Default`. Two

@@ -8,7 +8,7 @@ import { getRoadOffset, ROAD_WIDTH, SIDEWALK_WIDTH } from './Road';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import Crowd from '../city/CityCrowd';
 import VideoBillboardScreen from './VideoBillboardScreen';
-import Car from '../Vehicles/Car';
+import ParkingLots from './ParkingLots';
 import { worldRng } from '../../lib/worldSeed';
 
 // Street-level detail pass -- benches/trash cans/hydrants/signs along the
@@ -273,17 +273,19 @@ const CityDetails: React.FC = () => {
           });
         }
 
-        // West/East edges: each has a chance of one parked car tucked
-        // against the curb, oriented along the road (length along Z).
+        // (le auto parcheggiate ora stanno nei parcheggi, ParkingLots.tsx: le
+        // chiamate a rnd() restano per non cambiare la posizione dell'arredo)
         if (rnd() < 0.6) {
           const edgeX = blockX - BLOCK_HALF + (ROAD_WIDTH / 2 - 0.9);
           const carZ = blockZ - EDGE_SLOT_OFFSET + rnd() * (EDGE_SLOT_OFFSET * 2);
-          carsArr.push({ x: edgeX, z: carZ, rotationY: Math.PI / 2 });
+          void edgeX;
+          void carZ;
         }
         if (rnd() < 0.6) {
           const edgeX = blockX + BLOCK_HALF - (ROAD_WIDTH / 2 - 0.9);
           const carZ = blockZ - EDGE_SLOT_OFFSET + rnd() * (EDGE_SLOT_OFFSET * 2);
-          carsArr.push({ x: edgeX, z: carZ, rotationY: -Math.PI / 2 });
+          void edgeX;
+          void carZ;
         }
 
         // Outer ring of the grid: a billboard on whichever edge faces
@@ -318,19 +320,8 @@ const CityDetails: React.FC = () => {
   return (
     <group>
       <StreetFurniture furniture={furniture} />
-      {parkedCars.map((c, i) => (
-        <Car
-          key={`city-car-${i}`}
-          id={`city-car-${i}`}
-          // Spawned a bit above the curb/sidewalk surface, same convention
-          // as Scene.tsx's own named cars (flat ground + clearance) --
-          // real physics settle it the rest of the way, unlike the old
-          // fixed ParkedCar this replaces which had to precompute its own
-          // resting height by hand.
-          position={[c.x, getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + 1.6, c.z]}
-          rotation={[0, c.rotationY, 0]}
-        />
-      ))}
+      {/* le auto ferme stanno nei parcheggi (ParkingLots.tsx), non lungo i marciapiedi */}
+      <ParkingLots />
       {/* passanti: la folla (agenti leggeri + pool di corpi veri + sagome
           instanziate), vedi components/city/crowd.ts */}
       <Crowd />

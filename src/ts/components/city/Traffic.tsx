@@ -1,15 +1,12 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { CuboidCollider, RigidBody, interactionGroups, useBeforePhysicsStep, type RapierRigidBody } from '@react-three/rapier';
 import * as THREE from 'three';
 import { useGLTF } from '../../lib/gltf';
 import { useStore } from '../../store';
 import { getRoadOffset, ROAD_OFFSETS } from '../Environment/Road';
 import { getTerrainHeight } from '../Environment/Terrain';
-import { vehicleBodyHandles } from '../Vehicles/vehicleRegistry';
 import { buildCarBatches } from '../Vehicles/FarCars';
-import { DEFAULT_CAR_SCALE } from '../Vehicles/Car';
-import { CollisionGroups } from '../../enums/CollisionGroups';
+import Car, { DEFAULT_CAR_SCALE, makeTrafficDriver, type TrafficDriver } from '../Vehicles/Car';
 import { crowdAgents } from './crowdSim';
 import { allyRegistry } from './npcCombat';
 import { copRegistry, pickRoadSpawn, wanted } from '../../lib/wanted';
@@ -25,8 +22,19 @@ import { signalClock, signalFor } from '../../lib/traffic';
 // investire i pedoni.
 
 const N_CARS = 30;
-const POOL = 10; // corpi fisici
-const PHYS_DIST = 48;
+// volanti della polizia: auto del traffico come le altre (corsie, semafori, code)
+// finche' non c'e' un ricercato a 2+ stelle; allora riprende la guida l'IA
+// d'inseguimento della Car (patrolRoute), poi tornano in corsia
+export const POLICE_CAR_IDS = ['police-1', 'police-2', 'police-3', 'police-4', 'police-5'];
+const policeDrivers = new Map<string, TrafficDriver>();
+export const policeDriver = (id: string) => {
+  let d = policeDrivers.get(id);
+  if (!d) policeDrivers.set(id, (d = makeTrafficDriver()));
+  return d;
+};
+const POOL = 8; // auto fisiche vere (veicoli a ruote con sospensioni, come quella del giocatore)
+const PHYS_DIST = 42; // le auto entro questa distanza dal giocatore diventano fisiche
+const PHYS_RELEASE_DIST = 58;
 const RESPAWN_DIST = 190;
 const G = 60; // distanza tra le strade
 const LIM = ROAD_OFFSETS[ROAD_OFFSETS.length - 1];
@@ -36,14 +44,13 @@ const CAR_LEN = 4.3;
 const S = DEFAULT_CAR_SCALE;
 // centro del telaio sopra il suolo (come Car.tsx a riposo)
 const RIDE_Y = 0.62;
-const TRAFFIC_GROUPS = interactionGroups([CollisionGroups.TrimeshColliders], [CollisionGroups.Default]);
-const PARK_X = 6000;
-
-// come CHASSIS_SHAPES di Car.tsx
-const SHAPES = [
-  { dim: [1.2233487, 0.4973112, 2.4203892], pos: [0, 0.091266, 0.037997] },
-  { dim: [1.083702, 0.5600574, 1.0714358], pos: [0, 0.61995, -0.255213] },
-];
+// dove riposano le auto del pool quando non servono (fuori dalla griglia)
+const parkPose = (k: number) => {
+  const x = -150 + k * 12;
+  const z = 270;
+  return { x, z, y: getTerrainHeight(x, z) + getRoadOffset(x, z) + 1.6 };
+};
+const wrapA = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 const TINTS = ['#ffffff', '#ffd6d6', '#d6e4ff', '#d9ffd6', '#fff2c2', '#e0d0ff', '#c9c9c9', '#ffb98a', '#9fb7d1', '#b5d6c0'];
 
@@ -63,7 +70,10 @@ interface TCar {
   y: number;
   yaw: number;
   tint: number;
-  slot: number;
+  phys: number; // indice dell'auto fisica del pool, -1 = solo simulata
+  police: boolean;
+  driver: TrafficDriver | null; // auto fisica fissa (polizia)
+  chasing: boolean;
   waitT: number;
   stuckT: number;
   panicUntil: number;
@@ -115,7 +125,10 @@ function makeCar(id: number): TCar {
     y: 0,
     yaw: 0,
     tint: id % TINTS.length,
-    slot: -1,
+    phys: -1,
+    police: false,
+    driver: null,
+    chasing: false,
     waitT: 0,
     stuckT: 0,
     panicUntil: 0,
@@ -193,9 +206,64 @@ const Traffic: React.FC = () => {
   const batches = useMemo(() => buildCarBatches(scene), [scene]);
   const cars = useRef<TCar[]>([]);
   const meshes = useRef<(THREE.InstancedMesh | null)[]>([]);
-  const bodies = useRef<(RapierRigidBody | null)[]>([]);
+  const drivers = useRef(Array.from({ length: POOL }, () => makeTrafficDriver()));
   const slotCar = useRef<(TCar | null)[]>(Array.from({ length: POOL }, () => null));
+  // un'auto del pool presa dal giocatore resta sua: esce dal pool finche' non e' lontana
+  const slotFree = useRef<boolean[]>(Array.from({ length: POOL }, () => true));
   const slotAcc = useRef(0);
+
+  // l'auto fisica del pool torna a riposo (o resta ferma e libera il posto)
+  const releaseSlot = (c: TCar, park: boolean) => {
+    const k = c.phys;
+    if (k < 0) return;
+    const d = drivers.current[k];
+    c.speed = Math.max(0, d.speed);
+    d.active = false;
+    d.throttle = 0;
+    d.brake = 0;
+    d.steer = 0;
+    if (park) {
+      const pk = parkPose(k);
+      d.warp = { x: pk.x, y: pk.y, z: pk.z, yaw: 0, speed: 0 };
+    }
+    slotCar.current[k] = null;
+    c.phys = -1;
+  };
+
+  // rimette sulla corsia piu' vicina una volante (finito l'inseguimento, o uscita di strada)
+  const snapToLane = (c: TCar, d: TrafficDriver, forceWarp: boolean) => {
+    const near = (v: number) => ROAD_OFFSETS.reduce((b, o) => (Math.abs(o - v) < Math.abs(b - v) ? o : b), ROAD_OFFSETS[0]);
+    const l0 = near(d.z);
+    const l1 = near(d.x);
+    const lat0 = Math.abs(d.z - l0);
+    const lat1 = Math.abs(d.x - l1);
+    const sx = Math.sin(d.yaw);
+    const sz = Math.cos(d.yaw);
+    if (lat0 <= lat1) {
+      c.axis = 0;
+      c.line = l0;
+      c.dir = sx >= 0 ? 1 : -1;
+      c.s = Math.max(-LIM + 8, Math.min(LIM - 8, d.x));
+    } else {
+      c.axis = 1;
+      c.line = l1;
+      c.dir = sz >= 0 ? 1 : -1;
+      c.s = Math.max(-LIM + 8, Math.min(LIM - 8, d.z));
+    }
+    c.state = 'road';
+    c.turn = null;
+    c.plan = null;
+    c.speed = Math.max(0, d.speed);
+    c.waitT = 0;
+    c.stuckT = 0;
+    place(c);
+    const lat = c.axis === 0 ? Math.abs(d.z - c.z) : Math.abs(d.x - c.x);
+    // fuori carreggiata o ribaltata: la si rimette in corsia
+    if (forceWarp || lat > 3 || d.upY < 0.5) {
+      d.warp = { x: c.x, y: getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + 1.2, z: c.z, yaw: c.yaw, speed: Math.min(c.speed, 4) };
+    }
+    d.active = true;
+  };
 
   if (cars.current.length === 0) {
     for (let i = 0; i < N_CARS; i++) {
@@ -203,18 +271,29 @@ const Traffic: React.FC = () => {
       respawn(c, cars.current, 0, 0, false);
       cars.current.push(c);
     }
+    POLICE_CAR_IDS.forEach((pid, i) => {
+      const c = makeCar(N_CARS + i);
+      c.police = true;
+      c.cruise = rnd(8, 10.5);
+      c.driver = policeDriver(pid);
+      respawn(c, cars.current, 0, 0, false);
+      cars.current.push(c);
+      const d = c.driver;
+      d.warp = { x: c.x, y: getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + 1.2, z: c.z, yaw: c.yaw, speed: c.speed };
+      d.x = c.x;
+      d.z = c.z;
+      d.yaw = c.yaw;
+      d.active = true;
+    });
   }
 
   useEffect(() => {
-    if (import.meta.env.DEV) (window as any).__traffic = cars.current;
+    if (import.meta.env.DEV) {
+      (window as any).__traffic = cars.current;
+      (window as any).__trafficDrivers = drivers.current;
+      (window as any).__policeDrivers = policeDrivers;
+    }
   }, []);
-  useEffect(
-    () => () => {
-      for (const b of bodies.current) if (b) vehicleBodyHandles.delete(b.handle);
-    },
-    []
-  );
-
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.05);
     const st = useStore.getState();
@@ -245,6 +324,50 @@ const Traffic: React.FC = () => {
     for (const arr of lanes.values()) arr.sort((a, b) => a.progress - b.progress);
 
     for (const c of list) {
+      const d = c.driver ?? (c.phys >= 0 ? drivers.current[c.phys] : null);
+      if (c.police && d) {
+        const chasing = wanted.level >= 2;
+        if (chasing) {
+          // ricercato: guida l'IA d'inseguimento della Car (patrolRoute), non il traffico
+          if (!c.chasing) {
+            c.chasing = true;
+            d.active = false;
+          }
+          c.x = d.x;
+          c.z = d.z;
+          c.yaw = d.yaw;
+          c.speed = Math.max(0, d.speed);
+          c.y = getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + RIDE_Y;
+          continue;
+        }
+        if (c.chasing) {
+          // finita la caccia: torna in corsia e nel traffico
+          c.chasing = false;
+          snapToLane(c, d, false);
+        }
+      }
+      if (d) {
+        // l'auto e' fisica: la posizione la dice il telaio
+        c.x = d.x;
+        c.z = d.z;
+        c.yaw = d.yaw;
+        c.speed = Math.max(0, d.speed);
+        c.y = getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + RIDE_Y;
+        if (c.state === 'road') {
+          c.s = c.axis === 0 ? c.x : c.z;
+          const lat = c.axis === 0 ? Math.abs(c.z - (c.line + LANE * c.dir)) : Math.abs(c.x - (c.line - LANE * c.dir));
+          // fuori strada, ribaltata o sparata lontano: si toglie dal traffico
+          if (lat > 5 || d.upY < 0.35) {
+            if (c.police) {
+              snapToLane(c, d, true);
+              continue;
+            }
+            releaseSlot(c, true);
+            respawn(c, list, pp[0], pp[2], true);
+            continue;
+          }
+        }
+      }
       const panic = now < c.panicUntil;
       if (startled && !panic && Math.hypot(c.x - pp[0], c.z - pp[2]) < 38) c.panicUntil = now + 6;
       let vTarget = panic ? c.cruise * 1.45 : c.cruise;
@@ -313,6 +436,8 @@ const Traffic: React.FC = () => {
             const mustStop = lt === 'red' || (lt === 'yellow' && canStop) || (busy && c.waitT < 12);
             if (mustStop) vTarget = Math.min(vTarget, Math.sqrt(2 * 3.2 * Math.max(0, dc - STOP_DIST + 0.4)));
           }
+          // prima di una svolta si rallenta (a 9 m/s un'auto vera non gira)
+          if (c.plan.turn && dc < 30) vTarget = Math.min(vTarget, 6.2 + Math.max(0, dc - 6) * 0.3);
           // si inizia la svolta
           if (c.plan.turn && dc <= 5 && dc > 0) {
             const nd = c.plan.nd;
@@ -346,89 +471,156 @@ const Traffic: React.FC = () => {
         vTarget = Math.min(vTarget, panic ? 8 : 6.2);
       }
 
-      // velocita'
-      if (vTarget < c.speed) c.speed = Math.max(vTarget, c.speed - 8 * dt);
-      else c.speed = Math.min(vTarget, c.speed + 3.2 * dt);
-      if (c.speed < 0.15) {
-        c.stuckT += dt;
-        c.waitT += dt;
-      } else {
-        c.stuckT = 0;
-        c.waitT = Math.max(0, c.waitT - dt * 2);
-      }
-
-      const px0 = c.x;
-      const pz0 = c.z;
-      if (c.state === 'road') {
-        c.s += c.dir * c.speed * dt;
-      } else if (c.turn) {
-        c.turn.t = Math.min(1, c.turn.t + (c.speed * dt) / c.turn.len);
-        if (c.turn.t >= 1) {
-          const k = c.turn;
-          c.axis = k.axis;
-          c.line = k.line;
-          c.dir = k.nd;
-          c.s = k.axis === 0 ? k.x2 : k.z2;
-          c.state = 'road';
-          c.turn = null;
-          c.plan = null;
+      if (d) {
+        // ---- guida: punto da raggiungere, sterzo, gas e freno ---------------
+        const L = Math.max(5, Math.min(13, 4 + c.speed * 0.55));
+        let tx: number;
+        let tz: number;
+        if (c.state === 'road') {
+          if (c.axis === 0) {
+            tx = c.s + c.dir * L;
+            tz = c.line + LANE * c.dir;
+          } else {
+            tz = c.s + c.dir * L;
+            tx = c.line - LANE * c.dir;
+          }
+        } else {
+          const k = c.turn!;
+          // a che punto della curva e' (il piu' vicino, sempre in avanti)
+          let bestT = k.t;
+          let bestD = Infinity;
+          for (let i = 0; i <= 12; i++) {
+            const u = Math.min(1, k.t + (i / 12) * 0.3);
+            const bx = (1 - u) * (1 - u) * k.x0 + 2 * (1 - u) * u * k.x1 + u * u * k.x2;
+            const bz = (1 - u) * (1 - u) * k.z0 + 2 * (1 - u) * u * k.z1 + u * u * k.z2;
+            const dd = (bx - c.x) ** 2 + (bz - c.z) ** 2;
+            if (dd < bestD) {
+              bestD = dd;
+              bestT = u;
+            }
+          }
+          k.t = bestT;
+          const u = Math.min(1, k.t + L / k.len);
+          tx = (1 - u) * (1 - u) * k.x0 + 2 * (1 - u) * u * k.x1 + u * u * k.x2;
+          tz = (1 - u) * (1 - u) * k.z0 + 2 * (1 - u) * u * k.z1 + u * u * k.z2;
+          if (k.t >= 0.97) {
+            c.axis = k.axis;
+            c.line = k.line;
+            c.dir = k.nd;
+            c.s = k.axis === 0 ? c.x : c.z;
+            c.state = 'road';
+            c.turn = null;
+            c.plan = null;
+          }
         }
+        const err = wrapA(Math.atan2(tx - c.x, tz - c.z) - c.yaw);
+        d.steer = Math.max(-1, Math.min(1, err * 1.8));
+        const e = vTarget - c.speed;
+        d.throttle = e > 0.3 ? Math.max(0.2, Math.min(1, e * 0.5)) : 0;
+        d.brake = vTarget < 0.2 && c.speed < 1.5 ? 1 : e < -0.8 ? Math.min(1, -e * 0.22) : 0;
+        d.active = true;
+        c.waitT = c.speed < 0.15 ? c.waitT + dt : Math.max(0, c.waitT - dt * 2);
+        c.stuckT = c.speed < 0.15 ? c.stuckT + dt : 0;
+      } else {
+        // ---- auto solo simulata: si muove a conti ---------------------------
+        if (vTarget < c.speed) c.speed = Math.max(vTarget, c.speed - 8 * dt);
+        else c.speed = Math.min(vTarget, c.speed + 3.2 * dt);
+        if (c.speed < 0.15) {
+          c.stuckT += dt;
+          c.waitT += dt;
+        } else {
+          c.stuckT = 0;
+          c.waitT = Math.max(0, c.waitT - dt * 2);
+        }
+        if (c.state === 'road') {
+          c.s += c.dir * c.speed * dt;
+        } else if (c.turn) {
+          c.turn.t = Math.min(1, c.turn.t + (c.speed * dt) / c.turn.len);
+          if (c.turn.t >= 1) {
+            const k = c.turn;
+            c.axis = k.axis;
+            c.line = k.line;
+            c.dir = k.nd;
+            c.s = k.axis === 0 ? k.x2 : k.z2;
+            c.state = 'road';
+            c.turn = null;
+            c.plan = null;
+          }
+        }
+        place(c);
+        c.y = getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + RIDE_Y;
       }
-      place(c);
-      if (dt > 0) {
-        c.vx = (c.x - px0) / dt;
-        c.vz = (c.z - pz0) / dt;
-      }
-      c.y = getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + RIDE_Y;
 
       // lontana dal giocatore o bloccata da un pezzo: torna in gioco altrove
       const far = Math.hypot(c.x - pp[0], c.z - pp[2]);
-      if (far > RESPAWN_DIST || c.stuckT > 28) {
+      if (c.police) {
+        // le volanti pattugliano tutta la citta': solo se bloccate da troppo si rimettono su una strada
+        if (c.stuckT > 28 && d) {
+          respawn(c, list, 0, 0, false);
+          d.warp = { x: c.x, y: getTerrainHeight(c.x, c.z) + getRoadOffset(c.x, c.z) + 1.2, z: c.z, yaw: c.yaw, speed: c.speed };
+        }
+      } else if (far > RESPAWN_DIST || c.stuckT > 28) {
+        releaseSlot(c, true);
         respawn(c, list, pp[0], pp[2], true);
-        c.slot = -1;
       }
     }
 
-    // corpi fisici alle auto piu' vicine
+    // auto fisiche vere alle piu' vicine al giocatore
     slotAcc.current += dt;
     if (slotAcc.current > 0.25) {
       slotAcc.current = 0;
-      const cand = list
-        .map((c) => ({ c, d: Math.hypot(c.x - pp[0], c.z - pp[2]) }))
-        .filter((o) => o.d < PHYS_DIST)
-        .sort((a, b) => a.d - b.d)
-        .slice(0, POOL);
-      const want = new Set(cand.map((o) => o.c));
-      for (let i = 0; i < POOL; i++) {
-        const cur = slotCar.current[i];
-        if (cur && !want.has(cur)) {
-          slotCar.current[i] = null;
-          cur.slot = -1;
-          const b = bodies.current[i];
-          if (b) {
-            vehicleBodyHandles.delete(b.handle);
-            b.setTranslation({ x: PARK_X + i * 10, y: -50, z: 0 }, true);
-            b.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      // rilascio: lontane, o prese dal giocatore (restano sue)
+      for (let k = 0; k < POOL; k++) {
+        const cur = slotCar.current[k];
+        const taken = st.currentControllable === 'car' && st.controlledEntityId === `traffic-${k}`;
+        if (cur && taken) {
+          slotFree.current[k] = false;
+          drivers.current[k].active = false;
+          slotCar.current[k] = null;
+          cur.phys = -1;
+          respawn(cur, list, pp[0], pp[2], true);
+        } else if (cur && Math.hypot(cur.x - pp[0], cur.z - pp[2]) > PHYS_RELEASE_DIST) {
+          releaseSlot(cur, true);
+        }
+        // l'auto presa e poi lasciata lontano torna al pool
+        if (!slotFree.current[k] && !taken && !slotCar.current[k]) {
+          const d = drivers.current[k];
+          if (Math.hypot(d.x - pp[0], d.z - pp[2]) > 120) {
+            slotFree.current[k] = true;
+            const pk = parkPose(k);
+            d.warp = { x: pk.x, y: pk.y, z: pk.z, yaw: 0, speed: 0 };
           }
         }
       }
+      // assegnazione: le piu' vicine senza auto fisica
+      const cand = list
+        .filter((c) => c.phys < 0 && !c.police)
+        .map((c) => ({ c, d: Math.hypot(c.x - pp[0], c.z - pp[2]) }))
+        .filter((o) => o.d < PHYS_DIST)
+        .sort((a, b) => a.d - b.d);
       for (const o of cand) {
-        if (o.c.slot >= 0) continue;
-        const free = slotCar.current.findIndex((x) => x === null);
-        if (free < 0) break;
-        slotCar.current[free] = o.c;
-        o.c.slot = free;
-        const b = bodies.current[free];
-        if (b) {
-          b.setTranslation({ x: o.c.x, y: o.c.y, z: o.c.z }, true);
-          vehicleBodyHandles.add(b.handle);
-        }
+        const k = slotCar.current.findIndex((x, i) => x === null && slotFree.current[i]);
+        if (k < 0) break;
+        const d = drivers.current[k];
+        d.warp = { x: o.c.x, y: o.c.y + 0.35, z: o.c.z, yaw: o.c.yaw, speed: o.c.speed };
+        d.x = o.c.x;
+        d.z = o.c.z;
+        d.yaw = o.c.yaw;
+        d.speed = o.c.speed;
+        d.upY = 1;
+        d.throttle = 0;
+        d.brake = 0;
+        d.steer = 0;
+        d.active = true;
+        slotCar.current[k] = o.c;
+        o.c.phys = k;
       }
     }
 
     // disegno: un'istanza per auto
     let n = 0;
     for (const c of list) {
+      if (c.phys >= 0 || c.driver) continue; // si disegna da se' (auto fisica)
       _q.setFromAxisAngle(_up, c.yaw);
       _p.set(c.x, c.y, c.z);
       _m.compose(_p, _q, _sc);
@@ -450,20 +642,6 @@ const Traffic: React.FC = () => {
     void state;
   });
 
-  // il corpo cinematico segue l'auto con la velocita' vera (spinge, investe)
-  useBeforePhysicsStep((world) => {
-    const dt = world.timestep || 1 / 60;
-    for (let i = 0; i < POOL; i++) {
-      const c = slotCar.current[i];
-      const b = bodies.current[i];
-      if (!c || !b) continue;
-      const cur = b.translation();
-      b.setLinvel({ x: (c.x - cur.x) / dt, y: (c.y - cur.y) / dt, z: (c.z - cur.z) / dt }, true);
-      _q.setFromAxisAngle(_up, c.yaw);
-      b.setRotation({ x: _q.x, y: _q.y, z: _q.z, w: _q.w }, true);
-    }
-  });
-
   return (
     <>
       {batches.map((b, i) => (
@@ -473,35 +651,17 @@ const Traffic: React.FC = () => {
           ref={(m) => {
             meshes.current[i] = m;
           }}
-          args={[b.geo, b.mat, N_CARS]}
+          args={[b.geo, b.mat, N_CARS + POLICE_CAR_IDS.length]}
           castShadow
           receiveShadow
           frustumCulled={false}
         />
       ))}
-      {Array.from({ length: POOL }, (_, i) => (
-        <RigidBody
-          key={i}
-          ref={(r) => {
-            bodies.current[i] = r;
-          }}
-          type="kinematicVelocity"
-          colliders={false}
-          position={[PARK_X + i * 10, -50, 0]}
-          canSleep={false}
-          collisionGroups={TRAFFIC_GROUPS}
-        >
-          {SHAPES.map((sh, k) => (
-            <CuboidCollider
-              key={k}
-              args={[(sh.dim[0] / 2) * S, (sh.dim[1] / 2) * S, (sh.dim[2] / 2) * S]}
-              position={[sh.pos[0] * S, sh.pos[1] * S, sh.pos[2] * S]}
-              friction={0.1}
-              restitution={0}
-            />
-          ))}
-        </RigidBody>
-      ))}
+      {/* le auto fisiche vere del pool: ferme e nascoste a riposo, guidate dal traffico quando servono */}
+      {Array.from({ length: POOL }, (_, k) => {
+        const pk = parkPose(k);
+        return <Car key={k} id={`traffic-${k}`} position={[pk.x, pk.y, pk.z]} driver={drivers.current[k]} />;
+      })}
     </>
   );
 };

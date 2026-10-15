@@ -14,7 +14,7 @@ import Park from './components/Environment/Park';
 import { TreeBatches } from './components/Environment/ParkTrees';
 import Planets from './components/Environment/Planets';
 import PoliceDirector from './components/city/PoliceDirector';
-import Traffic from './components/city/Traffic';
+import Traffic, { policeDriver } from './components/city/Traffic';
 import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from './components/Environment/RaceTrack';
 import Road from './components/Environment/Road';
 import Terrain from './components/Environment/Terrain';
@@ -130,40 +130,40 @@ const Scene: React.FC = () => {
                 oltre il terrain e sparisce"). */}
             <FarCars />
             <Traffic />
-            <Car id="car-1" position={[10, 1.6, 0]} />
-            <Car id="car-2" position={[60, 1.6, 0]} />
-            <Car id="car-3" position={[0, 1.6, 60]} />
-            <Car id="car-4" position={[-60, 1.6, 60]} />
-            <Car id="car-5" position={[60, 1.6, 60]} />
-            <Car id="car-6" position={[-60, 1.6, -60]} />
+            {/* (le auto ferme stanno nei parcheggi: components/Environment/ParkingLots.tsx) */}
 
             {/* Police patrol cars */}
             <Car
               id="police-1"
+              driver={policeDriver('police-1')}
               position={[POLICE_ROUTE_INNER[0][0], 1.6, POLICE_ROUTE_INNER[0][1]]}
               rotation={[0, Math.PI / 2, 0]}
               patrolRoute={POLICE_ROUTE_INNER}
             />
             <Car
               id="police-2"
+              driver={policeDriver('police-2')}
               position={[POLICE_ROUTE_OUTER[0][0], 1.6, POLICE_ROUTE_OUTER[0][1]]}
               rotation={[0, Math.PI / 2, 0]}
               patrolRoute={POLICE_ROUTE_OUTER}
             />
             <Car
               id="police-3"
+              driver={policeDriver('police-3')}
               position={[POLICE_ROUTE_WIDE[0][0], 1.6, POLICE_ROUTE_WIDE[0][1]]}
               rotation={[0, Math.PI / 2, 0]}
               patrolRoute={POLICE_ROUTE_WIDE}
             />
             <Car
               id="police-4"
+              driver={policeDriver('police-4')}
               position={[POLICE_ROUTE_CROSS1[0][0], 1.6, POLICE_ROUTE_CROSS1[0][1]]}
               rotation={[0, Math.PI / 2, 0]}
               patrolRoute={POLICE_ROUTE_CROSS1}
             />
             <Car
               id="police-5"
+              driver={policeDriver('police-5')}
               position={[POLICE_ROUTE_CROSS2[0][0], 1.6, POLICE_ROUTE_CROSS2[0][1]]}
               rotation={[0, Math.PI / 2, 0]}
               patrolRoute={POLICE_ROUTE_CROSS2}

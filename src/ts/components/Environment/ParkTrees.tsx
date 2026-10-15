@@ -200,6 +200,15 @@ function bakeTreeImpostor(gl: THREE.WebGLRenderer, tpl: TreeTemplate): TreeImpos
     h = halfH * 2;
   const a = new THREE.PlaneGeometry(w, h).translate(center.x, center.y, center.z);
   const b = new THREE.PlaneGeometry(w, h).rotateY(Math.PI / 2).translate(center.x, center.y, center.z);
+  // WebGPU: la texture di un render target ha la riga 0 in alto, mentre i piani
+  // si aspettano v=0 in basso (come in WebGL): senza questo l'albero lontano
+  // compare a testa in giu'.
+  if ((gl as any).backend?.isWebGPUBackend) {
+    for (const g of [a, b]) {
+      const uv = g.getAttribute('uv') as THREE.BufferAttribute;
+      for (let i = 0; i < uv.count; i++) uv.setY(i, 1 - uv.getY(i));
+    }
+  }
   const geometry = mergeBufferGeometries([a, b]) ?? a;
   const material = new THREE.MeshLambertMaterial({ map: target.texture, alphaTest: 0.45, side: THREE.DoubleSide });
   return { geometry, material, target, ready: texturesReady(tpl) };
@@ -208,6 +217,9 @@ function bakeTreeImpostor(gl: THREE.WebGLRenderer, tpl: TreeTemplate): TreeImpos
 // Tutti gli alberi iscritti, disegnati in blocco. Montato una volta (Scene).
 export const TreeBatches: React.FC = () => {
   const gl = useThree((s) => s.gl);
+  // le foto degli alberi si scattano solo a backend WebGPU pronto (l'init e'
+  // asincrono: prima .clear()/.render() lanciano e rompono tutto l'albero React)
+  const [glReady, setGlReady] = useState(!!(gl as any)._initialized);
   const [version, setVersion] = useState(0);
   useEffect(() => {
     const l = () => setVersion((v) => v + 1);
@@ -231,6 +243,10 @@ export const TreeBatches: React.FC = () => {
   // rifa le foto scattate prima che le texture fossero pronte
   const retry = useRef(0);
   useFrame((_s, dt) => {
+    if (!glReady) {
+      if ((gl as any)._initialized) setGlReady(true);
+      return;
+    }
     retry.current += dt;
     if (retry.current < 0.5) return;
     retry.current = 0;
@@ -248,6 +264,7 @@ export const TreeBatches: React.FC = () => {
     }
     return imp;
   };
+  if (!glReady) return null;
   return (
     <>
       {batches.map(([tpl, items], ti) => {

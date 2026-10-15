@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { stdMat } from '../../lib/sharedMaterials';
 import * as THREE from 'three';
 import { interactionGroups } from '@react-three/rapier';
 import { useStaticBoxes, type StaticBox } from './staticColliders';
@@ -201,22 +202,22 @@ export const BuildingStairwell: React.FC<Props> = ({ x, y, z, width, depth, heig
       {/* tetto a L: il vano resta aperto, l'ultima rampa esce sul tetto */}
       <mesh position={[x + pieceA.cx, y + roofY, z + pieceA.cz]} castShadow receiveShadow>
         <boxGeometry args={[pieceA.w, BUILDING_WALL_THICKNESS, pieceA.d]} />
-        <meshStandardMaterial {...roofMaterial} />
+        <primitive object={stdMat(roofMaterial)} attach="material" />
       </mesh>
       <mesh position={[x + pieceB.cx, y + roofY, z + pieceB.cz]} castShadow receiveShadow>
         <boxGeometry args={[pieceB.w, BUILDING_WALL_THICKNESS, pieceB.d]} />
-        <meshStandardMaterial {...roofMaterial} />
+        <primitive object={stdMat(roofMaterial)} attach="material" />
       </mesh>
 
       {numFloors > 1 && (
         <>
           <instancedMesh key={`sa-${key}`} ref={slabARef} args={[undefined, undefined, numFloors - 1]} receiveShadow>
             <boxGeometry args={[pieceA.w, BUILDING_SLAB_THICKNESS, pieceA.d]} />
-            <meshStandardMaterial color="#4a4a4a" roughness={0.85} />
+            <primitive object={stdMat({ color: '#4a4a4a', roughness: 0.85 })} attach="material" />
           </instancedMesh>
           <instancedMesh key={`sb-${key}`} ref={slabBRef} args={[undefined, undefined, numFloors - 1]} receiveShadow>
             <boxGeometry args={[pieceB.w, BUILDING_SLAB_THICKNESS, pieceB.d]} />
-            <meshStandardMaterial color="#4a4a4a" roughness={0.85} />
+            <primitive object={stdMat({ color: '#4a4a4a', roughness: 0.85 })} attach="material" />
           </instancedMesh>
         </>
       )}
@@ -224,22 +225,22 @@ export const BuildingStairwell: React.FC<Props> = ({ x, y, z, width, depth, heig
       {/* gradini (come l'arena) */}
       <instancedMesh key={`st-${key}`} ref={stepRef} args={[undefined, undefined, flights.length * steps]} castShadow receiveShadow>
         <boxGeometry args={[stepRun, stepRise, BUILDING_STAIR_LANE]} />
-        <meshStandardMaterial color="#4f46e5" roughness={0.7} metalness={0.1} />
+        <primitive object={stdMat({ color: '#4f46e5', roughness: 0.7, metalness: 0.1 })} attach="material" />
       </instancedMesh>
       {/* soletta inclinata sotto ogni rampa */}
       <instancedMesh key={`sg-${key}`} ref={stringerRef} args={[undefined, undefined, flights.length]} castShadow receiveShadow>
         <boxGeometry args={[stringerLen, STRINGER_T, BUILDING_STAIR_LANE]} />
-        <meshStandardMaterial color="#5b5f66" roughness={0.85} />
+        <primitive object={stdMat({ color: '#5b5f66', roughness: 0.85 })} attach="material" />
       </instancedMesh>
       {/* pianerottoli intermedi */}
       <instancedMesh key={`ld-${key}`} ref={landingRef} args={[undefined, undefined, landings.length]} castShadow receiveShadow>
         <boxGeometry args={[sw.landingHX * 2, LANDING_T, sw.landingHZ * 2]} />
-        <meshStandardMaterial color="#4a4a4a" roughness={0.85} />
+        <primitive object={stdMat({ color: '#4a4a4a', roughness: 0.85 })} attach="material" />
       </instancedMesh>
       {/* parapetto sul bordo del vano */}
       <instancedMesh key={`rl-${key}`} ref={railRef} args={[undefined, undefined, railYs.length]} castShadow>
         <boxGeometry args={[railLen, RAIL_H, RAIL_T]} />
-        <meshStandardMaterial color="#9aa3ad" roughness={0.4} metalness={0.6} />
+        <primitive object={stdMat({ color: '#9aa3ad', roughness: 0.4, metalness: 0.6 })} attach="material" />
       </instancedMesh>
     </group>
   );

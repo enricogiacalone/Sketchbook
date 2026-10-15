@@ -196,6 +196,7 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
     coverT: 0,
     badCover: null as null | { x: number; z: number },
     sector: h % 4,
+    warm: 0,
   });
 
   if (import.meta.env.DEV) {
@@ -631,6 +632,8 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
 
     g.position.set(pos.x, gy, pos.z);
     data.rotation = g.rotation.y + Math.PI;
+    // visibile solo dopo un paio di frame animati: mai un frame a T alla comparsa
+    if (S.warm < 3 && ++S.warm >= 3) g.visible = true;
     if (info) {
       info.x = pos.x;
       info.z = pos.z;
@@ -646,7 +649,7 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
   if (gone) return null;
   return (
     <>
-      <group ref={groupRef} position={[p0.x, getTerrainHeight(p0.x, p0.z) + getRoadOffset(p0.x, p0.z), p0.z]}>
+      <group ref={groupRef} visible={false} position={[p0.x, getTerrainHeight(p0.x, p0.z) + getRoadOffset(p0.x, p0.z), p0.z]}>
         <primitive object={actor.clone} />
         <SpeechBubble message={message} position={[0, 2.4, 0]} />
       </group>

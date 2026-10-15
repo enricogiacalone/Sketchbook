@@ -30,6 +30,10 @@ interface CarProps {
   // and shows a driver (Officer, below) in its seat -- unless/until an
   // actual player boards and drives it themselves (see humanIsDriving).
   patrolRoute?: [number, number][];
+  // Traffico civile (city/Traffic.tsx): chi guida e' la simulazione del traffico
+  // attraverso questo oggetto (gas, freno e sterzo analogici); l'auto e' fisica
+  // vera (sospensioni, urti, ribaltamenti) e rimanda posa e velocita'.
+  driver?: TrafficDriver;
   // Initial yaw, e.g. for a car spawned already facing along a road/curb
   // (see CityDetails.tsx's parked cars, now real drivable Car instances
   // instead of the old static ParkedCar decoration) -- purely a spawn-time
@@ -290,6 +294,38 @@ const Officer: React.FC<{ seatPosition: [number, number, number]; seatQuaternion
 // Scala/massa di default di tutte le auto: il manichino e' alto 1.8 m, il
 // modello originale era fatto per il boxman (x1.5 = stessa proporzione
 // dell'auto dell'arena). Massa reale: investire qualcuno lo butta giu'.
+export interface TrafficDriver {
+  active: boolean;
+  throttle: number; // 0..1
+  brake: number; // 0..1
+  steer: number; // -1..1, positivo = a sinistra
+  // teletrasporto richiesto (consumato dall'auto)
+  warp: { x: number; y: number; z: number; yaw: number; speed: number } | null;
+  // telemetria in uscita
+  x: number;
+  z: number;
+  yaw: number;
+  speed: number;
+  upY: number;
+}
+export const makeTrafficDriver = (): TrafficDriver => ({
+  active: false,
+  throttle: 0,
+  brake: 0,
+  steer: 0,
+  warp: null,
+  x: 0,
+  z: 0,
+  yaw: 0,
+  speed: 0,
+  upY: 1,
+});
+// Telaio delle auto: membro anche del gruppo Vehicle, e le auto del traffico
+// solo di quello: cosi' si urtano tra loro e col giocatore senza toccare il
+// terreno (Default), che le sospensioni gestiscono con i raggi delle ruote.
+const CAR_CHASSIS_GROUPS = groupsExcluding([CollisionGroups.Default, CollisionGroups.Vehicle], CollisionGroups.Default);
+const TRAFFIC_CAR_GROUPS = groupsExcluding([CollisionGroups.Vehicle], CollisionGroups.Default);
+
 export const DEFAULT_CAR_SCALE = 1.5;
 export const DEFAULT_CAR_MASS_KG = 1100;
 
@@ -308,6 +344,7 @@ const Car: React.FC<CarProps> = ({
   id = 'car-1',
   rotation = [0, 0, 0],
   patrolRoute,
+  driver,
   scale = DEFAULT_CAR_SCALE,
   massKg = DEFAULT_CAR_MASS_KG,
 }) => {
@@ -741,6 +778,28 @@ const Car: React.FC<CarProps> = ({
       }
     }
 
+    // -- Traffico: teletrasporto richiesto (assegnazione / rilascio dal pool)
+    if (driver?.warp) {
+      const w = driver.warp;
+      driver.warp = null;
+      if (frozenRef.current) {
+        chassis.setBodyType(rapier.RigidBodyType.Dynamic, true);
+        frozenRef.current = false;
+      }
+      _uprightQuat.setFromEuler(_uprightEuler.set(0, w.yaw, 0));
+      chassis.setTranslation({ x: w.x, y: w.y, z: w.z }, true);
+      chassis.setRotation({ x: _uprightQuat.x, y: _uprightQuat.y, z: _uprightQuat.z, w: _uprightQuat.w }, true);
+      chassis.setLinvel({ x: Math.sin(w.yaw) * w.speed, y: 0, z: Math.cos(w.yaw) * w.speed }, true);
+      chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
+      steeringSpring.current.position = 0;
+      steeringSpring.current.velocity = 0;
+      steeringSpring.current.target = 0;
+      // la marcia giusta per la velocita' di partenza (limiti delle marce: 5, 9, 13, 17, 22)
+      let g = 1;
+      while (g < MAX_GEARS && w.speed / VS > GEARS_MAX_SPEEDS[String(g)] - 0.5) g++;
+      gear.current = g;
+    }
+
     // -- Flip recovery: runs unconditionally (driven or parked), since a
     // parked car can just as easily get knocked over by another car or the
     // player. See the constants above for what counts as "flipped" and
@@ -778,7 +837,8 @@ const Car: React.FC<CarProps> = ({
       }
     }
 
-    const isAiDriving = !!patrolRoute && patrolRoute.length >= 2 && !humanIsDriving;
+    const driverActive = !!driver?.active && !humanIsDriving;
+    const isAiDriving = ((!!patrolRoute && patrolRoute.length >= 2) || driverActive) && !humanIsDriving;
     const isCarActive = humanIsDriving || isAiDriving;
     if (isCarActive && frozenRef.current) {
       chassis.setBodyType(rapier.RigidBodyType.Dynamic, true);
@@ -1044,10 +1104,10 @@ const Car: React.FC<CarProps> = ({
       }
     }
 
-    const activeForward = humanIsDriving ? input.forward : aiForward;
-    const activeBackward = humanIsDriving ? input.backward : aiBackward;
-    const activeLeft = humanIsDriving ? input.left : aiLeft;
-    const activeRight = humanIsDriving ? input.right : aiRight;
+    const activeForward = humanIsDriving ? input.forward : driverActive ? driver!.throttle > 0.02 : aiForward;
+    const activeBackward = humanIsDriving ? input.backward : driverActive ? false : aiBackward;
+    const activeLeft = humanIsDriving ? input.left : driverActive ? false : aiLeft;
+    const activeRight = humanIsDriving ? input.right : driverActive ? false : aiRight;
 
     // Tuning telemetry (ENGINE_FORCE/BRAKE_FORCE/etc.) removed now that
     // the real Rapier vehicle controller is dialed in -- it was running 8
@@ -1095,7 +1155,7 @@ const Car: React.FC<CarProps> = ({
         shiftTimer.current = TIME_TO_SHIFT;
         for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, 0);
       } else if (activeForward) {
-        const force = ((ENGINE_FORCE * FORCE_SCALE) / gear.current) * powerFactor;
+        const force = ((ENGINE_FORCE * FORCE_SCALE) / gear.current) * powerFactor * (driverActive ? driver!.throttle : 1);
         // avanti = forza negativa, come applyEngineForce(-force) dell'originale
         appliedEngineForce = -force;
         for (let i = 0; i < 4; i++) controller.setWheelEngineForce(i, -force);
@@ -1124,6 +1184,10 @@ const Car: React.FC<CarProps> = ({
       steeringSpring.current.target = THREE.MathUtils.clamp(steering, -MAX_STEER_VAL, MAX_STEER_VAL);
     } else {
       steeringSpring.current.target = 0;
+    }
+    if (driverActive) {
+      // sterzo analogico, limitato con la velocita' come quello a tasti
+      steeringSpring.current.target = THREE.MathUtils.clamp(driver!.steer, -1, 1) * (MAX_STEER_VAL / speedFactor);
     }
     steeringSpring.current.simulate(dt);
     for (let j = 0; j < steeringIndices.length; j++) controller.setWheelSteering(steeringIndices[j], steeringSpring.current.position);
@@ -1165,10 +1229,20 @@ const Car: React.FC<CarProps> = ({
     }
 
     // -- Handbrake (Space), rear wheels only, matching the original.
-    const brakeForce = input.jump ? BRAKE_FORCE * FORCE_SCALE : 0;
-    for (let j = 0; j < rwdIndices.length; j++) controller.setWheelBrake(rwdIndices[j], brakeForce);
+    const brakeForce = driverActive ? BRAKE_FORCE * FORCE_SCALE * driver!.brake : input.jump ? BRAKE_FORCE * FORCE_SCALE : 0;
+    if (driverActive) for (let j = 0; j < 4; j++) controller.setWheelBrake(j, brakeForce);
+    else for (let j = 0; j < rwdIndices.length; j++) controller.setWheelBrake(rwdIndices[j], brakeForce);
 
     controller.updateVehicle(dt, rapier.QueryFilterFlags.EXCLUDE_SENSORS, WHEEL_RAY_GROUPS);
+
+    if (driver) {
+      const tp = chassis.translation();
+      driver.x = tp.x;
+      driver.z = tp.z;
+      driver.yaw = Math.atan2(_forward.x, _forward.z);
+      driver.speed = speed;
+      driver.upY = _chassisUp.y;
+    }
 
     if (import.meta.env.DEV) {
       reportTelemetry(true, {
@@ -1193,6 +1267,12 @@ const Car: React.FC<CarProps> = ({
     const t = c.translation();
     const dx = t.x - camera.position.x,
       dz = t.z - camera.position.z;
+    // auto del traffico a riposo nel pool: ne' modello ne' istanza lontana
+    if (driver && !driver.active && !patrolRoute && !humanIsDriving && controlledEntityId !== id) {
+      if (clonedScene.visible) clonedScene.visible = false;
+      farCars.delete(id);
+      return;
+    }
     const far = !humanIsDriving && dx * dx + dz * dz > CAR_LOD_DIST * CAR_LOD_DIST;
     if (far !== !clonedScene.visible) {
       clonedScene.visible = !far;
@@ -1337,7 +1417,7 @@ const Car: React.FC<CarProps> = ({
       linearDamping={0.01}
       angularDamping={0.01}
       canSleep={false}
-      collisionGroups={groupsExcluding(CollisionGroups.Default)}
+      collisionGroups={driver ? TRAFFIC_CAR_GROUPS : CAR_CHASSIS_GROUPS}
     >
       {CHASSIS_SHAPES.map((shape, i) => (
         <CuboidCollider
@@ -1355,7 +1435,7 @@ const Car: React.FC<CarProps> = ({
       ))}
       <primitive object={clonedScene} scale={S} />
       {/* fumo dello scarico (ExhaustSmoke.tsx): solo a motore acceso */}
-      {(humanIsDriving || (!!patrolRoute && patrolRoute.length >= 2)) && <ExhaustSmoke pipes={exhaustPipes} />}
+      {(humanIsDriving || !!driver?.active || (!!patrolRoute && patrolRoute.length >= 2)) && <ExhaustSmoke pipes={exhaustPipes} />}
 
       {/* Headlights -- conditionally mounted (see the big comment above):
           only exist in the scene graph at all while `headlightsOn`, so a
