@@ -12,6 +12,7 @@ import NpcInspector from '../UI/NpcInspector';
 import { CITY_LAYOUT, getBuildingDetails } from '../Environment/City';
 import { ROAD_OFFSETS, ROAD_WIDTH } from '../Environment/Road';
 import { insideStatics, setCrowdStatics } from './crowdObstacles';
+import { getStreetProps, HOSPITAL, POLICE_STATION } from '../Environment/streetPropsData';
 import { AIM_CHEST_Y, registerAimTargets } from '../../lib/aimTargets';
 import {
   assignCrowdSlots,
@@ -69,6 +70,11 @@ function buildCrowdStatics() {
         [1, -1],
       ])
         circles.push({ x: ox + sx * c, z: oz + sz * c, r: 0.15 });
+  // arredo urbano nuovo (alberi, chioschi, fermate...) e i due edifici di servizio
+  const sp = getStreetProps();
+  for (const r of sp.crowdRects) rects.push(r);
+  for (const c of sp.crowdCircles) circles.push(c);
+  for (const b of [HOSPITAL, POLICE_STATION]) rects.push({ minX: b.x - b.w / 2 - 0.2, maxX: b.x + b.w / 2 + 0.2, minZ: b.z - b.d / 2 - 0.2, maxZ: b.z + b.d / 2 + 0.2 });
   setCrowdStatics(rects, circles);
 }
 

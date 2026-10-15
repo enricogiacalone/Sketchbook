@@ -3,6 +3,7 @@ import { useStore } from '../../store';
 import { clearWanted, wanted } from '../../lib/wanted';
 import { playerControl } from '../../lib/playerControl';
 import { talkState } from '../../lib/dialogue';
+import { HOSPITAL_SPAWN, POLICE_SPAWN } from '../Environment/streetPropsData';
 
 // "Wasted" e "Busted" alla GTA.
 // - Wasted: la vita arriva a zero; schermo in grigio con la scritta, a terra
@@ -12,16 +13,9 @@ import { talkState } from '../../lib/dialogue';
 //   a piedi: si resta fermi, scritta, nero, e ci si ritrova alla stazione di
 //   polizia piu' vicina, con una multa e senza stelle.
 
-const HOSPITALS: Array<[number, number]> = [
-  [-120, -60],
-  [120, 60],
-  [0, -120],
-];
-const STATIONS: Array<[number, number]> = [
-  [60, 120],
-  [-120, 60],
-  [120, -120],
-];
+// ospedale e stazione di polizia veri (Environment/CityServices.tsx): si ricompare davanti all'ingresso
+const HOSPITALS: Array<[number, number]> = [HOSPITAL_SPAWN];
+const STATIONS: Array<[number, number]> = [POLICE_SPAWN];
 const ARREST_AT = 1.6;
 
 type Kind = 'wasted' | 'busted';

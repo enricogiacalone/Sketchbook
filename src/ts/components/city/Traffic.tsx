@@ -39,7 +39,9 @@ const RESPAWN_DIST = 190;
 const G = 60; // distanza tra le strade
 const LIM = ROAD_OFFSETS[ROAD_OFFSETS.length - 1];
 const LANE = 1.4;
-const STOP_DIST = 7.6; // dal centro dell'incrocio
+// dal centro dell'incrocio: la linea di stop sta a 9.2 m (segnaletica a terra,
+// streetPropsData.ts) e il centro dell'auto a mezza lunghezza prima
+const STOP_DIST = 11.4;
 const CAR_LEN = 4.3;
 const S = DEFAULT_CAR_SCALE;
 // centro del telaio sopra il suolo (come Car.tsx a riposo)

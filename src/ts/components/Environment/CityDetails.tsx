@@ -9,6 +9,8 @@ import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import Crowd from '../city/CityCrowd';
 import VideoBillboardScreen from './VideoBillboardScreen';
 import ParkingLots from './ParkingLots';
+import StreetProps from './StreetProps';
+import CityServices from './CityServices';
 import { worldRng } from '../../lib/worldSeed';
 
 // Street-level detail pass -- benches/trash cans/hydrants/signs along the
@@ -322,6 +324,9 @@ const CityDetails: React.FC = () => {
       <StreetFurniture furniture={furniture} />
       {/* le auto ferme stanno nei parcheggi (ParkingLots.tsx), non lungo i marciapiedi */}
       <ParkingLots />
+      {/* arredo urbano esteso (cassonetti, alberi, fermate, chioschi, cartelli, segnaletica a terra) e servizi */}
+      <StreetProps />
+      <CityServices />
       {/* passanti: la folla (agenti leggeri + pool di corpi veri + sagome
           instanziate), vedi components/city/crowd.ts */}
       <Crowd />
