@@ -40,7 +40,7 @@ app.get("/api/config", (req, res) => {
 });
 
 app.post("/api/ollama", (req, res) => {
-  const { prompt, model } = req.body;
+  const { prompt, model, maxTokens } = req.body;
   if (!prompt) {
     return res.status(400).json({ error: "Prompt is required" });
   }
@@ -49,8 +49,9 @@ app.post("/api/ollama", (req, res) => {
     model: model || "qwen2.5-coder:14b",
     prompt: prompt,
     stream: false,
+    keep_alive: "30m",
     options: {
-      num_predict: 64,
+      num_predict: Math.min(Math.max(parseInt(maxTokens) || 64, 8), 128),
       temperature: 0.7
     }
   });

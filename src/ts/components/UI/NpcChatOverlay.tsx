@@ -1,3 +1,4 @@
+import { askOllama, ollamaEnabled } from '../../lib/ollamaNpc';
 import React, { useState, useEffect } from 'react';
 import { useStore } from '../../store';
 
@@ -37,17 +38,10 @@ const NpcChatOverlay: React.FC = () => {
     setLoading(true);
 
     try {
-      const prompt = `Sei un passante NPC in un videogioco 3D open-world sandbox chiamato Sketchbook. Vivi in questa città, cammini per le strade, incontri giocatori e veicoli. Rispondi in italiano in modo immersivo, breve, caratteristico e un po' ironico alla seguente battuta del giocatore: "${userMsg}"`;
-      
-      const res = await fetch('/api/ollama', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
-      });
-      const data = await res.json();
-      const reply = data.response || "Non so che dire, amico!";
+      const prompt = `Passante ironico in un gioco 3D open-world. Rispondi in italiano, breve, alla battuta del giocatore: "${userMsg}"`;
+      const reply = (await askOllama(prompt, 'chat', 64)) ?? (ollamaEnabled() ? 'Non so che dire, amico!' : 'La chat con gli NPC e\' spenta (si attiva dalla schermata iniziale).');
 
-      setMessages((prev) => [...prev, { sender: 'npc', text: reply.trim() }]);
+      setMessages((prev) => [...prev, { sender: 'npc', text: reply }]);
     } catch (err) {
       setMessages((prev) => [...prev, { sender: 'npc', text: "Hmm... il mio cervello Ollama si è disconnesso un attimo." }]);
     } finally {

@@ -6,6 +6,7 @@ import { getTerrainHeight } from './Terrain';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { getSunDirection, getDayFactor } from '../../lib/SunCycle';
 import { StaticInstances, type InstanceXform } from './StaticInstances';
+import { signalClock, signalFor, type Light } from '../../lib/traffic';
 
 // Shared road-grid layout, also consumed by Player.tsx (getRoadOffset) so the
 // character's manual ground-snapping agrees with the actual road geometry
@@ -387,24 +388,35 @@ const StreetLampCycle: React.FC = () => {
 // light-source cost.
 const _trafficRedMat = new THREE.MeshStandardMaterial({ color: '#330000', emissive: '#ff0000', emissiveIntensity: 0 });
 const _trafficGreenMat = new THREE.MeshStandardMaterial({ color: '#003300', emissive: '#00ff00', emissiveIntensity: 0 });
-const TRAFFIC_CYCLE_SECONDS = 4;
+// due coppie di lampade: i pali "A" mostrano il segnale di chi va lungo X, i "B" lungo Z
+const _trafficRedMatB = new THREE.MeshStandardMaterial({ color: '#330000', emissive: '#ff0000', emissiveIntensity: 0 });
+const _trafficGreenMatB = new THREE.MeshStandardMaterial({ color: '#003300', emissive: '#00ff00', emissiveIntensity: 0 });
 
 // Mounted exactly once (in Road() below) regardless of how many
 // intersections exist -- see the shared-material comment above.
+const setLight = (red: THREE.MeshStandardMaterial, green: THREE.MeshStandardMaterial, l: Light) => {
+  // giallo = tutte e due accese a meta'
+  red.emissiveIntensity = l === 'red' ? 2.5 : l === 'yellow' ? 1.4 : 0;
+  green.emissiveIntensity = l === 'green' ? 2.5 : l === 'yellow' ? 1.4 : 0;
+};
 const TrafficLightCycle: React.FC = () => {
-  useFrame((state) => {
-    const isRed = Math.floor(state.clock.elapsedTime / TRAFFIC_CYCLE_SECONDS) % 2 === 0;
-    _trafficRedMat.emissiveIntensity = isRed ? 2.5 : 0;
-    _trafficGreenMat.emissiveIntensity = isRed ? 0 : 2.5;
+  const last = React.useRef('');
+  useFrame(() => {
+    const t = signalClock();
+    const a = signalFor(0, t);
+    const b = signalFor(1, t);
+    const key = a + b;
+    if (key === last.current) return;
+    last.current = key;
+    setLight(_trafficRedMat, _trafficGreenMat, a);
+    setLight(_trafficRedMatB, _trafficGreenMatB, b);
   });
   return null;
 };
 
-// Arredo degli incroci disegnato in blocco (StaticInstances): strisce
 // pedonali, lampioni e semafori di tutta la citta' in poche draw call per
 // zona invece di ~900 mesh singole; i pali hanno i loro collider tutti in un
-// unico corpo fisso. I semafori sono decorativi (nessuno li rispetta): tutti
-// in fase sullo stesso timer (TrafficLightCycle).
+// unico corpo fisso. I semafori seguono lib/traffic.ts (il traffico li rispetta).
 const STRIPE_COUNT = 6;
 const STRIPE_W = 0.5;
 const STRIPE_L = 4;
@@ -432,6 +444,8 @@ const IntersectionDetails: React.FC = () => {
     const tBoxes: InstanceXform[] = [];
     const tRed: InstanceXform[] = [];
     const tGreen: InstanceXform[] = [];
+    const tRedB: InstanceXform[] = [];
+    const tGreenB: InstanceXform[] = [];
     const yOff = ROAD_Y_OFFSET + 0.01;
     const half = ROAD_WIDTH / 2 + 2;
     for (const ox of ROAD_OFFSETS) {
@@ -459,19 +473,19 @@ const IntersectionDetails: React.FC = () => {
           lampPoles.push({ x: lx, y: y + STREET_LIGHT_POLE_HEIGHT / 2, z: lz });
           lampBulbs.push({ x: lx, y: y + STREET_LIGHT_POLE_HEIGHT, z: lz });
         }
-        for (const [tx, tz] of [
-          [ox - c, oz + c],
-          [ox + c, oz - c],
+        for (const [tx, tz, pole] of [
+          [ox - c, oz + c, 0],
+          [ox + c, oz - c, 1],
         ]) {
           const y = getTerrainHeight(tx, tz);
           tPoles.push({ x: tx, y: y + TRAFFIC_POLE_H / 2, z: tz });
           tBoxes.push({ x: tx, y: y + TRAFFIC_POLE_H + 0.35, z: tz });
-          tRed.push({ x: tx, y: y + TRAFFIC_POLE_H + 0.6, z: tz + 0.19 });
-          tGreen.push({ x: tx, y: y + TRAFFIC_POLE_H + 0.1, z: tz + 0.19 });
+          (pole === 0 ? tRed : tRedB).push({ x: tx, y: y + TRAFFIC_POLE_H + 0.6, z: tz + 0.19 });
+          (pole === 0 ? tGreen : tGreenB).push({ x: tx, y: y + TRAFFIC_POLE_H + 0.1, z: tz + 0.19 });
         }
       }
     }
-    return { stripes, lampPoles, lampBulbs, tPoles, tBoxes, tRed, tGreen };
+    return { stripes, lampPoles, lampBulbs, tPoles, tBoxes, tRed, tGreen, tRedB, tGreenB };
   }, []);
 
   return (
@@ -490,6 +504,8 @@ const IntersectionDetails: React.FC = () => {
       <StaticInstances name="traffic-boxes" geometry={_trafficBoxGeo} material={_trafficBoxMat} items={d.tBoxes} castShadow />
       <StaticInstances name="traffic-red" geometry={_trafficBulbGeo} material={_trafficRedMat} items={d.tRed} />
       <StaticInstances name="traffic-green" geometry={_trafficBulbGeo} material={_trafficGreenMat} items={d.tGreen} />
+      <StaticInstances name="traffic-red-b" geometry={_trafficBulbGeo} material={_trafficRedMatB} items={d.tRedB} />
+      <StaticInstances name="traffic-green-b" geometry={_trafficBulbGeo} material={_trafficGreenMatB} items={d.tGreenB} />
       {/* pali: niente Characters (sottili, nessuno ci deve stare sopra);
           auto e proiettili ci sbattono */}
       <RigidBody type="fixed" colliders={false}>

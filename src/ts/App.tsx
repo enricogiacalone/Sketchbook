@@ -42,6 +42,8 @@ import RagdollBenchGUI from './components/UI/RagdollBenchGUI';
 import RagdollBenchOverlay from './components/UI/RagdollBenchOverlay';
 import ScenariosGUI from './components/UI/ScenariosGUI';
 import StatusBars from './components/UI/StatusBars';
+import WantedHud from './components/UI/WantedHud';
+import PlayerFate from './components/UI/PlayerFate';
 import WeaponHUD from './components/UI/WeaponHUD';
 import WeaponWheel from './components/UI/WeaponWheel';
 import WelcomeScreen from './components/UI/WelcomeScreen';
@@ -199,6 +201,15 @@ const App: React.FC = () => {
           renderer.init().catch((err: any) => {
             console.warn('WebGPU renderer initialization skipped (headless/unsupported environment):', err);
           });
+          // drei (useTexture) chiama initTexture subito, anche prima che il backend
+          // WebGPU sia pronto: lancia e riempie la console. Prima dell'init non c'e'
+          // niente da pre-caricare (la texture parte col primo disegno).
+          const origInitTexture = renderer.initTexture?.bind(renderer);
+          if (origInitTexture) {
+            renderer.initTexture = (t: any) => {
+              if (renderer._initialized) origInitTexture(t);
+            };
+          }
           const origRender = renderer.render.bind(renderer);
           renderer.render = function (scene: any, camera: any) {
             if (this._initialized) {
@@ -344,6 +355,8 @@ const App: React.FC = () => {
           {showChatInput && <ChatInput />}
           {showGamepadDebug && <GamepadDebug />}
           {showStatusBars && <StatusBars />}
+          {testScene === 'none' && <WantedHud />}
+          {testScene === 'none' && <PlayerFate />}
         </>
       )}
 

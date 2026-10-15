@@ -13,7 +13,8 @@ import MeteoriteSpawner from './components/Environment/MeteoriteSpawner';
 import Park from './components/Environment/Park';
 import { TreeBatches } from './components/Environment/ParkTrees';
 import Planets from './components/Environment/Planets';
-import PoliceWalkers from './components/Environment/PoliceWalkers';
+import PoliceDirector from './components/city/PoliceDirector';
+import Traffic from './components/city/Traffic';
 import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from './components/Environment/RaceTrack';
 import Road from './components/Environment/Road';
 import Terrain from './components/Environment/Terrain';
@@ -101,7 +102,7 @@ const Scene: React.FC = () => {
       <OllamaProps />
       {isRaceTest && <RaceTrack />}
       {!isCleanTest && <Road />}
-      {!isCleanTest && <PoliceWalkers />}
+      {!isCleanTest && <PoliceDirector />}
       {!isCleanTest && <CityFlags />}
       {(!isCleanTest || isDuelTest) && <Clouds />}
       <Planets />
@@ -128,6 +129,7 @@ const Scene: React.FC = () => {
                 controller is meant to be used (see git history / chat, "cade
                 oltre il terrain e sparisce"). */}
             <FarCars />
+            <Traffic />
             <Car id="car-1" position={[10, 1.6, 0]} />
             <Car id="car-2" position={[60, 1.6, 0]} />
             <Car id="car-3" position={[0, 1.6, 60]} />

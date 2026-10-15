@@ -31,7 +31,7 @@ export interface DialogueView {
 
 export interface EntityInfo {
   id: string;
-  type: 'player' | 'enemy' | 'car' | 'airplane' | 'helicopter' | 'ufo';
+  type: 'player' | 'enemy' | 'police' | 'car' | 'airplane' | 'helicopter' | 'ufo';
   position: [number, number, number];
   rotation: number; // Yaw in radians
 }
@@ -274,6 +274,9 @@ interface GameState {
   // "stilizza il gioco in stile toon" (lib/toonStyle.ts) e "un checkbox per
   // far cominciare la giornata, altrimenti sempre giorno" (lib/SunCycle.ts).
   // Ricordate nel browser (localStorage) tra una partita e l'altra.
+  // chat degli NPC con Ollama (welcome): spenta di default
+  ollamaNpcChat: boolean;
+  setOllamaNpcChat: (on: boolean) => void;
   toonStyle: boolean;
   dayCycle: boolean;
   // risoluzione che si adatta alla scheda video (Environment/AdaptiveResolution.tsx)
@@ -377,6 +380,10 @@ interface GameState {
   spawnPoint: [number, number, number, number] | null;
   dialogueView: DialogueView | null;
   activeNpcId: string | null;
+  // ricercato alla GTA (lib/wanted.ts): stelle 0-5, e se la polizia ti sta cercando
+  wantedLevel: number;
+  wantedSearching: boolean;
+  setWanted: (level: number, searching: boolean) => void;
   talkPrompt: string | null;
   storyBanner: { title: string; subtitle: string; color: string; until: number } | null;
   setMissionStage: (stage: number) => void;
@@ -571,6 +578,7 @@ export const useStore = create<GameState>((set) => ({
   debugOrthoCamera: false,
   arenaScene: { obstacles: true, walls: true, floor: true, speakers: true, course: true, car: true },
   showSimCitta: false,
+  ollamaNpcChat: readSetting('ollamaNpcChat', false),
   toonStyle: readSetting('toonStyle', true),
   dayCycle: readSetting('dayCycle', false),
   adaptiveResolution: readSetting('adaptiveResolution', true),
@@ -585,7 +593,7 @@ export const useStore = create<GameState>((set) => ({
   showGameplayHud: false,
   showCollectiblesCounter: false,
   showControls: false,
-  showChatInput: false,
+  showChatInput: true,
   showGamepadDebug: false,
   showStatusBars: false,
   showNpcChat: false,
@@ -607,6 +615,9 @@ export const useStore = create<GameState>((set) => ({
   spawnPoint: null,
   dialogueView: null,
   activeNpcId: null,
+  wantedLevel: 0,
+  wantedSearching: false,
+  setWanted: (wantedLevel, wantedSearching) => set((state) => (state.wantedLevel === wantedLevel && state.wantedSearching === wantedSearching ? state : { wantedLevel, wantedSearching })),
   talkPrompt: null,
   storyBanner: null,
   entities: new Map(),
@@ -708,6 +719,10 @@ export const useStore = create<GameState>((set) => ({
   setDebugOrthoCamera: (debugOrthoCamera) => set({ debugOrthoCamera }),
   setArenaScene: (partial) => set((state) => ({ arenaScene: { ...state.arenaScene, ...partial } })),
   setShowSimCitta: (on) => set({ showSimCitta: on }),
+  setOllamaNpcChat: (ollamaNpcChat) => {
+    writeSetting('ollamaNpcChat', ollamaNpcChat);
+    set({ ollamaNpcChat });
+  },
   setToonStyle: (toonStyle) => {
     writeSetting('toonStyle', toonStyle);
     set({ toonStyle });

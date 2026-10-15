@@ -4,6 +4,7 @@ import { buildCityImage, WORLD_HALF } from '../../lib/cityMapImage';
 import { gps, updateGps } from '../../lib/gps';
 import { radarState } from '../../lib/radarState';
 import { cityOpponents } from '../city/cityActors';
+import { wanted } from '../../lib/wanted';
 
 // "sistema la minimappa, deve essere visibile solo in playground. uguale a
 // gta" -- il radar di GTA V:
@@ -191,6 +192,32 @@ const Minimap: React.FC = () => {
         if (p.x < -4 || p.y < -4 || p.x > W + 4 || p.y > H + 4) return;
         dot(p.x, p.y, 4 * scale, COL.enemy);
       });
+      // area di ricerca (GTA 4): cerchio che lampeggia mentre la polizia ti cerca
+      if (st.wantedLevel > 0 && st.wantedSearching && wanted.searchR > 0) {
+        const c = toScreen(wanted.searchCx, wanted.searchCz);
+        const e = toScreen(wanted.searchCx + wanted.searchR, wanted.searchCz);
+        const rad = Math.hypot(e.x - c.x, e.y - c.y);
+        const on = Math.floor(performance.now() / 450) % 2 === 0;
+        g.save();
+        g.beginPath();
+        g.arc(c.x, c.y, rad, 0, Math.PI * 2);
+        g.fillStyle = on ? 'rgba(74,140,255,0.22)' : 'rgba(255,64,64,0.22)';
+        g.fill();
+        g.lineWidth = 2 * scale;
+        g.strokeStyle = on ? 'rgba(74,140,255,0.9)' : 'rgba(255,64,64,0.9)';
+        g.stroke();
+        g.restore();
+      }
+      // polizia: sul radar solo da ricercati, lampeggia rosso/blu
+      if (st.wantedLevel > 0) {
+        const flash = Math.floor(performance.now() / 350) % 2 === 0 ? '#4a8cff' : '#ff4040';
+        st.entities.forEach((e) => {
+          if (e.type !== 'police') return;
+          const p = toScreen(e.position[0], e.position[2]);
+          if (p.x < -4 || p.y < -4 || p.x > W + 4 || p.y > H + 4) return;
+          dot(p.x, p.y, 4 * scale, flash);
+        });
+      }
       // altri giocatori: freccia nel loro colore
       for (const o of cityOpponents) {
         if (!o.team.startsWith('REMOTE_') || o.isDead) continue;

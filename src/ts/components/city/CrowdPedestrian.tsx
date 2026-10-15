@@ -18,21 +18,23 @@ import { applyFighterHit } from '../Environment/weapons/shootableRegistry';
 import { K, KIMODO_CLIPS } from '../../lib/kimodo';
 import { CLIP_GROUND_SPEED } from '../Environment/locomotion';
 import SpeechBubble from '../UI/SpeechBubble';
-import { getTerrainHeight } from '../Environment/Terrain';
-import { getRoadOffset } from '../Environment/Road';
+import { allyRegistry } from './npcCombat';
+import { askOllama, ollamaEnabled } from '../../lib/ollamaNpc';
+import { parseOrder, type Order } from './allyOrders';
 
 const CORPSE_S = 30;
 const CORPSE_FAR_S = 8;
-const ANGER_RADIUS = 1.1;
 const _hitDir = new THREE.Vector3();
 const _hitPt = new THREE.Vector3();
 
 interface Props {
   slot: number;
   onBecomeEnemy: (agent: CrowdAgent, position: [number, number, number], hp?: number) => void;
+  // reclutato in chat ("seguimi", "uccidi..."): diventa un alleato
+  onBecomeAlly: (agent: CrowdAgent, position: [number, number, number], hp: number, order: Order) => void;
 }
 
-const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
+const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy, onBecomeAlly }) => {
   const npcId = `crowd-${slot}`;
   const actor = useMannequinActor({
     id: npcId,
@@ -51,14 +53,17 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
   const deadAgent = useRef<CrowdAgent | null>(null);
   const walkingRef = useRef<boolean | null>(null);
   const takeoverRef = useRef(false);
-  const lastPlayer = useRef<[number, number] | null>(null);
 
   const [speechMsg, setSpeechMsg] = useState<string>('');
   const lastSpokenTime = useRef(-99);
   const lastCheckTime = useRef(0);
   const lastProcessedPlayerMsg = useRef('');
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const customActionRef = useRef<'none' | 'follow' | 'attack'>('none');
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const activeNow = () => {
+    const id = useStore.getState().activeNpcId;
+    return !!id && id !== npcId;
+  };
 
   const clearConversation = () => {
     setSpeechMsg('');
@@ -188,6 +193,7 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
     if (res === 'hurt' && !handled.current) {
       handled.current = true;
       a.gone = true;
+      if (crowdSlots[slot] === a) crowdSlots[slot] = null;
       onBecomeEnemy(a, [data.position.x, g.position.y, data.position.z], (data.hp / actor.maxHp()) * 100);
       release();
       return;
@@ -202,124 +208,83 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
     const activeNpcId = st.activeNpcId;
     const canTalk = !activeNpcId || activeNpcId === npcId;
 
-    // Custom Agent Actions (Smooth Companion Follow Path & Animation)
-    if (customActionRef.current === 'follow') {
-      a.gone = true;
-      const targetX = pp[0] - Math.sin(st.playerYaw || 0) * 1.5;
-      const targetZ = pp[2] - Math.cos(st.playerYaw || 0) * 1.5;
-      const fdx = targetX - a.x;
-      const fdz = targetZ - a.z;
-      const fdist = Math.hypot(fdx, fdz);
-
-      if (fdist > 0.8) {
-        const speed = 3.2;
-        const vx = fdx / fdist;
-        const vz = fdz / fdist;
-        a.x += vx * speed * delta;
-        a.z += vz * speed * delta;
-        a.y = getTerrainHeight(a.x, a.z) + getRoadOffset(a.x, a.z);
-
-        const targetYaw = Math.atan2(vx, vz);
-        let d = targetYaw - g.rotation.y;
-        d = Math.atan2(Math.sin(d), Math.cos(d));
-        g.rotation.y += d * Math.min(1, delta * 12);
-
-        a.pause = 0;
-        const clip = actor.hasClip('Walk') ? 'Walk' : 'Idle_A';
-        actor.play(clip, 0.3, true, speed / (WALK_BASE_SPEED[clip] ?? 0.73));
-      } else {
-        const idle = actor.hasClip('Idle_A') ? 'Idle_A' : 'Walk';
-        actor.play(idle, 0.3);
-        const dx = pp[0] - a.x;
-        const dz = pp[2] - a.z;
-        if (Math.hypot(dx, dz) > 0.01) {
-          const targetYaw = Math.atan2(dx, dz);
-          let d = targetYaw - g.rotation.y;
-          d = Math.atan2(Math.sin(d), Math.cos(d));
-          g.rotation.y += d * Math.min(1, delta * 10);
-        }
-      }
-    }
-
-    // Throttled proximity check (every 3 seconds)
-    if (canTalk && distSq < 36 && state.clock.elapsedTime - lastCheckTime.current > 3 && !speechMsg) {
+    // Saluto spontaneo (solo con la chat Ollama accesa, e solo se il modello e' libero)
+    if (ollamaEnabled() && canTalk && distSq < 36 && state.clock.elapsedTime - lastCheckTime.current > 3 && !speechMsg) {
       lastCheckTime.current = state.clock.elapsedTime;
       if (state.clock.elapsedTime - lastSpokenTime.current > 20 && Math.random() < 0.3) {
         lastSpokenTime.current = state.clock.elapsedTime;
-        st.setActiveNpcId(npcId);
-        resetConversationTimeout(a);
-        
-        fetch('/api/ollama', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: "Sei un passante NPC nella città 3D di Sketchbook. Dì una frase casuale o un saluto spontaneo al giocatore che ti passa vicino in italiano (massimo 10 parole)." })
-        })
-        .then(res => res.json())
-        .then(data => {
-          if (data.response) {
-            setSpeechMsg(data.response.trim());
+        void askOllama('Sei un passante in una citta\' 3D. Saluta il giocatore con una frase breve in italiano (max 8 parole).', 'greet').then((r) => {
+          if (r && agentRef.current === a && !activeNow()) {
+            useStore.getState().setActiveNpcId(npcId);
+            setSpeechMsg(r);
             resetConversationTimeout(a);
-          } else {
-            clearConversation();
           }
-        })
-        .catch(() => clearConversation());
+        });
       }
     }
 
-    // Check if player typed in chat (Ollama Agent Command Processing)
+    // Comando dalla chat (entro 8 m): risponde solo il passante piu' vicino al giocatore
     if (canTalk && distSq < 64 && st.playerMessage && st.playerMessage !== lastProcessedPlayerMsg.current) {
       lastProcessedPlayerMsg.current = st.playerMessage;
-      lastSpokenTime.current = state.clock.elapsedTime;
-      st.setActiveNpcId(npcId);
-      resetConversationTimeout(a);
-
-      fetch('/api/ollama', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: `Sei un passante NPC intelligente in Sketchbook con percezione del mondo (posizione x=${a.x.toFixed(1)}, z=${a.z.toFixed(1)}). Il giocatore ti ha ordinato: '${st.playerMessage}'. 
-          Analizza il comando. Se ti chiede di seguirmi, muoverti o attaccare/uccidere, decidi l'azione.
-          Rispondi ESATTAMENTE in formato JSON valido:
-          {
-            "dialogue": "Tua risposta in-character in italiano (max 12 parole)",
-            "action": "none" | "follow" | "attack"
-          }` 
-        })
-      })
-      .then(res => res.json())
-      .then(data => {
-        try {
-          let text = data.response || "{}";
-          text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-          const parsed = JSON.parse(text);
-          if (parsed.dialogue) {
-            setSpeechMsg(parsed.dialogue.trim());
-            resetConversationTimeout(a);
+      let nearest = true;
+      for (const o of crowdSlots) if (o && o !== a && !o.gone && o.dist < a.dist) nearest = false;
+      if (nearest) {
+        const msg = st.playerMessage;
+        const order = parseOrder(msg);
+        const recruit = (o: Order) => {
+          handled.current = true;
+          a.gone = true;
+          if (crowdSlots[slot] === a) crowdSlots[slot] = null;
+          onBecomeAlly(a, [data.position.x, g.position.y, data.position.z], (data.hp / actor.maxHp()) * 100, o);
+          release();
+        };
+        if (order) {
+          // gli ordini li eseguono gli alleati che ho gia'; un nuovo passante si arruola
+          // solo se non ce ne sono, o se gli si dice di seguirmi
+          if (order.kind === 'follow' || (allyRegistry.size === 0 && (order.kind === 'attack' || order.kind === 'defend'))) {
+            recruit(order);
+            return;
           }
-          if (parsed.action === 'follow') {
-            customActionRef.current = 'follow';
-            a.gone = true;
-            console.log('[Ollama Agent] NPC now following player with correct animation and rotation!');
-          } else if (parsed.action === 'attack') {
-            customActionRef.current = 'attack';
-            handled.current = true;
-            a.gone = true;
-            onBecomeEnemy(a, [a.x, a.y, a.z]);
-            release();
-          }
-        } catch (e) {
-          if (data.response) {
-            setSpeechMsg(data.response.trim());
+        } else {
+          if (ollamaEnabled()) {
+            lastSpokenTime.current = state.clock.elapsedTime;
+            st.setActiveNpcId(npcId);
             resetConversationTimeout(a);
+            void askOllama(
+              `Passante in un gioco 3D. Il giocatore dice: '${msg}'. Rispondi breve in italiano. Se ti chiede di seguirlo action="follow"; se ti chiede di attaccare qualcuno action="attack" e target "police"|"civilian"|"enemy"|"any". Solo JSON: {"dialogue":"max 12 parole","action":"none"|"follow"|"attack","target":"any"}`,
+              'chat',
+              64
+            ).then((resp) => {
+              if (!resp) {
+                clearConversation();
+                return;
+              }
+              let parsed: any = null;
+              try {
+                parsed = JSON.parse(resp.replace(/```json/g, '').replace(/```/g, '').trim());
+              } catch {
+                setSpeechMsg(resp);
+                resetConversationTimeout(a);
+                return;
+              }
+              if (parsed.action === 'follow' || parsed.action === 'attack') {
+                // (potrebbe essere gia' stato scambiato per un altro corpo nel frattempo)
+                if (agentRef.current === a && !handled.current) {
+                  const target = ['police', 'civilian', 'enemy', 'any'].includes(parsed.target) ? parsed.target : 'any';
+                  recruit({ kind: parsed.action, target, all: false });
+                }
+              } else if (parsed.dialogue) {
+                setSpeechMsg(String(parsed.dialogue).trim());
+                resetConversationTimeout(a);
+              }
+            });
           }
         }
-      })
-      .catch(() => clearConversation());
+      }
     }
 
-    // If speaking and not following, stop and look at player
-    if (speechMsg && customActionRef.current !== 'follow') {
+    // If speaking, stop and look at player
+    if (speechMsg) {
       a.pause = Math.max(a.pause, 1.5);
       const talkClip = actor.hasClip('Idle_Talking') ? 'Idle_Talking' : 'Idle_A';
       actor.play(talkClip, 0.3);
@@ -332,7 +297,7 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
         d = Math.atan2(Math.sin(d), Math.cos(d));
         g.rotation.y += d * Math.min(1, delta * 10);
       }
-    } else if (customActionRef.current !== 'follow') {
+    } else {
       if (a.fear > 0) {
         if (isCowering(a)) {
           if (actor.hasClip(K.cower)) actor.play(K.cower, 0.25, false);
@@ -364,7 +329,7 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
     }
 
     takeoverRef.current = false;
-    if (!speechMsg && customActionRef.current !== 'follow') {
+    if (!speechMsg) {
       let d = a.yaw - g.rotation.y;
       d = Math.atan2(Math.sin(d), Math.cos(d));
       g.rotation.y += d * Math.min(1, delta * 8);
@@ -373,20 +338,6 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy }) => {
     g.position.set(a.x, a.y, a.z);
     data.position.set(a.x, 0, a.z);
     data.rotation = g.rotation.y + Math.PI;
-
-    const lp = lastPlayer.current;
-    lastPlayer.current = [pp[0], pp[2]];
-    if (st.currentControllable === 'player' && !handled.current && lp && customActionRef.current !== 'follow') {
-      const hx = pp[0] - a.x;
-      const hz = pp[2] - a.z;
-      const towards = -((pp[0] - lp[0]) * hx + (pp[2] - lp[1]) * hz) / Math.max(1e-3, Math.hypot(hx, hz));
-      if (hx * hx + hz * hz < ANGER_RADIUS * ANGER_RADIUS && towards > 0.5 * delta) {
-        handled.current = true;
-        a.gone = true;
-        onBecomeEnemy(a, [a.x, a.y, a.z]);
-        release();
-      }
-    }
   });
 
   return (

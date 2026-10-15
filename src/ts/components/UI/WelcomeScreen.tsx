@@ -30,6 +30,8 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
   const controlMethod = 'auto';
   const toonStyle = useStore((st) => st.toonStyle);
   const setToonStyle = useStore((st) => st.setToonStyle);
+  const ollamaNpcChat = useStore((st) => st.ollamaNpcChat);
+  const setOllamaNpcChat = useStore((st) => st.setOllamaNpcChat);
   const dayCycle = useStore((st) => st.dayCycle);
   const setDayCycle = useStore((st) => st.setDayCycle);
   const [error, setError] = useState('');
@@ -108,6 +110,14 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
             <label style={checkRow}>
               <input type="checkbox" checked={dayCycle} onChange={(e) => setDayCycle(e.target.checked)} /> Scorre la giornata (giorno e
               notte) &mdash; spento: sempre giorno
+            </label>
+          </div>
+
+          <div className="welcome-form-group">
+            <label className="welcome-label">NPC</label>
+            <label style={checkRow}>
+              <input type="checkbox" checked={ollamaNpcChat} onChange={(e) => setOllamaNpcChat(e.target.checked)} /> Chat con gli NPC
+              (Ollama) &mdash; spento: niente chat, ma gli ordini ("seguimi", "uccidi...") funzionano
             </label>
           </div>
 

@@ -546,6 +546,38 @@ function steerAround(a: CrowdAgent, pref: number, obstacles: CrowdObstacle[]): n
   return 0;
 }
 
+// a fine tratto: sceglie il tratto successivo dal punto raggiunto (in fuga
+// niente soste: chooseStop lo chiama solo chi cammina)
+function advanceSegment(a: CrowdAgent) {
+    const reachedX = a.x1 + (a.x2 - a.x1) * a.t;
+    const reachedZ = a.z1 + (a.z2 - a.z1) * a.t;
+    const horizontal = Math.abs(a.x2 - a.x1) >= Math.abs(a.z2 - a.z1);
+    const extent = (GRID_RADIUS + 1) * GRID_SPACING;
+    const currentAxis = horizontal ? 'horizontal' : 'vertical';
+    const nextAxis = a.turnAxis ?? currentAxis;
+    a.turnAxis = null;
+    const previousTarget = nextAxis === 'horizontal' ? (a.t === 0 ? a.x2 : a.x1) : a.t === 0 ? a.z2 : a.z1;
+    let nextTarget: number;
+    if (nextAxis === currentAxis && Math.random() < 0.35) {
+      const turn = randomTurnTarget(horizontal ? reachedX : reachedZ, extent);
+      if (turn !== null) {
+        nextTarget = turn;
+        a.turnAxis = horizontal ? 'vertical' : 'horizontal';
+      } else {
+        nextTarget = randomRouteTarget(horizontal ? reachedX : reachedZ, previousTarget, extent);
+      }
+    } else {
+      nextTarget = randomRouteTarget(nextAxis === 'horizontal' ? reachedX : reachedZ, previousTarget, extent);
+    }
+    a.x1 = reachedX;
+    a.z1 = reachedZ;
+    a.x2 = nextAxis === 'horizontal' ? nextTarget : reachedX;
+    a.z2 = nextAxis === 'horizontal' ? reachedZ : nextTarget;
+    a.t = 0;
+    a.dir = 1;
+    a.len = Math.abs(nextTarget - (nextAxis === 'horizontal' ? reachedX : reachedZ));
+}
+
 // Un passo di simulazione per tutti: pochi conti per agente.
 export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdObstacle[] = []) {
   for (const a of crowdAgents) a.dist = Math.hypot(a.x - px, a.z - pz);
@@ -561,6 +593,14 @@ export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdOb
       a.pause = 0;
       if (!isCowering(a) && a.len > 0.01) {
         a.t = Math.min(1, Math.max(0, a.t + (a.dir * PANIC_SPEED * dt) / a.len));
+        // in fondo al tratto non si resta li' a correre sul posto: si prende il
+        // tratto successivo, uno che porti lontano dallo sparo
+        if ((a.dir > 0 && a.t >= 1) || (a.dir < 0 && a.t <= 0)) {
+          for (let k = 0; k < 4; k++) {
+            advanceSegment(a);
+            if ((a.x2 - a.x1) * (a.x - a.fearX) + (a.z2 - a.z1) * (a.z - a.fearZ) >= 0) break;
+          }
+        }
         a.curSpeed = PANIC_SPEED;
         a.gait = (a.gait + (dt * PANIC_SPEED) / ((WALK_BASE_SPEED[a.walkClip] ?? 0.75) * CROWD_GAIT_CYCLE_S * 2.5)) % 1;
       }
@@ -585,33 +625,7 @@ export function stepCrowd(dt: number, px: number, pz: number, obstacles: CrowdOb
       a.t += (a.dir * v * dt) / a.len;
       if (a.t >= 1 || a.t <= 0) {
         a.t = Math.min(1, Math.max(0, a.t));
-        const reachedX = a.x1 + (a.x2 - a.x1) * a.t;
-        const reachedZ = a.z1 + (a.z2 - a.z1) * a.t;
-        const horizontal = Math.abs(a.x2 - a.x1) >= Math.abs(a.z2 - a.z1);
-        const extent = (GRID_RADIUS + 1) * GRID_SPACING;
-        const currentAxis = horizontal ? 'horizontal' : 'vertical';
-        const nextAxis = a.turnAxis ?? currentAxis;
-        a.turnAxis = null;
-        const previousTarget = nextAxis === 'horizontal' ? (a.t === 0 ? a.x2 : a.x1) : a.t === 0 ? a.z2 : a.z1;
-        let nextTarget: number;
-        if (nextAxis === currentAxis && Math.random() < 0.35) {
-          const turn = randomTurnTarget(horizontal ? reachedX : reachedZ, extent);
-          if (turn !== null) {
-            nextTarget = turn;
-            a.turnAxis = horizontal ? 'vertical' : 'horizontal';
-          } else {
-            nextTarget = randomRouteTarget(horizontal ? reachedX : reachedZ, previousTarget, extent);
-          }
-        } else {
-          nextTarget = randomRouteTarget(nextAxis === 'horizontal' ? reachedX : reachedZ, previousTarget, extent);
-        }
-        a.x1 = reachedX;
-        a.z1 = reachedZ;
-        a.x2 = nextAxis === 'horizontal' ? nextTarget : reachedX;
-        a.z2 = nextAxis === 'horizontal' ? reachedZ : nextTarget;
-        a.t = 0;
-        a.dir = 1;
-        a.len = Math.abs(nextTarget - (nextAxis === 'horizontal' ? reachedX : reachedZ));
+        advanceSegment(a);
         chooseStop(a);
       }
       // il passo va con la velocita' vera (fermo dietro a qualcuno: fermo)

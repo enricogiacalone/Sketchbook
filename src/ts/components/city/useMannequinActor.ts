@@ -3,7 +3,7 @@ import { KIMODO_ANIMS_URL } from '../../lib/kimodo';
 import { useGLTF } from '../../lib/gltf';
 import { useThree } from '@react-three/fiber';
 import { useRapier } from '@react-three/rapier';
-import { vehicleBodyHandles } from '../Vehicles/vehicleRegistry';
+import { refreshVehicleSnapshot } from '../../lib/vehicleSnapshot';
 import { SkeletonUtils } from 'three-stdlib';
 import * as THREE from 'three';
 import { useRagdoll } from '../Environment/ragdoll/useRagdoll';
@@ -20,6 +20,7 @@ import { registerInspectable, mixerAnims } from '../../lib/npcInspect';
 import { registerFighterBlast, applyKnockdownBlast } from '../../lib/explosions';
 import { registerShotProxy } from '../../lib/shotProxies';
 import { HIT_SHAPES, rayVsVerticalCapsule } from './crowdSim';
+import { reportCrime } from '../../lib/wanted';
 
 // "sostituisci i nemici della citta' con il nostro manichino.. basta
 // boxman": il corpo comune di passanti, nemici e poliziotti -- lo stesso
@@ -101,15 +102,12 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   const { world } = useRapier();
 
   const vehicleNear = (x: number, z: number) => {
-    for (const h of vehicleBodyHandles) {
-      const b = world.getRigidBody(h);
-      if (!b) continue;
-      const t = b.translation();
-      const dx = t.x - x;
-      const dz = t.z - z;
-      if (dx * dx + dz * dz > VEHICLE_CHECK_DIST_SQ) continue;
-      const v = b.linvel();
-      if (v.x * v.x + v.z * v.z > 0.5) return true;
+    const snap = refreshVehicleSnapshot(world);
+    for (let i = 0; i < snap.n; i++) {
+      if (!snap.moving[i]) continue;
+      const dx = snap.x[i] - x;
+      const dz = snap.z[i] - z;
+      if (dx * dx + dz * dz <= VEHICLE_CHECK_DIST_SQ) return true;
     }
     return false;
   };
@@ -123,6 +121,13 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   const maxHp = useRef(opts.hp);
 
   const modelRootRef = useRef<THREE.Object3D | null>(null);
+  const setShadows = (on: boolean) => {
+    modelRootRef.current?.traverse((o: any) => {
+      if (!o.isSkinnedMesh) return;
+      o.userData.csOrig ??= o.castShadow;
+      o.castShadow = on ? o.userData.csOrig : false;
+    });
+  };
 
   const { clone, mixer, clips } = useMemo(() => {
     const c = SkeletonUtils.clone(scene);
@@ -224,6 +229,14 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     return new THREE.AnimationClip(`${clip.name}__${part}`, clip.duration, tracks);
   };
 
+  // niente di visibile in corso (appena svegliato, dopo uno stop o un KO): una
+  // dissolvenza in entrata partirebbe dalla posa a T del rig, con le braccia
+  // aperte per qualche decimo di secondo. In quel caso la clip parte netta.
+  const nothingVisible = () => {
+    for (const a of (mixer as any)._actions as THREE.AnimationAction[]) if (a.isRunning() && a.getEffectiveWeight() > 0.05) return false;
+    return true;
+  };
+
   // startAt: da che punto della clip partire (s), per riprendere il passo
   // di una sagoma della folla senza salti
   const play = (name: string, fade = 0.2, loop = true, timeScale = 1, startAt?: number) => {
@@ -241,6 +254,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     const a = (acts[name] ??= mixer.clipAction(clip));
     a.setEffectiveTimeScale(timeScale);
     if (curRef.current === name && (loop || a.isRunning())) return;
+    if (fade > 0 && nothingVisible()) fade = 0;
     const prev = curRef.current ? acts[curRef.current] : null;
     if (prev && prev !== a) prev.fadeOut(fade);
     a.reset();
@@ -269,6 +283,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
       if (la) la.setEffectiveTimeScale(timeScale);
       return;
     }
+    if (fade > 0 && nothingVisible()) fade = 0;
 
     const acts = actionsRef.current;
     
@@ -374,6 +389,8 @@ export function useMannequinActor(opts: MannequinActorOptions) {
         farParkedRef.current = true;
         dropActive();
         ragdoll.park();
+        // da lontano l'ombra di un corpo da ~14k triangoli non si nota: via dal passaggio ombre
+        setShadows(false);
       }
       const hidden = distSq > HIDE_DIST_SQ;
       clone.visible = !hidden;
@@ -387,6 +404,7 @@ export function useMannequinActor(opts: MannequinActorOptions) {
         // di nuovo vicino: il prossimo update rimette le capsule sulle ossa
         farParkedRef.current = false;
         clone.visible = true;
+        setShadows(true);
       }
       ragdoll.beginFrame();
       mixer.update(delta + farAccRef.current);
@@ -411,6 +429,8 @@ export function useMannequinActor(opts: MannequinActorOptions) {
       if (ob.hitSpeed >= RUN_OVER_KILL_SPEED) {
         data.hp = 0;
         data.isDead = true;
+        // investito da un'auto guidata dal giocatore: crimine
+        if (data.team.startsWith('CIVILIAN') && useStore.getState().currentControllable === 'car') reportCrime('runover', pos.x, pos.z);
         _dir.set(ob.hitVX, 0.35 * ob.hitSpeed, ob.hitVZ);
         lastHitRef.current = { seg: ob.segment ?? 'Hips', dir: _dir.clone().normalize(), speed: _dir.length() };
       } else if (ob.hitSpeed >= RUN_OVER_KO_SPEED) {
@@ -561,6 +581,10 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     // un attimo quando un passante prende il corpo vero)
     mixer.stopAllAction();
     curRef.current = null;
+    // (anche i due strati gambe/busto: altrimenti playSplit crede che siano
+    // ancora accesi e il personaggio resta a T per tutta la fuga)
+    curLegsRef.current = null;
+    curUpperRef.current = null;
     if (opts.targetable !== false && !data.isDead) addCityOpponent(data);
   };
 
@@ -580,6 +604,8 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     data.hp = maxHp.current;
     lastHitRef.current = null;
     curRef.current = null;
+    curLegsRef.current = null;
+    curUpperRef.current = null;
     if (opts.targetable !== false) addCityOpponent(data);
   };
 
@@ -675,12 +701,12 @@ export function useMannequinActor(opts: MannequinActorOptions) {
   useEffect(() => {
     if (import.meta.env.DEV) {
       const reg = ((window as any).__npcs ??= {});
-      reg[id] = { data, ragdoll, deadFor: () => deadForRef.current, isDead: () => deadRef.current };
+      reg[id] = { data, ragdoll, mixer, clone, isDormant: () => dormantRef.current, deadFor: () => deadForRef.current, isDead: () => deadRef.current };
       return () => {
         delete reg[id];
       };
     }
-  }, [id, data, ragdoll]);
+  }, [id, data, ragdoll, mixer, clone]);
 
   return {
     data,

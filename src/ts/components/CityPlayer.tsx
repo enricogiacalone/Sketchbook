@@ -9,7 +9,6 @@ import { DRONE_ID } from './Drone';
 import SpeechBubble from './UI/SpeechBubble';
 import RadarCameraBridge from './UI/RadarCameraBridge';
 import Enemy from './Enemy';
-import Pedestrian from './Environment/Pedestrian';
 import WeaponEffects from './Environment/weapons/WeaponEffects';
 import { emitShotFx, onLocalShotFx } from './Environment/weapons/weaponFx';
 import { applyFighterHit, registerFighterDamageHandler, registerFighterHitHandler } from './Environment/weapons/shootableRegistry';
@@ -441,7 +440,6 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
   // Scene.tsx): window.__cityDebug.spawnEnemy(x, z) / clearEnemies()
   const rapierCtx = useRapier();
   const [testEnemies, setTestEnemies] = useState<{ id: string; pos: [number, number, number]; hp?: number }[]>([]);
-  const [testPeds, setTestPeds] = useState<{ id: string; x1: number; z1: number; x2: number; z2: number }[]>([]);
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     let n = 0;
@@ -452,9 +450,6 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
       rapier: rapierCtx.rapier,
       spawnEnemy: (x: number, z: number) => setTestEnemies((l) => [...l, { id: `test-enemy-${n++}`, pos: [x, 3, z] }]),
       clearEnemies: () => setTestEnemies([]),
-      spawnPedestrian: (x1: number, z1: number, x2: number, z2: number) =>
-        setTestPeds((l) => [...l, { id: `test-ped-${n++}`, x1, z1, x2, z2 }]),
-      clearPedestrians: () => setTestPeds([]),
     };
     return () => {
       delete (window as any).__cityDebug;
@@ -485,19 +480,6 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
           onGiveUp={(gid) => setTestEnemies((l) => l.filter((x) => x.id !== gid))}
         />
       ))}
-      {testPeds
-        .filter((p) => !testEnemies.some((e) => e.id === p.id))
-        .map((p) => (
-          <Pedestrian
-            key={p.id}
-            id={p.id}
-            x1={p.x1}
-            z1={p.z1}
-            x2={p.x2}
-            z2={p.z2}
-            onBecomeEnemy={(pid, pos, hp) => setTestEnemies((l) => (l.some((e) => e.id === pid) ? l : [...l, { id: pid, pos, hp }]))}
-          />
-        ))}
       <OwnSpeechBubble />
       <RadarCameraBridge />
       {ids.map((id) => (

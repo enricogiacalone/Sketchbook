@@ -34,6 +34,8 @@ import { getShootableCollider, applyFighterHit } from './weapons/shootableRegist
 import { registerFighterBlast, applyKnockdownBlast } from '../../lib/explosions';
 import { raycastProxies } from '../../lib/shotProxies';
 import { crowdAgents, promoteCrowdAgent } from '../city/crowdSim';
+import { reportCrime, reportHit } from '../../lib/wanted';
+import { playerControl } from '../../lib/playerControl';
 import { emitShotFx, type ShotSurface } from './weapons/weaponFx';
 import {
   PISTOL_MAG_SIZE,
@@ -127,7 +129,8 @@ const OBSTACLE_HIT_COOLDOWN_S = 0.6;
 const OBSTACLE_KNOCKDOWN_SPEED = 3.5;
 const KNIFE_HEAVY_KNOCKDOWN_SPEED = 4.5;
 // morto: dopo quanti secondi ci si rialza (niente schermata di sconfitta)
-const PLAYER_REVIVE_S = 4;
+// (sdraiato 5 s: la schermata "Wasted" copre gli ultimi, poi l'ospedale: UI/PlayerFate.tsx)
+const PLAYER_REVIVE_S = 5;
 const KNIFE_LUNGE_SPEED = 1.5; // m/s -> ~45 cm di passo
 const _support = new THREE.Vector3();
 // presa del fucile (rifleIK)
@@ -912,6 +915,24 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     };
   }, [clipsMap, ragdoll, camera]);
 
+  // spostamento del giocatore dall'esterno (ospedale, stazione di polizia)
+  React.useEffect(() => {
+    if (!publishPlayerInfo) return;
+    const tp = (x: number, z: number, rotation?: number) => {
+      data.position.x = x;
+      data.position.z = z;
+      if (rotation !== undefined) data.rotation = rotation;
+      travRef.current.feetY = getTerrainHeight(x, z) + getRoadOffset(x, z);
+      travRef.current.lastX = x;
+      travRef.current.lastZ = z;
+    };
+    playerControl.teleport = tp;
+    return () => {
+      if (playerControl.teleport === tp) playerControl.teleport = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // fine del mescolamento della locomozione (qualunque altra animazione):
   // le clip del passo si dissolvono, quella che resta (se e' tra loro) va a
   // peso pieno
@@ -1042,6 +1063,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
           opponent.hitFromX = pending.pos.x;
           opponent.hitFromZ = pending.pos.z;
         }
+        reportHit(opponent, opponent.isDead);
       }
     } else if (pending.kind === 'bag') {
       // "crea un sacco su cui allenarmi nell'arena.. mi serve per capire
@@ -1283,6 +1305,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     const aiming = aimingRef.current;
     // "folla piu' viva": i passanti vicini scappano o si accucciano
     crowdPanic(data.position.x, data.position.z);
+    // la polizia che sente lo sparo alza le stelle
+    reportCrime('gunshot', data.position.x, data.position.z);
     camera.getWorldDirection(_shotCamDir);
     spreadDirection(_shotCamDir, aiming ? st.spreadAim : st.spreadHip, _shotCamDir);
     // Il raggio camera parte all'altezza del personaggio lungo la linea di
@@ -1330,6 +1354,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
           target.hitFromX = _muzzle.x;
           target.hitFromZ = _muzzle.z;
         }
+        reportHit(target, kill);
         useStore.getState().setPlayerWeaponState({ pistolHitAt: performance.now(), pistolHitKill: kill, pistolHitHead: head });
       }
       applyFighterHit(info.ownerId, seg, _shotDir, st.hitSpeed[seg] ?? st.hitSpeedLimb, point);
@@ -1350,6 +1375,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
             speed: st.hitSpeed[proxy.segment] ?? st.hitSpeedLimb,
             damage: st.dmg[proxy.segment] ?? st.dmgLimb,
           });
+          reportCrime('assault', agent.x, agent.z);
           useStore
             .getState()
             .setPlayerWeaponState({ pistolHitAt: performance.now(), pistolHitKill: false, pistolHitHead: proxy.segment === 'Head' });
@@ -1563,7 +1589,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // triggerHit), so a javascript_tool script driving the real game can
     // see WHY movement might be blocked (e.g. a stuck attackLock) without
     // guessing. Same spirit/safety as DuelArena.tsx's own __duelDebug.
-    (window as any).__pcsDebug = {
+    if (import.meta.env.DEV) (window as any).__pcsDebug = {
       input: { ...input },
       attackLock: data.attackLock,
       triggerHit: !!data.triggerHit,

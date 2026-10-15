@@ -16,6 +16,7 @@ import { remoteDrivenCars, isRemoteDriven } from '../multiplayer/remoteVehicles'
 import { simDebug } from '../../debug/simDebug';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { getRoadOffset } from '../Environment/Road';
+import { wanted, copSeesPlayer, copRegistry, registerCop, unregisterCop, pickRoadSpawn } from '../../lib/wanted';
 import { CoefficientCombineRule } from '@dimforge/rapier3d-compat';
 import { SketchbookRaycastVehicle } from './sketchbookRaycastVehicle';
 
@@ -322,6 +323,7 @@ const Car: React.FC<CarProps> = ({
 
   const wheelDefs = useMemo<WheelDef[]>(() => {
     const defs: WheelDef[] = [];
+    const helperMeshes: THREE.Object3D[] = [];
     clonedScene.traverse((child) => {
       const isTireWheel = child.userData?.data === 'wheel';
       // The name heuristic alone (no userData.data==='wheel') catches things
@@ -342,6 +344,7 @@ const Car: React.FC<CarProps> = ({
       // hull below (CHASSIS_SHAPES) is unrelated to this hide.
       if (child.userData?.data === 'collision') {
         child.visible = false;
+        helperMeshes.push(child);
       }
       if (isTireWheel) {
         child.visible = true;
@@ -353,6 +356,11 @@ const Car: React.FC<CarProps> = ({
         });
       }
     });
+    // gli helper di collisione (2 box + 12 sfere da ~960 triangoli) sono
+    // invisibili ma restavano nel grafo: ~500 oggetti in citta' da percorrere
+    // e aggiornare a ogni frame per niente. Via dal clone (la geometria e'
+    // condivisa col modello originale: non si distrugge).
+    for (const hm of helperMeshes) hm.removeFromParent();
     if (defs.length !== 4) {
       console.warn(
         `Car ${id}: expected 4 wheel nodes in car.glb, found ${defs.length}. Falling back to a stub wheel (physics only, no visual) for any missing slot.`
@@ -416,6 +424,18 @@ const Car: React.FC<CarProps> = ({
   // when patrolRoute is set; harmless idle refs otherwise.
   const aiTargetIndex = useRef(0);
   const aiStaleTimer = useRef(0);
+  // inseguimento alla GTA (auto della polizia con 2+ stelle): retromarcia per
+  // liberarsi, attesa tra un teletrasporto e l'altro, e se stava inseguendo
+  const aiReverseT = useRef(0);
+  const aiWarpCd = useRef(0);
+  const aiWasChasing = useRef(false);
+  const isPoliceCar = !!patrolRoute && id.startsWith('police-');
+  // l'auto della polizia vede (e sente) i crimini come un agente a piedi
+  useEffect(() => {
+    if (!isPoliceCar) return;
+    registerCop(id, true);
+    return () => unregisterCop(id);
+  }, [id, isPoliceCar]);
 
   // Officer's seat transform, in THIS car's own local space (same frame
   // <primitive object={clonedScene}> and the headlights already use) --
@@ -894,7 +914,51 @@ const Car: React.FC<CarProps> = ({
       aiRight = false;
     if (isAiDriving && patrolRoute && patrolRoute.length >= 2) {
       const posNow = chassis.translation();
-      const wp = patrolRoute[aiTargetIndex.current];
+      let wp: [number, number] = patrolRoute[aiTargetIndex.current];
+      const chasing = isPoliceCar && wanted.level >= 2;
+      if (isPoliceCar) {
+        const ci = copRegistry.get(id);
+        if (ci) {
+          ci.x = posNow.x;
+          ci.z = posNow.z;
+        }
+      }
+      if (chasing) {
+        const pl = useStore.getState().playerPos;
+        const pdx = pl[0] - posNow.x;
+        const pdz = pl[2] - posNow.z;
+        const pd = Math.hypot(pdx, pdz);
+        // a bordo vede il giocatore entro 45 m
+        if (pd < 45 && useStore.getState().health > 0) copSeesPlayer(id, pl[0], pl[2]);
+        wp = wanted.searching ? [wanted.lastX, wanted.lastZ] : [pl[0], pl[2]];
+        // troppo lontana per arrivare in tempo: rinforzo da una strada fuori vista
+        aiWarpCd.current -= dt;
+        if (pd > 140 && aiWarpCd.current <= 0 && !wanted.searching) {
+          aiWarpCd.current = 6;
+          const sp = pickRoadSpawn(pl[0], pl[2], 85);
+          const groundY = getTerrainHeight(sp.x, sp.z) + getRoadOffset(sp.x, sp.z);
+          _uprightQuat.setFromEuler(_uprightEuler.set(0, sp.yaw, 0));
+          chassis.setTranslation({ x: sp.x, y: groundY + 1.2, z: sp.z }, true);
+          chassis.setRotation({ x: _uprightQuat.x, y: _uprightQuat.y, z: _uprightQuat.z, w: _uprightQuat.w }, true);
+          chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
+          chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
+          aiReverseT.current = 0;
+        }
+      } else if (aiWasChasing.current) {
+        // finita la caccia: riprende il giro dal punto del percorso piu' vicino
+        let best = 0;
+        let bd = Infinity;
+        for (let i = 0; i < patrolRoute.length; i++) {
+          const d = (patrolRoute[i][0] - posNow.x) ** 2 + (patrolRoute[i][1] - posNow.z) ** 2;
+          if (d < bd) {
+            bd = d;
+            best = i;
+          }
+        }
+        aiTargetIndex.current = best;
+        wp = patrolRoute[best];
+      }
+      aiWasChasing.current = chasing;
       _aiViewDir.set(wp[0] - posNow.x, 0, wp[1] - posNow.z);
       const distToTarget = _aiViewDir.length();
 
@@ -922,7 +986,7 @@ const Car: React.FC<CarProps> = ({
         const nextWp = patrolRoute[(aiTargetIndex.current + 1) % patrolRoute.length];
         const afterWp = patrolRoute[(aiTargetIndex.current + 2) % patrolRoute.length];
         _aiSegDir.set(afterWp[0] - nextWp[0], 0, afterWp[1] - nextWp[1]);
-        if (_aiSegDir.lengthSq() > 0.001) {
+        if (!chasing && _aiSegDir.lengthSq() > 0.001) {
           _aiSegDir.normalize();
           const slowDownDot = _aiViewDir.dot(_aiSegDir);
           if (
@@ -936,6 +1000,26 @@ const Car: React.FC<CarProps> = ({
         }
       }
 
+      if (chasing) {
+        // vicino al bersaglio: si ferma (non gli passa sopra all'infinito)
+        if (distToTarget < 8) {
+          aiForward = false;
+          aiBackward = speed > 3;
+        }
+        // incastrata: retromarcia sterzando dal lato opposto
+        if (aiReverseT.current > 0) {
+          aiReverseT.current -= dt;
+          aiForward = false;
+          aiBackward = true;
+          const l = aiLeft;
+          aiLeft = aiRight;
+          aiRight = l;
+        } else if (aiStaleTimer.current > 2 && distToTarget > 10) {
+          aiReverseT.current = 1.3;
+          aiStaleTimer.current = 0;
+        }
+      }
+
       // Stuck recovery, mirroring the original's staleTimer -> teleport
       // back above the current target node -- a patrol car wedged against
       // a curb/wall/another car otherwise stays stuck there forever.
@@ -944,7 +1028,7 @@ const Car: React.FC<CarProps> = ({
       } else {
         aiStaleTimer.current = 0;
       }
-      if (aiStaleTimer.current > PATROL_STUCK_TIMEOUT) {
+      if (!chasing && aiStaleTimer.current > PATROL_STUCK_TIMEOUT) {
         const groundY = getTerrainHeight(wp[0], wp[1]) + getRoadOffset(wp[0], wp[1]);
         const yaw = _uprightEuler.setFromQuaternion(_chassisQuat, 'YXZ').y;
         _uprightQuat.setFromEuler(_uprightEuler.set(0, yaw, 0));
@@ -955,7 +1039,7 @@ const Car: React.FC<CarProps> = ({
         aiStaleTimer.current = 0;
       }
 
-      if (distToTarget < PATROL_NODE_RADIUS) {
+      if (!chasing && distToTarget < PATROL_NODE_RADIUS) {
         aiTargetIndex.current = (aiTargetIndex.current + 1) % patrolRoute.length;
       }
     }

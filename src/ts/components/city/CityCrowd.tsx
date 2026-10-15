@@ -4,6 +4,8 @@ import { useRapier } from '@react-three/rapier';
 import { vehicleBodyHandles } from '../Vehicles/vehicleRegistry';
 import { useStore } from '../../store';
 import Enemy from '../Enemy';
+import AllyNpc from './AllyNpc';
+import type { Order } from './allyOrders';
 import CrowdPedestrian from './CrowdPedestrian';
 import CrowdInstances from './CrowdInstances';
 import NpcInspector from '../UI/NpcInspector';
@@ -29,6 +31,8 @@ import {
 // muore, poi l'agente torna a camminare).
 
 const ASSIGN_EVERY_S = 0.2;
+// alleati reclutati in chat contemporaneamente
+const MAX_ALLIES = 3;
 // corpi veri aggiunti dal pannello: uno alla volta (crearne uno -- manichino,
 // mixer, ragdoll -- costa qualche millisecondo), per non bloccare il gioco
 const BODY_MOUNT_EVERY_S = 0.12;
@@ -72,7 +76,12 @@ function buildCrowdStatics() {
 const carColliderOf = new Map<number, number>();
 
 const Crowd: React.FC = () => {
-  const [enemies, setEnemies] = useState<Array<{ id: string; agentId: number; position: [number, number, number]; hp?: number }>>([]);
+  const [enemies, setEnemies] = useState<
+    Array<{ id: string; agentId: number; agent: CrowdAgent; position: [number, number, number]; hp?: number }>
+  >([]);
+  const [allies, setAllies] = useState<
+    Array<{ id: string; agent: CrowdAgent; position: [number, number, number]; hp: number; order: Order }>
+  >([]);
   const acc = useRef(ASSIGN_EVERY_S);
   // quanti corpi veri sono montati (verso store.crowdBodies, Debug > Citta')
   const bodiesWanted = useStore((s) => Math.max(0, Math.min(CROWD_MAX_SLOTS, Math.round(s.crowdBodies))));
@@ -134,6 +143,12 @@ const Crowd: React.FC = () => {
     for (const h of vehicleBodyHandles) {
       const b = world.getRigidBody(h);
       if (!b) continue;
+      // lontano dal punto che seguiamo la folla non li evita (oltre AVOID_DIST):
+      // inutile leggerne collider e rotazione
+      const bt = b.translation();
+      const bdx = bt.x - (camFar ? cam.x : pp[0]);
+      const bdz = bt.z - (camFar ? cam.z : pp[2]);
+      if (bdx * bdx + bdz * bdz > 80 * 80) continue;
       const v = b.linvel();
       const moving = v.x * v.x + v.z * v.z > 1;
       let ch = carColliderOf.get(h);
@@ -186,20 +201,58 @@ const Crowd: React.FC = () => {
   });
 
   const handleBecomeEnemy = useCallback((agent: CrowdAgent, position: [number, number, number], hp?: number) => {
+    agent.gone = true;
+    agent.slot = -1;
+    const idx = crowdAgents.indexOf(agent);
+    if (idx !== -1) crowdAgents.splice(idx, 1);
+
     setEnemies((prev) =>
-      prev.some((e) => e.agentId === agent.id) ? prev : [...prev, { id: `crowd-enemy-${agent.id}`, agentId: agent.id, position, hp }]
+      prev.some((e) => e.agentId === agent.id) ? prev : [...prev, { id: `crowd-enemy-${agent.id}`, agentId: agent.id, agent, position, hp }]
     );
   }, []);
+
+  // l'agente torna a camminare nella folla (nemico che rinuncia, alleato congedato o morto)
+  const returnToCrowd = useCallback((agent: CrowdAgent) => {
+    reviveCrowdAgent(agent);
+    if (!crowdAgents.includes(agent)) crowdAgents.push(agent);
+  }, []);
+
+  // reclutato in chat: esce dalla folla e diventa un alleato (al massimo MAX_ALLIES)
+  const handleBecomeAlly = useCallback(
+    (agent: CrowdAgent, position: [number, number, number], hp: number, order: Order) => {
+      agent.gone = true;
+      agent.slot = -1;
+      const idx = crowdAgents.indexOf(agent);
+      if (idx !== -1) crowdAgents.splice(idx, 1);
+      setAllies((prev) => {
+        if (prev.some((x) => x.agent === agent)) return prev;
+        const next = [...prev, { id: `ally-${agent.id}`, agent, position, hp, order }];
+        // il piu' vecchio se ne va, se sono troppi
+        while (next.length > MAX_ALLIES) returnToCrowd(next.shift()!.agent);
+        return next;
+      });
+    },
+    [returnToCrowd]
+  );
+  const handleAllyGone = useCallback(
+    (id: string) => {
+      setAllies((prev) => {
+        const x = prev.find((a) => a.id === id);
+        if (x) returnToCrowd(x.agent);
+        return prev.filter((a) => a.id !== id);
+      });
+    },
+    [returnToCrowd]
+  );
   const handleEnemyGiveUp = useCallback((id: string) => {
     setEnemies((prev) => {
       const e = prev.find((x) => x.id === id);
       if (e) {
-        const a = crowdAgents.find((x) => x.id === e.agentId);
-        if (a) reviveCrowdAgent(a);
+        returnToCrowd(e.agent);
       }
       return prev.filter((x) => x.id !== id);
     });
-  }, []);
+  }, [returnToCrowd]);
 
   if (import.meta.env.DEV) (window as any).__crowd = { agents: crowdAgents, enemies };
 
@@ -208,10 +261,13 @@ const Crowd: React.FC = () => {
       <CrowdInstances />
       <NpcInspector />
       {Array.from({ length: Math.min(bodies, bodiesWanted) }, (_, s) => (
-        <CrowdPedestrian key={s} slot={s} onBecomeEnemy={handleBecomeEnemy} />
+        <CrowdPedestrian key={s} slot={s} onBecomeEnemy={handleBecomeEnemy} onBecomeAlly={handleBecomeAlly} />
       ))}
       {enemies.map((e) => (
         <Enemy key={e.id} id={e.id} initialPosition={e.position} initialHp={e.hp} onGiveUp={handleEnemyGiveUp} />
+      ))}
+      {allies.map((a, i) => (
+        <AllyNpc key={a.id} id={a.id} index={i} initialPosition={a.position} initialHp={a.hp} order={a.order} onGone={handleAllyGone} />
       ))}
     </>
   );

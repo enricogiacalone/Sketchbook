@@ -12,11 +12,16 @@ import { farCars } from './vehicleRegistry';
 // si notano.
 
 const PARTS = /^(body|door_\d|wheel.*|Cylinder001)$/;
-const MAX_FAR_CARS = 64;
+const MAX_FAR_CARS = 96;
 
-const FarCars: React.FC = () => {
-  const { scene } = useGLTF('car.glb');
-  const batches = useMemo(() => {
+export interface CarBatch {
+  mat: THREE.Material;
+  geo: THREE.BufferGeometry;
+}
+
+// il modello fuso in una geometria per materiale (usata anche dal traffico, Traffic.tsx)
+export function buildCarBatches(scene: THREE.Object3D): CarBatch[] {
+  {
     scene.updateMatrixWorld(true);
     const inv = new THREE.Matrix4().copy(scene.matrixWorld).invert();
     const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
@@ -34,9 +39,14 @@ const FarCars: React.FC = () => {
       arr.push(g.index ? g.toNonIndexed() : g);
     });
     return [...byMat.entries()]
-      .map(([mat, geos]) => ({ mat, geo: mergeBufferGeometries(geos) }))
-      .filter((b): b is { mat: THREE.Material; geo: THREE.BufferGeometry } => !!b.geo);
-  }, [scene]);
+      .map(([mat, geo]) => ({ mat, geo: mergeBufferGeometries(geo) }))
+      .filter((b): b is CarBatch => !!b.geo);
+  }
+}
+
+const FarCars: React.FC = () => {
+  const { scene } = useGLTF('car.glb');
+  const batches = useMemo(() => buildCarBatches(scene), [scene]);
 
   const meshes = useRef<(THREE.InstancedMesh | null)[]>([]);
   useFrame(() => {
