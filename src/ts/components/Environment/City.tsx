@@ -3,10 +3,11 @@ import { useFrame } from '@react-three/fiber';
 import { useStore } from '../../store';
 import { FarBuildings, type FarBuildingItem } from './FarBuildings';
 import * as THREE from 'three';
-import { getTerrainHeight } from './Terrain';
+import { getTerrainHeight, setTerrainBuildings } from './Terrain';
 import { getRoadOffset } from './Road';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { BuildingStairwell } from './BuildingStairwell';
+import { CLIMBABLE_GROUPS } from './traversal/traversalWorld';
 import { useStaticBoxes, type StaticBox } from './staticColliders';
 import {
   BUILDING_HOLE_LEN,
@@ -334,6 +335,8 @@ export const CITY_LAYOUT: CityLayout = (() => {
       }
     }
   }
+  // il terreno dei cortili verdi resta piatto accanto ai palazzi (Terrain.tsx)
+  setTerrainBuildings(bArr.map((b) => ({ minX: b.x - b.w / 2, maxX: b.x + b.w / 2, minZ: b.z - b.d / 2, maxZ: b.z + b.d / 2 })));
   return { buildings: bArr, courtyards: cArr, plazas: pArr };
 })();
 
@@ -680,8 +683,29 @@ const Building: React.FC<{
       out.push({ half: [T, height / 2, halfD], pos: [halfW, height / 2, 0], groups: g });
     }
     if (annex) out.push({ half: [annex.w / 2, annex.h / 2, annex.d / 2], pos: [annex.ox, annex.h / 2, annex.oz], groups: g });
+    // Davanzali scavalcabili: sotto ogni finestra una scatola "arrampicabile"
+    // (dal pavimento della stanza al bordo basso del buco), cosi' le sonde del
+    // parkour (traversal.ts) trovano un bordo solo dove c'e' una finestra: ci
+    // si sale e si scavalca per entrare o uscire. (Si sovrappone al muro pieno
+    // gia' li': le sonde vedono solo il gruppo Climbable.)
+    if (wallHoles) {
+      const sill = (h: WallHole, place: (cx: number, cy: number, hh: number, hw: number) => StaticBox) => {
+        const top = h.cy - h.hh;
+        const bottom = h.cy - 0.5 * floorHeight;
+        if (top - bottom < 0.2) return;
+        out.push(place(h.cx, (top + bottom) / 2, (top - bottom) / 2, h.hw));
+      };
+      for (const h of wallHoles.holesW) {
+        sill(h, (cx, cy, hh, hw) => ({ half: [hw, hh, T], pos: [cx, cy, -halfD], groups: CLIMBABLE_GROUPS }));
+        sill(h, (cx, cy, hh, hw) => ({ half: [hw, hh, T], pos: [cx, cy, halfD], groups: CLIMBABLE_GROUPS }));
+      }
+      for (const h of wallHoles.holesD) {
+        sill(h, (cx, cy, hh, hw) => ({ half: [T, hh, hw], pos: [-halfW, cy, cx], groups: CLIMBABLE_GROUPS }));
+        sill(h, (cx, cy, hh, hw) => ({ half: [T, hh, hw], pos: [halfW, cy, cx], groups: CLIMBABLE_GROUPS }));
+      }
+    }
     return out;
-  }, [colliderBoxes, halfW, halfD, doorHalf, height, hasLintel, annex]);
+  }, [colliderBoxes, halfW, halfD, doorHalf, height, hasLintel, annex, wallHoles, floorHeight]);
   useStaticBoxes([x, y, z], wallBoxes);
 
   return (
@@ -896,18 +920,17 @@ const GreenCourtyard: React.FC<{ x: number; z: number; treeTemplates: TreeTempla
 
   return (
     <>
-      <group position={[x, y, z]}>
-        <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[20, 20]} />
-          <meshStandardMaterial color="#2d4a1e" />
-        </mesh>
-      </group>
+      {/* il terreno verde con le colline e' Terrain.tsx (greenness / getTerrainHeight) */}
       {/* cespugli, in blocco */}
       <StaticInstances
         name="bushes"
         geometry={_bushGeo}
         material={_bushMat}
-        items={[...Array(5)].map((_, i) => ({ x: x + Math.sin(i) * 6, y: y + 0.5, z: z + Math.cos(i) * 6 }))}
+        items={[...Array(5)].map((_, i) => {
+          const bx = x + Math.sin(i) * 6;
+          const bz = z + Math.cos(i) * 6;
+          return { x: bx, y: getTerrainHeight(bx, bz) + 0.5, z: bz };
+        })}
       />
       {/* Real grass (same pmndrs shader-ported blades as Park.tsx,
                 see RealGrass.tsx/GrassMaterial.ts for attribution) +
@@ -918,7 +941,7 @@ const GreenCourtyard: React.FC<{ x: number; z: number; treeTemplates: TreeTempla
                 posto dell'altro grass"). Bounds match the 20x20 courtyard
                 plane above; counts scaled down proportionally from Park's
                 own 51x51 area. */}
-      <RealGrassPatch minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} instances={700} baseY={y} />
+      <RealGrassPatch minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} instances={700} />
       <Flowers minX={x - 10} maxX={x + 10} minZ={z - 10} maxZ={z + 10} count={12} />
       {trees.map((t, i) => (
         <TreeInstance key={i} x={t.x} z={t.z} rotationY={t.rotationY} scale={t.scale} template={treeTemplates[t.templateIndex]} />

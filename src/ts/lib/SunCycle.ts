@@ -43,11 +43,14 @@ const UP_AXIS = new THREE.Vector3(0, 1, 0);
 // FIXED_DAY_HOUR. Accesa: la giornata riparte DA QUELL'ORA (niente salti)
 // e scorre; rispenta: torna giorno.
 export const FIXED_DAY_HOUR = 10.5;
+export const ZOMBIE_NIGHT_HOUR = 23.5;
 let cycleStartElapsed: number | null = null;
 
 export const getTimeOfDay = (elapsedTime: number): number => {
   const forced = (window as any).__forceTimeOfDay;
   if (typeof forced === 'number') return forced;
+  // modalita' zombi notturna: sempre notte fonda
+  if (useStore.getState().zombieNight) return ZOMBIE_NIGHT_HOUR;
   if (!useStore.getState().dayCycle) {
     cycleStartElapsed = null;
     return FIXED_DAY_HOUR;

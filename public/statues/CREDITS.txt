@@ -1,0 +1,18 @@
+Statue 3D (tutte CC0 / pubblico dominio; l'attribuzione non e' richiesta, ma e' un bel gesto)
+
+horse.glb, fox.glb, stag.glb
+  Quaternius - Poly Pizza (poly.pizza): Horse Statue, Fox Statue, Stag Statue - CC0
+
+knight.glb
+  "Knight statue" di yd - OpenGameArt (opengameart.org/content/knight-statue) - CC0
+  (knight_statue.blend, convertito in GLB con la posa fissata)
+
+sungoddess.glb
+  "Medieval Statue" (Sun Goddess Statue) di Daniel Andersson - OpenGameArt
+  (opengameart.org/content/medieval-statue) - CC0
+  (InnansorraStatueUpload.blend convertito in GLB, senza modificatore Subsurf)
+
+lamp.glb
+  "Statue holding Lightpost" di Colorado Stark - OpenGameArt
+  (opengameart.org/content/statue-holding-lightpost) - CC0
+  (Statue_With_Lamp_LP.obj + texture diffusa 1024 px, convertito in GLB)

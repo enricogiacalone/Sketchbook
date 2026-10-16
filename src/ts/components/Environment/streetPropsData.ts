@@ -263,7 +263,7 @@ export interface PlateItem {
 export interface StreetPropsData {
   parts: Record<string, InstanceXform[]>; // 'geo|mat' -> istanze
   plates: PlateItem[];
-  solids: Array<{ x: number; y: number; z: number; hx: number; hy: number; hz: number }>;
+  solids: Array<{ x: number; y: number; z: number; hx: number; hy: number; hz: number; climb?: boolean }>;
   crowdRects: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }>;
   crowdCircles: Array<{ x: number; z: number; r: number }>;
   // dove stanno pensiline, chioschi e fioriere (la folla ci si ferma: city/crowdScenes.ts); yaw: dove guarda il lato +z locale
@@ -348,6 +348,8 @@ export function getStreetProps(): StreetPropsData {
           hx: swap ? sol.hz : sol.hx,
           hy: sol.hy,
           hz: swap ? sol.hx : sol.hz,
+          // cassonetti, chioschi e fioriere si scavalcano / ci si sale sopra (traversal)
+          climb: name === 'dumpster' || name === 'kiosk' || name === 'planter',
         });
         const hx = swap ? sol.hz : sol.hx;
         const hz = swap ? sol.hx : sol.hz;

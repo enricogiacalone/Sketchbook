@@ -5,6 +5,7 @@ import { gps, routeEta, setWaypoint, type P2 } from '../../lib/gps';
 import { BAR, BAR_FRONT_Z, MARKET, YARD } from '../../missions/storyPlaces';
 import { RUNWAY_CENTER, HELIPORT_CENTER } from '../Environment/Airport';
 import { CITY_BLOCK_SIZE } from '../Environment/City';
+import { getMonumentLayout } from '../Environment/CityMonuments';
 
 // Mappa della pausa, alla GTA: "Mappa in pausa: si apre con Esc o Start e
 // mostra strade, luoghi delle missioni e la tua posizione, con zoom e
@@ -62,6 +63,8 @@ interface Place {
 }
 
 const PLACES: Place[] = [
+  // le statue scaricate (CC0): negli angoli dei blocchi
+  ...getMonumentLayout().models.map((m) => ({ name: m.def.label, hint: 'Statua', x: m.x, z: m.z, icon: '★' })),
   { name: 'Bar Da Vito', hint: 'Vito, il boss del quartiere', x: BAR.x, z: BAR_FRONT_Z - 1, icon: 'B' },
   { name: 'Mercato', hint: 'Bancarelle e il chiosco di Lucky', x: MARKET.x, z: MARKET.z, icon: 'M' },
   { name: 'Deposito', hint: 'Il cortile dei Serpenti', x: YARD.x, z: YARD.z, icon: 'D' },

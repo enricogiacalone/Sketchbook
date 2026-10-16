@@ -275,6 +275,9 @@ interface GameState {
   setOllamaNpcChat: (on: boolean) => void;
   toonStyle: boolean;
   dayCycle: boolean;
+  // modalita' zombi notturna: notte fonda, pioggia, zombi (components/city/ZombieNight.tsx)
+  zombieNight: boolean;
+  setZombieNight: (on: boolean) => void;
   // risoluzione che si adatta alla scheda video (Environment/AdaptiveResolution.tsx)
   adaptiveResolution: boolean;
   // "mettimi un hud con cui configurare il numero di corpi veri, e anche uno
@@ -570,6 +573,7 @@ export const useStore = create<GameState>((set) => ({
   ollamaNpcChat: readSetting('ollamaNpcChat', false),
   toonStyle: readSetting('toonStyle', true),
   dayCycle: readSetting('dayCycle', false),
+  zombieNight: false,
   adaptiveResolution: readSetting('adaptiveResolution', true),
   crowdBodies: readNumSetting('crowdBodies', 6),
   crowdActiveRagdoll: readSetting('crowdActiveRagdoll', false),
@@ -712,6 +716,7 @@ export const useStore = create<GameState>((set) => ({
     writeSetting('toonStyle', toonStyle);
     set({ toonStyle });
   },
+  setZombieNight: (zombieNight) => set({ zombieNight }),
   setDayCycle: (dayCycle) => {
     writeSetting('dayCycle', dayCycle);
     set({ dayCycle });

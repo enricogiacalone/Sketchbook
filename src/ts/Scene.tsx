@@ -14,6 +14,7 @@ import Park from './components/Environment/Park';
 import { TreeBatches } from './components/Environment/ParkTrees';
 import Planets from './components/Environment/Planets';
 import PoliceDirector from './components/city/PoliceDirector';
+import ZombieNight from './components/city/ZombieNight';
 import Traffic, { policeDriver } from './components/city/Traffic';
 import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from './components/Environment/RaceTrack';
 import Road from './components/Environment/Road';
@@ -95,6 +96,8 @@ const Scene: React.FC = () => {
   const isDuelTest = testScene === 'duel';
   const duelRound = useStore((state) => state.duelRound);
   const showSimCitta = useStore((state) => state.showSimCitta);
+  // modalita' zombi notturna: niente traffico, polizia e passanti
+  const zombieNight = useStore((state) => state.zombieNight);
   const showSkyAtmosphere = !isCleanTest || isRaceTest || isDuelTest;
 
   return (
@@ -103,7 +106,8 @@ const Scene: React.FC = () => {
       <OllamaProps />
       {isRaceTest && <RaceTrack />}
       {!isCleanTest && <Road />}
-      {!isCleanTest && <PoliceDirector />}
+      {!isCleanTest && !zombieNight && <PoliceDirector />}
+      {!isCleanTest && <ZombieNight />}
       {!isCleanTest && <CityFlags />}
       {(!isCleanTest || isDuelTest) && <Clouds />}
       <Planets />
@@ -130,10 +134,12 @@ const Scene: React.FC = () => {
                 controller is meant to be used (see git history / chat, "cade
                 oltre il terrain e sparisce"). */}
             <FarCars />
-            <Traffic />
+            {!zombieNight && <Traffic />}
             {/* (le auto ferme stanno nei parcheggi: components/Environment/ParkingLots.tsx) */}
 
-            {/* Police patrol cars */}
+            {/* Police patrol cars (non nella modalita' zombi) */}
+            {!zombieNight && (
+              <>
             <Car
               id="police-1"
               driver={policeDriver('police-1')}
@@ -169,6 +175,8 @@ const Scene: React.FC = () => {
               rotation={[0, Math.PI / 2, 0]}
               patrolRoute={POLICE_ROUTE_CROSS2}
             />
+              </>
+            )}
           </>
         )}
 

@@ -46,7 +46,7 @@ const noRaycast = () => {};
 const RUN_FRAMES = 12;
 
 // pose di un corpo vero (manichino) in coordinate del modello
-function bakeSkinned(mesh: THREE.SkinnedMesh, root: THREE.Object3D): { pos: Float32Array; nrm: Float32Array } {
+export function bakeSkinned(mesh: THREE.SkinnedMesh, root: THREE.Object3D): { pos: Float32Array; nrm: Float32Array } {
   root.updateMatrixWorld(true);
   const sk = mesh.skeleton;
   sk.update();

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { StaticInstances, type InstanceXform } from './StaticInstances';
 import { useStaticBoxes, type StaticBox } from './staticColliders';
+import { CLIMBABLE_GROUPS } from './traversal/traversalWorld';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { streetLampBulbMaterial } from './Road';
 import { getMarkings, getStreetProps, type GeoKey, type MatKey } from './streetPropsData';
@@ -206,7 +207,7 @@ const StreetProps: React.FC = () => {
   const marks = useMemo(() => getMarkings(), []);
 
   const solids = useMemo<StaticBox[]>(
-    () => data.solids.map((s) => ({ half: [s.hx, s.hy, s.hz], pos: [s.x, s.y, s.z], groups: GROUPS })),
+    () => data.solids.map((s) => ({ half: [s.hx, s.hy, s.hz], pos: [s.x, s.y, s.z], groups: s.climb ? CLIMBABLE_GROUPS : GROUPS })),
     [data]
   );
   useStaticBoxes([0, 0, 0], solids);

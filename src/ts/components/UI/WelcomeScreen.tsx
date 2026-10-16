@@ -34,6 +34,8 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
   const setOllamaNpcChat = useStore((st) => st.setOllamaNpcChat);
   const dayCycle = useStore((st) => st.dayCycle);
   const setDayCycle = useStore((st) => st.setDayCycle);
+  const zombieNight = useStore((st) => st.zombieNight);
+  const setZombieNight = useStore((st) => st.setZombieNight);
   const [error, setError] = useState('');
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [phoneUrl, setPhoneUrl] = useState('');
@@ -110,6 +112,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
             <label style={checkRow}>
               <input type="checkbox" checked={dayCycle} onChange={(e) => setDayCycle(e.target.checked)} /> Scorre la giornata (giorno e
               notte) &mdash; spento: sempre giorno
+            </label>
+            <label style={checkRow}>
+              <input type="checkbox" checked={zombieNight} onChange={(e) => setZombieNight(e.target.checked)} /> Modalità zombi notturna
+              &mdash; notte fonda, pioggia e zombi per la città
             </label>
           </div>
 

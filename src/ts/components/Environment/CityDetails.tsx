@@ -11,7 +11,11 @@ import VideoBillboardScreen from './VideoBillboardScreen';
 import ParkingLots from './ParkingLots';
 import StreetProps from './StreetProps';
 import CityServices from './CityServices';
+import CityClimbables from './CityClimbables';
+import FireEscapes from './FireEscapes';
+import CityMonuments from './CityMonuments';
 import { worldRng } from '../../lib/worldSeed';
+import { useStore } from '../../store';
 import { spawnCrowdScenes } from '../city/crowdScenes';
 
 // Street-level detail pass -- benches/trash cans/hydrants/signs along the
@@ -327,6 +331,7 @@ export function buildCityDetails() {
 }
 
 const CityDetails: React.FC = () => {
+  const zombieNight = useStore((s) => s.zombieNight);
   const { furniture, billboards } = useMemo(() => {
     const d = buildCityDetails();
     // gente seduta sulle panchine, nelle pensiline, che balla...: prima che la folla monti
@@ -342,9 +347,12 @@ const CityDetails: React.FC = () => {
       {/* arredo urbano esteso (cassonetti, alberi, fermate, chioschi, cartelli, segnaletica a terra) e servizi */}
       <StreetProps />
       <CityServices />
+      <CityClimbables />
+      <FireEscapes />
+      <CityMonuments />
       {/* passanti: la folla (agenti leggeri + pool di corpi veri + sagome
           instanziate), vedi components/city/crowd.ts */}
-      <Crowd />
+      {!zombieNight && <Crowd />}
       {billboards.map((b, i) => (
         <Billboard key={`bb-${i}`} x={b.x} z={b.z} rotationY={b.rotationY} schemeIndex={b.schemeIndex} />
       ))}

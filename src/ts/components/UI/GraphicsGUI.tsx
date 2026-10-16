@@ -21,6 +21,12 @@ const GraphicsGUI: React.FC = () => {
       set giornata(v: boolean) {
         st().setDayCycle(v);
       },
+      get zombi() {
+        return st().zombieNight;
+      },
+      set zombi(v: boolean) {
+        st().setZombieNight(v);
+      },
       get adattiva() {
         return st().adaptiveResolution;
       },
@@ -67,6 +73,7 @@ const GraphicsGUI: React.FC = () => {
     const ctrls = [
       folder.add(bind, 'toon').name('Stile toon').listen(),
       folder.add(bind, 'giornata').name('Scorre la giornata (giorno/notte)').listen(),
+      folder.add(bind, 'zombi').name('Modalità zombi notturna').listen(),
       folder.add(bind, 'adattiva').name('Risoluzione adattiva').listen(),
       folder.add(adaptiveResInfo, 'dpr').name('  risoluzione (dpr)').listen().disable(),
       folder.add(adaptiveResInfo, 'fps').name('  fps').listen().disable(),

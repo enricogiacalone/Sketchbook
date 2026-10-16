@@ -255,8 +255,12 @@ const PATROL_STUCK_TIMEOUT = 5; // seconds, matches the original's staleTimer
 const OFFICER_COLOR = '#1e40af';
 const OFFICER_SEAT_FWD = 0.31;
 const OFFICER_SEAT_DOWN = 0.44;
-const Officer: React.FC<{ seatPosition: [number, number, number]; seatQuaternion: [number, number, number, number] }> = ({
+// guidatori del traffico civile: una tinta per auto
+const DRIVER_COLORS = ['#8d6e63', '#607d8b', '#9e9d24', '#6d4c41', '#78909c', '#a1887f', '#5d4037', '#827717', '#455a64'];
+const driverColor = (id: string) => DRIVER_COLORS[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % DRIVER_COLORS.length];
+const Officer: React.FC<{ seatPosition: [number, number, number]; seatQuaternion: [number, number, number, number]; color?: string }> = ({
   seatPosition,
+  color = OFFICER_COLOR,
 }) => {
   const { scene } = useGLTF(MANNEQUIN_URL);
   const { animations } = useGLTF(MANNEQUIN_BASE_ANIMS_URL);
@@ -265,12 +269,12 @@ const Officer: React.FC<{ seatPosition: [number, number, number]; seatQuaternion
     c.traverse((child: any) => {
       if (child.isSkinnedMesh) {
         child.material = child.material.clone();
-        child.material.emissive = new THREE.Color(OFFICER_COLOR);
+        child.material.emissive = new THREE.Color(color);
         child.material.emissiveIntensity = 0.45;
       }
     });
     return { clone: c, mixer: new THREE.AnimationMixer(c) };
-  }, [scene]);
+  }, [scene, color]);
 
   useEffect(() => {
     const clip = animations.find((a) => a.name === 'Driving');
@@ -323,8 +327,10 @@ export const makeTrafficDriver = (): TrafficDriver => ({
 // Telaio delle auto: le auto normali (giocatore, parcheggiate) sono in Default
 // + Vehicle e toccano tutto come prima; quelle del traffico solo in Vehicle e
 // non toccano il Default (terreno, palazzi: le sospensioni lavorano con i raggi
-// delle ruote), ma urtano le altre auto, il giocatore e i personaggi.
-const CAR_CHASSIS_GROUPS = groupsExcluding([CollisionGroups.Default, CollisionGroups.Vehicle]);
+// delle ruote), ma urtano le altre auto, il giocatore e i personaggi. Le auto
+// normali sono anche Climbable: cofano e tetto si salgono come un blocco
+// (traversal/traversalWorld.ts); quelle del traffico, in moto, no.
+const CAR_CHASSIS_GROUPS = groupsExcluding([CollisionGroups.Default, CollisionGroups.Vehicle, CollisionGroups.Climbable]);
 const TRAFFIC_CAR_GROUPS = groupsExcluding([CollisionGroups.Vehicle], CollisionGroups.Default);
 
 export const DEFAULT_CAR_SCALE = 1.5;
@@ -514,7 +520,7 @@ const Car: React.FC<CarProps> = ({
   // needs to be positioned in as a sibling of <primitive> inside the same
   // RigidBody.
   const officerSeatTransform = useMemo(() => {
-    if (!patrolRoute) return null;
+    if (!patrolRoute && !driver) return null;
     const seatNode = clonedScene.getObjectByName('seat_1');
     if (!seatNode) return null;
     clonedScene.updateMatrixWorld(true);
@@ -528,7 +534,7 @@ const Car: React.FC<CarProps> = ({
       position: [localPos.x * S, localPos.y * S, localPos.z * S] as [number, number, number],
       quaternion: [worldQuat.x, worldQuat.y, worldQuat.z, worldQuat.w] as [number, number, number, number],
     };
-  }, [clonedScene, patrolRoute, S]);
+  }, [clonedScene, patrolRoute, driver, S]);
 
   // -- Doors, mirroring the original's VehicleDoor: whichever door the
   // player is actually walking through swings open for the whole
@@ -721,6 +727,9 @@ const Car: React.FC<CarProps> = ({
     return () => {
       vehicleBodyHandles.delete(chassis.handle);
       vehicleController.current = null;
+      // via dalla minimappa e dalla ricerca dell'auto piu' vicina (traffico e
+      // volanti smontati, es. nella modalita' zombi)
+      useStore.getState().removeEntity(id);
       // Drop this car's window.__sim telemetry entry on unmount (e.g.
       // leaving the race/car-test scenario) so a stale, no-longer-driven
       // body's last-known position/velocity doesn't linger forever in
@@ -1292,6 +1301,7 @@ const Car: React.FC<CarProps> = ({
   // "modelli semplificati da lontano": oltre CAR_LOD_DIST dalla telecamera
   // il modello (9 mesh) si nasconde e l'auto viene disegnata in blocco con
   // tutte le altre lontane (FarCars.tsx: 2 draw call per tutte).
+  const driverVisRef = useRef<THREE.Group>(null);
   useFrame(({ camera }) => {
     const c = chassisRef.current;
     if (!c) return;
@@ -1301,6 +1311,7 @@ const Car: React.FC<CarProps> = ({
     // auto del traffico a riposo nel pool: ne' modello ne' istanza lontana
     if (driver && !driver.active && !patrolRoute && !humanIsDriving && controlledEntityId !== id) {
       if (clonedScene.visible) clonedScene.visible = false;
+      if (driverVisRef.current) driverVisRef.current.visible = false;
       farCars.delete(id);
       return;
     }
@@ -1310,6 +1321,8 @@ const Car: React.FC<CarProps> = ({
       if (far) farCars.set(id, clonedScene);
       else farCars.delete(id);
     }
+    // il guidatore si vede quando si vede l'auto (non in pool a riposo, non lontana)
+    if (driverVisRef.current && driverVisRef.current.visible !== clonedScene.visible) driverVisRef.current.visible = clonedScene.visible;
   });
   useEffect(
     () => () => {
@@ -1513,8 +1526,14 @@ const Car: React.FC<CarProps> = ({
           humanIsDriving). Purely visual: the AI drives the RigidBody
           directly (activeForward/Backward/Left/Right above), same as a
           human would via the keyboard -- this is just who you see doing it. */}
-      {patrolRoute && !humanIsDriving && officerSeatTransform && (
-        <Officer seatPosition={officerSeatTransform.position} seatQuaternion={officerSeatTransform.quaternion} />
+      {(patrolRoute || driver) && !humanIsDriving && officerSeatTransform && (
+        <group ref={driverVisRef}>
+          <Officer
+            seatPosition={officerSeatTransform.position}
+            seatQuaternion={officerSeatTransform.quaternion}
+            color={isPoliceCar || id.startsWith('police-') ? OFFICER_COLOR : driverColor(id)}
+          />
+        </group>
       )}
       {patrolRoute && !humanIsDriving && (
         <Html position={[0, 2.2, 0]} center distanceFactor={12} occlude={false}>

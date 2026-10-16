@@ -52,6 +52,26 @@ const TARGET_SEARCH_DIST = 50;
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const _aimAt = new THREE.Vector3();
 
+// In auto: il guidatore e' seat_1, i passeggeri occupano seat_2..seat_4 (in
+// tutto 4 posti): chi segue il giocatore sale al primo posto libero, gli
+// altri restano a piedi finche' non scende qualcuno.
+const PASSENGER_SEATS = ['seat_2', 'seat_3', 'seat_4'];
+const seatTaken = new Map<string, Map<string, string>>(); // auto -> posto -> alleato
+const SEAT_FWD = 0.31; // radice del personaggio rispetto al nodo del sedile (come per il guidatore)
+const SEAT_DOWN = 0.44;
+const BOARD_DIST = 3.0; // m dall'auto per salire
+const CAR_CHASE_MAX = 40; // oltre questa distanza dal giocatore si segue e basta
+const _sq = new THREE.Quaternion();
+const _sp = new THREE.Vector3();
+const _sf = new THREE.Vector3();
+const _su = new THREE.Vector3();
+const _se = new THREE.Euler();
+const takenOf = (carId: string) => {
+  let m = seatTaken.get(carId);
+  if (!m) seatTaken.set(carId, (m = new Map()));
+  return m;
+};
+
 function matches(o: FighterData, order: Order, pp: number[]): boolean {
   const t = o.team ?? '';
   if (t === 'ALLY' || t === 'PLAYER' || t.startsWith('REMOTE_')) return false;
@@ -121,6 +141,9 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
     sinceNear: 0,
     warm: 0,
     spokeAt: 0,
+    // posto in auto prenotato (si va verso la portiera) e posto occupato
+    reserved: null as { carId: string; name: string } | null,
+    seat: null as { carId: string; name: string } | null,
   });
 
   if (import.meta.env.DEV) ((window as any).__allyS ??= {})[id] = S.current;
@@ -171,6 +194,9 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
     applyOrder(firstOrder);
     return () => {
       allyRegistry.delete(id);
+      const st = S.current;
+      const hold = st.seat ?? st.reserved;
+      if (hold) seatTaken.get(hold.carId)?.delete(hold.name);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -232,6 +258,92 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
       }
       s.prevPX = pp[0];
       s.prevPZ = pp[2];
+    }
+
+    // ---- in auto ------------------------------------------------------------------
+    const carId = store.currentControllable === 'car' ? store.controlledEntityId : null;
+    const carRoot = carId ? _state.scene.getObjectByName(carId) : null;
+    const releaseSeat = () => {
+      const h = s.seat ?? s.reserved;
+      if (h) seatTaken.get(h.carId)?.delete(h.name);
+      s.seat = null;
+      s.reserved = null;
+    };
+    if (s.seat) {
+      const root = _state.scene.getObjectByName(s.seat.carId);
+      const node = root?.getObjectByName(s.seat.name);
+      if (!root || !node || carId !== s.seat.carId || s.mode !== 'follow') {
+        // il giocatore e' sceso (o altro ordine): si scende dalla portiera del suo posto
+        if (root) {
+          const n = s.seat.name.slice(-1);
+          const ent = root.getObjectByName(`entrance_${n}`);
+          if (ent) {
+            ent.getWorldPosition(_sp);
+            pos.x = _sp.x;
+            pos.z = _sp.z;
+          }
+        }
+        releaseSeat();
+        s.step = newStepState();
+        g.quaternion.identity();
+      } else {
+        // seduto: segue il sedile dell'auto, fermo, senza fisica
+        root.getWorldQuaternion(_sq);
+        node.getWorldPosition(_sp);
+        _sf.set(0, 0, 1).applyQuaternion(_sq);
+        _su.set(0, 1, 0).applyQuaternion(_sq);
+        _sp.addScaledVector(_sf, SEAT_FWD).addScaledVector(_su, -SEAT_DOWN);
+        g.position.copy(_sp);
+        g.quaternion.copy(_sq);
+        pos.x = _sp.x;
+        pos.z = _sp.z;
+        data.rotation = _se.setFromQuaternion(_sq, 'YXZ').y + Math.PI;
+        pistol.setVisible(false);
+        pistol.update(delta);
+        actor.play(actor.hasClip('Sitting_Idle') ? 'Sitting_Idle' : 'Idle_A', 0.2);
+        if (s.warm < 3 && ++s.warm >= 3) g.visible = true;
+        return;
+      }
+    }
+    // prenotazione del posto: il piu' vicino libero tra i tre dei passeggeri
+    let carGoal: THREE.Vector3 | null = null;
+    if (carRoot && carId && s.mode === 'follow' && distP < CAR_CHASE_MAX) {
+      const taken = takenOf(carId);
+      if (s.reserved && (s.reserved.carId !== carId || (taken.get(s.reserved.name) ?? id) !== id)) {
+        releaseSeat();
+      }
+      if (!s.reserved) {
+        let bestName: string | null = null;
+        let bestD = 1e9;
+        for (const name of PASSENGER_SEATS) {
+          if (taken.has(name) || !carRoot.getObjectByName(name)) continue;
+          const ent = carRoot.getObjectByName(`entrance_${name.slice(-1)}`) ?? carRoot.getObjectByName(name)!;
+          ent.getWorldPosition(_sp);
+          const d = Math.hypot(_sp.x - pos.x, _sp.z - pos.z);
+          if (d < bestD) {
+            bestD = d;
+            bestName = name;
+          }
+        }
+        if (bestName) {
+          taken.set(bestName, id);
+          s.reserved = { carId, name: bestName };
+        }
+      }
+      if (s.reserved) {
+        const ent = carRoot.getObjectByName(`entrance_${s.reserved.name.slice(-1)}`) ?? carRoot.getObjectByName(s.reserved.name)!;
+        carGoal = ent.getWorldPosition(new THREE.Vector3());
+        carRoot.getWorldPosition(_sp);
+        if (Math.hypot(_sp.x - pos.x, _sp.z - pos.z) < BOARD_DIST || Math.hypot(carGoal.x - pos.x, carGoal.z - pos.z) < 1.2) {
+          // sale
+          s.seat = s.reserved;
+          s.reserved = null;
+          s.moving = false;
+          return;
+        }
+      }
+    } else if (s.reserved) {
+      releaseSeat();
     }
 
     // ---- nuovi ordini dalla chat ----------------------------------------
@@ -351,14 +463,15 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
       if (distP < 8) faceYaw = Math.atan2(dxP, dzP);
       look = distP > 8;
     } else {
-      // seguire: un posto dietro al giocatore, ognuno il suo
+      // seguire: un posto dietro al giocatore, ognuno il suo (o, se il giocatore e'
+      // in auto e c'e' posto, la portiera del proprio sedile)
       const spread = (idleOffset * 0.75 + (index === 0 ? 0.35 : 0)) * 1;
       const ca = Math.cos(spread);
       const sa = Math.sin(spread);
       const rx = s.rearX * ca - s.rearZ * sa;
       const rz = s.rearX * sa + s.rearZ * ca;
-      goalX = pp[0] + rx * FOLLOW_R;
-      goalZ = pp[2] + rz * FOLLOW_R;
+      goalX = carGoal ? carGoal.x : pp[0] + rx * FOLLOW_R;
+      goalZ = carGoal ? carGoal.z : pp[2] + rz * FOLLOW_R;
       const gd = Math.hypot(goalX - pos.x, goalZ - pos.z);
 
       // troppo lontano (o il giocatore e' in auto e ha tirato dritto): si riporta vicino
