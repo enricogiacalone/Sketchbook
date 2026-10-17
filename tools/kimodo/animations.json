@@ -82,7 +82,6 @@
       "seed": 34,
       "prompt": "A person is punched in the stomach, doubles over in pain and then straightens up."
     },
-
     {
       "group": "folla",
       "name": "look_around",
@@ -130,16 +129,19 @@
       "name": "panic_run",
       "seconds": 4,
       "seed": 47,
-      "loop": { "minSeconds": 0.6 },
+      "loop": {
+        "minSeconds": 0.6
+      },
       "prompt": "A person runs forward in panic, waving the arms and looking back over the shoulder."
     },
-
     {
       "group": "stati",
       "name": "injured_walk",
       "seconds": 5,
       "seed": 51,
-      "loop": { "minSeconds": 1 },
+      "loop": {
+        "minSeconds": 1
+      },
       "prompt": "A person walks forward slowly, limping on the left leg and holding their side in pain."
     },
     {
@@ -147,7 +149,9 @@
       "name": "out_of_breath",
       "seconds": 5,
       "seed": 52,
-      "loop": { "minSeconds": 2 },
+      "loop": {
+        "minSeconds": 2
+      },
       "prompt": "A person stands bent over with hands on knees, breathing heavily after running."
     },
     {
@@ -225,7 +229,9 @@
       "name": "walk_upstairs",
       "seconds": 4,
       "seed": 68,
-      "loop": { "minSeconds": 1 },
+      "loop": {
+        "minSeconds": 1
+      },
       "prompt": "A person walks up a flight of stairs at a normal pace, lifting the knees for each step."
     },
     {
@@ -233,8 +239,58 @@
       "name": "walk_downstairs",
       "seconds": 4,
       "seed": 69,
-      "loop": { "minSeconds": 1 },
+      "loop": {
+        "minSeconds": 1
+      },
       "prompt": "A person walks down a flight of stairs at a normal pace, carefully stepping down each step."
+    },
+    {
+      "group": "idle",
+      "name": "idle_breathe",
+      "seconds": 5,
+      "seed": 101,
+      "loop": {
+        "minSeconds": 2.5
+      },
+      "prompt": "A person stands still in a neutral relaxed pose with both feet together and arms hanging at the sides, breathing calmly and barely moving.",
+      "start": "assets-src/kimodo/walk_start:0:8",
+      "end": "assets-src/kimodo/walk_start:0:8"
+    },
+    {
+      "group": "idle",
+      "name": "idle_shift_weight",
+      "seconds": 5,
+      "seed": 102,
+      "loop": {
+        "minSeconds": 2.5
+      },
+      "prompt": "A person stands relaxed with feet together, slowly shifts their weight from one leg to the other and back, arms hanging loosely.",
+      "start": "assets-src/kimodo/walk_start:0:8",
+      "end": "assets-src/kimodo/walk_start:0:8"
+    },
+    {
+      "group": "idle",
+      "name": "idle_look",
+      "seconds": 5,
+      "seed": 103,
+      "loop": {
+        "minSeconds": 2.5
+      },
+      "prompt": "A person stands still with feet together and arms at the sides, glances to the left, then to the right, then looks forward again.",
+      "start": "assets-src/kimodo/walk_start:0:8",
+      "end": "assets-src/kimodo/walk_start:0:8"
+    },
+    {
+      "group": "idle",
+      "name": "idle_fidget",
+      "seconds": 5,
+      "seed": 104,
+      "loop": {
+        "minSeconds": 2.5
+      },
+      "prompt": "A person stands with feet together, rolls their shoulders, rubs the back of the neck with one hand, then lets the arm drop back to the side.",
+      "start": "assets-src/kimodo/walk_start:0:8",
+      "end": "assets-src/kimodo/walk_start:0:8"
     }
   ]
 }

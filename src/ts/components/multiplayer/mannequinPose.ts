@@ -19,6 +19,7 @@ export const POSE_BONES = [
   'spine_02',
   'spine_03',
   'neck_01',
+  'neck_02',
   'head',
   'clavicle_l',
   'upperarm_l',

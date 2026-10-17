@@ -36,7 +36,7 @@ export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
   // dei SUOI vertici (osso dominante) e sporge al massimo ~3 cm, nessun
   // vertice resta fuori da tutte le capsule per piu' di ~4 cm (prima:
   // fino a 10 cm scoperti sulla testa, 7 su petto e spalle, sfera del
-  // bacino che sporgeva di 9 cm). Le mani restano senza collider.
+  // bacino che sporgeva di 9 cm). Le mani hanno la loro capsula (Hand_L/R, comprese le dita: 2523 vertici ciascuna).
   //
   // Torso copre solo spine_01->spine_02, SpineMid e SpineHigh la loro
   // fetta (vedi la storia in git: un Torso fino a neck_01 impilava tre
@@ -61,17 +61,17 @@ export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
     lengthScale: 1.43,
     toOffset: [0, -0.004, 0.024],
   },
-  // petto: capsula ORIZZONTALE da spalla a spalla (x +-0.2 a y 1.36),
+  // petto: capsula ORIZZONTALE da spalla a spalla (x +-0.19 a y 1.36; 38 cm in tutto, prima 40),
   // non lungo la spina -- il torace e' largo 34 cm e profondo 25
   {
     name: 'SpineHigh',
     drivingBone: 'spine_03',
     parent: 'SpineMid',
     toBone: 'neck_01',
-    radius: 0.14,
+    radius: 0.15,
     lengthScale: 1,
-    fromOffset: [0.2, 0.078, -0.017],
-    toOffset: [-0.2, -0.092, 0.021],
+    fromOffset: [0.19, 0.078, -0.017],
+    toOffset: [-0.19, -0.092, 0.021],
   },
   // testa: dal collo fin sopra il cranio (head_leaf sta 19 cm sotto la
   // sommita'), leggermente inclinata all'indietro come la nuca
@@ -112,6 +112,7 @@ export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
     fromOffset: [-0.013, -0.007, 0],
     toOffset: [0, -0.009, 0.007],
   },
+  { name: 'Hand_L', drivingBone: 'hand_l', parent: 'ForeArm_L', toBone: 'middle_01_l', radius: 0.045, lengthScale: 1.8 },
   {
     name: 'ClavicleR',
     drivingBone: 'clavicle_r',
@@ -140,6 +141,7 @@ export const ACTIVE_RAGDOLL_SEGMENTS: RagdollSegment[] = [
     fromOffset: [0.013, -0.007, 0],
     toOffset: [0, -0.009, 0.007],
   },
+  { name: 'Hand_R', drivingBone: 'hand_r', parent: 'ForeArm_R', toBone: 'middle_01_r', radius: 0.045, lengthScale: 1.8 },
   {
     name: 'Thigh_L',
     drivingBone: 'thigh_l',
@@ -222,8 +224,11 @@ export const ACTIVE_RAGDOLL_MASS_WEIGHT: Record<string, number> = {
   ClavicleR: 0.02,
   UpperArm_L: 0.028,
   UpperArm_R: 0.028,
-  ForeArm_L: 0.022, // include la mano (non simulata a parte), come "forearm and hand" di Winter
-  ForeArm_R: 0.022,
+  // Winter: avambraccio 1.6% + mano 0.6% (= il 2.2% di prima, ora diviso)
+  ForeArm_L: 0.016,
+  ForeArm_R: 0.016,
+  Hand_L: 0.006,
+  Hand_R: 0.006,
   Thigh_L: 0.1,
   Thigh_R: 0.1,
   Shin_L: 0.0465,
@@ -262,6 +267,9 @@ export const ACTIVE_RAGDOLL_JOINT_LIMITS_DEG: Record<string, { x: [number, numbe
   UpperArm_R: { x: [-79, 102], y: [-110, 95], z: [-132, 52] },
   ForeArm_L: { x: [-52, 116], y: [-38, 88], z: [-77, 76] },
   ForeArm_R: { x: [-88, 104], y: [-88, 39], z: [-80, 36] },
+  // polso: non misurato sulle clip, escursione anatomica larga (flesso-estensione piu' di ogni clip)
+  Hand_L: { x: [-60, 60], y: [-40, 40], z: [-70, 70] },
+  Hand_R: { x: [-60, 60], y: [-40, 40], z: [-70, 70] },
   Thigh_L: { x: [-138, 49], y: [-86, 79], z: [-48, 109] },
   Thigh_R: { x: [-81, 83], y: [-47, 93], z: [-104, 50] },
   Shin_L: { x: [-22, 116], y: [-26, 55], z: [-53, 25] },
@@ -297,6 +305,8 @@ export const ACTIVE_RAGDOLL_JOINT_FREQ: Record<string, number> = {
   UpperArm_R: 35,
   ForeArm_L: 35,
   ForeArm_R: 35,
+  Hand_L: 28,
+  Hand_R: 28,
   Thigh_L: 42,
   Thigh_R: 42,
   Shin_L: 42,
@@ -324,6 +334,8 @@ export const ACTIVE_RAGDOLL_KO_TONE: Record<string, number> = {
   UpperArm_R: 0.6,
   ForeArm_L: 0.5,
   ForeArm_R: 0.5,
+  Hand_L: 0.5,
+  Hand_R: 0.5,
   Thigh_L: 0.75,
   Thigh_R: 0.75,
   Shin_L: 0.6,

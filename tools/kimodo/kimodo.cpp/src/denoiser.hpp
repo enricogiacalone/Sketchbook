@@ -70,6 +70,25 @@ std::expected<std::vector<float>, std::string> sample_motion_sequence_from_noise
     const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
     unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight);
 
+// Pose constraint (local addition, not in upstream port): a SOMA pose held for
+// `hold` frames starting at `frame`. `heading` is the facing angle the pose is
+// rotated to (radians, as measured by the hips; 0 = facing +z). `free_xz` leaves
+// the ground position unconstrained (use for poses the clip arrives at).
+struct pose_key {
+    std::size_t frame = 0, hold = 1;
+    float heading = 0.F;
+    bool free_xz = false;
+    std::vector<float> local_xyzw; // [joints,4]
+    float root_y = 0.F;
+};
+
+// Same DDIM sampler as sample_motion_from_noise, but the constraint branch of the
+// separated CFG sees the given poses (full-body positions + end-effector rotations).
+std::expected<std::vector<float>, std::string> sample_motion_with_pose_keys(
+    const ggml_motion_weights &weights, std::span<const float> initial_noise,
+    std::span<const float> embedding, std::size_t frames, unsigned steps,
+    float text_weight, float constraint_weight, std::span<const pose_key> keys);
+
 // Build the exact condition consumed by the next `_multiprompt` DDIM run.
 // Exposed for the raw fixture test as well as the runtime orchestrator.
 std::expected<sequence_transition, std::string> prepare_sequence_transition(

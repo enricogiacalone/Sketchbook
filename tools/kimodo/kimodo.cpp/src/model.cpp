@@ -100,6 +100,46 @@ std::expected<motion_data, std::string> model::generate_embedding(
 #endif
 }
 
+std::expected<motion_data, std::string> model::generate_text_posed(
+    std::string_view utf8_prompt, unsigned frames, unsigned steps, std::uint64_t seed,
+    float text_cfg, float constraint_cfg, std::span<const pose_key> keys) const {
+#ifdef KIMODO_HAVE_GGML
+    if (!impl_->text) return std::unexpected("model was loaded without a native text bundle");
+    if (frames == 0 || frames > 10000 || steps == 0 || steps > 1000 || keys.empty() || keys.size() > 16)
+        return std::unexpected("invalid pose-key sampling parameters");
+    auto embedding = impl_->text->encode(utf8_prompt);
+    if (!embedding) return std::unexpected(embedding.error());
+    if (!impl_->weights) {
+        auto loaded = detail::ggml_motion_weights::load(impl_->motion_path);
+        if (!loaded) return std::unexpected(loaded.error());
+        impl_->weights = std::move(*loaded);
+    }
+    std::vector<detail::pose_key> inner;
+    for (const auto &k : keys)
+        inner.push_back({k.frame, k.hold, k.heading, k.free_xz, k.local_rotations_xyzw, k.root_y});
+    std::mt19937_64 rng(seed);
+    std::normal_distribution<float> normal(0.f, 1.f);
+    const size_t motion_dim=impl_->skeleton->motion_dim();
+    std::vector<float> noise(static_cast<size_t>(frames)*motion_dim);
+    for (float &value : noise) value = normal(rng);
+    auto sampled = detail::sample_motion_with_pose_keys(*impl_->weights, noise, *embedding, frames, steps, text_cfg, constraint_cfg, inner);
+    if (!sampled) return std::unexpected(sampled.error());
+    auto gm=impl_->weights->f32_values("stats.global_root.mean"), gs=impl_->weights->f32_values("stats.global_root.std");
+    auto bm=impl_->weights->f32_values("stats.body.mean"), bs=impl_->weights->f32_values("stats.body.std");
+    if (!gm || !gs || !bm || !bs) return std::unexpected("motion GGUF lacks normalization statistics");
+    auto decoded=detail::decode_motion(*sampled,frames,*impl_->skeleton,*gm,*gs,*bm,*bs);
+    if (!decoded) return std::unexpected(decoded.error());
+    motion_data result;
+    result.frames=frames; result.joints=static_cast<unsigned>(impl_->skeleton->joints());
+    result.local_rotations_xyzw=std::move(decoded->local_xyzw);
+    result.root_positions=std::move(decoded->root_positions);
+    return result;
+#else
+    (void) utf8_prompt; (void) frames; (void) steps; (void) seed; (void) text_cfg; (void) constraint_cfg; (void) keys;
+    return std::unexpected("Kimodo was built without GGML support");
+#endif
+}
+
 std::expected<motion_data, std::string> model::generate_text_sequence(
     std::span<const prompt_segment> segments, unsigned transition_frames,
     unsigned steps, std::uint64_t seed, float text_cfg, float constraint_cfg) const {

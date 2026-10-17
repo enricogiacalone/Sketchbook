@@ -35,6 +35,8 @@ import { registerFighterBlast, applyKnockdownBlast } from '../../lib/explosions'
 import { raycastProxies } from '../../lib/shotProxies';
 import { crowdAgents, promoteCrowdAgent } from '../city/crowdSim';
 import { markPlayerHit, reportCrime, reportHit } from '../../lib/wanted';
+import { Inertializer } from '../../lib/inertialize';
+import { findEntry, hasMotion, leftPhaseAt, nextLeftContact, sampleMotion, totalYaw, trackSpeed, yawDoneAt, clipSeconds, type MotionSample } from '../../lib/motionTrack';
 import { BUMP_COOLDOWN_MS, BUMP_DIST, BUMP_HEAVY, BUMP_MEDIUM, BUMP_MIN_SPEED, pushBump, type BumpStrength } from '../../lib/bump';
 import { triggerCameraShake } from '../../lib/cameraShake';
 import { playerControl } from '../../lib/playerControl';
@@ -297,6 +299,9 @@ const _carUp = new THREE.Vector3();
 const _carTmp = new THREE.Vector3();
 const _carTmp2 = new THREE.Vector3();
 const _carEuler = new THREE.Euler();
+const _moA: MotionSample = { x: 0, z: 0, yaw: 0 };
+const _moB: MotionSample = { x: 0, z: 0, yaw: 0 };
+const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const _yawPi = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 
 const _tFwd = new THREE.Vector3();
@@ -528,6 +533,21 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   const obstacleHitCooldownRef = useRef(0);
   // spallate ai passanti (lib/bump.ts): ultima per ogni persona
   const bumpCdRef = useRef(new Map<string, number>());
+  // partenza / fermata / svolta con una clip Kimodo che porta la sua traccia di
+  // movimento (lib/motionTrack.ts): il corpo avanza e gira come dice la clip
+  const locoSnapRef = useRef(false);
+  const motionRef = useRef({
+    active: false,
+    kind: 'start' as 'start' | 'stop' | 'turn',
+    clip: '',
+    t: 0,
+    tEnd: 0,
+    ts: 1,
+    posK: 1,
+    yawK: 1,
+    at: 0,
+    still: 0,
+  });
   // direzione (rotation del corpo) verso cui guarda la camera, aggiornata ogni frame
   const camYawRef = useRef(0);
   const spineLeanWRef = useRef(1); // peso della torsione del busto (0 a terra)
@@ -820,6 +840,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     return { clone: clonedScene, mixer: animMixer, actions: actMap, clipsMap: cMap, animCatalog: catalog };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene, animations, data]);
+  // passaggio senza dissolvenza tra clip diverse (lib/inertialize.ts): lo scarto di posa svanisce con una molla
+  const inert = useMemo(() => new Inertializer(clone), [clone]);
 
   // pistola a una mano (weapons/poseLayer.ts): le clip Pistol_* solo sul
   // braccio destro (sulle due braccia mentre si ricarica), il resto del
@@ -1578,7 +1600,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     if (tPoseBench) {
       skeletonRef.current?.pose();
     } else if (mixer) {
+      inert.ripristina();
       mixer.update(delta * globalSpeed);
+      inert.applica(delta * globalSpeed);
       // pistola rilassata come in GTA: braccio lungo il fianco come nella
       // camminata, solo la mano la impugna; mirando / sparando il braccio si
       // alza nella posa di mira; ricaricando lavorano tutte e due le mani
@@ -2915,6 +2939,141 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     const mash = injured ? 0 : input.sprintMash();
     const flatWant = mash > 0 ? LT.jogSpeed + (LT.runSpeed - LT.jogSpeed) * mash : runWanted ? LT.jogSpeed : walkSpeed;
     const want = !hasDir ? 0 : stair ? (runWanted || mash > 0 ? LT.runSpeed / (gR * dR) : walkSpeed / (gW * dW)) * stairCycle : flatWant;
+    // Partenze, fermate e svolte sul posto con le clip Kimodo che hanno la traccia
+    // del movimento (lib/motionTrack.ts, scripts/kimodo-gait.mjs): da fermo si
+    // parte con i primi passi della clip invece di scattare, quando si lascia
+    // lo stick si frena con qualche passo, e una svolta ampia da fermi si fa
+    // girando sul posto con i piedi. Se mancano le clip o c'e' altro da fare
+    // (colpi, scale, arma in mira...) non succede niente e il passo e' quello di prima.
+    {
+      const mo = motionRef.current;
+      // fine della clip Kimodo: si passa al passo normale / riposo senza dissolvenza (inerzializzazione)
+      const endMotion = () => {
+        if (!mo.active) return;
+        mo.active = false;
+        inert.cambio();
+        locoSnapRef.current = true;
+      };
+      const nowMs = performance.now();
+      const free =
+        !stair &&
+        !injured &&
+        !gunFacingCam &&
+        vehRef.current.mode === 'none' &&
+        data.attackLock <= 0 &&
+        !kd.isDown() &&
+        !data.isDead &&
+        travRef.current.mode === 'ground' &&
+        !(window as any).__noKimodoMotion;
+      if (mo.active && (nowMs - mo.at > 120 || !free)) endMotion();
+      mo.at = nowMs;
+      if (!free) mo.still = 0;
+      else if (!mo.active) mo.still = ls.speed < 0.05 ? mo.still + dtL : 0;
+      const targetYaw = hasDir ? Math.atan2(_moveDir.x, _moveDir.z) + Math.PI : null;
+      const begin = (kind: 'start' | 'stop' | 'turn', clip: string, t: number, tEnd: number, ts: number, posK: number, yawK: number) => {
+        mo.active = true;
+        mo.kind = kind;
+        mo.clip = clip;
+        mo.t = t;
+        mo.tEnd = tEnd;
+        mo.ts = ts;
+        mo.posK = posK;
+        mo.yawK = yawK;
+        inert.cambio();
+        transitionToAnimation(clip, 0.04, false, ts, t);
+      };
+      if (!mo.active && free) {
+        if (hasDir && ls.speed < 0.05 && mo.still > 0.12 && targetYaw !== null) {
+          const diff = wrapAngle(targetYaw - rotBeforeFacing);
+          if (Math.abs(diff) >= 1.0) {
+            // svolta sul posto: a sinistra (diff > 0) o a destra; mezzo giro solo a sinistra
+            const clip =
+              diff > 2.3 && hasMotion('Kimodo_turn_180') ? 'Kimodo_turn_180' : diff > 0 ? 'Kimodo_turn_left_90' : 'Kimodo_turn_right_90';
+            if (hasMotion(clip) && actions[clip]) {
+              const ty = totalYaw(clip);
+              const yawK = THREE.MathUtils.clamp(diff / ty, 0.5, 2.0);
+              const ts = clip === 'Kimodo_turn_180' ? 1.5 : 1.8;
+              begin('turn', clip, 0, Math.min(clipSeconds(clip) - 0.05, yawDoneAt(clip, 0.97)), ts, 1, yawK);
+            }
+          } else {
+            const clip = runWanted || mash > 0 ? 'Kimodo_run_start' : 'Kimodo_walk_start';
+            const tEnd = nextLeftContact(clip, 0.5);
+            if (hasMotion(clip) && actions[clip] && tEnd !== null) begin('start', clip, 0, tEnd, 1, 1, 1);
+          }
+        } else if (!hasDir && ls.speed > 0.8 && !ls.skidding) {
+          const clip = ls.speed > 2.4 ? 'Kimodo_run_stop' : 'Kimodo_walk_stop';
+          if (hasMotion(clip) && actions[clip]) {
+            const e = findEntry(clip, ls.speed, ls.phase, 1.2);
+            if (e && e.cost < 0.45) {
+              // fine: quando la traccia e' quasi ferma
+              let tEnd = clipSeconds(clip) - 0.2;
+              for (let t = e.t + 0.2; t < clipSeconds(clip); t += 1 / 30) {
+                if (trackSpeed(clip, t) < 0.12) {
+                  tEnd = t;
+                  break;
+                }
+              }
+              const posK = THREE.MathUtils.clamp(ls.speed / Math.max(0.3, trackSpeed(clip, e.t)), 0.6, 1.6);
+              begin('stop', clip, e.t, tEnd, 1, posK, 1);
+            }
+          }
+        }
+      }
+      if (mo.active) {
+        // si interrompe: passa subito al passo normale con la velocita' della clip
+        const speedNow = trackSpeed(mo.clip, mo.t) * mo.posK * mo.ts;
+        if ((mo.kind === 'stop' && hasDir) || (mo.kind === 'start' && !hasDir)) {
+          ls.speed = speedNow;
+          ls.phase = leftPhaseAt(mo.clip, mo.t) ?? ls.phase;
+          endMotion();
+        }
+      }
+      if (mo.active) {
+        const t1 = Math.min(mo.tEnd, mo.t + dtL * mo.ts);
+        sampleMotion(mo.clip, mo.t, _moA);
+        sampleMotion(mo.clip, t1, _moB);
+        let dyaw = (_moB.yaw - _moA.yaw) * mo.yawK;
+        if (mo.kind === 'start' && targetYaw !== null) {
+          // in partenza si puo' ancora correggere la direzione (2.5 rad/s)
+          const d = wrapAngle(targetYaw - rotBeforeFacing);
+          dyaw += THREE.MathUtils.clamp(d, -2.5 * dtL, 2.5 * dtL);
+        }
+        data.rotation = wrapAngle(rotBeforeFacing + dyaw);
+        const fx = -Math.sin(data.rotation);
+        const fz = -Math.cos(data.rotation);
+        const lx = -Math.cos(data.rotation);
+        const lz = Math.sin(data.rotation);
+        const dz = (_moB.z - _moA.z) * mo.posK;
+        const dx = (_moB.x - _moA.x) * mo.posK;
+        resolveAndApplyMovement(fx * dz + lx * dx, fz * dz + lz * dx);
+        ls.speed = dtL > 1e-5 ? Math.hypot(dx, dz) / dtL : ls.speed;
+        ls.turnRate = dtL > 1e-5 ? dyaw / dtL : 0;
+        ls.skidding = false;
+        mo.t = t1;
+        if (mo.t >= mo.tEnd - 1e-4) {
+          // fine della clip: il passo normale (o il riposo) riparte da qui
+          endMotion();
+          if (mo.kind === 'start') {
+            ls.speed = trackSpeed(mo.clip, mo.t) * mo.posK * mo.ts;
+            ls.phase = 0;
+          } else {
+            ls.speed = 0;
+          }
+          // dopo una svolta si parte subito (clip di partenza); dopo il resto si riparte da zero
+          mo.still = mo.kind === 'turn' ? 0.2 : 0;
+          if (mo.kind === 'turn') {
+            // un frame fermi: la partenza (clip) parte dal frame dopo, non lo scatto del passo normale
+            data.state = idleState();
+            applyTransform();
+            return;
+          }
+        } else {
+          data.state = mo.kind === 'stop' ? 'Frena' : mo.kind === 'start' ? 'Si muove' : idleState();
+          applyTransform();
+          return;
+        }
+      }
+    }
     data.rotation = stepLoco(
       ls,
       gunFacingCam ? data.rotation : rotBeforeFacing,
@@ -3008,9 +3167,11 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       if (!lb.active) {
         // entrata: da quello che c'era (un colpo, un idle Kimodo...)
         const prev = actions[data.currentAnim];
-        if (prev && !clips.includes(data.currentAnim)) prev.fadeOut(0.2);
+        const snap = locoSnapRef.current;
+        locoSnapRef.current = false;
+        if (prev && !clips.includes(data.currentAnim)) prev.fadeOut(snap ? 0.03 : 0.2);
         lb.active = true;
-        lb.blendIn = 0;
+        lb.blendIn = snap ? 1 : 0;
         for (const c of clips) {
           const a = actions[c];
           a.stopFading();
@@ -3075,7 +3236,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     } else {
       ls.lean = 0;
       data.state = idleState();
-      if (!kimodoIdle(dtL)) transitionToAnimation(idleName(), 0.2, true);
+      const snapIdle = locoSnapRef.current;
+      locoSnapRef.current = false;
+      if (!kimodoIdle(dtL)) transitionToAnimation(idleName(), snapIdle ? 0.03 : 0.2, true);
     }
 
     applyTransform();

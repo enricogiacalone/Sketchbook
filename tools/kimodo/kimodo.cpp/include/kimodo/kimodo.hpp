@@ -27,6 +27,18 @@ struct prompt_segment {
     unsigned frames = 0;
 };
 
+// A SOMA pose (local rotations xyzw per joint, pelvis height) the generated
+// motion is asked to match for `hold` frames starting at `frame`. `heading` is
+// the facing angle (radians, 0 = +z); `free_xz` leaves the ground position free.
+struct pose_key {
+    unsigned frame = 0;
+    unsigned hold = 1;
+    float heading = 0.F;
+    bool free_xz = false;
+    std::vector<float> local_rotations_xyzw;
+    float root_y = 0.F;
+};
+
 class KIMODO_API model {
 public:
     static std::expected<std::unique_ptr<model>, std::string> load(
@@ -38,6 +50,9 @@ public:
     std::expected<motion_data, std::string> generate_text(
         std::string_view utf8_prompt, unsigned frames, unsigned steps, std::uint64_t seed,
         float text_cfg, float constraint_cfg) const;
+    std::expected<motion_data, std::string> generate_text_posed(
+        std::string_view utf8_prompt, unsigned frames, unsigned steps, std::uint64_t seed,
+        float text_cfg, float constraint_cfg, std::span<const pose_key> keys) const;
     std::expected<motion_data, std::string> generate_text_sequence(
         std::span<const prompt_segment> segments, unsigned transition_frames,
         unsigned steps, std::uint64_t seed, float text_cfg, float constraint_cfg) const;

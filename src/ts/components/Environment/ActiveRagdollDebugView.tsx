@@ -27,7 +27,7 @@ import type { ActiveRagdollSegmentDebug } from './ragdoll/useRagdoll';
 // del segmento con rosso acceso (COLOR_OVER_LIMIT) solo quando quel
 // giunto sta davvero sforando il proprio cono -- il colore di identita'
 // torna appena rientra nel limite.
-const MAX_ACTIVE_SEGMENTS = 20; // margine sopra i 17 di ACTIVE_RAGDOLL_SEGMENTS -- vedi ragdollConfig.ts
+const MAX_ACTIVE_SEGMENTS = 20; // margine sopra i 19 di ACTIVE_RAGDOLL_SEGMENTS -- vedi ragdollConfig.ts
 const COLOR_OVER_LIMIT = new THREE.Color('#ff2222');
 const COLOR_FALLBACK = new THREE.Color('#ffffff'); // segmento non elencato sotto (non dovrebbe succedere, ma niente capsule invisibili per errore)
 

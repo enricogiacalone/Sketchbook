@@ -95,13 +95,13 @@ manifest_rows() {
   node -e '
     const m = require(process.argv[1]);
     for (const a of m.animations) if (!process.argv[2] || a.name === process.argv[2])
-      console.log([a.name, a.seconds ?? 4, a.seed ?? 1, a.prompt].join("\t"));
+      console.log([a.name, a.seconds ?? 4, a.seed ?? 1, a.start ?? "-", a.end ?? "-", a.prompt].join("\t"));
   ' "$MANIFEST" "${1:-}"
 }
 
 # genera una clip grezza in assets-src/kimodo/NOME (senza adattarla)
 generate_one() {
-  local name=$1 prompt=$2 seconds=$3 seed=$4
+  local name=$1 prompt=$2 seconds=$3 seed=$4 start=${5:--} end=${6:--}
   [[ "$name" =~ ^[A-Za-z0-9_]+$ ]] || die "NOME solo lettere, numeri e _ (diventa il nome della clip)"
   check_disk
   [ -x "$BUILD/kmd-generate" ] && [ -f "$MODEL" ] || die "prima: $0 setup"
@@ -112,7 +112,12 @@ generate_one() {
   printf '%s\n' "$prompt" >"$out/prompt.txt"
   say "genero '$name' ($seconds s, seme $seed): $prompt"
   local t0=$SECONDS
-  "$BUILD/kmd-generate" "$MODEL" "$TEXT" "$out/prompt.txt" "$frames" 100 "$seed" "$out" </dev/null 2>&1 | tee -a "$LOG"
+  # start/end: "cartella:fotogramma[:tenuta[:gradi]]" di una posa da rispettare
+  # (relativa alla radice del progetto), vedi "pose" in animations.json
+  local pose=()
+  [ "$start" != "-" ] && pose+=(--start "$REPO/$start")
+  [ "$end" != "-" ] && pose+=(--end "$REPO/$end")
+  "$BUILD/kmd-generate" "$MODEL" "$TEXT" "$out/prompt.txt" "$frames" 100 "$seed" "$out" ${pose[@]+"${pose[@]}"} </dev/null 2>&1 | tee -a "$LOG"
   echo "($((SECONDS - t0)) s)"
   local dst="$REPO/assets-src/kimodo/$name"
   mkdir -p "$dst"
@@ -128,9 +133,9 @@ gen() {
     local row
     row=$(manifest_rows "$name")
     [ -n "$row" ] || die "'$name' non e' in $MANIFEST: serve anche la descrizione"
-    IFS=$'\t' read -r name seconds seed prompt <<<"$row"
+    IFS=$'\t' read -r name seconds seed start end prompt <<<"$row"
   fi
-  generate_one "$name" "$prompt" "$seconds" "$seed"
+  generate_one "$name" "$prompt" "$seconds" "$seed" "${start:--}" "${end:--}"
   retarget
 }
 
@@ -138,15 +143,15 @@ gen() {
 batch() {
   local rows todo=0 done_=0 t0=$SECONDS
   rows=$(manifest_rows)
-  while IFS=$'\t' read -r name seconds seed prompt; do
+  while IFS=$'\t' read -r name seconds seed start end prompt; do
     [ -f "$REPO/assets-src/kimodo/$name/local_rotations_xyzw.f32" ] || todo=$((todo + 1))
   done <<<"$rows"
   say "$todo animazioni da generare (le altre ci sono gia')"
-  while IFS=$'\t' read -r name seconds seed prompt; do
+  while IFS=$'\t' read -r name seconds seed start end prompt; do
     [ -f "$REPO/assets-src/kimodo/$name/local_rotations_xyzw.f32" ] && continue
     done_=$((done_ + 1))
     say "[$done_/$todo] dopo $(((SECONDS - t0) / 60)) min"
-    generate_one "$name" "$prompt" "$seconds" "$seed"
+    generate_one "$name" "$prompt" "$seconds" "$seed" "$start" "$end"
   done <<<"$rows"
   retarget
   say "fatto in $(((SECONDS - t0) / 60)) min"

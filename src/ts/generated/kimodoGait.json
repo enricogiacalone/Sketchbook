@@ -1,0 +1,38 @@
+{
+ "Kimodo_walk_start": {
+  "fps": 30,
+  "leftContacts": [
+   0,
+   0.8,
+   1.833,
+   1.967
+  ]
+ },
+ "Kimodo_walk_stop": {
+  "fps": 30,
+  "leftContacts": [
+   0.5,
+   0.833,
+   1.633,
+   2.3
+  ]
+ },
+ "Kimodo_run_start": {
+  "fps": 30,
+  "leftContacts": [
+   0,
+   1.167,
+   1.8,
+   2.433
+  ]
+ },
+ "Kimodo_run_stop": {
+  "fps": 30,
+  "leftContacts": [
+   0.433,
+   1.133,
+   1.767,
+   2.133
+  ]
+ }
+}
