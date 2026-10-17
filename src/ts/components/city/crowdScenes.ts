@@ -2,6 +2,7 @@ import { spawnAnchoredAgent, crowdAgents, LOOK_CLIP, type CrowdAgent } from './c
 import { getStreetProps } from '../Environment/streetPropsData';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { getRoadOffset } from '../Environment/Road';
+import { onPlanetRebuild } from '../../lib/planet';
 import { worldRng } from '../../lib/worldSeed';
 
 // "usane il piu' possibile in citta', ma con realta' fisica": gente ferma a un
@@ -53,6 +54,9 @@ const toWorld = (cx: number, cz: number, ry: number, lx: number, lz: number): [n
 ];
 
 let spawned: CrowdAgent[] = [];
+onPlanetRebuild(() => {
+  spawned = [];
+});
 
 // da chiamare una volta (idempotente: con l'HMR toglie quelli di prima)
 export function spawnCrowdScenes(furniture: FurnitureLike[]) {

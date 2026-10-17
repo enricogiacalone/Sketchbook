@@ -2,10 +2,12 @@ import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { CuboidCollider, RigidBody } from '@react-three/rapier';
 import Car from '../Vehicles/Car';
+import Motorcycle from '../Vehicles/Motorcycle';
 import { getRoadOffset } from './Road';
 import { getTerrainHeight } from './Terrain';
 import { StaticInstances, type InstanceXform } from './StaticInstances';
 import { worldRng } from '../../lib/worldSeed';
+import { onPlanetRebuild, serviceShiftX } from '../../lib/planet';
 
 // Parcheggi: le auto ferme della citta' stanno qui, non piu' sparse lungo i
 // marciapiedi. Tre piazzali sui blocchi vuoti oltre il bordo ovest della
@@ -14,16 +16,20 @@ import { worldRng } from '../../lib/worldSeed';
 // le auto di muso verso il bordo e la coda sul corsello centrale; i posti sono
 // segnati con le strisce e molti sono occupati.
 
-const LOT_X = -150; // centro dei piazzali (blocco vuoto a ovest)
+let LOT_X = -150 + serviceShiftX(); // centro dei piazzali (blocco vuoto a ovest)
 const LOT_Z = [-90, 30, 150]; // blocchi liberi
 const HALF_X = 10.5;
 const HALF_Z = 12.5;
 const ROW_X = 5.9; // centro delle auto in ogni fila
 const BAYS = 8;
 const PITCH = 3;
-const ROAD_EDGE_X = -124; // dove finisce la carreggiata della strada a x=-120
+let ROAD_EDGE_X = -124 + serviceShiftX(); // dove finisce la carreggiata della strada a x=-120
 const SURF_Y = 0.15; // la quota delle strade (ROAD_Y_OFFSET)
 const OCCUPANCY = 0.72;
+onPlanetRebuild(() => {
+  LOT_X = -150 + serviceShiftX();
+  ROAD_EDGE_X = -124 + serviceShiftX();
+});
 
 const asphaltMat = new THREE.MeshStandardMaterial({ color: '#2b2d31', roughness: 0.9 });
 const stripeMat = new THREE.MeshStandardMaterial({ color: '#e8e8e8', roughness: 0.8 });
@@ -93,8 +99,20 @@ const ParkingLots: React.FC = () => {
   // il raccordo va dal bordo del piazzale (x=-139.5) alla carreggiata (x=-124)
   const apronW = ROAD_EDGE_X - (LOT_X + HALF_X);
 
+  // moto ferme lungo il corsello centrale di ogni piazzale (a meta' tra le due file di auto)
+  const motos = useMemo(() => {
+    const out: Array<{ id: string; x: number; z: number; yaw: number }> = [];
+    LOT_Z.forEach((lz, li) => {
+      [-8, -3, 3, 8].forEach((dz, k) => out.push({ id: `city-moto-${li * 4 + k}`, x: LOT_X + (k % 2 ? 1.3 : -1.3), z: lz + dz, yaw: Math.PI / 2 + (k % 2 ? 0.25 : -0.25) }));
+    });
+    return out;
+  }, []);
+
   return (
     <group>
+      {motos.map((m) => (
+        <Motorcycle key={m.id} id={m.id} position={[m.x, getTerrainHeight(m.x, m.z) + getRoadOffset(m.x, m.z) + SURF_Y + 0.5, m.z]} yaw={m.yaw} />
+      ))}
       {LOT_Z.map((lz) => (
         <group key={lz}>
           {/* asfalto del piazzale e raccordo con la strada: solido, alla quota delle strade */}

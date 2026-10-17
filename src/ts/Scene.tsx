@@ -12,7 +12,6 @@ import DuelArena from './components/Environment/DuelArena';
 import MeteoriteSpawner from './components/Environment/MeteoriteSpawner';
 import Park from './components/Environment/Park';
 import { TreeBatches } from './components/Environment/ParkTrees';
-import Planets from './components/Environment/Planets';
 import PoliceDirector from './components/city/PoliceDirector';
 import ZombieNight from './components/city/ZombieNight';
 import Traffic, { policeDriver } from './components/city/Traffic';
@@ -28,6 +27,9 @@ import HeistMission from './components/Missions/HeistMission';
 import SoldierSpawner from './components/SoldierSpawner';
 import Airplane from './components/Vehicles/Airplane'; // Import Airplane
 import Car from './components/Vehicles/Car'; // Import Car
+import Motorcycle from './components/Vehicles/Motorcycle';
+import { getTerrainHeight } from './components/Environment/Terrain';
+import { getRoadOffset } from './components/Environment/Road';
 import FarCars from './components/Vehicles/FarCars';
 import Helicopter from './components/Vehicles/Helicopter'; // Import Helicopter
 import { useGLTF } from './lib/gltf';
@@ -88,6 +90,17 @@ const POLICE_ROUTE_CROSS2: [number, number][] = [
   [-60, 180],
 ];
 
+// stadi di montaggio: 0 subito, poi uno ogni STAGE_MS
+const STAGE_MS = 450;
+const useMountStages = (): number => {
+  const [stage, setStage] = React.useState(0);
+  React.useEffect(() => {
+    const ids = [1, 2, 3, 4].map((k) => window.setTimeout(() => setStage(k), k * STAGE_MS));
+    return () => ids.forEach((id) => window.clearTimeout(id));
+  }, []);
+  return stage;
+};
+
 const Scene: React.FC = () => {
   const testScene = useStore((state) => state.testScene);
   const isCleanTest = testScene !== 'none';
@@ -99,25 +112,27 @@ const Scene: React.FC = () => {
   // modalita' zombi notturna: niente traffico, polizia e passanti
   const zombieNight = useStore((state) => state.zombieNight);
   const showSkyAtmosphere = !isCleanTest || isRaceTest || isDuelTest;
+  // il mondo si monta a pezzi, uno ogni ~0.5 s (terreno, strade, palazzi, parco e arredo, traffico e missioni):
+  // montarlo tutto insieme congelava il gioco per piu' di un secondo all'arrivo su un pianeta
+  const stage = useMountStages();
 
   return (
     <>
       <Terrain />
       <OllamaProps />
       {isRaceTest && <RaceTrack />}
-      {!isCleanTest && <Road />}
-      {!isCleanTest && !zombieNight && <PoliceDirector />}
-      {!isCleanTest && <ZombieNight />}
-      {!isCleanTest && <CityFlags />}
+      {!isCleanTest && stage >= 1 && <Road />}
+      {!isCleanTest && stage >= 4 && !zombieNight && <PoliceDirector />}
+      {!isCleanTest && stage >= 4 && <ZombieNight />}
+      {!isCleanTest && stage >= 1 && <CityFlags />}
       {(!isCleanTest || isDuelTest) && <Clouds />}
-      <Planets />
       {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}
       {showSkyAtmosphere && <MeteoriteSpawner />}
-      {!isCleanTest && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
-      {!isCleanTest && showSimCitta && <SoldierSpawner />}
+      {!isCleanTest && stage >= 4 && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
+      {!isCleanTest && stage >= 4 && showSimCitta && <SoldierSpawner />}
       {/* Carichiamo i modelli in blocchi separati per non bloccare la fisica */}
       <Suspense fallback={null}>
-        {!isCleanTest && !DEBUG_DISABLE_CARS_AND_ENEMIES && (
+        {!isCleanTest && stage >= 4 && !DEBUG_DISABLE_CARS_AND_ENEMIES && (
           <>
             {/* Spawn Y lowered from 5 -> 1.2 (Claude): with the old cannon-worker
                 setup this height didn't matter -- the car's position was
@@ -134,6 +149,14 @@ const Scene: React.FC = () => {
                 controller is meant to be used (see git history / chat, "cade
                 oltre il terrain e sparisce"). */}
             <FarCars />
+            {/* la moto (Motorcycle.tsx): vicino al punto di partenza, F alla sella a sinistra per salire */}
+            {[
+              ['moto-1', 4, 5, 0.6],
+              ['moto-2', -8, 9, 2.4],
+              ['moto-3', 10, -7, -0.9],
+            ].map(([id, x, z, yaw]) => (
+              <Motorcycle key={id as string} id={id as string} position={[x as number, getTerrainHeight(x as number, z as number) + getRoadOffset(x as number, z as number) + 0.5, z as number]} yaw={yaw as number} />
+            ))}
             {!zombieNight && <Traffic />}
             {/* (le auto ferme stanno nei parcheggi: components/Environment/ParkingLots.tsx) */}
 
@@ -193,7 +216,7 @@ const Scene: React.FC = () => {
             arbitrary in-city coordinates -- same drop height as before (a
             short fall onto a plain CuboidCollider, proven safe for both,
             unlike the raycast-suspension cars). */}
-        {!isCarTest && !isRaceTest && (isCleanTest || !DEBUG_DISABLE_CARS_AND_ENEMIES) && (
+        {!isCarTest && !isRaceTest && stage >= 3 && (isCleanTest || !DEBUG_DISABLE_CARS_AND_ENEMIES) && (
           <>
             <Airplane position={[RUNWAY_CENTER[0], 5, RUNWAY_CENTER[1]]} />
             <Helicopter position={[HELIPORT_CENTER[0], 20, HELIPORT_CENTER[1]]} />
@@ -235,15 +258,15 @@ const Scene: React.FC = () => {
       <Airport />
       {!isCleanTest && (
         <Suspense fallback={null}>
-          <City />
-          <BuildingLeds />
-          <BuildingLedGlow />
-          <Park />
-          <TreeBatches />
-          <CityDetails />
-          <Collectibles />
-          <StoryMission />
-          <HeistMission />
+          {stage >= 2 && <City />}
+          {stage >= 2 && <BuildingLeds />}
+          {stage >= 2 && <BuildingLedGlow />}
+          {stage >= 3 && <Park />}
+          {stage >= 3 && <TreeBatches />}
+          {stage >= 3 && <CityDetails />}
+          {stage >= 4 && <Collectibles />}
+          {stage >= 4 && <StoryMission />}
+          {stage >= 4 && <HeistMission />}
         </Suspense>
       )}
     </>

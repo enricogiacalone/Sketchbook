@@ -8,6 +8,7 @@ import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { BAR } from '../../missions/storyPlaces';
 import { BarDaVito } from './StoryPlaces';
 import { worldRng } from '../../lib/worldSeed';
+import { getPlanetStyle } from '../../lib/planet';
 
 const BLOCK_MIN = 0;
 const BLOCK_MAX = 60;
@@ -252,7 +253,7 @@ const Park: React.FC = () => {
 
     if (treeTemplates.length > 0) {
       const rnd = worldRng('park-trees');
-      const treeCount = 16;
+      const treeCount = Math.round(16 * getPlanetStyle().vegetation);
       for (let i = 0; i < treeCount; i++) {
         for (let attempt = 0; attempt < 6; attempt++) {
           const x = AREA_MIN + rnd() * (AREA_MAX - AREA_MIN);

@@ -1,3 +1,4 @@
+import { onPlanetRebuild } from '../lib/planet';
 import { BANK } from '../components/Environment/streetPropsData';
 import { YARD } from './storyPlaces';
 
@@ -29,13 +30,20 @@ export const LOOT = 3000;
 export const CREW_BONUS = 250;
 
 // le guardie della banca: sul piazzale davanti all'ingresso e sul marciapiede di fronte
-export const BANK_GUARDS: Array<{ x: number; z: number; facing: number }> = [
+const makeBankGuards = (): Array<{ x: number; z: number; facing: number }> => [
   { x: VAULT[0] + 1.5, z: VAULT[1] - 4, facing: Math.PI / 2 },
   { x: VAULT[0] + 1.5, z: VAULT[1] + 4, facing: Math.PI / 2 },
   { x: VAULT[0] + 0.5, z: VAULT[1] - 10, facing: Math.PI / 2 },
   { x: VAULT[0] + 0.5, z: VAULT[1] + 10, facing: Math.PI / 2 },
   { x: VAULT[0] + 15, z: VAULT[1], facing: -Math.PI / 2 },
 ];
+export const BANK_GUARDS = makeBankGuards();
+// la banca si sposta con la taglia del pianeta (lib/planet.ts): si aggiorna sul posto
+onPlanetRebuild(() => {
+  VAULT[0] = BANK.x + BANK.w / 2 + 2.6;
+  VAULT[1] = BANK.z;
+  BANK_GUARDS.splice(0, BANK_GUARDS.length, ...makeBankGuards());
+});
 
 export const HEIST_OBJECTIVES: Record<HeistStep, string> = {
   idle: '',

@@ -27,7 +27,7 @@ export interface DialogueView {
 
 export interface EntityInfo {
   id: string;
-  type: 'player' | 'enemy' | 'police' | 'car' | 'airplane' | 'helicopter' | 'ufo';
+  type: 'player' | 'enemy' | 'police' | 'car' | 'motorcycle' | 'airplane' | 'helicopter' | 'ufo';
   position: [number, number, number];
   rotation: number; // Yaw in radians
 }

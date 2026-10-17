@@ -415,7 +415,7 @@ const PauseMap: React.FC = () => {
       g.strokeStyle = 'rgba(79,195,247,0.05)';
       g.lineWidth = 1;
       g.beginPath();
-      for (let v = -300; v <= 300; v += 60) {
+      for (let v = -Math.floor(WORLD_HALF / 60) * 60; v <= WORLD_HALF; v += 60) {
         const [x0, y0] = toScreen(v, -WORLD_HALF);
         const [, y1] = toScreen(v, WORLD_HALF);
         g.moveTo(Math.round(x0) + 0.5, y0);

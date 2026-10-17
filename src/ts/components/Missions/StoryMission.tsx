@@ -1,3 +1,4 @@
+import { onPlanetRebuild } from '../../lib/planet';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -130,6 +131,10 @@ const NPC_BY_ID: Record<string, NpcDef> = Object.fromEntries(NPCS.map((n) => [n.
 
 // --- Missione 2: Franco, il ragioniere in fuga, all'aeroporto -------------
 const FRANCO_START: [number, number] = [RUNWAY_CENTER[0] + 34, RUNWAY_CENTER[1] + 15];
+onPlanetRebuild(() => {
+  FRANCO_START[0] = RUNWAY_CENTER[0] + 34;
+  FRANCO_START[1] = RUNWAY_CENTER[1] + 15;
+});
 const FRANCO_SEE_DIST = 16; // m: ti vede e scappa
 const FRANCO_CATCH_DIST = 1.7;
 const FRANCO_LOST_DIST = 75; // piu' lontano di cosi': e' scappato

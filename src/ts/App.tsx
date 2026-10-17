@@ -50,11 +50,19 @@ import { useStore } from './store';
 import Ocean from './components/Environment/Ocean';
 import Minimap from './components/UI/Minimap';
 import PauseMap from './components/UI/PauseMap';
+import { getPlanetStyle, usePlanetEpoch } from './lib/planet';
+import WorldGate from './components/WorldGate';
+import PhysicsHost from './components/PhysicsHost';
+import PlanetMenu from './components/UI/PlanetMenu';
+import SpaceHud from './components/UI/SpaceHud';
+import SpacePlanets, { SpaceStars, SpaceSun } from './components/Environment/SpacePlanets';
+import SpaceController from './components/SpaceController';
 import GameFreeze from './components/GameFreeze';
 const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 const CharLab = React.lazy(() => import('./charLab/CharLab'));
 
 const App: React.FC = () => {
+  const planetEpoch = usePlanetEpoch();
   const [isJoined, setIsJoined] = useState(false);
   // "Laboratorio cervello mosca" (WelcomeScreen): scena a parte, vedi src/ts/flyLab
   const [labMode, setLabMode] = useState(false);
@@ -226,6 +234,10 @@ const App: React.FC = () => {
         {isJoined && (
           <Suspense fallback={null}>
             <Sky />
+            <SpacePlanets />
+            <SpaceSun />
+            <SpaceStars />
+            <SpaceController />
             <NightSky />
             <WorldFog />
             {/* <Ocean /> */}
@@ -263,8 +275,8 @@ const App: React.FC = () => {
               these per RigidBody/Collider instead -- see each body's own
               friction/restitution props (e.g. Player.tsx's capsule).
             */}
-            <Physics
-              gravity={[0, -20, 0]}
+            <PhysicsHost
+              gravity={[0, -20 * getPlanetStyle().gravity, 0]}
               // Matches cannon's old `iterations` (solver iterations/step).
               numSolverIterations={15}
               // Matches cannon's old `stepSize` (fixed physics tick rate).
@@ -287,7 +299,12 @@ const App: React.FC = () => {
                   espone world/rapier/step su window per il pausa+passo-
                   singolo dei test del ragdoll, vedi il file stesso. */}
               <RagdollPhysicsDebugBridge />
+              {/* a ogni cambio di pianeta (lib/planet.ts) Scene, giocatore e drone si
+                  smontano e si rimontano da zero (key): i loro corpi escono dal mondo
+                  Rapier e quelli nuovi entrano. Il mondo stesso (<Physics>) NON si
+                  smonta: liberarlo con i figli ancora vivi da' 'unreachable'. */}
               {/* Scene contains the world environment */}
+              <WorldGate>
               <Scene />
               {/* "togli boxman e il drone dalla scena del duello" -- the
                   1v1 duel gives you a combat soldier to control instead
@@ -306,9 +323,11 @@ const App: React.FC = () => {
                       persistent entity (see Drone.tsx), not something
                       Player.tsx spawns/despawns on the fly toggle
                       anymore. */}
+              </WorldGate>
+              {/* il drone resta montato nel viaggio (spazio): il rebase lo sposta (lib/space.ts) */}
               <Drone />
               <PhysicsBridge />
-            </Physics>
+            </PhysicsHost>
 
             <ThirdPersonCamera />
           </Suspense>
@@ -324,7 +343,8 @@ const App: React.FC = () => {
       <OllamaGUI />
       <CityGUI />
       <ScenariosGUI />
-      <Minimap />
+      <Minimap key={planetEpoch} />
+      <SpaceHud />
       <WeaponWheel />
       <RagdollBenchGUI />
       <WeaponHUD />
@@ -349,6 +369,7 @@ const App: React.FC = () => {
 
       {/* pausa in citta': la mappa alla GTA (waypoint e GPS); altrove il velo */}
       {isPaused && isJoined && testScene === 'none' && <PauseMap />}
+      {isPaused && isJoined && testScene === 'none' && <PlanetMenu />}
       {isPaused && !(isJoined && testScene === 'none') && (
         <div
           style={{

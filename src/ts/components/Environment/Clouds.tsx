@@ -1,6 +1,8 @@
 import React, { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { getPlanetStyle, onPlanetRebuild } from '../../lib/planet';
+import { spaceState } from '../../lib/space';
 import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
 
 // "da qui ruba le nuvole" -- nuvole alla maniera di chasergit/gear
@@ -35,9 +37,13 @@ const createFallbackTexture = (): THREE.CanvasTexture => {
   return new THREE.CanvasTexture(canvas);
 };
 
-const CLOUD_COUNT = 40;
+let CLOUD_COUNT = Math.round(40 * getPlanetStyle().cloudiness);
 const PUFFS_PER_CLOUD = 6;
-const TOTAL = CLOUD_COUNT * PUFFS_PER_CLOUD;
+let TOTAL = CLOUD_COUNT * PUFFS_PER_CLOUD;
+onPlanetRebuild(() => {
+  CLOUD_COUNT = Math.round(40 * getPlanetStyle().cloudiness);
+  TOTAL = CLOUD_COUNT * PUFFS_PER_CLOUD;
+});
 const SPREAD = 800;
 const WRAP = 500;
 const BASE_HEIGHT = 150;
@@ -137,6 +143,10 @@ const Clouds: React.FC = () => {
   useFrame((state, delta) => {
     const mesh = meshRef.current;
     if (!mesh) return;
+    // nello spazio (lib/space.ts) le nuvole non ci sono
+    mesh.visible = spaceState.cloud > 0.01;
+    if (!mesh.visible) return;
+    material.opacity = 0.95 * spaceState.cloud;
     const t = state.clock.elapsedTime;
     const cam = state.camera.position;
 

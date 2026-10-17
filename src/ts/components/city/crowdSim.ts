@@ -1,4 +1,5 @@
 import { K } from '../../lib/kimodo';
+import { getPlanet, onPlanetRebuild } from '../../lib/planet';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { getRoadOffset, ROAD_WIDTH, SIDEWALK_WIDTH } from '../Environment/Road';
 import {
@@ -34,14 +35,15 @@ export const CROWD_DRAW_DIST = 190; // le sagome oltre non si disegnano
 export const IDLE_POSE_AT = 0.35;
 
 const GRID_SPACING = 60;
-const GRID_RADIUS = 1;
+// la folla cammina negli isolati interni (un anello in meno della citta')
+let GRID_RADIUS = getPlanet().gridRadius - 1;
 const BLOCK_HALF = GRID_SPACING / 2;
 const SIDEWALK_CENTER_OFFSET = ROAD_WIDTH / 2 + SIDEWALK_WIDTH / 2;
 const SIDE_HALF_LEN = BLOCK_HALF - 12; // lascia spazio tra i passanti e le strisce agli incroci
 const AGENTS_PER_SIDE = 5;
 const CROSSWALK_OFFSET = ROAD_WIDTH / 2 + 2;
 
-const isSkippedBlock = (i: number, j: number): boolean => (i === 0 && j === 0) || (i === -1 && j === 1) || (i === 1 && j === -1);
+const isSkippedBlock = (i: number, j: number): boolean => (i === 0 && j === 0) || (i === -GRID_RADIUS && j === GRID_RADIUS) || (i === GRID_RADIUS && j === -GRID_RADIUS);
 
 export const CIVILIAN_COLORS = ['#8d6e63', '#607d8b', '#9e9d24', '#6d4c41', '#78909c', '#a1887f', '#5d4037', '#827717', '#455a64'];
 export const WALK_CLIPS = ['Walk'];
@@ -318,6 +320,13 @@ function makeAgents(): CrowdAgent[] {
 export const crowdAgents: CrowdAgent[] = makeAgents();
 // agente assegnato a ciascun corpo vero del pool (null = libero)
 export const crowdSlots: (CrowdAgent | null)[] = Array.from({ length: CROWD_MAX_SLOTS }, () => null);
+// cambio pianeta: la folla si rigenera sul posto (gli array sono stabili)
+onPlanetRebuild(() => {
+  GRID_RADIUS = getPlanet().gridRadius - 1;
+  crowdAgents.length = 0;
+  crowdAgents.push(...makeAgents());
+  crowdSlots.fill(null);
+});
 // primo corpo libero tra quelli in uso (-1 = nessuno)
 const freeSlot = () => {
   for (let s = 0; s < slotCount; s++) if (!crowdSlots[s]) return s;

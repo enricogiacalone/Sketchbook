@@ -213,7 +213,7 @@ const CityPlayer: React.FC<{ userName: string }> = ({ userName }) => {
       const out: string[] = [];
       if (showCar) out.push('duel-car');
       for (const [id, e] of useStore.getState().entities)
-        if ((e.type === 'car' || e.type === 'helicopter') && !isRemoteDriven(id)) out.push(id);
+        if ((e.type === 'car' || e.type === 'motorcycle' || e.type === 'helicopter') && !isRemoteDriven(id)) out.push(id);
       return out;
     },
     [showCar]

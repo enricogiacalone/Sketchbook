@@ -15,6 +15,7 @@ import CityClimbables from './CityClimbables';
 import FireEscapes from './FireEscapes';
 import CityMonuments from './CityMonuments';
 import { worldRng } from '../../lib/worldSeed';
+import { getPlanet, isPlazaBlock, onPlanetRebuild } from '../../lib/planet';
 import { useStore } from '../../store';
 import { spawnCrowdScenes } from '../city/crowdScenes';
 
@@ -24,7 +25,7 @@ import { spawnCrowdScenes } from '../city/crowdScenes';
 // so this stuff only shows up where there's actually a city block to
 // belong to, not scattered across the empty outer ring of the road grid.
 const GRID_SPACING = 60;
-const GRID_RADIUS = 2; // matches City.tsx's gridRadius
+let GRID_RADIUS = getPlanet().gridRadius; // matches City.tsx's gridRadius
 const BLOCK_HALF = GRID_SPACING / 2;
 // Distance from a road's centerline to the middle of its sidewalk band --
 // mirrors the sidewalkOuter/SIDEWALK_HEIGHT math in Road.tsx's
@@ -37,8 +38,7 @@ const EDGE_SLOT_OFFSET = 12;
 
 const isSkippedBlock = (i: number, j: number): boolean =>
   (i === 0 && j === 0) || // park
-  (i === -2 && j === 2) || // plaza -- matches City.tsx's CITY_LAYOUT.plazas
-  (i === 2 && j === -2); // plaza
+  isPlazaBlock(i, j); // plaza -- matches City.tsx's CITY_LAYOUT.plazas
 
 // --- Small street props -----------------------------------------------
 
@@ -244,6 +244,10 @@ const SIGN_COLORS = ['#1565c0', '#2e7d32', '#f9a825', '#ef6c00'];
 // anche la folla (le panchine dove ci si siede: city/crowdScenes.ts).
 export type CityFurniture = Array<{ kind: 'bench' | 'trash' | 'hydrant' | 'sign'; x: number; z: number; rotationY: number; color?: string }>;
 let cityDetailsCache: { furniture: CityFurniture; parkedCars: Array<{ x: number; z: number; rotationY: number }>; billboards: Array<{ x: number; z: number; rotationY: number; schemeIndex: number }> } | null = null;
+onPlanetRebuild(() => {
+  GRID_RADIUS = getPlanet().gridRadius;
+  cityDetailsCache = null;
+});
 export function buildCityDetails() {
   if (cityDetailsCache) return cityDetailsCache;
 

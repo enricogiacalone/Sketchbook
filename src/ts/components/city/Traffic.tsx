@@ -7,6 +7,8 @@ import { getRoadOffset, ROAD_OFFSETS } from '../Environment/Road';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { buildCarBatches } from '../Vehicles/FarCars';
 import Car, { DEFAULT_CAR_SCALE, makeTrafficDriver, type TrafficDriver } from '../Vehicles/Car';
+import TrafficMoto from '../Vehicles/TrafficMoto';
+import { getPlanet, getPlanetStyle, onPlanetRebuild } from '../../lib/planet';
 import { crowdAgents } from './crowdSim';
 import { allyRegistry } from './npcCombat';
 import { copRegistry, pickRoadSpawn, wanted } from '../../lib/wanted';
@@ -21,7 +23,10 @@ import { signalClock, signalFor } from '../../lib/traffic';
 // giocatore ricevono un corpo cinematico (pool) per urtare, essere urtate e
 // investire i pedoni.
 
-const N_CARS = 30;
+const carsForPlanet = () => Math.max(8, Math.round(30 * getPlanetStyle().traffic * (getPlanet().gridRadius / 2)));
+let N_CARS = carsForPlanet(); // dal pianeta (lib/planet.ts)
+// moto del traffico: stessa simulazione delle auto (corsie, semafori, code), disegnate da sole (TrafficMoto.tsx)
+const N_MOTOS = 8;
 // volanti della polizia: auto del traffico come le altre (corsie, semafori, code)
 // finche' non c'e' un ricercato a 2+ stelle; allora riprende la guida l'IA
 // d'inseguimento della Car (patrolRoute), poi tornano in corsia
@@ -37,7 +42,12 @@ const PHYS_DIST = 42; // le auto entro questa distanza dal giocatore diventano f
 const PHYS_RELEASE_DIST = 58;
 const RESPAWN_DIST = 190;
 const G = 60; // distanza tra le strade
-const LIM = ROAD_OFFSETS[ROAD_OFFSETS.length - 1];
+let LIM = ROAD_OFFSETS[ROAD_OFFSETS.length - 1];
+onPlanetRebuild(() => {
+  N_CARS = carsForPlanet();
+  LIM = ROAD_OFFSETS[ROAD_OFFSETS.length - 1];
+  policeDrivers.clear();
+});
 const LANE = 1.4;
 // dal centro dell'incrocio: la linea di stop sta a 9.2 m (segnaletica a terra,
 // streetPropsData.ts) e il centro dell'auto a mezza lunghezza prima
@@ -74,6 +84,7 @@ interface TCar {
   tint: number;
   phys: number; // indice dell'auto fisica del pool, -1 = solo simulata
   police: boolean;
+  moto: boolean;
   driver: TrafficDriver | null; // auto fisica fissa (polizia)
   chasing: boolean;
   waitT: number;
@@ -129,6 +140,7 @@ function makeCar(id: number): TCar {
     tint: id % TINTS.length,
     phys: -1,
     police: false,
+    moto: false,
     driver: null,
     chasing: false,
     waitT: 0,
@@ -287,6 +299,13 @@ const Traffic: React.FC = () => {
       d.yaw = c.yaw;
       d.active = true;
     });
+    for (let i = 0; i < N_MOTOS; i++) {
+      const c = makeCar(N_CARS + POLICE_CAR_IDS.length + i);
+      c.moto = true;
+      c.cruise = rnd(10, 14.5);
+      respawn(c, cars.current, 0, 0, false);
+      cars.current.push(c);
+    }
   }
 
   useEffect(() => {
@@ -596,7 +615,7 @@ const Traffic: React.FC = () => {
       }
       // assegnazione: le piu' vicine senza auto fisica
       const cand = list
-        .filter((c) => c.phys < 0 && !c.police)
+        .filter((c) => c.phys < 0 && !c.police && !c.moto)
         .map((c) => ({ c, d: Math.hypot(c.x - pp[0], c.z - pp[2]) }))
         .filter((o) => o.d < PHYS_DIST)
         .sort((a, b) => a.d - b.d);
@@ -622,7 +641,7 @@ const Traffic: React.FC = () => {
     // disegno: un'istanza per auto
     let n = 0;
     for (const c of list) {
-      if (c.phys >= 0 || c.driver) continue; // si disegna da se' (auto fisica)
+      if (c.phys >= 0 || c.driver || c.moto) continue; // si disegna da se' (auto fisica, moto)
       _q.setFromAxisAngle(_up, c.yaw);
       _p.set(c.x, c.y, c.z);
       _m.compose(_p, _q, _sc);
@@ -658,6 +677,10 @@ const Traffic: React.FC = () => {
           receiveShadow
           frustumCulled={false}
         />
+      ))}
+      {/* le moto del traffico (la posizione la scrive la simulazione sopra) */}
+      {cars.current.filter((c) => c.moto).map((c) => (
+        <TrafficMoto key={c.id} car={c} />
       ))}
       {/* le auto fisiche vere del pool: ferme e nascoste a riposo, guidate dal traffico quando servono */}
       {Array.from({ length: POOL }, (_, k) => {

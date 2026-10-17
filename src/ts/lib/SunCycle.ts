@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { useStore } from '../store';
+import { spaceState } from './space';
 
 // Shared day/night cycle math -- "sistemiamo il cielo... lo vorrei piu
 // realistico". Used to live only inline inside Sky.tsx's useFrame, with no
@@ -27,6 +28,7 @@ export const DAY_CYCLE_SECONDS = 360; // full day/night in 360s -- user clarifie
 // north/south -- purely cosmetic variety, doesn't affect correctness.
 const SUN_PATH_TILT = Math.PI * 0.12;
 const UP_AXIS = new THREE.Vector3(0, 1, 0);
+const _spaceSun = new THREE.Vector3();
 
 // (si parte di giorno: vedi FIXED_DAY_HOUR sotto)
 
@@ -69,6 +71,10 @@ export const getSunDirection = (elapsedTime: number): THREE.Vector3 => {
   const a = (timeOfDay / 24) * Math.PI * 2;
   const dir = new THREE.Vector3(0, -Math.cos(a), -Math.sin(a));
   dir.applyAxisAngle(UP_AXIS, SUN_PATH_TILT);
+  // nello spazio la luce viene dal sole vero (lib/space.ts)
+  if (spaceState.sunBlend > 0.001) {
+    dir.lerp(_spaceSun.set(spaceState.sunDir[0], spaceState.sunDir[1], spaceState.sunDir[2]), spaceState.sunBlend).normalize();
+  }
   return dir;
 };
 

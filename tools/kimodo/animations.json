@@ -310,6 +310,62 @@
       "seconds": 3,
       "seed": 8711,
       "prompt": "a person waves hello with the right hand"
+    },
+    {
+      "name": "moto_ride",
+      "seconds": 4,
+      "seed": 201,
+      "loop": {
+        "minSeconds": 2
+      },
+      "prompt": "A person sits on a motorcycle riding forward, torso leaning slightly forward, both hands gripping the handlebars, both feet resting on the footpegs, the head looking ahead at the road.",
+      "group": "moto"
+    },
+    {
+      "name": "moto_stopped",
+      "seconds": 4,
+      "seed": 202,
+      "loop": {
+        "minSeconds": 2
+      },
+      "prompt": "A person sits on a stationary motorcycle with the left foot planted on the ground, the right foot on the footpeg and both hands on the handlebars, waiting with small natural movements.",
+      "group": "moto"
+    },
+    {
+      "name": "moto_mount",
+      "seconds": 3,
+      "seed": 203,
+      "start": "assets-src/kimodo/walk_start:0:8",
+      "prompt": "A person standing at the left side of a motorcycle swings the right leg over the seat, sits down, grabs the handlebars with both hands and places both feet on the footpegs.",
+      "group": "moto"
+    },
+    {
+      "name": "moto_dismount",
+      "seconds": 3,
+      "seed": 204,
+      "end": "assets-src/kimodo/walk_start:0:8",
+      "prompt": "A person sitting on a motorcycle lets go of the handlebars, lifts the right leg over the seat and steps down on the left side of the motorcycle, then stands still.",
+      "group": "moto"
+    },
+    {
+      "name": "moto_lean_left",
+      "seconds": 3,
+      "seed": 205,
+      "loop": {
+        "minSeconds": 1.5
+      },
+      "prompt": "A person riding a motorcycle leans the whole body to the left through a long left curve, hands on the handlebars, left knee slightly out, then stays leaned.",
+      "group": "moto"
+    },
+    {
+      "name": "moto_lean_right",
+      "seconds": 3,
+      "seed": 206,
+      "loop": {
+        "minSeconds": 1.5
+      },
+      "prompt": "A person riding a motorcycle leans the whole body to the right through a long right curve, hands on the handlebars, right knee slightly out, then stays leaned.",
+      "group": "moto"
     }
   ]
 }

@@ -5,7 +5,10 @@
 // ricordato nel browser. Va letto PRIMA di caricare il gioco (main.tsx):
 // la citta' si genera quando il suo modulo viene importato.
 
+import { DEFAULT_GRID_RADIUS, profileFromSeed, setPlanet, type PlanetProfile } from './planet';
+
 const LS_KEY = 'sketchbook-world-seed';
+const LS_KEY_GRID = 'sketchbook-world-grid';
 let seed = 1;
 
 export const getWorldSeed = () => seed;
@@ -25,37 +28,67 @@ async function fetchJson(url: string, init?: RequestInit, timeoutMs = 1500): Pro
   }
 }
 
-const readLocal = (): number | null => {
+const readLocal = (): { seed: number; gridRadius?: number } | null => {
   try {
     const v = Number(localStorage.getItem(LS_KEY));
-    return Number.isInteger(v) && v > 0 ? v : null;
+    if (!(Number.isInteger(v) && v > 0)) return null;
+    const g = Number(localStorage.getItem(LS_KEY_GRID));
+    return { seed: v, gridRadius: Number.isInteger(g) && g > 0 ? g : undefined };
   } catch {
     return null;
   }
 };
-const writeLocal = (v: number) => {
+const writeLocal = (p: PlanetProfile) => {
   try {
-    localStorage.setItem(LS_KEY, String(v));
+    localStorage.setItem(LS_KEY, String(p.seed));
+    localStorage.setItem(LS_KEY_GRID, String(p.gridRadius));
   } catch {
     /* niente */
   }
 };
 
+// legge il pianeta salvato (server, se no il browser) e lo imposta
 export async function initWorldSeed(): Promise<number> {
   const res = await fetchJson('/api/world');
   const fromServer = Number(res?.seed);
-  if (Number.isInteger(fromServer) && fromServer > 0) seed = fromServer;
-  else seed = readLocal() ?? Math.floor(Math.random() * 2147483646) + 1;
-  writeLocal(seed);
+  let profile: PlanetProfile;
+  if (Number.isInteger(fromServer) && fromServer > 0) {
+    const g = Number(res?.gridRadius);
+    profile = profileFromSeed(fromServer, Number.isInteger(g) && g > 0 ? g : DEFAULT_GRID_RADIUS);
+  } else {
+    const l = readLocal();
+    profile = l ? profileFromSeed(l.seed, l.gridRadius ?? DEFAULT_GRID_RADIUS) : profileFromSeed(Math.floor(Math.random() * 2147483646) + 1);
+  }
+  seed = profile.seed;
+  setPlanet(profile);
+  writeLocal(profile);
   return seed;
 }
 
-// nuova citta': nuovo seme (sul server se c'e'), poi si ricarica la pagina
-export async function reseedWorld() {
-  const res = await fetchJson('/api/world/reseed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-  const next = Number(res?.seed);
-  writeLocal(Number.isInteger(next) && next > 0 ? next : Math.floor(Math.random() * 2147483646) + 1);
+// cambio pianeta a runtime (lib/warp.ts): il seme dei numeri casuali segue il profilo
+export function applyWorldSeed(profile: PlanetProfile) {
+  seed = profile.seed;
+  setPlanet(profile);
+  writeLocal(profile);
+}
+
+// cambio pianeta con ricarica: salva il profilo (server e browser) e ricarica la pagina.
+// La ricarica smonta tutto e ricrea da zero il mondo fisico Rapier: le
+// ricariche a caldo danno errori noti ("unreachable / recursive use").
+export async function travelToPlanet(profile: PlanetProfile) {
+  const res = await fetchJson('/api/world/reseed', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ seed: profile.seed, gridRadius: profile.gridRadius }),
+  });
+  void res;
+  writeLocal(profile);
   window.location.reload();
+}
+
+// nuova citta': nuovo seme, poi si ricarica la pagina
+export async function reseedWorld() {
+  await travelToPlanet(profileFromSeed(Math.floor(Math.random() * 2147483646) + 1));
 }
 
 // numeri casuali ripetibili (mulberry32): uno "stream" per ogni cosa che si

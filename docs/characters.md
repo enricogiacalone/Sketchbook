@@ -74,3 +74,36 @@ Ogni gruppo ha un menu "Prova" che fa ripetere la clip al manichino. La cartella
 vero (`idleConfig` in `lib/kimodo.ts`, letto ogni frame da `PlayerCombatSoldier`): riposo di base, variazioni on/off, ogni quanti
 secondi (da/fino a), peso di ogni clip (0 = mai) e prova. Predefinito: respiro di base, variazioni shift_weight x2 e fidget.
 Tra una clip di prova e l'altra (e quando si toglie la prova) il manichino torna al riposo vero del giocatore (`benchRestClip`: il respiro configurato), non alla guardia da combattimento (`Fighting Idle`).
+
+## Moto
+
+- `components/Vehicles/Motorcycle.tsx` (fisica e comandi), `MotorcycleModel.tsx` (modello fatto di forme semplici, nessun file),
+  `lib/motorcycleGeometry.ts` (misure: interasse 1,44 m, sella a 0,8 m, manopole, pedane, ingresso a sinistra).
+- Fisica "arcade": corpo rigido con le rotazioni bloccate a velocita' comandata (gas W, freno S, sterzo A/D, Spazio = freno a mano), sterzo
+  "a bicicletta" (v * tan(sterzo) / interasse, meno efficace ad alta velocita'), massimo ~115 km/h; inclinazione in curva e beccheggio
+  solo nel disegno (gruppo interno), quindi il pilota si inclina con la moto (la sella e' lo stesso gruppo). Attrito con `Min` a zero:
+  con la media col terreno le sfere-ruota si inchiodavano.
+- Entrata/uscita: stesso meccanismo delle auto in `PlayerCombatSoldier` (F vicino all'ingresso, nodi `seat_1` / `entrance_1`); sulla moto
+  niente portiera, e le capsule solide del pilota si parcheggiano finche' e' in sella (`ragdoll.park()`), altrimenti urtano la moto.
+  Entita' di tipo `motorcycle` (`store.ts`), `currentControllable` resta `car`. Nella citta' c'e' una moto (`moto-1`) vicino al punto di
+  partenza (`Scene.tsx`); nel laboratorio il pulsante "+ Moto".
+- **Animazioni del pilota: da generare con Kimodo** (a unita' collegata). I prompt sono in `tools/kimodo/animations.json`, gruppo `moto`:
+  `moto_ride`, `moto_stopped` (loop), `moto_mount` (parte dalla posa canonica), `moto_dismount` (finisce sulla posa canonica),
+  `moto_lean_left`, `moto_lean_right` (loop). Comando: `for n in moto_ride moto_stopped moto_mount moto_dismount moto_lean_left moto_lean_right; do npm run kimodo -- gen $n; done`.
+  Riferimento dell'origine del personaggio: come `Driving` dell'auto (`VEH_SEAT.motorcycle`: 0,45 m sotto la sella). Finche' le clip
+  mancano il giocatore usa `Driving` / `Sitting_Enter` / `Sitting_Exit`; con le clip presenti (nomi in `K.moto`) usa ride/stopped (a
+  velocita' 1,5 m/s), mount e dismount. Le due clip di inclinazione non sono ancora collegate.
+- Laboratorio: pavimento a quadretti da 1 m; il labirinto parte spento (pulsante "Labirinto").
+
+### Moto in citta'
+
+- Ferme: 3 vicino al punto di partenza (`Scene.tsx`: moto-1..3) e 12 lungo il corsello centrale dei tre parcheggi (`ParkingLots.tsx`: city-moto-0..11),
+  tutte guidabili (`Motorcycle.tsx`).
+- Nel traffico: 8 moto (`N_MOTOS` in `Traffic.tsx`), con un pilota seduto e un colore a testa. Sono "auto" della stessa simulazione (corsie,
+  semafori, code, svolte, panico agli spari, rinnovo lontano dal giocatore) ma non entrano nel pool delle auto fisiche e non sono disegnate in blocco:
+  le disegna `TrafficMoto.tsx` (inclinata in curva dalla velocita' di rotazione, ruote e sterzo che girano, nascosta oltre 170 m) con un corpo
+  cinematico per urtare i personaggi. Il pilota usa `Kimodo_moto_ride` se c'e', altrimenti `Driving`.
+
+## Sospensioni della moto
+
+`lib/motoSuspension.ts`: massa sospesa (telaio, sella, pilota) con due gradi di liberta' (sobbalzo e beccheggio), molla + smorzatore come la macchina ma piu' dure (`HEAVE_W`, `PITCH_W`, smorzamento ~0,35). Frenando la moto si abbassa sull'avantreno, accelerando si impenna un po'; dossi e salti la fanno rimbalzare. `MotorcycleModel` separa parte sospesa (telaio, foderi forcella, forcellone, mono) e non sospesa (ruote, steli dorati); `applyMotoSuspension()` aggiorna forcellone e mono-ammortizzatore. Usato da `Motorcycle.tsx` e `TrafficMoto.tsx`; la sella (`seat_1`) e' sulla massa sospesa, quindi il pilota segue.

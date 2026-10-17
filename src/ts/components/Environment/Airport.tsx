@@ -1,6 +1,7 @@
 import React, { useRef } from "react";
 import * as THREE from "three";
 import { getTerrainHeight } from "./Terrain";
+import { onPlanetRebuild, planetGeometry } from "../../lib/planet";
 
 // Placed well south of the city grid (which spans roughly x/z in
 // [-120, 180], see City.tsx's gridRadius=2 blocks) and well clear of the
@@ -10,10 +11,16 @@ import { getTerrainHeight } from "./Terrain";
 // Exported so Scene.tsx can spawn the Airplane/Helicopter directly on top
 // of their own pad instead of at their old, somewhat arbitrary in-city
 // coordinates.
-export const RUNWAY_CENTER: [number, number] = [0, -260];
+// (a 80 m oltre l'ultima strada: -260 per la citta' di taglia 2)
+export const RUNWAY_CENTER: [number, number] = [0, -(planetGeometry().roadExtent + 80)];
+// (tuple stabili: al cambio pianeta si aggiornano sul posto)
+onPlanetRebuild(() => {
+  RUNWAY_CENTER[1] = -(planetGeometry().roadExtent + 80);
+  HELIPORT_CENTER[1] = RUNWAY_CENTER[1];
+});
 export const RUNWAY_LENGTH = 200;
 export const RUNWAY_WIDTH = 18;
-export const HELIPORT_CENTER: [number, number] = [140, -260];
+export const HELIPORT_CENTER: [number, number] = [140, RUNWAY_CENTER[1]];
 export const HELIPORT_RADIUS = 14;
 
 const _dashDummy = new THREE.Object3D();

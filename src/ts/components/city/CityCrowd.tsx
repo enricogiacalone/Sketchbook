@@ -12,6 +12,7 @@ import { CITY_LAYOUT, getBuildingDetails } from '../Environment/City';
 import { ROAD_OFFSETS, ROAD_WIDTH } from '../Environment/Road';
 import { insideStatics, setCrowdStatics } from './crowdObstacles';
 import { BANK, getStreetProps, HOSPITAL, POLICE_STATION } from '../Environment/streetPropsData';
+import { onPlanetRebuild } from '../../lib/planet';
 import { AIM_CHEST_Y, registerAimTargets } from '../../lib/aimTargets';
 import {
   assignCrowdSlots,
@@ -80,6 +81,8 @@ function buildCrowdStatics() {
 
 // auto: il collider cuboide piu' grande del telaio, cercato una volta
 const carColliderOf = new Map<number, number>();
+// (gli handle Rapier si riusano nel mondo nuovo)
+onPlanetRebuild(() => carColliderOf.clear());
 
 const Crowd: React.FC = () => {
   const [allies, setAllies] = useState<

@@ -188,7 +188,11 @@ const newSeed = () => Math.floor(Math.random() * 2147483646) + 1;
 app.get("/api/world", (req, res) => {
   db.get(`SELECT value FROM world WHERE key = 'seed'`, [], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
-    if (row) return res.json({ seed: Number(row.value) });
+    if (row) {
+      return db.get(`SELECT value FROM world WHERE key = 'grid'`, [], (e0, g) =>
+        res.json({ seed: Number(row.value), gridRadius: g ? Number(g.value) : null })
+      );
+    }
     const seed = newSeed();
     db.run(`INSERT OR IGNORE INTO world (key, value) VALUES ('seed', ?)`, [String(seed)], (e) => {
       if (e) return res.status(500).json({ error: e.message });
@@ -202,9 +206,13 @@ app.get("/api/world", (req, res) => {
 
 app.post("/api/world/reseed", (req, res) => {
   const seed = Number.isInteger(req.body?.seed) && req.body.seed > 0 ? req.body.seed : newSeed();
-  db.run(`INSERT OR REPLACE INTO world (key, value) VALUES ('seed', ?)`, [String(seed)], (err) =>
-    err ? res.status(500).json({ error: err.message }) : res.json({ seed })
-  );
+  // dimensione della mappa del pianeta (lib/planet.ts); senza, la deriva il client dal seme
+  const grid = Number.isInteger(req.body?.gridRadius) && req.body.gridRadius > 0 && req.body.gridRadius < 10 ? req.body.gridRadius : null;
+  db.run(`INSERT OR REPLACE INTO world (key, value) VALUES ('seed', ?)`, [String(seed)], (err) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (grid === null) return db.run(`DELETE FROM world WHERE key = 'grid'`, [], () => res.json({ seed, gridRadius: null }));
+    db.run(`INSERT OR REPLACE INTO world (key, value) VALUES ('grid', ?)`, [String(grid)], () => res.json({ seed, gridRadius: grid }));
+  });
 });
 
 const validPlayer = (p) => typeof p === "string" && p.length > 0 && p.length <= 40;

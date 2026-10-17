@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useStore } from '../../store';
 import { acquireDebugGui, debugSection, releaseDebugGui } from '../../lib/debugGui';
+import { skySettings } from '../../lib/space';
 import { adaptiveResInfo } from '../Environment/AdaptiveResolution';
 
 const GraphicsGUI: React.FC = () => {
@@ -14,6 +15,12 @@ const GraphicsGUI: React.FC = () => {
       },
       set toon(v: boolean) {
         st().setToonStyle(v);
+      },
+      get skyShader() {
+        return skySettings.shader;
+      },
+      set skyShader(v: boolean) {
+        skySettings.shader = v;
       },
       get giornata() {
         return st().dayCycle;
@@ -72,6 +79,7 @@ const GraphicsGUI: React.FC = () => {
     };
     const ctrls = [
       folder.add(bind, 'toon').name('Stile toon').listen(),
+      folder.add(bind, 'skyShader').name('Shader del cielo').listen(),
       folder.add(bind, 'giornata').name('Scorre la giornata (giorno/notte)').listen(),
       folder.add(bind, 'zombi').name('Modalità zombi notturna').listen(),
       folder.add(bind, 'adattiva').name('Risoluzione adattiva').listen(),

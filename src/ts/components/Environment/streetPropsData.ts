@@ -1,6 +1,7 @@
 import { CITY_LAYOUT } from './City';
 import { ROAD_OFFSETS, ROAD_WIDTH, SIDEWALK_WIDTH, SIDEWALK_HEIGHT, ROAD_Y_OFFSET } from './Road';
 import { worldRng } from '../../lib/worldSeed';
+import { onPlanetRebuild, serviceShiftX } from '../../lib/planet';
 import type { InstanceXform } from './StaticInstances';
 
 // Arredo urbano: dove sta ogni cosa. Tutto calcolato una volta sola e sempre
@@ -11,23 +12,44 @@ import type { InstanceXform } from './StaticInstances';
 // (StreetProps.tsx); qui i dati, i collider e gli ostacoli per la folla.
 
 export const SW_Y = ROAD_Y_OFFSET + SIDEWALK_HEIGHT; // quota del marciapiede
-export const LOT_RECTS = [-90, 30, 150].map((z) => ({ minX: -163, maxX: -122, minZ: z - 14, maxZ: z + 14 }));
-// Ospedale e stazione di polizia (CityServices.tsx): blocchi vuoti a ovest
-export const HOSPITAL = { x: -148, z: -30, w: 30, d: 22, h: 15 };
-export const POLICE_STATION = { x: -148, z: 90, w: 30, d: 22, h: 12 };
-// la Banca Centrale (missione del colpo, missions/heist.ts): angolo sud-ovest
-export const BANK = { x: -148, z: -150, w: 32, d: 24, h: 14 };
+// (il blocco di servizio a ovest segue la taglia del pianeta: serviceShiftX).
+// Oggetti stabili riempiti sul posto (applyServices): al cambio pianeta chi li
+// ha importati li ritrova aggiornati.
 const rectOf = (b: { x: number; z: number; w: number; d: number }, m = 0) => ({
   minX: b.x - b.w / 2 - m,
   maxX: b.x + b.w / 2 + m,
   minZ: b.z - b.d / 2 - m,
   maxZ: b.z + b.d / 2 + m,
 });
-const EXCLUDE = [...LOT_RECTS, rectOf(HOSPITAL, 2), rectOf(POLICE_STATION, 2), rectOf(BANK, 2)];
-
+export const LOT_RECTS: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }> = [];
+// Ospedale e stazione di polizia (CityServices.tsx): blocchi vuoti a ovest
+export const HOSPITAL = { x: 0, z: -30, w: 30, d: 22, h: 15 };
+export const POLICE_STATION = { x: 0, z: 90, w: 30, d: 22, h: 12 };
+// la Banca Centrale (missione del colpo, missions/heist.ts): angolo sud-ovest
+export const BANK = { x: 0, z: -150, w: 32, d: 24, h: 14 };
+let EXCLUDE: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }> = [];
 // dove si respawna (davanti agli ingressi, UI/PlayerFate.tsx)
-export const HOSPITAL_SPAWN: [number, number] = [HOSPITAL.x + HOSPITAL.w / 2 + 5, HOSPITAL.z];
-export const POLICE_SPAWN: [number, number] = [POLICE_STATION.x + POLICE_STATION.w / 2 + 5, POLICE_STATION.z];
+export const HOSPITAL_SPAWN: [number, number] = [0, 0];
+export const POLICE_SPAWN: [number, number] = [0, 0];
+function applyServices() {
+  const SX = serviceShiftX();
+  LOT_RECTS.length = 0;
+  for (const z of [-90, 30, 150]) LOT_RECTS.push({ minX: -163 + SX, maxX: -122 + SX, minZ: z - 14, maxZ: z + 14 });
+  HOSPITAL.x = -148 + SX;
+  POLICE_STATION.x = -148 + SX;
+  BANK.x = -148 + SX;
+  EXCLUDE = [...LOT_RECTS, rectOf(HOSPITAL, 2), rectOf(POLICE_STATION, 2), rectOf(BANK, 2)];
+  HOSPITAL_SPAWN[0] = HOSPITAL.x + HOSPITAL.w / 2 + 5;
+  HOSPITAL_SPAWN[1] = HOSPITAL.z;
+  POLICE_SPAWN[0] = POLICE_STATION.x + POLICE_STATION.w / 2 + 5;
+  POLICE_SPAWN[1] = POLICE_STATION.z;
+}
+applyServices();
+onPlanetRebuild(() => {
+  applyServices();
+  cache = null;
+  markCache = null;
+});
 
 export type GeoKey = 'box' | 'cyl' | 'sph' | 'plane';
 export type MatKey = 'paint' | 'metal' | 'glass' | 'neon' | 'dark';

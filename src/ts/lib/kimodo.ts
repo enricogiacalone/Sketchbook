@@ -32,6 +32,16 @@ export const K = {
   idleVariations: ['Kimodo_idle_shift_weight', 'Kimodo_idle_shift_weight', 'Kimodo_idle_fidget'],
   // passo laterale (era "idle_look": non e' un riposo): per spostarsi lungo un muro in copertura
   sideStep: 'Kimodo_side_step',
+  // moto (tools/kimodo/animations.json, gruppo 'moto': i prompt ci sono, le clip vanno generate a unita' collegata:
+  // `npm run kimodo -- gen moto_ride` ecc.). Finche' mancano il giocatore usa le clip dell'auto (Driving, Sitting_*)
+  moto: {
+    ride: 'Kimodo_moto_ride',
+    stopped: 'Kimodo_moto_stopped',
+    mount: 'Kimodo_moto_mount',
+    dismount: 'Kimodo_moto_dismount',
+    leanLeft: 'Kimodo_moto_lean_left',
+    leanRight: 'Kimodo_moto_lean_right',
+  },
   // folla
   crowdIdles: ['Kimodo_look_around', 'Kimodo_wait_impatient', 'Kimodo_stretch', 'Kimodo_phone_talk'],
   panicRun: 'Kimodo_panic_run',

@@ -1,3 +1,5 @@
+import { droneRebase, getSpaceBoost, PLANET_R, SUN_R, spacePlanets, spaceState, sunPos } from '../lib/space';
+import { isWorldMounted } from '../lib/planet';
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { RigidBody, BallCollider, RapierRigidBody, useRapier } from '@react-three/rapier';
@@ -7,7 +9,7 @@ import { useInput } from '../hooks/useInput';
 import { useStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../enums/CollisionGroups';
-import { droneMouseDelta, droneOrientation, droneShake, droneCamPose, droneHud, DroneHudTarget, dronePad } from '../lib/droneFlight';
+import { droneMouseDelta, droneOrientation, droneShake, droneCamPose, droneHud, DroneHudTarget, dronePad, droneExit } from '../lib/droneFlight';
 import { acquireAudioListener, releaseAudioListener } from '../lib/sharedAudioListener';
 import { cityOpponents } from './city/cityActors';
 import type { FighterData } from './Environment/SquadArenaTypes';
@@ -425,6 +427,16 @@ const Drone: React.FC = () => {
     const delta = Math.min(dtRaw, 0.1);
     const f = fly.current;
 
+    // rebase del riferimento (viaggio tra pianeti, lib/space.ts): il drone resta dov'e' nel mondo, cambiano i numeri
+    if (droneRebase.pending) {
+      const tr = body.translation();
+      body.setTranslation({ x: tr.x - droneRebase.x, y: tr.y - droneRebase.y, z: tr.z - droneRebase.z }, true);
+      f.pos.set(f.pos.x - droneRebase.x, f.pos.y - droneRebase.y, f.pos.z - droneRebase.z);
+      f.lastDronePos.set(f.lastDronePos.x - droneRebase.x, f.lastDronePos.y - droneRebase.y, f.lastDronePos.z - droneRebase.z);
+      droneRebase.x = droneRebase.y = droneRebase.z = 0;
+      droneRebase.pending = false;
+    }
+
     const flyPressed = input.consumeJustPressed('fly');
     const isActive = currentControllable === 'drone' && controlledEntityId === DRONE_ID;
 
@@ -550,12 +562,19 @@ const Drone: React.FC = () => {
     const back = Math.max(k.KeyS ? 1 : 0, pd.ly);
     const upK = Math.max(k.KeyR || k.Space ? 1 : 0, pd.up);
     const downK = Math.max(k.KeyF || k.ShiftLeft || k.ShiftRight ? 1 : 0, pd.down);
-    const accel = f.accelOff > 0 ? 0 : ACCELERATION;
+    // nello spazio la spinta cresce con la quota (lib/space.ts)
+    const accel = f.accelOff > 0 ? 0 : ACCELERATION * getSpaceBoost();
     if (f.accelOff > 0) f.accelOff -= delta;
     _v1.set(0, upK - downK, back - forward).multiplyScalar(delta * accel); // deltaVelocity
     const coast = _v1.lengthSq() === 0 ? (100 * DW) / (f.vel.length() + DW) : 1;
     const damp = Math.min(1, Math.max(1, coast) * 0.01 * (dtMs / 16.67));
     f.vel.addScaledVector(f.vel, -damp).add(_v1);
+    // limite di velocita' che dipende dalla quota (lib/space.ts): si frena atterrando, si accelera decollando
+    {
+      const vmax = spaceState.vmax;
+      const sp = f.vel.length();
+      if (sp > vmax) f.vel.multiplyScalar(vmax / sp + (1 - vmax / sp) * Math.exp(-delta * 4));
+    }
 
     // spostamento nel mondo, con urti (il drone sta davanti al telaio)
     const move = _v2.copy(f.vel).applyQuaternion(f.quat).multiplyScalar(delta);
@@ -598,6 +617,41 @@ const Drone: React.FC = () => {
           playAt(SOUND_URLS.explosions[Math.floor(Math.random() * 2)], _dronePos, 15, 0.6);
         }
         f.accelOff = CRASH_ACCEL_OFF_S;
+      }
+    }
+
+    // anche il sole e' solido
+    {
+      const sp = sunPos();
+      const dx = _dronePos.x - sp[0], dy = _dronePos.y - sp[1], dz = _dronePos.z - sp[2];
+      const dist = Math.hypot(dx, dy, dz);
+      const lim = SUN_R + 60;
+      if (dist < lim && dist > 1e-3) {
+        const k = lim / dist;
+        _dronePos.set(sp[0] + dx * k, sp[1] + dy * k, sp[2] + dz * k);
+        f.pos.copy(_dronePos).addScaledVector(_fwd, -CAM_AHEAD).addScaledVector(_up, CAM_BELOW);
+        f.vel.set(0, 0, 0);
+      }
+    }
+    // i pianeti nello spazio sono solidi per il drone (quello con la citta' montata no: ci si vola sopra)
+    for (const pl of spacePlanets()) {
+      if (spaceState.resident?.seed === pl.profile.seed) continue;
+      const dx = _dronePos.x - pl.center[0];
+      const dy = _dronePos.y - pl.center[1];
+      const dz = _dronePos.z - pl.center[2];
+      const dist = Math.hypot(dx, dy, dz);
+      const lim = PLANET_R + 30;
+      if (dist < lim && dist > 1e-3) {
+        const k = lim / dist;
+        _dronePos.set(pl.center[0] + dx * k, pl.center[1] + dy * k, pl.center[2] + dz * k);
+        f.pos.copy(_dronePos).addScaledVector(_fwd, -CAM_AHEAD).addScaledVector(_up, CAM_BELOW);
+        _v1.set(dx / dist, dy / dist, dz / dist);
+        _v2.copy(f.vel).applyQuaternion(f.quat);
+        const inward = _v2.dot(_v1);
+        if (inward < 0) {
+          _v2.addScaledVector(_v1, -inward);
+          f.vel.copy(_v2).applyQuaternion(_q.copy(f.quat).invert());
+        }
       }
     }
 
@@ -819,7 +873,8 @@ const Drone: React.FC = () => {
     droneHud.targets = targets;
 
     // B (o Triangolo / Select tenuto sul pad): torna al giocatore
-    if (flyPressed) {
+    if (flyPressed && isWorldMounted()) {
+      droneExit.at = performance.now();
       setIsDrone(false);
       useStore.getState().setCurrentControllable('player');
     }

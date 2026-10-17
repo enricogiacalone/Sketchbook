@@ -1,3 +1,4 @@
+import { onPlanetRebuild } from './planet';
 import { ROAD_OFFSETS, ROAD_SIZE } from '../components/Environment/Road';
 
 // GPS alla GTA: "Waypoint: lo metti con un clic sulla mappa. Tragitto: il
@@ -60,7 +61,10 @@ function buildRoadGraph(): RoadGraph {
   return { nodes, edges, adj };
 }
 
-export const roadGraph = buildRoadGraph();
+export let roadGraph = buildRoadGraph();
+onPlanetRebuild(() => {
+  roadGraph = buildRoadGraph();
+});
 
 export interface RoadSnap {
   edge: number;

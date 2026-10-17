@@ -7,11 +7,12 @@ import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { getSunDirection, getDayFactor } from '../../lib/SunCycle';
 import { StaticInstances, type InstanceXform } from './StaticInstances';
 import { signalClock, signalFor, type Light } from '../../lib/traffic';
+import { onPlanetRebuild, planetGeometry } from '../../lib/planet';
 
 // Shared road-grid layout, also consumed by Player.tsx (getRoadOffset) so the
 // character's manual ground-snapping agrees with the actual road geometry
 // instead of relying on physics contact response (see Player.tsx for why).
-export const ROAD_SIZE = 600;
+export let ROAD_SIZE = planetGeometry().roadSize; // dipende dal pianeta (lib/planet.ts)
 export const ROAD_GRID_SPACING = 60;
 export const ROAD_WIDTH = 8;
 export const ROAD_Y_OFFSET = 0.15;
@@ -41,13 +42,16 @@ export const ROAD_THICKNESS = 1.0;
 // "fai la citta piu piccola" -- kept one ring wider than City.tsx's own
 // gridRadius (1), same convention as before (was city radius 2 / road
 // radius 3): a spare outer perimeter road with no buildings past it.
-export const ROAD_OFFSETS: number[] = (() => {
+const makeRoadOffsets = (): number[] => {
   const arr: number[] = [];
-  for (let i = -3; i <= 3; i++) {
+  const rr = planetGeometry().roadRadius;
+  for (let i = -rr; i <= rr; i++) {
     arr.push(i * ROAD_GRID_SPACING);
   }
   return arr;
-})();
+};
+// (binding vivo: onPlanetRebuild lo ricalcola cambiando pianeta)
+export let ROAD_OFFSETS: number[] = makeRoadOffsets();
 
 // Streetlamp world positions across the whole road grid, computed ONCE by
 // mirroring the exact placement formula used in Road()'s JSX below (two
@@ -57,7 +61,7 @@ export const ROAD_OFFSETS: number[] = (() => {
 // per-lamp light living here -- see the removed-pointLight comment on
 // StreetLight below for why there isn't one already.
 export const STREET_LIGHT_POLE_HEIGHT = 6;
-export const STREET_LIGHT_POSITIONS: Array<{ x: number; z: number }> = (() => {
+const makeStreetLights = (): Array<{ x: number; z: number }> => {
   const positions: Array<{ x: number; z: number }> = [];
   for (const ox of ROAD_OFFSETS) {
     for (const oz of ROAD_OFFSETS) {
@@ -66,7 +70,13 @@ export const STREET_LIGHT_POSITIONS: Array<{ x: number; z: number }> = (() => {
     }
   }
   return positions;
-})();
+};
+export let STREET_LIGHT_POSITIONS: Array<{ x: number; z: number }> = makeStreetLights();
+onPlanetRebuild(() => {
+  ROAD_SIZE = planetGeometry().roadSize;
+  ROAD_OFFSETS = makeRoadOffsets();
+  STREET_LIGHT_POSITIONS = makeStreetLights();
+});
 
 // Returns the ground surface's extra elevation above the raw terrain height
 // at (x, z) -- road, sidewalk, or 0 if the point isn't over either. Mirrors

@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { CITY_LAYOUT } from './City';
+import { onPlanetRebuild } from '../../lib/planet';
 import { getSunDirection, getDayFactor } from '../../lib/SunCycle';
 
 // "fai illuminare i palazzi come se avessero decorazioni led la notte" --
@@ -40,7 +41,7 @@ interface LedSegment {
 // in Environment/ -- 4 roofline segments (front/back/left/right) per
 // building, straight from CITY_LAYOUT so this always matches the actual
 // generated buildings without redoing any placement logic.
-const ALL_SEGMENTS: LedSegment[] = (() => {
+const makeSegments = (): LedSegment[] => {
   const segments: LedSegment[] = [];
   for (const b of CITY_LAYOUT.buildings) {
     const halfW = b.w / 2;
@@ -60,7 +61,11 @@ const ALL_SEGMENTS: LedSegment[] = (() => {
     );
   }
   return segments;
-})();
+};
+let ALL_SEGMENTS: LedSegment[] = makeSegments();
+onPlanetRebuild(() => {
+  ALL_SEGMENTS = makeSegments();
+});
 
 const _dummy = new THREE.Object3D();
 const _liveColor = new THREE.Color();

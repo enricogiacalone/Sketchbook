@@ -1,6 +1,6 @@
 import React, { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Grid } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import { CuboidCollider, Physics, RigidBody, useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { createGameRenderer } from '../lib/gameRenderer';
@@ -26,6 +26,7 @@ import CityPlayer from '../components/CityPlayer';
 import { playerAuto } from '../lib/playerAutopilot';
 import { NavGrid, setNav } from '../lib/nav';
 import Enemy from '../components/Enemy';
+import Motorcycle from '../components/Vehicles/Motorcycle';
 import Zombie, { type ZombieKind } from '../components/city/Zombie';
 import PoliceOfficer from '../components/city/PoliceOfficer';
 import AllyNpc from '../components/city/AllyNpc';
@@ -42,7 +43,7 @@ const LAB_X = 150;
 const LAB_Z = -90;
 const groundY = () => getTerrainHeight(LAB_X, LAB_Z) + getRoadOffset(LAB_X, LAB_Z);
 
-type Kind = 'pedestrian' | 'hunter-fists' | 'hunter-armed' | 'enemy' | 'enemy-fists' | 'police' | 'swat' | 'ally' | 'zombie-slow' | 'zombie-brisk' | 'zombie-runner';
+type Kind = 'moto' | 'pedestrian' | 'hunter-fists' | 'hunter-armed' | 'enemy' | 'enemy-fists' | 'police' | 'swat' | 'ally' | 'zombie-slow' | 'zombie-brisk' | 'zombie-runner';
 interface Spawned {
   id: string;
   kind: Kind;
@@ -51,6 +52,7 @@ interface Spawned {
 }
 
 const KINDS: { kind: Kind; label: string }[] = [
+  { kind: 'moto', label: 'Moto' },
   { kind: 'pedestrian', label: 'Passante (folla)' },
   { kind: 'hunter-fists', label: 'Cacciatore (pugni)' },
   { kind: 'hunter-armed', label: 'Cacciatore (pistola)' },
@@ -321,6 +323,37 @@ const ExitBeacon: React.FC<{ maze: Maze; gy: number }> = ({ maze, gy }) => (
   </group>
 );
 
+// Pavimento a quadretti (1 m per quadretto): un riferimento visivo per distanze e velocita'
+const CheckerFloor: React.FC<{ y: number }> = ({ y }) => {
+  const tex = useMemo(() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 256;
+    const g = c.getContext('2d')!;
+    for (let i = 0; i < 2; i++)
+      for (let j = 0; j < 2; j++) {
+        g.fillStyle = (i + j) % 2 ? '#2b303b' : '#4a5263';
+        g.fillRect(i * 128, j * 128, 128, 128);
+      }
+    // un filo piu' chiaro sui bordi dei quadretti
+    g.strokeStyle = '#6b7488';
+    g.lineWidth = 2;
+    g.strokeRect(0, 0, 256, 256);
+    g.strokeRect(0, 0, 128, 128);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(60, 60); // 120 m / 2 m per tessera (2x2 quadretti)
+    t.anisotropy = 8;
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }, []);
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[LAB_X, y, LAB_Z]} receiveShadow>
+      <planeGeometry args={[120, 120]} />
+      <meshStandardMaterial map={tex} roughness={1} />
+    </mesh>
+  );
+};
+
 // il mondo fisico, per i test dalla console (window.__labWorld)
 const WorldHandle: React.FC = () => {
   const { world } = useRapier();
@@ -511,10 +544,11 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
 
   // Il mondo del laboratorio (labirinto + griglie di navigazione) e' uno stato, non un useMemo: React puo'
   // dimenticare i valori memorizzati e rifarli (e col labirinto si perderebbe tutto cio' che il pilota ha esplorato).
-  const makeWorld = (seed: number) => {
+  const makeWorld = (seed: number, mazeOn: boolean) => {
     const maze = buildMaze(seed);
     const m = maze.half + 8;
-    const wallRects = maze.walls.map((w) => ({ x: LAB_X + w.x, z: LAB_Z + w.z, w: w.w, d: w.d }));
+    // senza labirinto la griglia di navigazione e' vuota (e i muri non ci sono)
+    const wallRects = mazeOn ? maze.walls.map((w) => ({ x: LAB_X + w.x, z: LAB_Z + w.z, w: w.w, d: w.d })) : [];
     // il tappo: sul muro esterno, largo come il varco (i cacciatori non devono lasciare il labirinto;
     // il giocatore invece l'uscita la attraversa: la sua griglia non ha il tappo)
     const [dx, dz] = DIRS[maze.exit.dir];
@@ -535,12 +569,14 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     ];
     return {
       seed,
+      mazeOn,
       maze,
       nav: new NavGrid(LAB_X - m, LAB_Z - m, LAB_X + m, LAB_Z + m, 0.5, wallRects, 0.6),
       huntNav: new NavGrid(LAB_X - m, LAB_Z - m, LAB_X + m, LAB_Z + m, 0.5, [...wallRects, plug, ...outside], 0.6),
     };
   };
-  const [world, setWorld] = useState(() => makeWorld(7));
+  // di partenza senza labirinto (spazio libero per fare un giro); il pulsante lo rimette
+  const [world, setWorld] = useState(() => makeWorld(7, false));
   const { maze, nav, huntNav } = world;
   useEffect(() => {
     setNav(huntNav);
@@ -548,8 +584,8 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   }, [huntNav]);
   // pilota automatico del giocatore: acceso all'inizio, i tasti lo scavalcano
   const pilot = useRef<Autopilot | null>(null);
-  const pilotOn = useRef(true);
-  const [pilotOnState, setPilotOnState] = useState(true);
+  const pilotOn = useRef(false);
+  const [pilotOnState, setPilotOnState] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [follow, setFollow] = useState(true);
   const [fpName, setFpName] = useState<string | null>(null);
@@ -572,11 +608,18 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     setResetKey((k) => k + 1);
   }, [putPlayerAtStart]);
   const newMaze = useCallback(() => {
-    setWorld((w) => makeWorld(w.seed + 1));
+    setWorld((w) => makeWorld(w.seed + 1, w.mazeOn));
     setResetKey((k) => k + 1);
     setList([]);
     crowdAgents.splice(0, crowdAgents.length);
     for (const s of crowdSlots.keys()) crowdSlots[s] = null;
+    putPlayerAtStart();
+  }, [putPlayerAtStart]);
+  const toggleMaze = useCallback(() => {
+    setWorld((w) => makeWorld(w.seed, !w.mazeOn));
+    setResetKey((k) => k + 1);
+    pilotOn.current = false;
+    setPilotOnState(false);
     putPlayerAtStart();
   }, [putPlayerAtStart]);
   // tre cacciatori (due a pugni, uno armato) sparsi nel labirinto, lontani dalla piazza
@@ -674,6 +717,7 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         setPilotOnState(on);
       },
       pilot: () => pilot.current?.status(),
+      toggleMaze,
       exit: () => ({ x: LAB_X + maze.exit.x, z: LAB_Z + maze.exit.z }),
       setWhere,
       maze: () => ({ walls: maze.walls.length, cells: maze.corridorCells.length }),
@@ -681,7 +725,7 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
       rows: () => rowsRef.current,
       list: () => listRef.current,
     };
-  }, [spawn, clear, provoke, maze, hunters, restart, newMaze]);
+  }, [spawn, clear, provoke, maze, hunters, restart, newMaze, toggleMaze]);
 
   const tposes = rows.filter((r) => r.tpose).length;
   const gy = groundY();
@@ -704,14 +748,10 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
             <RigidBody type="fixed" colliders={false} position={[LAB_X, gy - 0.5, LAB_Z]}>
               <CuboidCollider args={[60, 0.5, 60]} friction={1} />
             </RigidBody>
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[LAB_X, gy, LAB_Z]} receiveShadow>
-              <planeGeometry args={[120, 120]} />
-              <meshStandardMaterial color="#3b4252" />
-            </mesh>
-            <Grid position={[LAB_X, gy + 0.01, LAB_Z]} args={[120, 120]} cellSize={1} sectionSize={5} infiniteGrid={false} fadeDistance={40} />
+            <CheckerFloor y={gy} />
             <WorldHandle />
-            <MazeWalls maze={maze} gy={gy} />
-            <ExitBeacon maze={maze} gy={gy} />
+            {world.mazeOn && <MazeWalls maze={maze} gy={gy} />}
+            {world.mazeOn && <ExitBeacon maze={maze} gy={gy} />}
             <CityPlayer key={resetKey} userName="Lab" />
             <PilotDriver pilot={pilot} pilotOn={pilotOn} />
             <FollowCam on={follow} />
@@ -720,6 +760,8 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
             {list.map((s) => {
               const y = 0;
               switch (s.kind) {
+                case 'moto':
+                  return <Motorcycle key={s.id} id={s.id} position={[s.x, groundY() + 0.45, s.z]} yaw={Math.PI * 0.75} />;
                 case 'enemy':
                 case 'enemy-fists':
                   return <Enemy key={s.id} id={s.id} initialPosition={[s.x, y, s.z]} onGiveUp={remove} armed={s.kind === 'enemy'} />;
@@ -769,6 +811,9 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         </button>
         <button onClick={() => setFollow((f) => !f)} style={{ ...btn, background: follow ? '#0e7490' : '#4b5563' }}>
           Telecamera: {follow ? 'segue il giocatore' : 'ferma'}
+        </button>
+        <button onClick={toggleMaze} style={{ ...btn, background: '#7c3aed' }}>
+          Labirinto: {world.mazeOn ? 'acceso' : 'spento'}
         </button>
         <button onClick={restart} style={{ ...btn, background: '#1d4ed8' }}>
           Ricomincia

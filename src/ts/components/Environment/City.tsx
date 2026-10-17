@@ -24,6 +24,7 @@ import { stdMat } from '../../lib/sharedMaterials';
 import { mergeBufferGeometries } from 'three-stdlib';
 import { MarketPlaza, WarehouseYard } from './StoryPlaces';
 import { worldRng } from '../../lib/worldSeed';
+import { getPlanet, getPlanetStyle, isPlazaBlock, onPlanetRebuild } from '../../lib/planet';
 import { MARKET } from '../../missions/storyPlaces';
 
 const _windowDummy = new THREE.Object3D();
@@ -255,7 +256,7 @@ export interface CityLayout {
 // of guessing/duplicating the 60-unit spacing.
 export const CITY_BLOCK_SIZE = 60;
 
-export const CITY_LAYOUT: CityLayout = (() => {
+const generateCityLayout = (): CityLayout => {
   const bArr: CityBuildingRecord[] = [];
   const cArr: Array<{ x: number; z: number }> = [];
   const pArr: Array<{ x: number; z: number }> = [];
@@ -275,8 +276,9 @@ export const CITY_LAYOUT: CityLayout = (() => {
   // sempre la stessa citta' a parita' di seme (lib/worldSeed.ts)
   const rnd = worldRng('city-layout');
 
-  // Citta estesa a 5x5 blocchi (gridRadius = 2)
-  const gridRadius = 2;
+  // Citta' di (2R+1)x(2R+1) blocchi, R = raggio del pianeta (lib/planet.ts; 2 = 5x5)
+  const gridRadius = getPlanet().gridRadius;
+  const pstyle = getPlanetStyle();
   for (let i = -gridRadius; i <= gridRadius; i++) {
     for (let j = -gridRadius; j <= gridRadius; j++) {
       const blockX = i * gridSpacing + gridSpacing / 2;
@@ -285,18 +287,18 @@ export const CITY_LAYOUT: CityLayout = (() => {
       if (i === 0 && j === 0) continue;
 
       // Plaza block coordinates on opposite corners of the 5x5 grid
-      if ((i === -2 && j === 2) || (i === 2 && j === -2)) {
+      if (isPlazaBlock(i, j, gridRadius)) {
         pArr.push({ x: blockX, z: blockZ });
         continue;
       }
 
       cArr.push({ x: blockX, z: blockZ });
 
-      const count = 3 + Math.floor(rnd() * 2);
+      const count = Math.max(2, Math.round((3 + Math.floor(rnd() * 2)) * pstyle.density));
       for (let k = 0; k < count; k++) {
         const w = 10 + rnd() * 12;
         const d = 10 + rnd() * 12;
-        const h = 20 + rnd() * 90;
+        const h = (20 + rnd() * 90) * pstyle.heightScale;
         const style = styles[Math.floor(rnd() * styles.length)];
         const palette = buildingColorsByStyle[style];
         const color = palette[Math.floor(rnd() * palette.length)];
@@ -338,7 +340,16 @@ export const CITY_LAYOUT: CityLayout = (() => {
   // il terreno dei cortili verdi resta piatto accanto ai palazzi (Terrain.tsx)
   setTerrainBuildings(bArr.map((b) => ({ minX: b.x - b.w / 2, maxX: b.x + b.w / 2, minZ: b.z - b.d / 2, maxZ: b.z + b.d / 2 })));
   return { buildings: bArr, courtyards: cArr, plazas: pArr };
-})();
+};
+
+// (oggetto stabile: al cambio pianeta si riempie sul posto, e chi lo importa lo ritrova aggiornato)
+export const CITY_LAYOUT: CityLayout = generateCityLayout();
+onPlanetRebuild(() => {
+  wallGeoCache.clear();
+  colliderBoxCache.clear();
+  detailsCache.clear();
+  Object.assign(CITY_LAYOUT, generateCityLayout());
+});
 
 // geometrie pesanti (muri estrusi coi buchi) e collider dei muri: calcolati
 // una volta per palazzo, riusati a ogni rimontaggio

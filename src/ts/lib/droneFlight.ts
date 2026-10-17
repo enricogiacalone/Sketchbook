@@ -91,6 +91,11 @@ export interface DroneHudTarget {
   leadDX: number;
   leadDY: number;
 }
+// quando il drone ha ceduto il comando (B): il giocatore, che legge lo stesso tasto nello stesso
+// frame, non deve riprendere subito il drone (dipende dall'ordine dei useFrame, che cambia
+// quando il mondo si rimonta)
+export const droneExit = { at: -1e9 };
+
 export const droneHud = {
   active: false,
   width: 0,

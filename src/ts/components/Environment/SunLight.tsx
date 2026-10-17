@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
+import { spaceState } from '../../lib/space';
 
 // The actual lighting rig behind the sky dome -- "sistemiamo il cielo...
 // sole vero collegato alla luce". Before this, the sky shader computed a
@@ -52,7 +53,8 @@ const SunLight: React.FC = () => {
     gl.shadowMap.autoUpdate = false;
     if ((shadowFrame.current++ & 1) === 0) gl.shadowMap.needsUpdate = true;
     const dir = getSunDirection(state.clock.elapsedTime);
-    const dayFactor = getDayFactor(dir.y);
+    // nello spazio e' sempre giorno sul lato illuminato dal sole vero (lib/space.ts)
+    const dayFactor = Math.max(getDayFactor(dir.y), spaceState.t);
     const warmth = getWarmth(dir.y);
 
     if (lightRef.current) {

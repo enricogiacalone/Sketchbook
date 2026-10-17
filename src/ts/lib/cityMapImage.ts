@@ -1,3 +1,4 @@
+import { onPlanetRebuild } from './planet';
 import { ROAD_OFFSETS, ROAD_WIDTH, SIDEWALK_WIDTH, ROAD_SIZE } from '../components/Environment/Road';
 import { CITY_LAYOUT, CITY_BLOCK_SIZE } from '../components/Environment/City';
 import { RUNWAY_CENTER, RUNWAY_LENGTH, RUNWAY_WIDTH, HELIPORT_CENTER, HELIPORT_RADIUS } from '../components/Environment/Airport';
@@ -21,8 +22,12 @@ export interface CityMapPalette {
   heliport: string;
 }
 
-export const WORLD_HALF = ROAD_SIZE / 2 + 20; // un po' di mare attorno all'isola
-export const TERRAIN_HALF = ROAD_SIZE / 2;
+export let WORLD_HALF = ROAD_SIZE / 2 + 20; // un po' di mare attorno all'isola
+export let TERRAIN_HALF = ROAD_SIZE / 2;
+onPlanetRebuild(() => {
+  WORLD_HALF = ROAD_SIZE / 2 + 20;
+  TERRAIN_HALF = ROAD_SIZE / 2;
+});
 
 export function buildCityImage(pal: CityMapPalette, pxPerM: number): HTMLCanvasElement {
   const size = Math.ceil(WORLD_HALF * 2 * pxPerM);

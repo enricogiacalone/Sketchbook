@@ -1,3 +1,4 @@
+import { onPlanetRebuild } from '../../lib/planet';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useRapier } from '@react-three/rapier';
@@ -57,6 +58,7 @@ const _aimAt = new THREE.Vector3();
 // altri restano a piedi finche' non scende qualcuno.
 const PASSENGER_SEATS = ['seat_2', 'seat_3', 'seat_4'];
 const seatTaken = new Map<string, Map<string, string>>(); // auto -> posto -> alleato
+onPlanetRebuild(() => seatTaken.clear());
 const SEAT_FWD = 0.31; // radice del personaggio rispetto al nodo del sedile (come per il guidatore)
 const SEAT_DOWN = 0.44;
 const BOARD_DIST = 3.0; // m dall'auto per salire

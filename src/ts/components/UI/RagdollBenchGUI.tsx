@@ -26,6 +26,7 @@ const NO_CLIP = '(gioco normale)';
 const KIMODO_GROUPS: Array<[string, string]> = [
   ['idle', 'Idle'],
   ['locomozione', 'Locomozione'],
+  ['moto', 'Moto'],
   ['stati', 'Stati'],
   ['folla', 'Folla'],
   ['ragdoll', 'Ragdoll (colpi e rialzi)'],

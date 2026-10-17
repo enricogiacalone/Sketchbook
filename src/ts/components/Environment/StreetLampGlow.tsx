@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { getTerrainHeight } from './Terrain';
 import { getSunDirection, getDayFactor } from '../../lib/SunCycle';
 import { STREET_LIGHT_POSITIONS, STREET_LIGHT_POLE_HEIGHT } from './Road';
+import { onPlanetRebuild } from '../../lib/planet';
 import { LAMP_POSITIONS, PARK_LAMP_POLE_HEIGHT } from './Park';
 
 // "la citta nn e colpita dai lampioni.. cioe nn irraggiano luce" -- the
@@ -50,7 +51,7 @@ interface LampPos {
 // (8, LAMP_POSITIONS) into one flat list of world positions, bulb height
 // included, so the per-frame nearest-neighbor search below has nothing
 // left to do but compare distances.
-const ALL_LAMPS: LampPos[] = [
+const makeLamps = (): LampPos[] => [
   ...STREET_LIGHT_POSITIONS.map(({ x, z }) => ({
     x,
     z,
@@ -65,7 +66,12 @@ const ALL_LAMPS: LampPos[] = [
 
 // Scratch array, sorted in place every frame -- avoids allocating a fresh
 // array 60 times a second just to find the nearest POOL_SIZE lamps.
-const _sorted: LampPos[] = [...ALL_LAMPS];
+let ALL_LAMPS: LampPos[] = makeLamps();
+let _sorted: LampPos[] = [...ALL_LAMPS];
+onPlanetRebuild(() => {
+  ALL_LAMPS = makeLamps();
+  _sorted = [...ALL_LAMPS];
+});
 
 // Mounted exactly once (in App.tsx, alongside SunLight/WorldFog/NightSky).
 const StreetLampGlow: React.FC = () => {

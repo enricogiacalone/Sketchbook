@@ -1,4 +1,9 @@
 import React, { useLayoutEffect, useMemo, useRef } from 'react';
+import { useFrame } from '@react-three/fiber';
+import { useStore } from '../../store';
+
+const GROW_FAR = 1800; // m
+const GROW_NEAR = 800; // m
 import * as THREE from 'three';
 import { useStaticBoxes, type StaticBox } from './staticColliders';
 import { toonCacheKey } from '../../lib/toonStyle';
@@ -170,6 +175,24 @@ const FarChunk: React.FC<{ items: FarBuildingItem[] }> = ({ items }) => {
     m.computeBoundingBox();
   }, [items, geo]);
   useLayoutEffect(() => () => geo.dispose(), [geo]);
+  // i palazzi spuntano da terra man mano che ci si avvicina (a piedi o col drone): oltre GROW_FAR
+  // dal giocatore sono schiacciati a terra (e comunque nella foschia), entro GROW_NEAR hanno
+  // l'altezza vera. Dentro la citta' sono sempre al 100%. Poi lo streaming per distanza li
+  // sostituisce con quelli dettagliati.
+  const grown = useRef(false);
+  const cx = useMemo(() => items.reduce((a, it) => a + it.x, 0) / Math.max(1, items.length), [items]);
+  const cz = useMemo(() => items.reduce((a, it) => a + it.z, 0) / Math.max(1, items.length), [items]);
+  useFrame(() => {
+    const m = ref.current;
+    if (!m) return;
+    const p = useStore.getState().playerPos;
+    const d = Math.hypot(p[0] - cx, p[1] * 0.5, p[2] - cz);
+    const k = Math.min(1, Math.max(0, (GROW_FAR - d) / (GROW_FAR - GROW_NEAR)));
+    const s = Math.max(0.001, k * k * (3 - 2 * k));
+    if (grown.current && s >= 1) return;
+    m.scale.y = s;
+    grown.current = s >= 1;
+  });
   return <instancedMesh ref={ref} args={[geo, _material, items.length]} castShadow receiveShadow />;
 };
 

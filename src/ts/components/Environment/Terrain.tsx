@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
 import * as THREE from "three";
-import { RigidBody, HeightfieldCollider, CuboidCollider } from "@react-three/rapier";
+import { RigidBody, HeightfieldCollider } from "@react-three/rapier";
 import { CollisionGroups, groupsExcluding } from "../../enums/CollisionGroups";
+import { planetGeometry, isPlazaBlock, onPlanetRebuild } from "../../lib/planet";
 
 // Flattened (Claude): this used to default to a +/-0.5 sine wave over a
 // 20-30 unit wavelength. On open ground that read as gentle rolling hills,
@@ -40,17 +41,24 @@ const hills = (x: number, z: number, ph: number, amp: number) =>
 
 const PARK = { min: 6, max: 54, cx: 30, cz: 30 };
 const COURT_HALF = 10; // i cortili verdi sono 20x20
-const COURT_BLOCKS = (() => {
+const makeCourtBlocks = (): Array<[number, number]> => {
+  const R = planetGeometry().gridRadius;
   const out: Array<[number, number]> = [];
-  for (let i = -2; i <= 2; i++)
-    for (let j = -2; j <= 2; j++) {
-      if ((i === 0 && j === 0) || (i === -2 && j === 2) || (i === 2 && j === -2)) continue;
+  for (let i = -R; i <= R; i++)
+    for (let j = -R; j <= R; j++) {
+      if ((i === 0 && j === 0) || isPlazaBlock(i, j, R)) continue;
       out.push([i * 60 + 30, j * 60 + 30]);
     }
   return out;
-})();
+};
 const courtKey = (bx: number, bz: number) => `${bx},${bz}`;
-const COURT_SET = new Set(COURT_BLOCKS.map(([x, z]) => courtKey(x, z)));
+let COURT_BLOCKS = makeCourtBlocks();
+let COURT_SET = new Set(COURT_BLOCKS.map(([x, z]) => courtKey(x, z)));
+onPlanetRebuild(() => {
+  COURT_BLOCKS = makeCourtBlocks();
+  COURT_SET = new Set(COURT_BLOCKS.map(([x, z]) => courtKey(x, z)));
+  courtBuildings = new Map();
+});
 // palazzi vicini a ogni cortile (rettangoli x/z), registrati da City.tsx appena
 // il layout della citta' esiste: lì il terreno resta piatto
 let courtBuildings = new Map<string, Array<{ minX: number; maxX: number; minZ: number; maxZ: number }>>();
@@ -113,8 +121,8 @@ export const getTerrainHeight = (
 };
 
 const Terrain: React.FC = () => {
-  const size = 600;
-  const segments = 300; // 2 m: le colline del parco hanno onde di 15+ m
+  const size = planetGeometry().roadSize;
+  const segments = Math.round(size / 2); // 2 m: le colline del parco hanno onde di 15+ m
   const maxHeight = 0;
 
   // Visual Mesh Data - Centered at [0,0,0]
@@ -176,26 +184,7 @@ const Terrain: React.FC = () => {
     return flat;
   }, [size, segments, maxHeight]);
 
-  // World-edge boundary walls -- invisible, solid, fully enclosing the
-  // 600x600 terrain (Claude). "l'auto e' caduta dal piano dove circolava":
-  // a car (or anything else) driven hard enough in one direction for long
-  // enough eventually crosses the heightfield's own edge at +/-size/2 --
-  // there's nothing at all beyond it, no ground, no wall, so it just falls
-  // into the void. This isn't a terrain bump or a one-off fluke, it's the
-  // literal edge of the playable world, reachable by any fast vehicle
-  // (confirmed live: a test car under sustained throttle+steering covered
-  // ~300+ units in a few seconds, well past the boundary). Four thin, tall
-  // CuboidColliders along each edge close that off for every vehicle AND
-  // the on-foot player uniformly, without needing separate "don't fall off
-  // the map" logic duplicated in Car.tsx/Airplane.tsx/Helicopter.tsx/
-  // Player.tsx. Tall enough (WALL_HALF_HEIGHT) to also stop a plane/heli
-  // skimming low near the edge, and dipped slightly below y=0
-  // (WALL_Y_CENTER - WALL_HALF_HEIGHT < 0) so there's no gap under it for
-  // something already airborne-but-low to slip through.
-  const WALL_HALF_THICK = 1;
-  const WALL_HALF_HEIGHT = 60;
-  const WALL_Y_CENTER = 45;
-  const halfSize = size / 2;
+  // (niente muri ai bordi: la citta' e' su un pianeta, vedi lib/space.ts; chi cade nel vuoto: SpaceController)
 
   return (
     <>
@@ -209,30 +198,7 @@ const Terrain: React.FC = () => {
           collisionGroups={groupsExcluding(CollisionGroups.TrimeshColliders, CollisionGroups.TrimeshColliders)}
         />
       </RigidBody>
-      <RigidBody type="fixed" colliders={false} position={[0, 0, 0]} friction={0.5} restitution={0}>
-        {/* North / South (perpendicular to Z) */}
-        <CuboidCollider
-          args={[halfSize + WALL_HALF_THICK, WALL_HALF_HEIGHT, WALL_HALF_THICK]}
-          position={[0, WALL_Y_CENTER, halfSize]}
-          collisionGroups={groupsExcluding(CollisionGroups.Default)}
-        />
-        <CuboidCollider
-          args={[halfSize + WALL_HALF_THICK, WALL_HALF_HEIGHT, WALL_HALF_THICK]}
-          position={[0, WALL_Y_CENTER, -halfSize]}
-          collisionGroups={groupsExcluding(CollisionGroups.Default)}
-        />
-        {/* East / West (perpendicular to X) */}
-        <CuboidCollider
-          args={[WALL_HALF_THICK, WALL_HALF_HEIGHT, halfSize + WALL_HALF_THICK]}
-          position={[halfSize, WALL_Y_CENTER, 0]}
-          collisionGroups={groupsExcluding(CollisionGroups.Default)}
-        />
-        <CuboidCollider
-          args={[WALL_HALF_THICK, WALL_HALF_HEIGHT, halfSize + WALL_HALF_THICK]}
-          position={[-halfSize, WALL_Y_CENTER, 0]}
-          collisionGroups={groupsExcluding(CollisionGroups.Default)}
-        />
-      </RigidBody>
+      {/* niente piu' muri invisibili ai bordi (si puo' uscire dalla citta'; chi cade nel vuoto: SpaceController) */}
       <mesh receiveShadow position={[0, 0, 0]}>
         <bufferGeometry>
           <bufferAttribute

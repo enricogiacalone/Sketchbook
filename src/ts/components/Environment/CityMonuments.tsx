@@ -7,6 +7,7 @@ import { CLIMBABLE_GROUPS } from './traversal/traversalWorld';
 import { CITY_LAYOUT } from './City';
 import { HOSPITAL, POLICE_STATION, BANK, LOT_RECTS, getStreetProps } from './streetPropsData';
 import { worldRng } from '../../lib/worldSeed';
+import { getPlanet, isPlazaBlock, onPlanetRebuild } from '../../lib/planet';
 import Statue, { STATUE_MATERIALS, type StatueStyle } from './Statue';
 import { useGLTF } from '../../lib/gltf';
 
@@ -178,10 +179,11 @@ export function cornerSpots(count: number): Array<[number, number]> {
   ];
   const R = 2.6; // mezzo ingombro del piedistallo con un po' d'aria
   const cands: Array<[number, number]> = [];
-  for (let i = -2; i <= 2; i++) {
-    for (let j = -2; j <= 2; j++) {
+  const GR = getPlanet().gridRadius;
+  for (let i = -GR; i <= GR; i++) {
+    for (let j = -GR; j <= GR; j++) {
       // parco e piazze (mercato, deposito) escluse
-      if ((i === 0 && j === 0) || (i === -2 && j === 2) || (i === 2 && j === -2)) continue;
+      if ((i === 0 && j === 0) || isPlazaBlock(i, j, GR)) continue;
       for (const sx of [-1, 1]) {
         for (const sz of [-1, 1]) cands.push([i * 60 + 30 + sx * 20.5, j * 60 + 30 + sz * 20.5]);
       }
@@ -255,6 +257,9 @@ const ModelStatue: React.FC<{ def: ModelDef; rotY: number }> = ({ def, rotY }) =
 // Posizioni di tutte le statue (sempre le stesse): le statue del manichino e
 // quelle scaricate; la mappa di pausa segna le scaricate (UI/PauseMap.tsx).
 let layoutCache: ReturnType<typeof computeLayout> | null = null;
+onPlanetRebuild(() => {
+  layoutCache = null;
+});
 function computeLayout() {
   const rnd = worldRng('monument-kinds');
   // il Gigante sta sulla fontana del parco: le altre nove agli angoli dei blocchi

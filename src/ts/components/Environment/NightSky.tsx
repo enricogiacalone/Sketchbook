@@ -2,6 +2,7 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getSunDirection, getDayFactor } from '../../lib/SunCycle';
+import { spaceState } from '../../lib/space';
 
 // "Notte vera con stelle e luna" -- before this, the sky dome shader
 // dimmed toward black at night (and only partway, see SunCycle.ts's fix
@@ -62,7 +63,9 @@ const NightSky: React.FC = () => {
   useFrame((state) => {
     const dir = getSunDirection(state.clock.elapsedTime);
     const dayFactor = getDayFactor(dir.y);
-    const nightFactor = 1 - dayFactor;
+    // nello spazio (lib/space.ts) le stelle ci sono sempre
+    const starSpace = Math.min(1, Math.max(0, (spaceState.dark - 0.25) / 0.6));
+    const nightFactor = Math.max(1 - dayFactor, starSpace);
 
     if (starsRef.current) {
       starsRef.current.position.copy(camera.position);
@@ -83,7 +86,7 @@ const NightSky: React.FC = () => {
         .addScaledVector(dir, -SPHERE_RADIUS * 0.9);
     }
     if (moonMatRef.current) {
-      moonMatRef.current.opacity = nightFactor;
+      moonMatRef.current.opacity = nightFactor * (1 - spaceState.dark); // nello spazio niente luna finta
     }
   });
 

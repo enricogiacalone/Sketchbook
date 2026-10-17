@@ -1,3 +1,4 @@
+import { droneExit } from '../../lib/droneFlight';
 import { setCameraFocus, clearCameraFocus } from '../../lib/cameraFocus';
 import React, { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -288,11 +289,13 @@ const CAR_EXIT_S = 1.1;
 const CAR_EXIT_MAX_SPEED = 2.5;
 // portiera del guidatore per tipo di veicolo, e quota massima (m, dal punto
 // d'ingresso al suolo) per scendere dall'elicottero
-const VEH_DOOR = { car: 'door_1', helicopter: 'door_L' } as const;
+const VEH_DOOR = { car: 'door_1', helicopter: 'door_L', motorcycle: null } as const;
 // radice del personaggio rispetto al nodo seat_1: l'elicottero ha il
 // pavimento piu' alto rispetto al sedile (con gli stessi numeri dell'auto i
 // piedi uscivano sotto la cabina)
-const VEH_SEAT = { car: { fwd: CAR_SEAT_FWD, down: CAR_SEAT_DOWN }, helicopter: { fwd: 0.24, down: 0.26 } } as const;
+// (moto: stesso riferimento del Driving dell'auto -- l'origine del personaggio e' dove starebbero i piedi in piedi, sotto la sella;
+// le clip Kimodo della moto vanno generate con lo stesso riferimento)
+const VEH_SEAT = { car: { fwd: CAR_SEAT_FWD, down: CAR_SEAT_DOWN }, helicopter: { fwd: 0.24, down: 0.26 }, motorcycle: { fwd: 0.0, down: 0.45 } } as const;
 const HELI_EXIT_MAX_HEIGHT = 1.2;
 const _carQuat = new THREE.Quaternion();
 const _carQ2 = new THREE.Quaternion();
@@ -576,7 +579,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     carSpeed: number;
     // "fallo usare al nostro personaggio": auto o elicottero (stesso modo di
     // salire: portiera del guidatore, sedile seat_1)
-    kind: 'car' | 'helicopter';
+    kind: 'car' | 'helicopter' | 'motorcycle';
   }>({
     mode: 'none',
     kind: 'car',
@@ -1911,6 +1914,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       data.state === 'In guardia' || data.state === 'Riposo',
       useStore.getState().ragdollPassive
     );
+    // sulla moto le capsule solide del pilota (e la hurtbox) non devono urtare la moto che lo porta: fuori dal mondo
+    // finche' si e' in sella (l'auto e' grande e pesante e non ne risente, la moto si')
+    if (vehRef.current.kind === 'motorcycle' && vehRef.current.mode !== 'none' && vehRef.current.mode !== 'toDoor' && vehRef.current.mode !== 'opening') ragdoll.park();
     // di nuovo DOPO il ragdoll attivo: le braccia fisiche non sempre
     // riescono a seguire la posa (limiti dei giunti, inerzia) e il fucile
     // e' rigido sul petto -- le mani restano comunque sull'arma
@@ -2007,6 +2013,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       const vs = vehRef.current;
       const st = useStore.getState();
       const dtV = delta * globalSpeed;
+      // clip di guida: sulla moto quella Kimodo (in marcia / ferma) se c'e', altrimenti quella dell'auto
+      const motoOrDriving = () => {
+        if (vs.kind !== 'motorcycle') return 'Driving';
+        const c = vs.carSpeed > 1.5 ? K.moto.ride : K.moto.stopped;
+        return actions[c] ? c : 'Driving';
+      };
       const carParts = (id: string | null) => {
         if (!id) return null;
         const root = threeScene.getObjectByName(id);
@@ -2017,7 +2029,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       };
       // radice del personaggio seduto al posto di guida + orientamento del gruppo
       const seatPose = (parts: NonNullable<ReturnType<typeof carParts>>, outPos: THREE.Vector3, outQuat: THREE.Quaternion) => {
-        parts.root.getWorldQuaternion(_carQuat);
+        // (moto: l'orientamento e' quello della sella, che si inclina in curva insieme alla moto)
+        (vs.kind === 'motorcycle' ? parts.seat : parts.root).getWorldQuaternion(_carQuat);
         parts.seat.getWorldPosition(outPos);
         _carFwd.set(0, 0, 1).applyQuaternion(_carQuat);
         _carUp.set(0, 1, 0).applyQuaternion(_carQuat);
@@ -2057,7 +2070,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
             if (Math.hypot(_carTmp.x - data.position.x, _carTmp.z - data.position.z) < CAR_ENTER_RANGE) {
               vs.mode = 'toDoor';
               vs.carId = id;
-              vs.kind = st.entities.get(id)?.type === 'helicopter' ? 'helicopter' : 'car';
+              const et = st.entities.get(id)?.type;
+              vs.kind = et === 'helicopter' ? 'helicopter' : et === 'motorcycle' ? 'motorcycle' : 'car';
               vs.t = 0;
               data.state = "Va all'auto";
               break;
@@ -2080,8 +2094,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
             const d = Math.hypot(dx, dz);
             if (d < 0.06 || vs.t > 4) {
               vs.mode = 'opening';
-              vs.t = 0;
-              transitionToAnimation('Interact', 0.2, false, 1.3, 0.35);
+              // (la moto non ha portiera: si sale subito)
+              vs.t = vs.kind === 'motorcycle' ? CAR_OPEN_S : 0;
+              if (vs.kind !== 'motorcycle') transitionToAnimation('Interact', 0.2, false, 1.3, 0.35);
             } else {
               const step = Math.min(d, LT.walkSpeed * dtV);
               data.position.x += (dx / d) * step;
@@ -2101,14 +2116,15 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
             data.rotation = _carEuler.setFromQuaternion(_carQ3, 'YXZ').y;
             data.position.x = _carTmp2.x;
             data.position.z = _carTmp2.z;
-            if (vs.t > 0.3 && !st.isVehicleTransitioning) st.setIsVehicleTransitioning(true, vs.carId, VEH_DOOR[vs.kind]);
+            if (vs.t > 0.3 && !st.isVehicleTransitioning && VEH_DOOR[vs.kind]) st.setIsVehicleTransitioning(true, vs.carId, VEH_DOOR[vs.kind]);
             applyTransform();
             if (vs.t >= CAR_OPEN_S) {
               vs.mode = 'entering';
               vs.t = 0;
               vs.from.set(data.position.x, travRef.current.feetY, data.position.z);
               vs.fromQuat.setFromAxisAngle(_worldUp, data.rotation);
-              transitionToAnimation('Sitting_Enter', 0.2, false, 1.62 / CAR_ENTER_S);
+              if (vs.kind === 'motorcycle' && actions[K.moto.mount]) transitionToAnimation(K.moto.mount, 0.2, false, (clipsMap[K.moto.mount]?.duration ?? CAR_ENTER_S) / CAR_ENTER_S);
+              else transitionToAnimation('Sitting_Enter', 0.2, false, 1.62 / CAR_ENTER_S);
             }
             return;
           }
@@ -2125,8 +2141,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
               if (vs.mode === 'entering') {
                 vs.mode = 'driving';
                 st.setIsVehicleTransitioning(false);
-                st.setCurrentControllable(vs.kind, vs.carId, 'driver', 'seat_1');
-                transitionToAnimation('Driving', 0.2, true);
+                st.setCurrentControllable(vs.kind === 'motorcycle' ? 'car' : vs.kind, vs.carId, 'driver', 'seat_1');
+                transitionToAnimation(motoOrDriving(), 0.2, true);
                 data.state = 'Guida';
               } else {
                 vs.mode = 'none';
@@ -2150,7 +2166,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
             if (publishPlayerInfo) st.setIsPlayerGrounded(true);
             seatPose(parts, _carTmp2, _carQ2);
             setGroupPose(_carTmp2, _carQ2);
-            transitionToAnimation('Driving', 0.2, true);
+            transitionToAnimation(motoOrDriving(), 0.2, true);
             parts.root.getWorldPosition(_carTmp);
             if (dtV > 1e-4 && vs.t > dtV * 1.5) {
               const sp = Math.hypot(_carTmp.x - vs.carPrev.x, _carTmp.z - vs.carPrev.z) / dtV;
@@ -2168,8 +2184,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
                 vs.t = 0;
                 vs.from.copy(_carTmp2);
                 vs.fromQuat.copy(_carQ2);
-                st.setIsVehicleTransitioning(true, vs.carId, VEH_DOOR[vs.kind]);
-                transitionToAnimation('Sitting_Exit', 0.2, false, 1.29 / CAR_EXIT_S);
+                if (VEH_DOOR[vs.kind]) st.setIsVehicleTransitioning(true, vs.carId, VEH_DOOR[vs.kind]);
+                if (vs.kind === 'motorcycle' && actions[K.moto.dismount]) transitionToAnimation(K.moto.dismount, 0.2, false, (clipsMap[K.moto.dismount]?.duration ?? CAR_EXIT_S) / CAR_EXIT_S);
+                else transitionToAnimation('Sitting_Exit', 0.2, false, 1.29 / CAR_EXIT_S);
                 data.state = "Scende dall'auto";
               }
             }
@@ -2217,7 +2234,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
           Math.atan2(Math.sin(yaw), Math.cos(yaw))
         );
       }
-      if (droneId && vehRef.current.mode === 'none' && input.consumeJustPressed('fly') && !data.isDead && !kd.isDown() && !traving()) {
+      if (droneId && vehRef.current.mode === 'none' && input.consumeJustPressed('fly') && performance.now() - droneExit.at > 250 && !data.isDead && !kd.isDown() && !traving()) {
         st.setIsDrone(true);
         st.setCurrentControllable('drone', droneId);
       }

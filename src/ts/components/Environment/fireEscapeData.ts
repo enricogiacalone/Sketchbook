@@ -1,6 +1,7 @@
 import { CITY_LAYOUT, type CityBuildingRecord } from './City';
 import { HOSPITAL, POLICE_STATION, BANK, LOT_RECTS, getStreetProps } from './streetPropsData';
 import { worldRng } from '../../lib/worldSeed';
+import { onPlanetRebuild } from '../../lib/planet';
 
 // Scale antincendio su alcuni palazzi alti: piattaforme a zig-zag una per
 // piano, collegate da scale a pioli. Dati puri (posizioni): il disegno e i
@@ -36,6 +37,9 @@ const AREA_U: [number, number] = [-5.2, 3.6];
 const AREA_V: [number, number] = [-0.1, 1.9];
 
 let cache: FireEscape[] | null = null;
+onPlanetRebuild(() => {
+  cache = null;
+});
 
 function blockCentre(v: number) {
   return Math.floor(v / 60) * 60 + 30;

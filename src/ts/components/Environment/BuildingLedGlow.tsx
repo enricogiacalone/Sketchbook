@@ -3,6 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { CITY_LAYOUT } from './City';
 import { getSunDirection, getDayFactor } from '../../lib/SunCycle';
+import { onPlanetRebuild } from '../../lib/planet';
 
 // "i led devono emettere luce la notte" -- BuildingLeds.tsx's roofline
 // trim only ever made those thin box meshes glow (unlit MeshBasicMaterial,
@@ -47,16 +48,22 @@ interface BuildingLightSpot {
 // Environment/) -- one light position per building, centered over the
 // roof at the same height as its LED trim (BuildingLeds.tsx), using that
 // building's own ledColor.
-const ALL_BUILDING_LIGHTS: BuildingLightSpot[] = CITY_LAYOUT.buildings.map((b) => ({
-  x: b.x,
-  y: b.by + b.h + 0.3,
-  z: b.z,
-  color: new THREE.Color(b.ledColor),
-}));
+const makeBuildingLights = (): BuildingLightSpot[] =>
+  CITY_LAYOUT.buildings.map((b) => ({
+    x: b.x,
+    y: b.by + b.h + 0.3,
+    z: b.z,
+    color: new THREE.Color(b.ledColor),
+  }));
+let ALL_BUILDING_LIGHTS: BuildingLightSpot[] = makeBuildingLights();
 
 // Scratch array, sorted in place every frame -- avoids allocating a fresh
 // array 60 times a second just to find the nearest POOL_SIZE buildings.
-const _sorted: BuildingLightSpot[] = [...ALL_BUILDING_LIGHTS];
+let _sorted: BuildingLightSpot[] = [...ALL_BUILDING_LIGHTS];
+onPlanetRebuild(() => {
+  ALL_BUILDING_LIGHTS = makeBuildingLights();
+  _sorted = [...ALL_BUILDING_LIGHTS];
+});
 
 // Mounted exactly once (in Scene.tsx, alongside BuildingLeds).
 const BuildingLedGlow: React.FC = () => {
