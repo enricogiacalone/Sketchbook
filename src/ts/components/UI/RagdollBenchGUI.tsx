@@ -3,6 +3,7 @@ import { useStore } from '../../store';
 import { DEFAULT_RAGDOLL_BENCH, type RagdollBenchSettings } from '../Environment/ragdoll/ragdollBench';
 import { acquireDebugGui, debugSection, releaseDebugGui } from '../../lib/debugGui';
 import { KO_SCENARIOS, copyKoValues, runKoScenario } from './koLab';
+import { IDLE_CLIPS, KIMODO_CLIPS, idleConfig } from '../../lib/kimodo';
 
 // "metti il personaggio a T e sistema queste ossa della ragdoll attiva..
 // sistema l'ambiente per fare i test come si deve" -- pannello dedicato
@@ -20,6 +21,17 @@ const TEST_HIT_SEGMENTS: Record<string, string> = {
 };
 
 const NO_CLIP = '(gioco normale)';
+
+// cartelle delle animazioni Kimodo nel pannello (il nome e' la "group" di tools/kimodo/animations.json)
+const KIMODO_GROUPS: Array<[string, string]> = [
+  ['idle', 'Idle'],
+  ['locomozione', 'Locomozione'],
+  ['stati', 'Stati'],
+  ['folla', 'Folla'],
+  ['ragdoll', 'Ragdoll (colpi e rialzi)'],
+  ['altre', 'Altre'],
+];
+const shortName = (n: string) => n.replace(/^Kimodo_/, '');
 
 const RagdollBenchGUI: React.FC = () => {
   useEffect(() => {
@@ -195,12 +207,49 @@ const RagdollBenchGUI: React.FC = () => {
 
     // L'elenco delle clip esiste solo dopo che il combattente del duello
     // e' montato: lo si riempie appena disponibile.
-    // "introduci kimodo": le clip generate (tools/kimodo/kimodo.sh) in un
-    // pannello a parte, oltre che nell'elenco completo qui sopra. Scegliendone
-    // una il manichino la ripete (clip -> pausa in guardia -> clip).
-    // (prima in una cartella a parte: e' lo stesso elenco, filtrato, quindi
-    // sta accanto all'altro)
-    let kimodoCtrl = folder.add(bind, 'clip', [NO_CLIP]).name('Animazione Kimodo').listen();
+    // "introduci kimodo": le clip generate (tools/kimodo/kimodo.sh) hanno una
+    // cartella a parte, a sua volta divisa per gruppo (idle, locomozione, stati,
+    // folla, ragdoll). Scegliendone una il manichino la ripete (clip -> pausa in
+    // guardia -> clip). L'idle e' anche configurabile: e' quello che il giocatore usa
+    // davvero da fermo (respiro di base + variazioni ogni tanto, lib/kimodo.ts idleConfig).
+    // al primo livello del pannello Debug (sezione 'kimodo'), non dentro Fisica e ragdoll
+    const kimodoFolder = debugSection('kimodo');
+    const kimodoSubfolders: any[] = [];
+    const addGroup = (parent: any, label: string, clips: string[]) => {
+      const f = parent.addFolder(`${label} (${clips.length})`);
+      kimodoSubfolders.push(f);
+      const options: Record<string, string> = { [NO_CLIP]: NO_CLIP };
+      for (const c of clips) options[shortName(c)] = c;
+      f.add(bind, 'clip', options).name('Prova').listen();
+      f.close();
+      return f;
+    };
+
+    // idle: la cartella che configura il riposo vero del giocatore
+    const idleFolder = kimodoFolder.addFolder('Idle (riposo del giocatore)');
+    kimodoSubfolders.push(idleFolder);
+    {
+      const idleOptions: Record<string, string> = {};
+      for (const c of IDLE_CLIPS) idleOptions[shortName(c)] = c;
+      idleFolder.add(idleConfig, 'base', idleOptions).name('Riposo di base').listen();
+      idleFolder.add(idleConfig, 'variations').name('Variazioni ogni tanto').listen();
+      idleFolder.add(idleConfig, 'minS', 2, 30, 0.5).name('Ogni (s) da').listen();
+      idleFolder.add(idleConfig, 'maxS', 2, 40, 0.5).name('Ogni (s) fino a').listen();
+      // quanto spesso: il numero di volte che la clip sta nella lista (0 = mai)
+      const weights: Record<string, number> = {};
+      for (const c of IDLE_CLIPS) {
+        weights[c] = idleConfig.pool.filter((n) => n === c).length;
+        idleFolder
+          .add(weights, c, 0, 4, 1)
+          .name(`Peso: ${shortName(c)}`)
+          .onChange(() => {
+            idleConfig.pool = IDLE_CLIPS.flatMap((n) => new Array<string>(Math.round(weights[n])).fill(n));
+          });
+      }
+      const options: Record<string, string> = { [NO_CLIP]: NO_CLIP };
+      for (const c of IDLE_CLIPS) options[shortName(c)] = c;
+      idleFolder.add(bind, 'clip', options).name('Prova').listen();
+    }
 
     const poll = window.setInterval(() => {
       const names: string[] | undefined = (window as any).__ragdollBench?.clipNames?.();
@@ -209,11 +258,19 @@ const RagdollBenchGUI: React.FC = () => {
           .options([NO_CLIP, ...names])
           .name('Animazione di prova')
           .listen();
-        const k = names.filter((n) => n.startsWith('Kimodo_'));
-        kimodoCtrl = kimodoCtrl
-          .options([NO_CLIP, ...k])
-          .name(`Animazione Kimodo (${k.length})`)
-          .listen();
+        // le altre cartelle, divise per gruppo (solo clip che il modello ha davvero)
+        const have = names.filter((n) => n.startsWith('Kimodo_'));
+        const byGroup = new Map<string, string[]>();
+        for (const c of have) {
+          const g = KIMODO_CLIPS[c]?.group ?? 'altre';
+          if (g === 'idle') continue;
+          (byGroup.get(g) ?? byGroup.set(g, []).get(g)!).push(c);
+        }
+        for (const [g, label] of KIMODO_GROUPS) {
+          const clips = byGroup.get(g);
+          if (clips?.length) addGroup(kimodoFolder, label, clips.sort());
+        }
+        for (const [g, clips] of byGroup) if (!KIMODO_GROUPS.some(([k]) => k === g)) addGroup(kimodoFolder, g, clips.sort());
         window.clearInterval(poll);
       }
     }, 1000);
@@ -300,6 +357,7 @@ const RagdollBenchGUI: React.FC = () => {
       window.removeEventListener('keydown', onKey);
       ko.destroy();
       folder.destroy();
+      kimodoSubfolders.forEach((f) => f.destroy());
       general.forEach((c) => c.destroy());
       releaseDebugGui();
     };

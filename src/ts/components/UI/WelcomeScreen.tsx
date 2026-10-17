@@ -6,7 +6,7 @@ interface WelcomeScreenProps {
   // entrare in un'arena" -- the third arg picks which world you land in:
   // 'world' is the existing "Enter Playground" flow, 'duel' drops you
   // straight into the 1v1 arena (see App.tsx's handleJoin).
-  onJoin: (name: string, controlMethod: string, mode: 'world' | 'duel' | 'flylab') => void;
+  onJoin: (name: string, controlMethod: string, mode: 'world' | 'duel' | 'flylab' | 'charlab') => void;
 }
 
 const checkRow: React.CSSProperties = {
@@ -146,6 +146,15 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
             onClick={() => onJoin(name.trim() || 'Ricercatore', controlMethod, 'flylab')}
           >
             🪰 Laboratorio cervello mosca
+          </button>
+
+          <button
+            className="welcome-button"
+            style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%)', marginTop: 12 }}
+            type="button"
+            onClick={() => onJoin(name.trim() || 'Ricercatore', controlMethod, 'charlab')}
+          >
+            🧍 Laboratorio personaggi
           </button>
 
           <button

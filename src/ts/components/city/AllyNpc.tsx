@@ -76,8 +76,7 @@ function matches(o: FighterData, order: Order, pp: number[]): boolean {
   const t = o.team ?? '';
   if (t === 'ALLY' || t === 'PLAYER' || t.startsWith('REMOTE_')) return false;
   const police = t.startsWith('POLICE');
-  // (un passante colpito diventa un nemico: per chi gli da' la caccia e' ancora un passante)
-  const civ = t.startsWith('CIVILIAN') || o.id.startsWith('crowd-enemy');
+  const civ = t.startsWith('CIVILIAN');
   const enemy = t === 'CITY_ENEMY';
   if (order.kind === 'defend') {
     // chi minaccia il giocatore (nemici e polizia vicini a lui)

@@ -182,7 +182,8 @@
       "seconds": 3,
       "seed": 62,
       "rootMotion": true,
-      "prompt": "A person standing still starts running forward, accelerating quickly into a steady run."
+      "prompt": "A person standing still starts running forward, accelerating quickly into a steady run.",
+      "start": "assets-src/kimodo/walk_start:0:8"
     },
     {
       "group": "locomozione",
@@ -190,7 +191,8 @@
       "seconds": 3,
       "seed": 63,
       "rootMotion": true,
-      "prompt": "A person walking forward at a normal pace slows down and comes to a natural stop, then stands still."
+      "prompt": "A person walking forward at a normal pace slows down and comes to a natural stop, then stands still.",
+      "end": "assets-src/kimodo/walk_start:0:8"
     },
     {
       "group": "locomozione",
@@ -198,7 +200,8 @@
       "seconds": 3,
       "seed": 64,
       "rootMotion": true,
-      "prompt": "A person running forward decelerates with a few steps and comes to a stop, then stands still."
+      "prompt": "A person running forward decelerates with a few steps and comes to a stop, then stands still.",
+      "end": "assets-src/kimodo/walk_start:0:8"
     },
     {
       "group": "locomozione",
@@ -222,7 +225,9 @@
       "seconds": 3,
       "seed": 67,
       "rootMotion": true,
-      "prompt": "A person standing still turns around one hundred eighty degrees in place with a few small steps, then stands still."
+      "prompt": "A person standing still turns around one hundred eighty degrees in place with a few small steps, then stands still.",
+      "start": "assets-src/kimodo/walk_start:0:8",
+      "end": "assets-src/kimodo/walk_start:0:8:180"
     },
     {
       "group": "locomozione",
@@ -248,11 +253,11 @@
       "group": "idle",
       "name": "idle_breathe",
       "seconds": 5,
-      "seed": 101,
+      "seed": 111,
       "loop": {
         "minSeconds": 2.5
       },
-      "prompt": "A person stands still in a neutral relaxed pose with both feet together and arms hanging at the sides, breathing calmly and barely moving.",
+      "prompt": "A person stands idle in a relaxed natural posture with feet together, arms hanging loosely, shoulders softly rising and falling with each breath and the head making tiny natural adjustments.",
       "start": "assets-src/kimodo/walk_start:0:8",
       "end": "assets-src/kimodo/walk_start:0:8"
     },
@@ -269,8 +274,8 @@
       "end": "assets-src/kimodo/walk_start:0:8"
     },
     {
-      "group": "idle",
-      "name": "idle_look",
+      "group": "locomozione",
+      "name": "side_step",
       "seconds": 5,
       "seed": 103,
       "loop": {
@@ -291,6 +296,20 @@
       "prompt": "A person stands with feet together, rolls their shoulders, rubs the back of the neck with one hand, then lets the arm drop back to the side.",
       "start": "assets-src/kimodo/walk_start:0:8",
       "end": "assets-src/kimodo/walk_start:0:8"
+    },
+    {
+      "group": "locomozione",
+      "name": "cover_wall",
+      "seconds": 3,
+      "seed": 24684,
+      "prompt": "a character slides their back against a concrete wall, pressing shoulders flat, breathing heavily and looking around cautiously"
+    },
+    {
+      "group": "folla",
+      "name": "saluto",
+      "seconds": 3,
+      "seed": 8711,
+      "prompt": "a person waves hello with the right hand"
     }
   ]
 }

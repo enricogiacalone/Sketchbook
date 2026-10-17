@@ -69,6 +69,9 @@ export function useRagdollSolidBodies(
 
     const entries = solidBodiesRef.current;
     for (const segment of SOLID_BODY_SEGMENTS) {
+      // (Foot_L/R compaiono due volte in SOLID_BODY_SEGMENTS: il secondo giro
+      // sovrascriveva la voce e il primo corpo restava li' per sempre, orfano)
+      if (entries[segment.name]) continue;
       const bone = bones[segment.drivingBone];
       const toBone = bones[segment.toBone];
       if (!bone || !toBone) continue;

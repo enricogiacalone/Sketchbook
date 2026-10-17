@@ -2,9 +2,9 @@ import { Canvas } from '@react-three/fiber';
 import { Physics } from '@react-three/rapier';
 import React, { Suspense, useEffect, useState } from 'react';
 import * as THREE from 'three';
-import { WebGPURenderer } from 'three/webgpu';
 import { useShallow } from 'zustand/react/shallow';
 import Scene from './Scene';
+import { createGameRenderer } from './lib/gameRenderer';
 import CityPlayer from './components/CityPlayer';
 import Drone from './components/Drone';
 import AdaptiveResolution from './components/Environment/AdaptiveResolution';
@@ -52,11 +52,14 @@ import Minimap from './components/UI/Minimap';
 import PauseMap from './components/UI/PauseMap';
 import GameFreeze from './components/GameFreeze';
 const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
+const CharLab = React.lazy(() => import('./charLab/CharLab'));
 
 const App: React.FC = () => {
   const [isJoined, setIsJoined] = useState(false);
   // "Laboratorio cervello mosca" (WelcomeScreen): scena a parte, vedi src/ts/flyLab
   const [labMode, setLabMode] = useState(false);
+  // "Laboratorio personaggi": piazza vuota per provare i personaggi (src/ts/charLab); in sviluppo si apre anche con ?lab=char
+  const [charLab, setCharLab] = useState(() => import.meta.env.DEV && new URLSearchParams(window.location.search).get('lab') === 'char');
   const [userName, setUserName] = useState('');
   const {
     isLoading,
@@ -107,7 +110,12 @@ const App: React.FC = () => {
     return params.get('autojoin') || 'Claude';
   }, []);
 
-  const handleJoin = (name: string, controlMethod: string, mode: 'world' | 'duel' | 'flylab' = 'world') => {
+  const handleJoin = (name: string, controlMethod: string, mode: 'world' | 'duel' | 'flylab' | 'charlab' = 'world') => {
+    if (mode === 'charlab') {
+      setUserName(name);
+      setCharLab(true);
+      return;
+    }
     if (mode === 'flylab') {
       // laboratorio: niente mondo di gioco, niente caricamento del gioco
       setUserName(name);
@@ -123,7 +131,7 @@ const App: React.FC = () => {
       .then(() => enterGame(name, controlMethod, mode));
   };
 
-  const enterGame = (name: string, controlMethod: string, mode: 'world' | 'duel' | 'flylab') => {
+  const enterGame = (name: string, controlMethod: string, mode: 'world' | 'duel' | 'flylab' | 'charlab') => {
     setUserName(name);
     setIsJoined(true);
     useStore.getState().setGameJoined(true);
@@ -170,6 +178,15 @@ const App: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [setPaused]);
 
+  if (charLab) {
+    // niente audio da sbloccare: il laboratorio e' muto
+    return (
+      <Suspense fallback={<div style={{ color: '#aaa', padding: 20 }}>carico il laboratorio...</div>}>
+        <CharLab onExit={() => setCharLab(false)} />
+      </Suspense>
+    );
+  }
+
   if (labMode) {
     return (
       <Suspense fallback={<div style={{ color: '#aaa', padding: 20 }}>carico il laboratorio...</div>}>
@@ -188,35 +205,7 @@ const App: React.FC = () => {
 
       {/* The game scene */}
       <Canvas
-        gl={(props: any) => {
-          const canvasElement =
-            props.canvas instanceof HTMLCanvasElement
-              ? props.canvas
-              : props instanceof HTMLCanvasElement
-                ? props
-                : props.canvas || props.domElement || (props.getState && props.getState().gl?.domElement);
-
-          const renderer = new WebGPURenderer({ canvas: canvasElement, antialias: true }) as any;
-          renderer.init().catch((err: any) => {
-            console.warn('WebGPU renderer initialization skipped (headless/unsupported environment):', err);
-          });
-          // drei (useTexture) chiama initTexture subito, anche prima che il backend
-          // WebGPU sia pronto: lancia e riempie la console. Prima dell'init non c'e'
-          // niente da pre-caricare (la texture parte col primo disegno).
-          const origInitTexture = renderer.initTexture?.bind(renderer);
-          if (origInitTexture) {
-            renderer.initTexture = (t: any) => {
-              if (renderer._initialized) origInitTexture(t);
-            };
-          }
-          const origRender = renderer.render.bind(renderer);
-          renderer.render = function (scene: any, camera: any) {
-            if (this._initialized) {
-              origRender(scene, camera);
-            }
-          };
-          return renderer;
-        }}
+        gl={createGameRenderer}
         shadows={{ type: THREE.PCFShadowMap }}
         camera={{ position: [5, 5, 5], fov: 50 }}
         // Cap the device pixel ratio -- with no dpr set, R3F defaults to

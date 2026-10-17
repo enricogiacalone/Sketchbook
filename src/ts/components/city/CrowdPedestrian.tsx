@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
+import { useRapier } from '@react-three/rapier';
 import * as THREE from 'three';
 import { useStore } from '../../store';
 import { useMannequinActor } from './useMannequinActor';
@@ -24,6 +25,9 @@ import { wanted, playerHitRecently, markPlayerHit } from '../../lib/wanted';
 import { BUMP_LINES, takeBump } from '../../lib/bump';
 import { askOllama, ollamaEnabled } from '../../lib/ollamaNpc';
 import { parseOrder, type Order } from './allyOrders';
+import { ENEMY_COLOR, newHostileState, stepHostile, type HostileState } from './brains/hostile';
+import { NO_PISTOL, PistolGear } from './brains/PistolGear';
+import type { PistolModelApi } from '../Environment/weapons/usePistolModel';
 
 // saluti spontanei al passaggio del giocatore
 const GREET_CLIPS = ['Greeting', 'Kimodo_saluto', 'Head Nod', 'Greeting'];
@@ -48,17 +52,18 @@ const _hitPt = new THREE.Vector3();
 
 interface Props {
   slot: number;
-  onBecomeEnemy: (agent: CrowdAgent, position: [number, number, number], hp?: number, armed?: boolean) => void;
+  // (un passante colpito che si arrabbia resta nello stesso corpo: vedi startHostile)
   // reclutato in chat ("seguimi", "uccidi..."): diventa un alleato
   onBecomeAlly: (agent: CrowdAgent, position: [number, number, number], hp: number, order: Order) => void;
 }
 
-const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy, onBecomeAlly }) => {
+const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeAlly }) => {
   const npcId = `crowd-${slot}`;
+  const civTeam = `CIVILIAN_crowd_${slot}`;
   const actor = useMannequinActor({
     id: npcId,
     name: 'Passante',
-    team: `CIVILIAN_crowd_${slot}`,
+    team: civTeam,
     color: '#607d8b',
     hp: 60,
     x: 0,
@@ -75,6 +80,11 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy, onBecomeAlly })
   // clip di reazione in corso (urto, saluto): fino a `until` (s di clock) manda lei
   const reactRef = useRef<{ clip: string; until: number; face: boolean } | null>(null);
   const lastGreetRef = useRef(-99);
+  // arrabbiato: stesso corpo, comportamento ostile (brains/hostile.ts)
+  const hostileRef = useRef<{ S: HostileState; armed: boolean } | null>(null);
+  const [armedGear, setArmedGear] = useState(false);
+  const pistolApi = useRef<PistolModelApi | null>(null);
+  const { world, rapier } = useRapier();
 
   const [speechMsg, setSpeechMsg] = useState<string>('');
   const lastSpokenTime = useRef(-99);
@@ -134,7 +144,28 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy, onBecomeAlly })
     [slot, npcId]
   );
 
+  const startHostile = (a: CrowdAgent, armed: boolean) => {
+    hostileRef.current = { S: newHostileState(false), armed };
+    // l'agente resta nel suo corpo ma esce dalla simulazione della folla (gone)
+    a.gone = true;
+    data.team = 'CITY_ENEMY';
+    data.name = 'Nemico';
+    actor.setTint(ENEMY_COLOR);
+    setArmedGear(armed);
+  };
+
+  // finito di essere ostile (rinuncia, morte, corpo restituito)
+  const endHostile = () => {
+    if (!hostileRef.current) return;
+    hostileRef.current = null;
+    (pistolApi.current ?? NO_PISTOL).setVisible(false);
+    setArmedGear(false);
+    data.team = civTeam;
+    data.name = 'Passante';
+  };
+
   const release = () => {
+    endHostile();
     const a = agentRef.current;
     if (a) {
       a.slot = -1;
@@ -173,6 +204,7 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy, onBecomeAlly })
         actor.sleep();
         return;
       }
+      endHostile();
       actor.setTint(want.color);
       actor.wake(want.x, want.z);
       g.position.set(want.x, want.y, want.z);
@@ -205,12 +237,47 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy, onBecomeAlly })
     if (res === 'dead') {
       a.gone = true;
       deadAgent.current = a;
+      endHostile();
       clearConversation();
       return;
     }
     if (res === 'down') {
       a.pause = Math.max(a.pause, 1);
       actor.holdRoot(g);
+      (pistolApi.current ?? NO_PISTOL).setVisible(false);
+      return;
+    }
+    // arrabbiato: lo stesso corpo diventa un nemico (inseguimento, pugni o pistola)
+    const hostile = hostileRef.current;
+    if (hostile) {
+      const pistol = pistolApi.current ?? NO_PISTOL;
+      const out = stepHostile(hostile.S, { armed: hostile.armed && !!pistolApi.current }, {
+        id: npcId,
+        actor,
+        g,
+        pistol,
+        world,
+        rapier,
+        delta,
+        res: res === 'hurt' ? 'hurt' : null,
+        say: (msg) => {
+          if (speechMsg) return;
+          setSpeechMsg(msg);
+          window.setTimeout(() => setSpeechMsg(''), 2500);
+        },
+      });
+      // l'agente segue il corpo (distanza, mira, minimappa)
+      a.x = data.position.x;
+      a.z = data.position.z;
+      a.y = g.position.y;
+      if (out === 'gaveUp') {
+        // rinuncia: torna a camminare nella folla sul suo tratto
+        endHostile();
+        handled.current = false;
+        a.pause = 1;
+        reviveCrowdAgent(a);
+        release();
+      }
       return;
     }
     if (res === 'hurt' && !handled.current) {
@@ -221,13 +288,11 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy, onBecomeAlly })
       const pp0 = useStore.getState().playerPos;
       const byPlayer = playerHitRecently(npcId, 3);
       const roll = Math.random();
-      if (byPlayer && roll < 0.45) {
+      if (a.forceHostile || (byPlayer && roll < 0.45)) {
         handled.current = true;
-        a.gone = true;
-        if (crowdSlots[slot] === a) crowdSlots[slot] = null;
-        const armed = roll < 0.07;
-        onBecomeEnemy(a, [data.position.x, g.position.y, data.position.z], (data.hp / actor.maxHp()) * 100, armed);
-        release();
+        const armed = a.forceHostile ? a.forceHostile === 'armed' : roll < 0.07;
+        a.forceHostile = undefined;
+        startHostile(a, armed);
         return;
       }
       a.fearX = byPlayer ? pp0[0] : data.position.x + (Math.random() - 0.5) * 2;
@@ -439,6 +504,7 @@ const CrowdPedestrian: React.FC<Props> = ({ slot, onBecomeEnemy, onBecomeAlly })
     <group ref={groupRef} position={[0, -1000, 0]}>
       <primitive object={actor.clone} />
       {speechMsg && <SpeechBubble message={speechMsg} position={[0, 2.3, 0]} />}
+      {armedGear && <PistolGear modelRootRef={actor.modelRootRef} apiRef={pistolApi} />}
     </group>
   );
 };

@@ -47,7 +47,7 @@ export function acquireDebugGui(): GUI {
 // sua sezione (debugSection) e ogni sezione si vede solo nella scena a cui
 // appartiene (e solo se ha qualcosa dentro).
 type TestScene = ReturnType<typeof useStore.getState>['testScene'];
-export type DebugSectionId = 'arena' | 'playground' | 'test' | 'personaggio' | 'fisica' | 'meteoriti' | 'grafica';
+export type DebugSectionId = 'arena' | 'playground' | 'test' | 'personaggio' | 'kimodo' | 'fisica' | 'meteoriti' | 'grafica';
 const SECTIONS: Array<{ id: DebugSectionId; title: string; visible: (scene: TestScene, joined: boolean) => boolean }> = [
   // solo nel duello (Duello 1v1)
   { id: 'arena', title: 'Arena', visible: (scene, joined) => joined && scene === 'duel' },
@@ -57,6 +57,8 @@ const SECTIONS: Array<{ id: DebugSectionId; title: string; visible: (scene: Test
   { id: 'test', title: 'Scenario di test', visible: (scene, joined) => joined && scene !== 'none' && scene !== 'duel' },
   // comuni
   { id: 'personaggio', title: 'Personaggio e camera', visible: () => true },
+  // le animazioni Kimodo (idle configurabile + elenco per gruppo): al primo livello del pannello
+  { id: 'kimodo', title: 'Animazioni Kimodo', visible: () => true },
   { id: 'fisica', title: 'Fisica e ragdoll', visible: () => true },
   // il cielo con i meteoriti c'e' in citta', nel duello e nella gara (Scene.tsx)
   { id: 'meteoriti', title: 'Meteoriti', visible: (scene, joined) => joined && (scene === 'none' || scene === 'duel' || scene === 'race') },

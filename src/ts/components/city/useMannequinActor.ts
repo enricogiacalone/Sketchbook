@@ -406,6 +406,15 @@ export function useMannequinActor(opts: MannequinActorOptions) {
       ragdoll.beginFrame();
       mixer.update(delta + farAccRef.current);
       farAccRef.current = 0;
+      // rete di sicurezza contro la posa a T: se in piedi e nessuna clip e'
+      // visibile (clip persa dopo un KO, un rialzo, una ripresa da lontano o
+      // una dissolvenza finita nel vuoto) il rig torna alla posa di bind, a
+      // braccia aperte. Si rilancia l'ultima clip (o un idle) senza dissolvenza.
+      if (!deadRef.current && getUpLeftRef.current <= 0 && !kd.isDown() && nothingVisible()) {
+        const last = curRef.current;
+        curRef.current = null;
+        play(last && clips[last] ? last : 'Idle_A', 0, true);
+      }
       if (!solidInitRef.current && !deadRef.current) {
         solidInitRef.current = true;
         ragdoll.resolveBodyMovement(0, 0, null);

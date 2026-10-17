@@ -10,6 +10,7 @@ import { useRagdoll } from './ragdoll/useRagdoll';
 import SolidBodyDebugView from './SolidBodyDebugView';
 import ActiveRagdollDebugView from './ActiveRagdollDebugView';
 import { useInput } from '../../hooks/useInput';
+import { playerAuto, withAutopilot } from '../../lib/playerAutopilot';
 import WeaponWheelController from '../UI/WeaponWheelController';
 import { FighterData, AnimCatalog } from './SquadArenaTypes';
 import type { PunchingBagHandle } from './PunchingBag';
@@ -27,7 +28,7 @@ import { stepAt, stepTopAt } from './stairSteps';
 import { newTravState, stepTraversal, followGround, isTraversing, hangHandTargets, type TravCtx } from './traversal/traversal';
 import { GETUP_CLIP } from './ragdoll/knockdown';
 import { useKnockdown } from './ragdoll/useKnockdown';
-import { K, KIMODO_ANIMS_URL } from '../../lib/kimodo';
+import { K, KIMODO_ANIMS_URL, idleConfig } from '../../lib/kimodo';
 import { crowdPanic } from '../city/crowdSim';
 import { castShot, spreadDirection } from './weapons/hitscan';
 import { getShootableCollider, applyFighterHit } from './weapons/shootableRegistry';
@@ -179,7 +180,7 @@ const dirWalkTs = () => timeScaleFor('Walk', LT.walkSpeed);
 const aimWalkTs = () => timeScaleFor('Walk', LT.aimWalkSpeed);
 // "sta in posizione di combattimento solo quando aggancio un nemico, per il
 // resto in idle normale": idle rilassato del rig (il primo che esiste)
-const RELAXED_IDLE_CLIPS = ['Idle_A', 'Idle_Subtle', 'Idle'];
+const RELAXED_IDLE_CLIPS = [K.idleBase, 'Idle_A', 'Idle_Subtle', 'Idle'];
 // "la posizione di riposo va in contrasto con il salire le scale cercando di
 // mettere sempre il piede destro dietro quello sinistro": Idle_A tiene il
 // destro 39 cm dietro il sinistro (misurato), su una scala vuol dire uno o
@@ -199,6 +200,8 @@ const COVER_REACH = 1.8;
 const COVER_MIN_HEIGHT = 1.8;
 const COVER_BACK_GAP = 0.42; // ~ il raggio del corpo (piu' vicino non ci si arriva)
 const COVER_MOVE_SPEED = 1.3;
+// quanto avanza di lato il passo laterale Kimodo (m/s a velocita' normale della clip: ~0.9 m in ~1.8 s)
+const COVER_SIDE_STEP_SPEED = 0.5;
 const COVER_SNAP_SPEED = 4;
 const COVER_SNAP_TOL = 0.08; // m: arrivati al muro (sotto, si scorre di lato)
 // il modello si sposta verso il muro di tanto, oltre al corpo fisico
@@ -511,7 +514,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   // city-wide arena's up-to-120 fighters), the duel always has exactly
   // one player -- no perf reason to ever skip this here.
   const ragdoll = useRagdoll(modelRootRef, data.id);
-  const input = useInput();
+  const input = withAutopilot(useInput());
   const { camera, scene: threeScene } = useThree();
   const { world, rapier } = useRapier();
   // Pistola (vedi weapons/): modello agganciato alla mano destra e stato
@@ -550,6 +553,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   });
   // direzione (rotation del corpo) verso cui guarda la camera, aggiornata ogni frame
   const camYawRef = useRef(0);
+  const torsoFreeRef = useRef(0);
   const spineLeanWRef = useRef(1); // peso della torsione del busto (0 a terra)
   // salto / arrampicata (traversal/traversal.ts): quota dei piedi, modo...
   const travRef = useRef(
@@ -600,6 +604,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   const sprintTimeRef = useRef(0);
   const breathLeftRef = useRef(0);
   const celebrateRef = useRef<{ delay: number; left: number }>({ delay: 0, left: 0 });
+  // variazioni del riposo: quanto manca alla prossima e quanto dura quella in corso
+  const idleVarRef = useRef({ next: 7, left: 0 });
   const scheduleCelebration = (victim: FighterData) => {
     const nearEnemy = opponents.some(
       (o) =>
@@ -1194,8 +1200,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   // busto tiene la posa Pistol_* sul layer alto.
   // Guardia (Fighting Idle) solo col lock-on su un nemico vivo; altrimenti
   // idle normale. Con la pistola le gambe stanno nella posa Pistol_Idle.
-  const relaxedIdle = RELAXED_IDLE_CLIPS.find((n) => actions[n]) ?? animCatalog.idle;
+  const relaxedIdle = [idleConfig.base, ...RELAXED_IDLE_CLIPS].find((n) => actions[n]) ?? animCatalog.idle;
   const stairsIdle = STAIRS_IDLE_CLIPS.find((n) => actions[n]) ?? relaxedIdle;
+  // il riposo tra una clip di prova e l'altra (pannello Debug): quello vero del giocatore, non la guardia da combattimento
+  const benchRestClip = () => [idleConfig.base, ...RELAXED_IDLE_CLIPS].find((n) => actions[n]) ?? animCatalog.idle;
   const isEngaged = () => !!input.lockOn && opponents.some((o) => !o.isDead);
   const onStairs = () => stepTopAt(data.position.x, data.position.z, travRef.current.feetY) !== null;
   const idleName = () => {
@@ -1204,7 +1212,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     if (weaponRef.current === 'rifle' && actions['Pistol_Idle__legs']) return 'Pistol_Idle__legs';
     if (weaponRef.current === 'knife' && actions[KNIFE_IDLE_CLIP]) return KNIFE_IDLE_CLIP;
     if (isEngaged()) return animCatalog.idle;
-    return onStairs() ? stairsIdle : relaxedIdle;
+    return onStairs() ? stairsIdle : [idleConfig.base, ...RELAXED_IDLE_CLIPS].find((n) => actions[n]) ?? relaxedIdle;
   };
   const idleState = () => (weaponRef.current === 'fists' && !isEngaged() ? 'Riposo' : 'In guardia');
   // Fermi: esultanza o fiatone (clip Kimodo) al posto del riposo. true se ha
@@ -1235,6 +1243,26 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       transitionToAnimation(K.outOfBreath, 0.35, true);
       data.state = 'Fiatone';
       return true;
+    }
+    // riposo: ogni 6-12 s una variazione (peso, sguardo, spalle) per un giro della clip, poi torna al respiro.
+    // Solo se il respiro di base c'e' (le variazioni partono e finiscono sulla sua stessa posa).
+    const iv = idleVarRef.current;
+    if (iv.left > 0) {
+      iv.left -= dt;
+      return iv.left > 0;
+    }
+    if (idleConfig.variations && actions[idleConfig.base] && !onStairs()) {
+      iv.next -= dt;
+      if (iv.next <= 0) {
+        iv.next = idleConfig.minS + Math.random() * Math.max(0, idleConfig.maxS - idleConfig.minS);
+        const pool = idleConfig.pool.filter((n) => actions[n]);
+        if (pool.length) {
+          const clip = pool[Math.floor(Math.random() * pool.length)];
+          iv.left = clipsMap[clip]?.duration ?? 3;
+          transitionToAnimation(clip, 0.4, true);
+          return true;
+        }
+      }
     }
     return false;
   };
@@ -1506,7 +1534,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     if (benchClip !== lastBenchClipRef.current) {
       // Cambio di clip di prova: dissolvenza come nel gioco (un taglio
       // secco teletrasporterebbe il bersaglio e falserebbe le misure).
-      const next = benchClip && actions[benchClip] ? benchClip : animCatalog.idle;
+      const next = benchClip && actions[benchClip] ? benchClip : benchRestClip();
       const loops = !benchClip || BENCH_LOOPING_CLIP.test(next);
       transitionToAnimation(next, 0.2, loops);
       lastBenchClipRef.current = benchClip;
@@ -1521,7 +1549,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       cyc.t += delta * globalSpeed;
       const dur = clipsMap[benchClip]?.duration ?? 1;
       if (cyc.phase === 'clip' && cyc.t >= dur) {
-        transitionToAnimation(animCatalog.idle, 0.25, true);
+        transitionToAnimation(benchRestClip(), 0.25, true);
         cyc.phase = 'rest';
         cyc.t = 0;
       } else if (cyc.phase === 'rest' && cyc.t >= 0.8) {
@@ -1750,11 +1778,14 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // al muro); sporgendosi a mirare torna a seguire la telecamera
     const cvT = coverRef.current;
     coverTwistRef.current = THREE.MathUtils.clamp(coverTwistRef.current + (cvT.on && !cvT.peek ? -1 : 1) * delta * 6, 0, 1);
+    // telecamera libera che segue il giocatore (laboratorio personaggi): niente allaccio tra busto e orbita,
+    // il busto resta quello della clip (si spegne e riaccende piano)
+    torsoFreeRef.current = THREE.MathUtils.clamp(torsoFreeRef.current + (playerAuto.freeTorso ? 1 : -1) * delta * 6, 0, 1);
     if (!tPoseBench && !benchClip && !traving() && !inCarBody())
       ragdoll.applySpineLean(
         THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX) * coverTwistRef.current,
         THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX) * (isGun() ? gunTwistRef.current : 1) * coverTwistRef.current,
-        spineLeanWRef.current
+        spineLeanWRef.current * (1 - torsoFreeRef.current)
       );
     // Fucile: e' agganciato al petto (calcio alla spalla, vedi
     // rifleHoldTuning) e le MANI vanno sull'arma: destra sull'impugnatura,
@@ -2352,6 +2383,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       if (input.backward) _tMove.addScaledVector(_tFwd, -1);
       if (input.left) _tMove.addScaledVector(_tRight, -1);
       if (input.right) _tMove.add(_tRight);
+      if (playerAuto.active) _tMove.set(playerAuto.mx, 0, playerAuto.mz);
       if (_tMove.lengthSq() > 0.0001) _tMove.normalize();
       const ctx: TravCtx = {
         world,
@@ -2457,6 +2489,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     if (input.backward) _moveDir.addScaledVector(_forward, -1);
     if (input.left) _moveDir.addScaledVector(_right, -1);
     if (input.right) _moveDir.add(_right);
+    // pilota automatico (lib/playerAutopilot.ts): la direzione e' gia' nel mondo
+    if (playerAuto.active) _moveDir.set(playerAuto.mx, 0, playerAuto.mz);
 
     // _toOpponent -- needed both by the lock-on facing below and the
     // dodge block's own "no direction held" fallback further down.
@@ -2601,8 +2635,14 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
               }
               cv.tx = _cvP.x + cv.nx * COVER_BACK_GAP;
               cv.tz = _cvP.z + cv.nz * COVER_BACK_GAP;
-              const clip = strafeClipFor(side > 0);
-              transitionToAnimation(clip, 0.15, true, timeScaleFor(clip, COVER_MOVE_SPEED));
+              // lungo il muro: il passo laterale Kimodo (va verso sinistra: a destra si riproduce al contrario),
+              // altrimenti il passo di lato di sempre
+              const sideStep = actions[K.sideStep];
+              const clip = sideStep ? K.sideStep : strafeClipFor(side > 0);
+              const ts = sideStep
+                ? (side > 0 ? -1 : 1) * THREE.MathUtils.clamp(COVER_MOVE_SPEED / COVER_SIDE_STEP_SPEED, 0.8, 2.5)
+                : timeScaleFor(clip, COVER_MOVE_SPEED);
+              transitionToAnimation(clip, 0.15, true, ts);
             }
           }
         }
@@ -2839,7 +2879,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
         if (od > best || od < 0.01) continue;
         let da = Math.atan2(-ox, -oz) - camYawRef.current;
         da = Math.atan2(Math.sin(da), Math.cos(da));
-        if (Math.abs(da) > 1.22) continue;
+        // (col pilota automatico non conta dove guarda la camera: si colpisce chi si ha davanti)
+        if (!playerAuto.active && Math.abs(da) > 1.22) continue;
         best = od;
         want = Math.atan2(-ox, -oz);
       }

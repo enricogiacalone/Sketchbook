@@ -136,7 +136,15 @@ for (let j = 0; j < 30; j++) {
 // tengono la loro inclinazione: copiate del tutto le spalle salivano di 2-6
 // cm sopra quelle del manichino, allineate del tutto scendevano di 2-5;
 // cosi' (misurato) stanno come nelle clip del manichino.
-const NO_ALIGN = new Set(['pelvis', 'spine_01', 'spine_02', 'spine_03', 'neck_01', 'neck_02', 'head']);
+// CORRETTO (ottobre 2026, "le spalle vanno un po' in avanti e poi tornano
+// indietro, tra le animazioni normali e quelle di kimodo"): misurato sulle
+// spalle (giunto upperarm nel frame del bacino) le clip Kimodo avevano le
+// spalle 4-8 cm piu' larghe (42 cm contro 34-38), 3 cm piu' basse e 3-5 cm
+// piu' avanti di Idle_A/Walk/Fighting Idle. Anche le clavicole ora si copiano
+// come la schiena (rotazione di SOMA rispetto al riposo): larghezza 37-39,
+// altezza 50-53, avanti -6..-12 cm, cioe' dentro l'intervallo delle clip del
+// manichino. KIMODO_CLAV=align riporta il comportamento di prima.
+const NO_ALIGN = new Set(['pelvis', 'spine_01', 'spine_02', 'spine_03', 'neck_01', 'neck_02', 'head', ...(process.env.KIMODO_CLAV === 'align' ? [] : ['clavicle_l', 'clavicle_r'])]);
 const YAW_ALIGN = new Set(['clavicle_l', 'clavicle_r']);
 const align = new Map();
 for (const [name, [, tChild, sChild]] of Object.entries(MAP)) {
@@ -517,7 +525,7 @@ const IDLE_ENDS = {
   turn_180: ['first', 'last'], turn_left_90: ['first', 'last'], turn_right_90: ['first', 'last'],
   wait_impatient: ['first', 'last'], look_around: ['first', 'last'], stretch: ['first', 'last'],
   saluto: ['first', 'last'], point_shout: ['first', 'last'],
-  idle_breathe: ['first', 'last'], idle_shift_weight: ['first', 'last'], idle_look: ['first', 'last'], idle_fidget: ['first', 'last'],
+  idle_breathe: ['first', 'last'], idle_shift_weight: ['first', 'last'], idle_fidget: ['first', 'last'],
 };
 const IDLE_BLEND_S = Number(process.env.KIMODO_IDLE_BLEND ?? 0.4);
 const IDLE_SKIP = /^(pelvis|root)$|^(thumb|index|middle|ring|pinky)_/;
@@ -908,7 +916,7 @@ for (const name of dirs.sort()) {
     add(node, 'rotation', arr, 'VEC4');
   }
   const prompt = fs.existsSync(path.join(dir, 'prompt.txt')) ? fs.readFileSync(path.join(dir, 'prompt.txt'), 'utf8').trim() : '';
-  const info = { duration: +((T - 1) / FPS).toFixed(3), loop: !!opts.loop, inPlace: !!opts.inPlace, speed: +speed.toFixed(3), prompt };
+  const info = { duration: +((T - 1) / FPS).toFixed(3), loop: !!opts.loop, inPlace: !!opts.inPlace, speed: +speed.toFixed(3), group: opts.group ?? 'altre', prompt };
   anim.setExtras({ ...info, source: 'kimodo soma-rp-v1.1' });
   meta[`Kimodo_${name}`] = motion ? { ...info, motion } : info;
   console.log(

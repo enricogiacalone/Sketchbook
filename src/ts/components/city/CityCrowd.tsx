@@ -3,7 +3,6 @@ import { useFrame } from '@react-three/fiber';
 import { useRapier } from '@react-three/rapier';
 import { vehicleBodyHandles } from '../Vehicles/vehicleRegistry';
 import { useStore } from '../../store';
-import Enemy from '../Enemy';
 import AllyNpc from './AllyNpc';
 import type { Order } from './allyOrders';
 import CrowdPedestrian from './CrowdPedestrian';
@@ -27,9 +26,10 @@ import {
 } from './crowdSim';
 
 // La folla della citta': simulazione leggera di tutti gli agenti, pool di
-// corpi veri per i vicini, sagome instanziate per gli altri, e i passanti
-// diventati nemici (Enemy.tsx al posto del passante finche' non rinuncia o
-// muore, poi l'agente torna a camminare).
+// corpi veri per i vicini, sagome instanziate per gli altri. Un passante che
+// si arrabbia resta nel suo corpo e passa al comportamento ostile
+// (brains/hostile.ts, vedi CrowdPedestrian); se rinuncia o muore l'agente
+// torna a camminare.
 
 const ASSIGN_EVERY_S = 0.2;
 // alleati reclutati in chat contemporaneamente
@@ -82,9 +82,6 @@ function buildCrowdStatics() {
 const carColliderOf = new Map<number, number>();
 
 const Crowd: React.FC = () => {
-  const [enemies, setEnemies] = useState<
-    Array<{ id: string; agentId: number; agent: CrowdAgent; position: [number, number, number]; hp?: number; armed?: boolean }>
-  >([]);
   const [allies, setAllies] = useState<
     Array<{ id: string; agent: CrowdAgent; position: [number, number, number]; hp: number; order: Order }>
   >([]);
@@ -206,17 +203,6 @@ const Crowd: React.FC = () => {
     }
   });
 
-  const handleBecomeEnemy = useCallback((agent: CrowdAgent, position: [number, number, number], hp?: number, armed = false) => {
-    agent.gone = true;
-    agent.slot = -1;
-    const idx = crowdAgents.indexOf(agent);
-    if (idx !== -1) crowdAgents.splice(idx, 1);
-
-    setEnemies((prev) =>
-      prev.some((e) => e.agentId === agent.id) ? prev : [...prev, { id: `crowd-enemy-${agent.id}`, agentId: agent.id, agent, position, hp, armed }]
-    );
-  }, []);
-
   // l'agente torna a camminare nella folla (nemico che rinuncia, alleato congedato o morto)
   const returnToCrowd = useCallback((agent: CrowdAgent) => {
     reviveCrowdAgent(agent);
@@ -250,27 +236,14 @@ const Crowd: React.FC = () => {
     },
     [returnToCrowd]
   );
-  const handleEnemyGiveUp = useCallback((id: string) => {
-    setEnemies((prev) => {
-      const e = prev.find((x) => x.id === id);
-      if (e) {
-        returnToCrowd(e.agent);
-      }
-      return prev.filter((x) => x.id !== id);
-    });
-  }, [returnToCrowd]);
-
-  if (import.meta.env.DEV) (window as any).__crowd = { agents: crowdAgents, enemies };
+  if (import.meta.env.DEV) (window as any).__crowd = { agents: crowdAgents };
 
   return (
     <>
       <CrowdInstances />
       <NpcInspector />
       {Array.from({ length: Math.min(bodies, bodiesWanted) }, (_, s) => (
-        <CrowdPedestrian key={s} slot={s} onBecomeEnemy={handleBecomeEnemy} onBecomeAlly={handleBecomeAlly} />
-      ))}
-      {enemies.map((e) => (
-        <Enemy key={e.id} id={e.id} initialPosition={e.position} initialHp={e.hp} armed={e.armed} onGiveUp={handleEnemyGiveUp} />
+        <CrowdPedestrian key={s} slot={s} onBecomeAlly={handleBecomeAlly} />
       ))}
       {allies.map((a, i) => (
         <AllyNpc key={a.id} id={a.id} index={i} initialPosition={a.position} initialHp={a.hp} order={a.order} onGone={handleAllyGone} />

@@ -106,6 +106,9 @@ export interface CrowdAgent {
   // clip tra cui cambia ogni tanto (chi e' ancorato non resta sempre uguale)
   pool: string[] | null;
   switchT: number;
+  // si arrabbia al prossimo colpo, qualunque sia la causa (missioni, prove):
+  // 'fists' a mani nude, 'armed' con la pistola
+  forceHostile?: 'fists' | 'armed';
 }
 
 export interface CrowdPendingHit {

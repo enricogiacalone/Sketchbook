@@ -141,7 +141,7 @@ posa del manichino SOMA codificata nella rappresentazione del modello: posizioni
 la posizione sul terreno libera). In `animations.json` una voce puo' avere `start` e `end`; `kimodo.sh` li passa al generatore.
 `scripts/kimodo-posecheck.mjs` misura il rispetto della posa.
 
-Posa canonica dell'idle = fotogramma 0 di `walk_start`. Generati `idle_breathe`, `idle_shift_weight`, `idle_look`, `idle_fidget` con inizio e
+Posa canonica dell'idle = fotogramma 0 di `walk_start`. Generati `idle_breathe`, `idle_shift_weight`, `idle_fidget` (e `idle_look`, poi rinominata `side_step`: faceva un passo laterale, non e' un riposo; si usa per muoversi lungo un muro in copertura) con inizio e
 fine vincolati a quella posa (loop):
 
 | | Scarto medio dalla posa canonica (grezzo) | Dopo il retarget (busto portato su `Idle_A` come `walk_start`) |
@@ -149,6 +149,13 @@ fine vincolati a quella posa (loop):
 | inizio / fine | 2.9-5.1 / 3.8-5.7 gradi (clip non vincolate: 4.4-9.5; arresti e svolte fino a 23) | busto 0.0, gambe 3.8-7.1 |
 | cucitura del loop | | 0.0 |
 | bacino che si sposta nel loop | | 0 cm |
+
+Le svolte `turn_left_90` e `turn_right_90` sono tornate alle versioni generate senza vincolo di posa (piacevano di piu'); `turn_180`, `walk_stop`, `run_stop`, `run_start` restano quelle vincolate.
+
+**Uso nel gioco (giocatore):** `K.idleBase` (`Kimodo_idle_breathe`) e' il riposo di `PlayerCombatSoldier` (prima `Idle_A`, che resta di
+riserva); ogni 6-12 s da fermo parte una variazione (`K.idleVariations`: peso, sguardo, spalle) per un giro e si torna al respiro
+(`kimodoIdle`). Non su scale (li' resta `Idle_Subtle`). Provato nel laboratorio: respiro, poi fidget e shift_weight a ~11-15 s l'uno
+dall'altro. Alleati, poliziotti, nemici e folla usano ancora `Idle_A`.
 
 Il vincolo e' morbido (non azzera), ma toglie la gran parte dello scarto dove serve (arresti, svolte).
 
