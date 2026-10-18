@@ -1,4 +1,7 @@
-import { droneRebase, getSpaceBoost, PLANET_R, SUN_R, spacePlanets, spaceState, sunPos } from '../lib/space';
+import { droneRebase, getSpaceBoost, PLANET_R, SUN_R, siteFrame, spacePlanets, spaceState, sunPos } from '../lib/space';
+import { getCurrentSite } from '../lib/site';
+import { hEff, surfaceHeight } from '../lib/planetSurface';
+import { TERRAIN_WINDOW_HALF as WINDOW_HALF } from '../lib/terrainData';
 import { isWorldMounted } from '../lib/planet';
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -105,6 +108,7 @@ const SOUND_URLS = {
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const _v1 = new THREE.Vector3();
+const _qSiteInv = new THREE.Quaternion();
 const _v2 = new THREE.Vector3();
 const _v3 = new THREE.Vector3();
 const _fwd = new THREE.Vector3();
@@ -427,13 +431,17 @@ const Drone: React.FC = () => {
     const delta = Math.min(dtRaw, 0.1);
     const f = fly.current;
 
-    // rebase del riferimento (viaggio tra pianeti, lib/space.ts): il drone resta dov'e' nel mondo, cambiano i numeri
+    // rebase del riferimento (sito nuovo, lib/space.ts): il drone resta dov'e' nel mondo, cambiano i numeri e la rotazione
     if (droneRebase.pending) {
       const tr = body.translation();
-      body.setTranslation({ x: tr.x - droneRebase.x, y: tr.y - droneRebase.y, z: tr.z - droneRebase.z }, true);
-      f.pos.set(f.pos.x - droneRebase.x, f.pos.y - droneRebase.y, f.pos.z - droneRebase.z);
-      f.lastDronePos.set(f.lastDronePos.x - droneRebase.x, f.lastDronePos.y - droneRebase.y, f.lastDronePos.z - droneRebase.z);
-      droneRebase.x = droneRebase.y = droneRebase.z = 0;
+      _v1.set(tr.x, tr.y, tr.z).applyQuaternion(droneRebase.q).add(droneRebase.t);
+      body.setTranslation({ x: _v1.x, y: _v1.y, z: _v1.z }, true);
+      f.pos.applyQuaternion(droneRebase.q).add(droneRebase.t);
+      f.lastDronePos.applyQuaternion(droneRebase.q).add(droneRebase.t);
+      f.quat.premultiply(droneRebase.q).normalize();
+      droneQuaternion.current.premultiply(droneRebase.q).normalize();
+      droneRebase.q.identity();
+      droneRebase.t.set(0, 0, 0);
       droneRebase.pending = false;
     }
 
@@ -633,24 +641,31 @@ const Drone: React.FC = () => {
         f.vel.set(0, 0, 0);
       }
     }
-    // i pianeti nello spazio sono solidi per il drone (quello con la citta' montata no: ci si vola sopra)
-    for (const pl of spacePlanets()) {
-      if (spaceState.resident?.seed === pl.profile.seed) continue;
-      const dx = _dronePos.x - pl.center[0];
-      const dy = _dronePos.y - pl.center[1];
-      const dz = _dronePos.z - pl.center[2];
-      const dist = Math.hypot(dx, dy, dz);
-      const lim = PLANET_R + 30;
-      if (dist < lim && dist > 1e-3) {
-        const k = lim / dist;
-        _dronePos.set(pl.center[0] + dx * k, pl.center[1] + dy * k, pl.center[2] + dz * k);
-        f.pos.copy(_dronePos).addScaledVector(_fwd, -CAM_AHEAD).addScaledVector(_up, CAM_BELOW);
-        _v1.set(dx / dist, dy / dist, dz / dist);
-        _v2.copy(f.vel).applyQuaternion(f.quat);
-        const inward = _v2.dot(_v1);
-        if (inward < 0) {
-          _v2.addScaledVector(_v1, -inward);
-          f.vel.copy(_v2).applyQuaternion(_q.copy(f.quat).invert());
+    // i pianeti nello spazio sono solidi per il drone (col loro rilievo); sul pianeta del sito montato,
+    // dentro la finestra di terreno, a fermarlo e' il terreno vero
+    {
+      const site = getCurrentSite();
+      const inWindow = Math.abs(_dronePos.x) < WINDOW_HALF - 60 && Math.abs(_dronePos.z) < WINDOW_HALF - 60;
+      for (const pl of spacePlanets()) {
+        if (pl.profile.seed === site.planetSeed && spaceState.resident && inWindow) continue;
+        const dx = _dronePos.x - pl.center[0];
+        const dy = _dronePos.y - pl.center[1];
+        const dz = _dronePos.z - pl.center[2];
+        const dist = Math.hypot(dx, dy, dz);
+        if (dist < 1e-3 || dist > PLANET_R + 600) continue;
+        _v3.set(dx / dist, dy / dist, dz / dist).applyQuaternion(_qSiteInv.copy(siteFrame.quat).invert());
+        const lim = PLANET_R + hEff(surfaceHeight(pl.profile.seed, _v3.x, _v3.y, _v3.z)) + 30;
+        if (dist < lim) {
+          const k = lim / dist;
+          _dronePos.set(pl.center[0] + dx * k, pl.center[1] + dy * k, pl.center[2] + dz * k);
+          f.pos.copy(_dronePos).addScaledVector(_fwd, -CAM_AHEAD).addScaledVector(_up, CAM_BELOW);
+          _v1.set(dx / dist, dy / dist, dz / dist);
+          _v2.copy(f.vel).applyQuaternion(f.quat);
+          const inward = _v2.dot(_v1);
+          if (inward < 0) {
+            _v2.addScaledVector(_v1, -inward);
+            f.vel.copy(_v2).applyQuaternion(_q.copy(f.quat).invert());
+          }
         }
       }
     }
@@ -873,7 +888,7 @@ const Drone: React.FC = () => {
     droneHud.targets = targets;
 
     // B (o Triangolo / Select tenuto sul pad): torna al giocatore
-    if (flyPressed && isWorldMounted()) {
+    if (flyPressed && isWorldMounted() && spaceState.alt < 2500) {
       droneExit.at = performance.now();
       setIsDrone(false);
       useStore.getState().setCurrentControllable('player');

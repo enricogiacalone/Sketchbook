@@ -1,3 +1,5 @@
+import { getCurrentSite, type Site } from './site';
+import { warmTerrain } from '../components/Environment/Terrain';
 import { CITY_LAYOUT, getBuildingDetails } from '../components/Environment/City';
 import { getStreetProps, getMarkings } from '../components/Environment/streetPropsData';
 import { getFireEscapes } from '../components/Environment/fireEscapeData';
@@ -18,7 +20,10 @@ const step = async (fn: () => unknown) => {
   await nextFrame();
 };
 
-export async function warmWorld() {
+export async function warmWorld(site: Site = getCurrentSite()) {
+  // il terreno (quote, mesh, colori) si costruisce a pezzetti: e' la parte piu' pesante, per ogni sito
+  await warmTerrain(site);
+  if (site.kind !== 'city') return;
   await step(getStreetProps);
   await step(getMarkings);
   await step(getFireEscapes);

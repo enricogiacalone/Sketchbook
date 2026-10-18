@@ -1,8 +1,11 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { styleFromSeed, usePlanetEpoch } from '../../lib/planet';
+import { PLANET_RADIUS, seaColor as seaColorOf, surfaceColor, surfaceInfo, surfacePoint } from '../../lib/planetSurface';
+import PlanetLOD, { BASE_STEP } from './PlanetLOD';
+import { getCurrentSite } from '../../lib/site';
 import { useFrame } from '@react-three/fiber';
-import { orbitOf, PLANET_R, SUN_R, SURFACE_SINK, spacePlanets, spaceState, spaceTime, sunPos, type SpacePlanet } from '../../lib/space';
+import { orbitOf, PLANET_R, SUN_R, siteFrame, spacePlanets, spaceState, sunPos, type SpacePlanet } from '../../lib/space';
 
 // I pianeti nello spazio (lib/space.ts): sfere con un aspetto procedurale
 // derivato dal seme (continenti, mari, colore della foschia), e una colonna di
@@ -10,60 +13,52 @@ import { orbitOf, PLANET_R, SUN_R, SURFACE_SINK, spacePlanets, spaceState, space
 // la citta' (sta pochi metri sotto il terreno piatto). Tutto visivo, senza
 // fisica: il drone non ci sbatte, e' Drone.tsx a tenerlo fuori.
 
-function hash2(x: number, y: number, seed: number): number {
-  let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + Math.imul(seed, 2147483647)) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-}
-// rumore a valori, periodico in x (la texture e' equirettangolare)
-function vnoise(u: number, v: number, period: number, seed: number): number {
-  const x0 = Math.floor(u), y0 = Math.floor(v);
-  const fx = u - x0, fy = v - y0;
-  const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
-  const w = (x: number) => ((x % period) + period) % period;
-  const a = hash2(w(x0), y0, seed), b = hash2(w(x0 + 1), y0, seed);
-  const c = hash2(w(x0), y0 + 1, seed), d = hash2(w(x0 + 1), y0 + 1, seed);
-  return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
-}
-
-function planetTexture(seed: number): THREE.CanvasTexture {
-  const st = styleFromSeed(seed);
-  const W = 512, H = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const g = canvas.getContext('2d')!;
-  const img = g.createImageData(W, H);
-  const tint = new THREE.Color(st.fogTint);
-  const sea = new THREE.Color().setHSL((seed % 360) / 360, 0.45, 0.28);
-  const land = new THREE.Color().setHSL(((seed * 7) % 360) / 360, 0.35, 0.42);
-  const sea2 = sea.clone().lerp(tint, 0.25);
-  const out = new THREE.Color();
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      let n = 0, amp = 0.5, f = 4, tot = 0;
-      for (let o = 0; o < 5; o++) {
-        n += amp * vnoise((x / W) * f, (y / H) * (f / 2), f, seed + o * 17);
-        tot += amp;
-        amp *= 0.5;
-        f *= 2;
-      }
-      n /= tot;
-      const polar = Math.abs(y / H - 0.5) * 2; // 0 equatore, 1 poli
-      if (n > 0.5) out.copy(land).lerp(tint, Math.min(1, (n - 0.5) * 2)); else out.copy(sea).lerp(sea2, n * 2);
-      if (polar > 0.86) out.lerp(new THREE.Color('#eef4fa'), (polar - 0.86) / 0.14);
-      const i = (y * W + x) * 4;
-      img.data[i] = out.r * 255;
-      img.data[i + 1] = out.g * 255;
-      img.data[i + 2] = out.b * 255;
-      img.data[i + 3] = 255;
+// geometria della superficie di un pianeta: sfera di raggio R spostata dal rilievo procedurale (stessa funzione del
+// terreno su cui si atterra, lib/planetSurface.ts), con i colori dei biomi. Una per pianeta, in cache.
+const surfaceGeoCache = new Map<number, THREE.BufferGeometry>();
+function planetSurfaceGeometry(seed: number): THREE.BufferGeometry {
+  let g = surfaceGeoCache.get(seed);
+  if (g) return g;
+  const W = 160, H = 80;
+  const pos = new Float32Array((W + 1) * (H + 1) * 3);
+  const col = new Float32Array((W + 1) * (H + 1) * 3);
+  const c = new THREE.Color();
+  const pt = new THREE.Vector3();
+  let k = 0;
+  for (let j = 0; j <= H; j++) {
+    const v = j / H;
+    const phi = v * Math.PI; // 0 al polo nord (+Y)
+    for (let i = 0; i <= W; i++) {
+      const u = i / W;
+      const th = u * Math.PI * 2;
+      const x = Math.sin(phi) * Math.cos(th), y = Math.cos(phi), z = Math.sin(phi) * Math.sin(th);
+      surfacePoint(seed, x, y, z, pt);
+      // abbassata del suo passo: i livelli di dettaglio (PlanetLOD) le stanno sopra
+      pt.multiplyScalar(1 - (0.12 * BASE_STEP) / pt.length());
+      pos[k] = pt.x;
+      pos[k + 1] = pt.y;
+      pos[k + 2] = pt.z;
+      surfaceColor(seed, surfaceInfo(seed, x, y, z), c);
+      col[k] = c.r;
+      col[k + 1] = c.g;
+      col[k + 2] = c.b;
+      k += 3;
     }
   }
-  g.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = THREE.RepeatWrapping;
-  return tex;
+  const idx: number[] = [];
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      const a = j * (W + 1) + i, b = a + 1, d = a + (W + 1), e = d + 1;
+      idx.push(a, d, b, b, d, e);
+    }
+  }
+  g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  surfaceGeoCache.set(seed, g);
+  return g;
 }
 
 // alone: anello luminoso che sfuma verso fuori (atmosfera vista dallo spazio)
@@ -156,6 +151,7 @@ export const SpaceStars: React.FC = () => {
   useFrame((state) => {
     if (!ref.current || !mat.current) return;
     ref.current.position.copy(state.camera.position);
+    ref.current.quaternion.copy(siteFrame.quat); // fisse nell'universo: nel riferimento del sito ruotano
     const t = Math.min(1, Math.max(0, (spaceState.dark - 0.2) / 0.6));
     mat.current.opacity = t;
     ref.current.visible = t > 0.01;
@@ -205,7 +201,7 @@ const PlanetHalo: React.FC<{ tint: string; map: THREE.Texture; fadeWithAltitude:
     if (mat.current) mat.current.opacity = Math.min(1, Math.max(0, (spaceState.dark - 0.05) / 0.5)) * (fadeWithAltitude ? 1 : 0.9);
   });
   return (
-    <sprite position={[0, -PLANET_R, 0]} scale={[PLANET_R * 2 * 1.28, PLANET_R * 2 * 1.28, 1]} renderOrder={-1}>
+    <sprite scale={[PLANET_R * 2 * 1.28, PLANET_R * 2 * 1.28, 1]} renderOrder={-1}>
       <spriteMaterial ref={mat} map={map} color={tint} transparent opacity={fadeWithAltitude ? 0 : 1} depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
     </sprite>
   );
@@ -215,46 +211,49 @@ const SpacePlanets: React.FC = () => {
   const epoch = usePlanetEpoch();
   // (ricalcolato a ogni cambio di riferimento: le posizioni dipendono dal pianeta corrente)
   const planets = useMemo<SpacePlanet[]>(() => spacePlanets(), [epoch]); // eslint-disable-line react-hooks/exhaustive-deps
-  const textures = useMemo(() => new Map<number, THREE.CanvasTexture>(), []);
   const halo = useMemo(() => haloTexture(1 / 1.28), []);
   const marker = useMemo(() => markerTexture(), []);
-  const tex = (seed: number) => {
-    let t = textures.get(seed);
-    if (!t) textures.set(seed, (t = planetTexture(seed)));
-    return t;
-  };
-
   return (
     <group dispose={null}>
       {planets.map((p) => (
-        <PlanetBody key={p.profile.seed} p={p} map={tex(p.profile.seed)} halo={halo} marker={marker} />
+        <PlanetBody key={p.profile.seed} p={p} halo={halo} marker={marker} />
+      ))}
+      {planets.map((p) => (
+        <PlanetLOD key={'lod' + p.profile.seed} p={p} />
       ))}
       <OrbitRings planets={planets} />
     </group>
   );
 };
 
-// un pianeta: il gruppo sta sul polo (la citta') e segue la sua orbita; la sfera gli gira sotto
-const PlanetBody: React.FC<{ p: SpacePlanet; map: THREE.Texture; halo: THREE.Texture; marker: THREE.Texture }> = ({ p, map, halo, marker }) => {
+// un pianeta: il gruppo sta nel suo centro (nel riferimento del sito) e ruota col riferimento; dentro ci
+// sono la superficie col rilievo, il mare (sfera di raggio R), l'alone dell'atmosfera e il punto-guida
+// della citta' (al polo nord, quota della superficie al polo)
+const PlanetBody: React.FC<{ p: SpacePlanet; halo: THREE.Texture; marker: THREE.Texture }> = ({ p, halo, marker }) => {
   const group = useRef<THREE.Group>(null);
-  const sphere = useRef<THREE.Mesh>(null);
-  const spin = useMemo(() => 0.02 + ((p.profile.seed * 7) % 13) * 0.004, [p.profile.seed]); // rad/s, attorno all'asse del polo
+  const geo = useMemo(() => planetSurfaceGeometry(p.profile.seed), [p.profile.seed]);
+  const tint = useMemo(() => styleFromSeed(p.profile.seed).fogTint, [p.profile.seed]);
+  const seaColor = useMemo(() => seaColorOf(p.profile.seed), [p.profile.seed]);
   useFrame(() => {
-    if (group.current) group.current.position.set(p.pole[0], p.pole[1], p.pole[2]);
-    if (sphere.current) sphere.current.rotation.y = spaceTime() * spin;
+    if (!group.current) return;
+    group.current.position.set(p.center[0], p.center[1], p.center[2]);
+    group.current.quaternion.copy(siteFrame.quat);
   });
   return (
     <group ref={group}>
-      <mesh ref={sphere} position={[0, -PLANET_R - (p.isCurrent ? SURFACE_SINK : 0), 0]}>
-        <sphereGeometry args={[PLANET_R, 96, 64]} />
-        <meshStandardMaterial map={map} color="#b8b8b8" roughness={1} metalness={0} />
+      <mesh geometry={geo}>
+        <meshStandardMaterial vertexColors roughness={0.95} metalness={0} polygonOffset polygonOffsetFactor={3} polygonOffsetUnits={3} />
       </mesh>
-      {/* atmosfera: alone del colore della foschia del pianeta, attorno alla sfera */}
-      <PlanetHalo tint={styleFromSeed(p.profile.seed).fogTint} map={halo} fadeWithAltitude={p.isCurrent} />
+      {/* il mare: la sfera al livello zero; le montagne e le coste la bucano */}
+      <mesh>
+        <sphereGeometry args={[PLANET_RADIUS, 256, 128]} />
+        <meshStandardMaterial color={seaColor} roughness={0.3} metalness={0} transparent opacity={0.9} polygonOffset polygonOffsetFactor={2} polygonOffsetUnits={2} />
+      </mesh>
+      <PlanetHalo tint={tint} map={halo} fadeWithAltitude={p.isCurrent} />
       {/* la citta': colonna di luce al polo, si vede da vicino, e un punto di dimensione fissa sullo schermo,
           che si vede da qualsiasi distanza */}
-      {!p.isCurrent && (
-        <>
+      {(!p.isCurrent || getCurrentSite().kind === 'wild') && (
+        <group position={[0, PLANET_RADIUS + p.hPole, 0]}>
           <mesh position={[0, 900, 0]}>
             <cylinderGeometry args={[45, 45, 1800, 12, 1, true]} />
             <meshBasicMaterial color="#7fe9ff" transparent opacity={0.55} fog={false} depthWrite={false} blending={THREE.AdditiveBlending} />
@@ -262,7 +261,7 @@ const PlanetBody: React.FC<{ p: SpacePlanet; map: THREE.Texture; halo: THREE.Tex
           <sprite position={[0, 40, 0]} scale={[0.02, 0.02, 1]} renderOrder={5}>
             <spriteMaterial map={marker} color="#7fe9ff" sizeAttenuation={false} transparent depthTest={false} depthWrite={false} blending={THREE.AdditiveBlending} fog={false} />
           </sprite>
-        </>
+        </group>
       )}
     </group>
   );
@@ -293,6 +292,7 @@ const OrbitRings: React.FC<{ planets: SpacePlanet[] }> = ({ planets }) => {
   useFrame(() => {
     if (!group.current) return;
     group.current.position.fromArray(sunPos());
+    group.current.quaternion.copy(siteFrame.quat);
     // visibili nello spazio, non dal suolo
     const k = Math.min(1, Math.max(0, (spaceState.dark - 0.4) / 0.5));
     group.current.visible = k > 0.01;

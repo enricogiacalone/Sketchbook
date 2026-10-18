@@ -5,6 +5,7 @@
 // ricordato nel browser. Va letto PRIMA di caricare il gioco (main.tsx):
 // la citta' si genera quando il suo modulo viene importato.
 
+import { citySite, setCurrentSite } from './site';
 import { DEFAULT_GRID_RADIUS, profileFromSeed, setPlanet, type PlanetProfile } from './planet';
 
 const LS_KEY = 'sketchbook-world-seed';
@@ -61,6 +62,7 @@ export async function initWorldSeed(): Promise<number> {
   }
   seed = profile.seed;
   setPlanet(profile);
+  setCurrentSite(citySite(profile.seed)); // si parte sempre dalla citta' (polo nord del pianeta)
   writeLocal(profile);
   return seed;
 }

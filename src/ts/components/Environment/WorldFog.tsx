@@ -3,6 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getPlanetStyle, usePlanetEpoch } from '../../lib/planet';
 import { spaceState } from '../../lib/space';
+import { getCurrentSite } from '../../lib/site';
 import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
 
 // Atmospheric perspective -- "sistemiamo il cielo... nebbia atmosferica".
@@ -52,7 +53,8 @@ const WorldFog: React.FC = () => {
     fog.color.copy(scratch.current);
     // nello spazio non c'e' foschia (lib/space.ts)
     const air = spaceState.fog;
-    fog.density = 0.0055 * style.fogDensity * air;
+    // meno foschia fuori dalla citta': si vedono i laghi e le montagne lontane
+    fog.density = 0.0055 * style.fogDensity * air * (getCurrentSite().kind === 'wild' ? 0.3 : 0.5);
   });
 
   return null;

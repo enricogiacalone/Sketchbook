@@ -5,6 +5,7 @@ import { gps, updateGps } from '../../lib/gps';
 import { radarState } from '../../lib/radarState';
 import { cityOpponents } from '../city/cityActors';
 import { wanted } from '../../lib/wanted';
+import { getCurrentSite } from '../../lib/site';
 
 // "sistema la minimappa, deve essere visibile solo in playground. uguale a
 // gta" -- il radar di GTA V:
@@ -144,7 +145,8 @@ const Minimap: React.FC = () => {
       g.beginPath();
       g.rect(0, 0, W, H);
       g.clip();
-      g.fillStyle = COL.water;
+      const wild = getCurrentSite().kind === 'wild';
+      g.fillStyle = wild ? '#1e2a1c' : COL.water;
       g.fillRect(0, 0, W, H);
       g.save();
       g.translate(cx, cy);
@@ -153,12 +155,12 @@ const Minimap: React.FC = () => {
       g.scale(s, s);
       g.translate(-(px + WORLD_HALF) * MAP_PX_PER_M, -(pz + WORLD_HALF) * MAP_PX_PER_M);
       g.imageSmoothingEnabled = true;
-      g.drawImage(city, 0, 0);
+      if (!wild) g.drawImage(city, 0, 0);
       g.restore();
 
       // --- tragitto del GPS: dal giocatore lungo le strade ---
       const route = gps.route;
-      if (route && route.points.length > 1) {
+      if (!wild && route && route.points.length > 1) {
         g.beginPath();
         g.moveTo(cx, cy);
         for (let i = 1; i < route.points.length; i++) {

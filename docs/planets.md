@@ -84,3 +84,9 @@ cambiare pianeta e' solo una traslazione (rebase) di tutto: il drone resta dov'e
 - Fase 3 (parziale, fatta): `styleFromSeed` in `lib/planet.ts` -> cielo (Sky: rayleigh/turbidity), nebbia (WorldFog: densita' e colore), altezza e densita' palazzi (City), gravita' (App, Physics). Poi anche traffico (N_CARS in Traffic.tsx), alberi del parco (Park) e nuvole (Clouds). Mancano acqua e pioggia. Vista dallo spazio: PlanetMenu.
 - Taglie piu' piccole di 2 o piu' grandi di 3 richiedono di spostare anche RaceTrack e le coordinate della missione.
 - Dev: con HMR attivo (moduli con `?t=`) le costanti del mondo possono mescolare istanze di `planet.ts`: dopo modifiche a `lib/planet.ts` riavviare vite.
+
+## Siti, terreno e acqua (atterraggio ovunque)
+- Il mondo e' montato su UN "sito" alla volta (`lib/site.ts`): la citta' (polo nord) o un punto selvaggio qualunque. Il riferimento di gioco ha origine sul sito e +Y lungo la normale; lo spostamento tra siti e' un rebase con rotazione (`siteTransform`, `requestDroneRebase`).
+- La superficie viene da `lib/planetSurface.ts` (`surfaceHeight/surfaceInfo`), la stessa per la sfera vista dallo spazio e per il terreno camminabile (`Terrain.tsx`, finestra a griglia costruita a pezzetti). Boschi e rocce: `Wilderness.tsx`.
+- Acqua: mari, laghi e fiumi sono una sola superficie al livello del mare (quota 0). Laghi e fiumi sono scavati in `surfaceHeight` sotto quota 0 sulla terra bassa (spariscono in montagna e nella pianura della citta'); `Water.tsx` disegna la toppa della sfera di mare attorno al sito. Non si nuota: si cammina sul fondale.
+- Nota di test: con il pannello browser nascosto `requestAnimationFrame` scende a 1 fps e il montaggio dei siti sembra bloccato (warmTerrain avanza a frame).

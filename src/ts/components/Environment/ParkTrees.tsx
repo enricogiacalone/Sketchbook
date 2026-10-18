@@ -78,7 +78,7 @@ export const useTreeTemplates = (variationCount: number = 3): TreeTemplate[] => 
 // Gli alberi si DISEGNANO in blocco (TreeBatches: un InstancedMesh per
 // parte del modello e per zona); qui ogni albero si iscrive nel registro e
 // tiene solo il suo collider del tronco.
-interface TreeEntry {
+export interface TreeEntry {
   template: TreeTemplate;
   x: number;
   y: number;
@@ -97,6 +97,16 @@ const notifyTrees = () => {
     treeListeners.forEach((l) => l());
   });
 };
+
+// iscrive molti alberi in blocco (boschi): disegnati da TreeBatches, senza un componente per albero
+export function registerTreeEntries(entries: TreeEntry[]): () => void {
+  entries.forEach((e) => treeRegistry.add(e));
+  notifyTrees();
+  return () => {
+    entries.forEach((e) => treeRegistry.delete(e));
+    notifyTrees();
+  };
+}
 
 export const TreeInstance: React.FC<{
   x: number;

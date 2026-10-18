@@ -8,10 +8,15 @@ import { getSunDirection, getDayFactor } from '../../lib/SunCycle';
 import { StaticInstances, type InstanceXform } from './StaticInstances';
 import { signalClock, signalFor, type Light } from '../../lib/traffic';
 import { onPlanetRebuild, planetGeometry } from '../../lib/planet';
+import { getCurrentSite } from '../../lib/site';
 
 // Shared road-grid layout, also consumed by Player.tsx (getRoadOffset) so the
 // character's manual ground-snapping agrees with the actual road geometry
 // instead of relying on physics contact response (see Player.tsx for why).
+// le strade si estendono ROAD_OVERSHOOT oltre l'ultimo incrocio: poi comincia il terreno del pianeta
+const ROAD_OVERSHOOT = 60;
+let REACH = planetGeometry().roadExtent + ROAD_OVERSHOOT;
+export const roadReach = () => REACH;
 export let ROAD_SIZE = planetGeometry().roadSize; // dipende dal pianeta (lib/planet.ts)
 export const ROAD_GRID_SPACING = 60;
 export const ROAD_WIDTH = 8;
@@ -73,6 +78,7 @@ const makeStreetLights = (): Array<{ x: number; z: number }> => {
 };
 export let STREET_LIGHT_POSITIONS: Array<{ x: number; z: number }> = makeStreetLights();
 onPlanetRebuild(() => {
+  REACH = planetGeometry().roadExtent + ROAD_OVERSHOOT;
   ROAD_SIZE = planetGeometry().roadSize;
   ROAD_OFFSETS = makeRoadOffsets();
   STREET_LIGHT_POSITIONS = makeStreetLights();
@@ -100,6 +106,10 @@ export const getRoadOffset = (x: number, z: number): number => {
   if (fo && x >= fo.minX && x <= fo.maxX && z >= fo.minZ && z <= fo.maxZ) return fo.y;
   const half = ROAD_WIDTH / 2;
   const sidewalkOuter = half + SIDEWALK_WIDTH;
+  // le strade finiscono ROAD_OVERSHOOT oltre l'ultimo incrocio; fuori (e nei siti selvaggi) c'e' solo terreno
+  if (getCurrentSite().kind === 'wild') return 0;
+  const reach = roadReach() + sidewalkOuter;
+  if (Math.abs(x) > reach || Math.abs(z) > reach) return 0;
 
   // Roads first, in a full pass -- a road strip and its own sidewalk can
   // never overlap, so this only matters at intersections, where we want
@@ -546,10 +556,10 @@ const Road: React.FC = () => {
       {offsets.map((offset, i) => (
         <React.Fragment key={`road-grid-${i}`}>
           <group position={[0, 0, offset]}>
-            <RoadSection axis="x" size={ROAD_SIZE} />
+            <RoadSection axis="x" size={roadReach() * 2} />
           </group>
           <group position={[offset, 0, 0]}>
-            <RoadSection axis="z" size={ROAD_SIZE} />
+            <RoadSection axis="z" size={roadReach() * 2} />
           </group>
         </React.Fragment>
       ))}

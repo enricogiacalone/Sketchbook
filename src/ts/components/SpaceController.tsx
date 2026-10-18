@@ -5,20 +5,48 @@ import '../lib/rapierGuard';
 import { useStore } from '../store';
 import { applyWorldSeed, fetchJson } from '../lib/worldSeed';
 import { warmWorld } from '../lib/worldWarmup';
-import { SPACE_FAR, SUN_R, sunPos, droneRebase, MOUNT_DIST, PLANET_R, UNMOUNT_DIST, poleShift, requestDroneRebase, spacePlanets, spaceState } from '../lib/space';
-import { getPlanet, mountPlanetWorld, rebuildPlanetData, recreatePhysics, unmountWorld, type PlanetProfile } from '../lib/planet';
+import { SPACE_FAR, SUN_R, sunPos, droneRebase, PLANET_R, requestDroneRebase, siteFrame, siteTransform, spacePlanets, spaceState, type SpacePlanet } from '../lib/space';
+import { getPlanet, mountPlanetWorld, planetCatalog, rebuildPlanetData, recreatePhysics, unmountWorld } from '../lib/planet';
+import { getCurrentSite, makeSite, setCurrentSite, type Site } from '../lib/site';
+import { hEff, surfaceHeight } from '../lib/planetSurface';
 
-// Il cuore del viaggio nello spazio, sempre montato:
-//  - quota sul pianeta piu' vicino -> atmosfera/spazio (spaceState.t), spinta
-//    del drone (spaceState.boost) e piani della camera (vicino/lontano)
-//  - residenza: la citta' di UN pianeta alla volta e' montata. Avvicinandosi
-//    al polo di un altro pianeta il mondo si rigenera li' (procedurale) e il
-//    riferimento si sposta sul suo polo (rebase: solo una traslazione, il
-//    drone resta dov'e' nel mondo); allontanandosi la citta' si smonta.
+// Il cuore del viaggio nello spazio e dell'atterraggio OVUNQUE, sempre montato:
+//  - quota sul corpo piu' vicino -> strati dell'atmosfera, limite di velocita' e piani della camera
+//  - sito: il mondo di gioco e' montato su UN sito alla volta (un punto di un pianeta, lib/site.ts). Scendendo
+//    sotto MOUNT_ALT su un pianeta il mondo si genera sotto il drone (terreno procedurale, boschi; la citta'
+//    se si e' sul suo polo) e il riferimento si sposta li' (rebase con rotazione). Allontanandosi dal sito
+//    (drone o a piedi) il mondo si rimonta sotto di te; salendo oltre UNMOUNT_ALT si smonta.
+const MOUNT_ALT = 1500; // m sulla superficie: si monta il mondo sotto il drone
+const UNMOUNT_ALT = 4000; // m: si smonta
+const RESITE_WILD = 600; // m dal centro del sito (drone): si rimonta sotto di lui
+const RESITE_CITY = 1000;
+const RESITE_FOOT_WILD = 450; // a piedi
+const RESITE_FOOT_CITY = 900;
+
 const smooth = (a: number, b: number, v: number) => {
   const t = Math.min(1, Math.max(0, (v - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
+
+const _v = new THREE.Vector3();
+const _qi = new THREE.Quaternion();
+
+// il pianeta piu' vicino alla posizione p (riferimento del sito) con la sua quota sulla superficie e la
+// direzione del punto sotto di p nel riferimento del pianeta
+function nearestPlanet(p: [number, number, number], planets: SpacePlanet[]) {
+  let best: { pl: SpacePlanet; alt: number; n: [number, number, number] } | null = null;
+  _qi.copy(siteFrame.quat).invert();
+  for (const pl of planets) {
+    const dx = p[0] - pl.center[0], dy = p[1] - pl.center[1], dz = p[2] - pl.center[2];
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist < 1e-3) continue;
+    _v.set(dx / dist, dy / dist, dz / dist).applyQuaternion(_qi);
+    const h = hEff(surfaceHeight(pl.profile.seed, _v.x, _v.y, _v.z));
+    const alt = dist - PLANET_R - h;
+    if (!best || alt < best.alt) best = { pl, alt, n: [_v.x, _v.y, _v.z] };
+  }
+  return best;
+}
 
 const SpaceController: React.FC = () => {
   const { camera } = useThree();
@@ -26,22 +54,23 @@ const SpaceController: React.FC = () => {
   const near = useRef(0.1);
   const last = useRef(0);
   const mountedAt = useRef(0);
+  const wasDrone = useRef(false);
+  const lastDrone = useRef<[number, number, number]>([0, 0, 0]);
+  const lastDroneYaw = useRef(0);
 
   useEffect(() => {
     spaceState.resident = getPlanet();
+    spaceState.site = getCurrentSite();
   }, []);
 
   useFrame((state) => {
     const st = useStore.getState();
     const p: [number, number, number] = st.isDrone ? (st.playerPos as [number, number, number]) : [camera.position.x, camera.position.y, camera.position.z];
     const planets = spacePlanets();
+    const near0 = nearestPlanet(p, planets);
 
-    // quota sul pianeta piu' vicino
-    let alt = Infinity;
-    for (const pl of planets) {
-      const d = Math.hypot(p[0] - pl.center[0], p[1] - pl.center[1], p[2] - pl.center[2]) - PLANET_R;
-      if (d < alt) alt = d;
-    }
+    // quota sul corpo piu' vicino (con il rilievo)
+    const alt = near0 ? near0.alt : Infinity;
     spaceState.alt = alt;
     // direzione del sole vero (la luce nello spazio)
     const sp = sunPos();
@@ -51,22 +80,17 @@ const SpaceController: React.FC = () => {
     // strati dell'atmosfera: tutti continui, ognuno con la sua fascia di quota
     spaceState.t = smooth(400, 9000, alt);
     // il sole dello shader del cielo e quello vero devono coincidere gia' prima che il sole vero si veda
-    // (compare con dark > 0.3, sopra ~5 km): a 4.5 km il sole del cielo e' gia' al suo posto
     spaceState.sunBlend = smooth(800, 4500, alt);
     spaceState.fog = Math.exp(-Math.max(0, alt) / 350); // l'aria sottile: la foschia cala esponenzialmente con la quota
     spaceState.cloud = 1 - smooth(500, 3200, alt); // poi le nuvole restano sotto
     const dk = smooth(1500, 11000, alt);
     spaceState.dark = dk * dk * (3 - 2 * dk); // il cielo si scurisce piano, fino al nero
-    // Velocita': il limite cresce con la quota sul corpo piu' vicino (pianeta o sole), quindi
-    // decollando si accelera a poco a poco e atterrando si frena da soli (a ogni metro di
-    // quota ~0.4 m/s: la discesa e' un esponenziale con costante di tempo ~2.5 s). La spinta si
-    // adegua, e Drone.tsx taglia la velocita' al limite.
-    const dsx = sp[0] - p[0], dsy = sp[1] - p[1], dsz = sp[2] - p[2];
-    const speedAlt = Math.max(0, Math.min(alt, Math.hypot(dsx, dsy, dsz) - SUN_R));
+    // Velocita': il limite cresce con la quota sul corpo piu' vicino (pianeta o sole)
+    const speedAlt = Math.max(0, Math.min(alt, Math.hypot(sdx, sdy, sdz) - SUN_R));
     spaceState.vmax = Math.min(35000, 40 + 0.4 * speedAlt);
     spaceState.boost = Math.max(1, spaceState.vmax / 30);
 
-    // piani della camera: vicino fine in citta', ampio nello spazio
+    // piani della camera: vicino fine vicino al suolo, ampio nello spazio
     const wantNear = alt > 300 ? 1 : 0.1;
     if (wantNear !== near.current && camera instanceof THREE.PerspectiveCamera) {
       near.current = wantNear;
@@ -75,28 +99,58 @@ const SpaceController: React.FC = () => {
       camera.updateProjectionMatrix();
     }
 
-    // senza muri ai bordi della citta': chi a piedi cade nel vuoto e' dato per morto (rinasce all'ospedale)
+    // chi a piedi cade nel vuoto e' dato per morto (rinasce all'ospedale)
     if (!st.isDrone && p[1] < -150 && st.health > 0) st.setHealth(0);
 
-    // residenza (ogni 0.25 s, e solo col drone in volo). Mentre il drone non ha ancora applicato il
-    // rebase la sua posizione e' nel riferimento vecchio: non si decide niente (e una citta' appena
-    // montata non si smonta subito: il suo smontaggio a meta' montaggio manda in panico Rapier)
-    if (busy.current || droneRebase.pending || !st.isDrone || state.clock.elapsedTime - last.current < 0.25) return;
+    // ultima posizione del drone (per atterrare dove si e' premuto B)
+    const droneJustLeft = wasDrone.current && !st.isDrone;
+    if (st.isDrone) {
+      lastDrone.current = [p[0], p[1], p[2]];
+      lastDroneYaw.current = st.playerYaw;
+    }
+    wasDrone.current = st.isDrone;
+
+    // --- siti: ogni 0.25 s, e mai mentre il drone non ha ancora applicato il rebase (la sua posizione e' nel
+    // riferimento vecchio) o se un montaggio e' in corso ---
+    if (busy.current || droneRebase.pending) return;
     if (performance.now() - mountedAt.current < 3000) return;
+    if (!droneJustLeft && state.clock.elapsedTime - last.current < 0.25) return;
     last.current = state.clock.elapsedTime;
     const res = spaceState.resident;
-    let nearest: { pl: (typeof planets)[number]; d: number } | null = null;
-    for (const pl of planets) {
-      const d = Math.hypot(p[0] - pl.pole[0], p[1] - pl.pole[1], p[2] - pl.pole[2]);
-      if (!nearest || d < nearest.d) nearest = { pl, d };
+    const site = getCurrentSite();
+
+    // B: il giocatore scende dove era il drone (il mondo si rimonta sotto di lui)
+    if (droneJustLeft && res && near0) {
+      const d = nearestPlanet(lastDrone.current, planets);
+      if (d && d.alt < UNMOUNT_ALT && d.pl.profile.seed === site.planetSeed) {
+        const lat = Math.hypot(lastDrone.current[0], lastDrone.current[2]);
+        const want = makeSite(d.pl.profile.seed, d.n[0], d.n[1], d.n[2]);
+        if (lat > 80 && want.id !== site.id) {
+          mountedAt.current = performance.now() + 1500;
+          void handoff(want, busy, { onFootAt: lastDrone.current, yaw: lastDroneYaw.current });
+          return;
+        }
+      }
     }
-    if (!nearest) return;
-    if (nearest.d < MOUNT_DIST && res?.seed !== nearest.pl.profile.seed) {
+
+    const ref = st.isDrone ? p : (st.playerPos as [number, number, number]);
+    const n = st.isDrone ? near0 : nearestPlanet(ref, planets);
+    if (!n) return;
+    if (res) {
+      const lateral = Math.hypot(ref[0], ref[2]);
+      const lim = st.isDrone ? (site.kind === 'city' ? RESITE_CITY : RESITE_WILD) : site.kind === 'city' ? RESITE_FOOT_CITY : RESITE_FOOT_WILD;
+      if (st.isDrone && (n.pl.profile.seed !== site.planetSeed || n.alt > UNMOUNT_ALT)) {
+        void leave(busy);
+      } else if (lateral > lim && n.pl.profile.seed === site.planetSeed && n.alt < UNMOUNT_ALT) {
+        const want = makeSite(n.pl.profile.seed, n.n[0], n.n[1], n.n[2]);
+        if (want.id !== site.id) {
+          mountedAt.current = performance.now() + 1500;
+          void handoff(want, busy, st.isDrone ? {} : { onFootAt: ref });
+        }
+      }
+    } else if (st.isDrone && n.alt < MOUNT_ALT) {
       mountedAt.current = performance.now() + 1500; // (il montaggio vero avviene tra poco)
-      void handoff(nearest.pl.profile, busy);
-    } else if (res && !(nearest.pl.profile.seed === res.seed && nearest.d < UNMOUNT_DIST)) {
-      // lontano dalla citta' montata: si smonta
-      void leave(busy);
+      void handoff(makeSite(n.pl.profile.seed, n.n[0], n.n[1], n.n[2]), busy, {});
     }
   });
 
@@ -118,35 +172,51 @@ async function leave(busy: { current: boolean }) {
   }
 }
 
-async function handoff(to: PlanetProfile, busy: { current: boolean }) {
+// monta il mondo sul sito `to`. onFootAt: il giocatore (a piedi) si trova li' (riferimento vecchio) e deve
+// riapparire nello stesso punto, con la stessa direzione, nel mondo nuovo
+async function handoff(to: Site, busy: { current: boolean }, opts: { onFootAt?: [number, number, number]; yaw?: number }) {
   busy.current = true;
   try {
-    const from = getPlanet();
-    tl(`handoff ${to.name} resident=${spaceState.resident?.name}`);
+    const from = getCurrentSite();
+    tl(`handoff ${to.id} (da ${from.id}) resident=${spaceState.resident?.name}`);
     if (spaceState.resident) {
       spaceState.resident = null;
       await unmountWorld();
     }
     // mondo fisico nuovo (il drone, dentro, si ricrea dov'e')
     await recreatePhysics();
-    // il riferimento passa al polo di `to`: il drone e' fermo nel mondo, si sposta solo il suo numero
-    const d = poleShift(from, to);
+    // il riferimento passa al sito `to`: rotazione e traslazione, applicate al drone; a piedi si prepara il punto di ritorno
+    const { q, t } = siteTransform(from, to);
     tl('rebase');
-    requestDroneRebase(d);
-    applyWorldSeed(to);
-    void fetchJson('/api/world/reseed', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ seed: to.seed, gridRadius: to.gridRadius }),
-    });
-    rebuildPlanetData();
+    requestDroneRebase(q, t);
+    const st = useStore.getState();
+    if (opts.onFootAt) {
+      const pNew = new THREE.Vector3(...opts.onFootAt).applyQuaternion(q).add(t);
+      const yaw = opts.yaw ?? st.playerYaw;
+      const f = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).applyQuaternion(q);
+      st.setSpawnPoint([pNew.x, pNew.z, Math.atan2(f.x, f.z), Math.min(pNew.y, 2) - 0.5]);
+    } else {
+      st.setSpawnPoint(null);
+    }
+    setCurrentSite(to);
+    spaceState.site = to;
+    const profile = planetCatalog().find((p) => p.seed === to.planetSeed)!;
+    if (profile.seed !== getPlanet().seed) {
+      applyWorldSeed(profile);
+      void fetchJson('/api/world/reseed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seed: profile.seed, gridRadius: profile.gridRadius }),
+      });
+      rebuildPlanetData();
+    }
     tl('data');
-    // i dati procedurali si preparano a pezzetti tra un frame e l'altro, a mondo ancora smontato
-    await warmWorld();
+    // i dati procedurali (citta', terreno) si preparano a pezzetti tra un frame e l'altro, a mondo ancora smontato
+    await warmWorld(to);
     tl('warm');
     mountPlanetWorld();
     tl('rebuilt');
-    spaceState.resident = to;
+    spaceState.resident = profile;
   } finally {
     busy.current = false;
   }

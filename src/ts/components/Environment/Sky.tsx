@@ -44,7 +44,8 @@ const Sky: React.FC = () => {
     // tone mapping il cielo saturava a bianco. Lo mappiamo noi, con un'esposizione regolabile.
     const mat = skyMesh.material as any;
     const exposure = tslUniform(0.035); // (0.5 e' per un mondo con tone mapping: qui il cielo saturava a bianco)
-    mat.colorNode = tslVec4(toneMapping(THREE.ACESFilmicToneMapping, exposure, mat.colorNode.rgb), 1.0);
+    const mapped = toneMapping(THREE.ACESFilmicToneMapping, exposure, mat.colorNode.rgb);
+    mat.colorNode = tslVec4(mapped.xyz, 1.0);
     mat.needsUpdate = true;
     (skyMesh as any).userData.exposure = exposure;
 

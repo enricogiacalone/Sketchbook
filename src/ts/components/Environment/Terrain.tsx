@@ -3,6 +3,9 @@ import * as THREE from "three";
 import { RigidBody, HeightfieldCollider } from "@react-three/rapier";
 import { CollisionGroups, groupsExcluding } from "../../enums/CollisionGroups";
 import { planetGeometry, isPlazaBlock, onPlanetRebuild } from "../../lib/planet";
+import { getCurrentSite, wildHeight, wildSample, type Site } from "../../lib/site";
+import { surfaceColor } from "../../lib/planetSurface";
+import { getTerrainData, setTerrainData, setTerrainWindowHalf, TERRAIN_STEP, type TerrainData } from "../../lib/terrainData";
 
 // Flattened (Claude): this used to default to a +/-0.5 sine wave over a
 // 20-30 unit wavelength. On open ground that read as gentle rolling hills,
@@ -85,12 +88,7 @@ export function greenness(x: number, z: number): number {
   return m <= 0 ? 0 : smooth(0, 2, m);
 }
 
-export const getTerrainHeight = (
-  x: number,
-  z: number,
-  maxHeight: number = 0
-): number => {
-  void maxHeight;
+const cityHeight = (x: number, z: number): number => {
   // parco
   if (x > PARK.min && x < PARK.max && z > PARK.min && z < PARK.max) {
     const edge = smooth(0, 9, Math.min(x - PARK.min, PARK.max - x, z - PARK.min, PARK.max - z));
@@ -120,103 +118,198 @@ export const getTerrainHeight = (
   return 0;
 };
 
-const Terrain: React.FC = () => {
-  const size = planetGeometry().roadSize;
-  const segments = Math.round(size / 2); // 2 m: le colline del parco hanno onde di 15+ m
-  const maxHeight = 0;
+// --- terreno del sito ---------------------------------------------------------------------------
+// Citta': piatta e con le colline del parco e dei cortili dentro il rettangolo CITY_HALF; fuori il terreno
+// procedurale del pianeta (curvatura + montagne + boschi) sale piano dalla pianura (BLEND m di fusione).
+// Sito selvaggio: solo il terreno del pianeta. Le quote vengono dalla griglia (collider e mesh) se c'e',
+// altrimenti si calcolano.
+const CITY_MARGIN = 50;
+const BLEND = 220;
+let cityHalf = planetGeometry().roadExtent + CITY_MARGIN;
+onPlanetRebuild(() => {
+  cityHalf = planetGeometry().roadExtent + CITY_MARGIN;
+});
+export const getCityHalf = () => cityHalf;
 
-  // Visual Mesh Data - Centered at [0,0,0]
-  const { vertices, normals, colors, visualIndices } = useMemo(() => {
-    const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
-    geometry.rotateX(-Math.PI / 2);
+const cityWeight = (site: Site, x: number, z: number): number =>
+  site.kind === 'wild' ? 1 : smooth(cityHalf, cityHalf + BLEND, Math.max(Math.abs(x), Math.abs(z)));
 
-    const pos = geometry.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const z = pos.getZ(i);
-      pos.setY(i, getTerrainHeight(x, z, maxHeight));
-    }
-    geometry.computeVertexNormals();
-    // colore: terra scura, verde dove ci sono le zone verdi (si vedono le colline)
-    const colors = new Float32Array(pos.count * 3);
-    const dark = new THREE.Color('#1a1a1a');
-    const green = new THREE.Color('#24401a');
-    const c = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) {
-      c.copy(dark).lerp(green, greenness(pos.getX(i), pos.getZ(i)));
-      colors[i * 3] = c.r;
-      colors[i * 3 + 1] = c.g;
-      colors[i * 3 + 2] = c.b;
-    }
+const computeHeight = (site: Site, x: number, z: number): number => {
+  const w = cityWeight(site, x, z);
+  if (w === 0) return cityHeight(x, z);
+  const wild = wildHeight(x, z, site);
+  return w === 1 ? wild : cityHeight(x, z) * (1 - w) + wild * w;
+};
 
-    return {
-      vertices: pos.array as Float32Array,
-      normals: geometry.attributes.normal.array as Float32Array,
-      colors,
-      visualIndices: geometry.index?.array as Uint32Array,
-    };
-  }, [size, segments, maxHeight]);
+const sampleGrid = (d: TerrainData, x: number, z: number): number => {
+  const half = d.size / 2;
+  const fx = (x + half) / TERRAIN_STEP;
+  const fz = (z + half) / TERRAIN_STEP;
+  const r0 = Math.min(d.segments - 1, Math.max(0, Math.floor(fx)));
+  const c0 = Math.min(d.segments - 1, Math.max(0, Math.floor(fz)));
+  const tx = Math.min(1, Math.max(0, fx - r0));
+  const tz = Math.min(1, Math.max(0, fz - c0));
+  const n = d.segments + 1;
+  const h = d.heights;
+  const h00 = h[c0 * n + r0], h10 = h[c0 * n + r0 + 1], h01 = h[(c0 + 1) * n + r0], h11 = h[(c0 + 1) * n + r0 + 1];
+  return h00 * (1 - tx) * (1 - tz) + h10 * tx * (1 - tz) + h01 * (1 - tx) * tz + h11 * tx * tz;
+};
 
-  // Physics Heightfield Data.
-  //
-  // Rapier's Heightfield shape is column-major, `heights[col * (nrows+1) +
-  // row]`, and -- unlike cannon's heightfield, which lives in the local XY
-  // plane and needs a -90deg X rotation to lay flat -- Rapier's already
-  // uses the local X/Z plane with height along local Y, and is CENTERED on
-  // the body's origin (cannon's was corner-anchored, hence the old
-  // `position: [-size/2, 0, size/2]` offset). So this body sits at world
-  // origin with identity rotation, matching the centered visual mesh above
-  // directly. Row = local X, column = local Z (verified live against
-  // getTerrainHeight with a raycast test while migrating off cannon).
-  const heights = useMemo(() => {
-    const nrows = segments;
-    const ncols = segments;
-    const flat = new Array<number>((nrows + 1) * (ncols + 1));
-    const step = size / segments;
+export const getTerrainHeight = (x: number, z: number, maxHeight: number = 0): number => {
+  void maxHeight;
+  const site = getCurrentSite();
+  if (site.kind === 'city' && Math.abs(x) < cityHalf && Math.abs(z) < cityHalf) return cityHeight(x, z);
+  const d = getTerrainData(site.id);
+  if (d && Math.abs(x) < d.size / 2 - TERRAIN_STEP && Math.abs(z) < d.size / 2 - TERRAIN_STEP) return sampleGrid(d, x, z);
+  return computeHeight(site, x, z);
+};
 
-    for (let row = 0; row <= nrows; row++) {
-      const worldX = -size / 2 + row * step;
-      for (let col = 0; col <= ncols; col++) {
-        const worldZ = -size / 2 + col * step;
-        flat[col * (nrows + 1) + row] = getTerrainHeight(worldX, worldZ, maxHeight);
+export const terrainWindowHalf = (site: Site): number => (site.kind === 'city' ? planetGeometry().roadExtent + 900 : 800);
+
+// costruzione a pezzetti (generatore: a ogni `yield` si puo' cedere il controllo ai frame)
+const BUDGET_MS = 12;
+function* terrainJob(site: Site): Generator<void, TerrainData, void> {
+  const half = terrainWindowHalf(site);
+  const segments = Math.round((half * 2) / TERRAIN_STEP);
+  const size = segments * TERRAIN_STEP;
+  const n = segments + 1;
+  const heights = new Float32Array(n * n);
+  const vertices = new Float32Array(n * n * 3);
+  const normals = new Float32Array(n * n * 3);
+  const colors = new Float32Array(n * n * 3);
+  const dark = new THREE.Color('#1a1a1a');
+  const green = new THREE.Color('#24401a');
+  const c = new THREE.Color();
+  const wc = new THREE.Color();
+  const rock = new THREE.Color('#6a6560');
+  let t0 = performance.now();
+  // 1) quote e colore di base del bioma (una sola risoluzione della direzione per punto)
+  const baseCol = new Float32Array(n * n * 3);
+  const infoH = new Float32Array(n * n);
+  for (let row = 0; row < n; row++) {
+    const x = -size / 2 + row * TERRAIN_STEP;
+    for (let col = 0; col < n; col++) {
+      const z = -size / 2 + col * TERRAIN_STEP;
+      const i = col * n + row;
+      const w = cityWeight(site, x, z);
+      if (w === 0) {
+        heights[i] = cityHeight(x, z);
+        continue;
       }
+      const smp = wildSample(x, z, site);
+      heights[i] = w === 1 ? smp.y : cityHeight(x, z) * (1 - w) + smp.y * w;
+      surfaceColor(site.planetSeed, smp.info, wc);
+      baseCol[i * 3] = wc.r;
+      baseCol[i * 3 + 1] = wc.g;
+      baseCol[i * 3 + 2] = wc.b;
+      infoH[i] = smp.info.h;
     }
-    return flat;
-  }, [size, segments, maxHeight]);
+    if (performance.now() - t0 > BUDGET_MS) {
+      yield;
+      t0 = performance.now();
+    }
+  }
+  // 2) vertici, normali (differenze centrali), colori
+  for (let row = 0; row < n; row++) {
+    const x = -size / 2 + row * TERRAIN_STEP;
+    for (let col = 0; col < n; col++) {
+      const z = -size / 2 + col * TERRAIN_STEP;
+      const i = col * n + row; // (colonna-maggiore: coincide con l'ordine del collider)
+      const k = i * 3;
+      vertices[k] = x;
+      vertices[k + 1] = heights[i];
+      vertices[k + 2] = z;
+      const hl = heights[col * n + Math.max(0, row - 1)], hr = heights[col * n + Math.min(n - 1, row + 1)];
+      const hd = heights[Math.max(0, col - 1) * n + row], hu = heights[Math.min(n - 1, col + 1) * n + row];
+      const nx = (hl - hr) / (2 * TERRAIN_STEP), nz = (hd - hu) / (2 * TERRAIN_STEP);
+      const il = 1 / Math.hypot(nx, 1, nz);
+      normals[k] = nx * il;
+      normals[k + 1] = il;
+      normals[k + 2] = nz * il;
+      const w = cityWeight(site, x, z);
+      c.copy(dark).lerp(green, w === 1 ? 0 : greenness(x, z));
+      if (w > 0) {
+        wc.setRGB(baseCol[k], baseCol[k + 1], baseCol[k + 2]);
+        wc.lerp(rock, smooth(0.3, 0.6, 1 - normals[k + 1]) * (infoH[i] > 0 ? 1 : 0.4));
+        c.lerp(wc, w);
+      }
+      colors[k] = c.r;
+      colors[k + 1] = c.g;
+      colors[k + 2] = c.b;
+    }
+    if (performance.now() - t0 > BUDGET_MS) {
+      yield;
+      t0 = performance.now();
+    }
+  }
+  // 3) indici
+  const indices = new Uint32Array(segments * segments * 6);
+  let q = 0;
+  for (let row = 0; row < segments; row++) {
+    for (let col = 0; col < segments; col++) {
+      const a = col * n + row, b = col * n + row + 1, d = (col + 1) * n + row, e = (col + 1) * n + row + 1;
+      indices[q++] = a;
+      indices[q++] = d;
+      indices[q++] = b;
+      indices[q++] = b;
+      indices[q++] = d;
+      indices[q++] = e;
+    }
+    if (performance.now() - t0 > BUDGET_MS) {
+      yield;
+      t0 = performance.now();
+    }
+  }
+  return { siteId: site.id, size, segments, heights, vertices, normals, colors, indices };
+}
 
-  // (niente muri ai bordi: la citta' e' su un pianeta, vedi lib/space.ts; chi cade nel vuoto: SpaceController)
+// versione "scalda": costruisce a pezzetti tra un frame e l'altro (a mondo smontato)
+export async function warmTerrain(site: Site = getCurrentSite()): Promise<void> {
+  if (getTerrainData(site.id)) return;
+  setTerrainWindowHalf(terrainWindowHalf(site));
+  const job = terrainJob(site);
+  for (;;) {
+    const r = job.next();
+    if (r.done) {
+      setTerrainData(r.value);
+      return;
+    }
+    await new Promise<void>((res) => requestAnimationFrame(() => res()));
+  }
+}
+
+const buildTerrainSync = (site: Site): TerrainData => {
+  const job = terrainJob(site);
+  for (;;) {
+    const r = job.next();
+    if (r.done) return r.value;
+  }
+};
+
+const Terrain: React.FC = () => {
+  const site = getCurrentSite();
+  const data = useMemo(() => {
+    const d = getTerrainData(site.id) ?? buildTerrainSync(site);
+    setTerrainData(d);
+    return d;
+  }, [site.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { size, segments, heights, vertices, normals, colors, indices } = data;
 
   return (
     <>
       <RigidBody type="fixed" colliders={false} position={[0, 0, 0]} friction={0.7} restitution={0}>
         <HeightfieldCollider
-          args={[segments, segments, heights, { x: size, y: 1, z: size }]}
-          // Exclude other TrimeshColliders (the road sections): every road
-          // strip and this heightfield are all static, fixed bodies, so
-          // colliding them with each other can only ever be a costly no-op
-          // -- there's no dynamic response to produce.
+          args={[segments, segments, heights as unknown as number[], { x: size, y: 1, z: size }]}
+          // Escludi gli altri TrimeshColliders (le strade): sono tutti statici
           collisionGroups={groupsExcluding(CollisionGroups.TrimeshColliders, CollisionGroups.TrimeshColliders)}
         />
       </RigidBody>
-      {/* niente piu' muri invisibili ai bordi (si puo' uscire dalla citta'; chi cade nel vuoto: SpaceController) */}
-      <mesh receiveShadow position={[0, 0, 0]}>
+      <mesh receiveShadow position={[0, 0, 0]} frustumCulled={false}>
         <bufferGeometry>
-          <bufferAttribute
-            attach="attributes-position"
-            args={[vertices, 3]}
-            count={vertices.length / 3}
-            array={vertices}
-            itemSize={3}
-          />
+          <bufferAttribute attach="attributes-position" args={[vertices, 3]} count={vertices.length / 3} array={vertices} itemSize={3} />
           <bufferAttribute attach="attributes-normal" args={[normals, 3]} count={normals.length / 3} array={normals} itemSize={3} />
           <bufferAttribute attach="attributes-color" args={[colors, 3]} count={colors.length / 3} array={colors} itemSize={3} />
-          <bufferAttribute
-            attach="index"
-            args={[visualIndices, 1]}
-            count={visualIndices.length}
-            array={visualIndices}
-            itemSize={1}
-          />
+          <bufferAttribute attach="index" args={[indices, 1]} count={indices.length} array={indices} itemSize={1} />
         </bufferGeometry>
         <meshStandardMaterial vertexColors roughness={0.9} />
       </mesh>

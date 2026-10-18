@@ -18,6 +18,9 @@ import Traffic, { policeDriver } from './components/city/Traffic';
 import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from './components/Environment/RaceTrack';
 import Road from './components/Environment/Road';
 import Terrain from './components/Environment/Terrain';
+import Wilderness from './components/Environment/Wilderness';
+import Water from './components/Environment/Water';
+import { getCurrentSite } from './lib/site';
 import OllamaProps from './components/Environment/OllamaProps';
 import UFO from './components/Environment/UFO';
 // (la vecchia catena di 3 missioni, MissionManager.tsx, e' sostituita dalla
@@ -115,24 +118,29 @@ const Scene: React.FC = () => {
   // il mondo si monta a pezzi, uno ogni ~0.5 s (terreno, strade, palazzi, parco e arredo, traffico e missioni):
   // montarlo tutto insieme congelava il gioco per piu' di un secondo all'arrivo su un pianeta
   const stage = useMountStages();
+  // sito selvaggio (atterrato fuori dalla citta'): solo terreno, natura e cielo
+  const wild = getCurrentSite().kind === 'wild';
 
   return (
     <>
       <Terrain />
       <OllamaProps />
       {isRaceTest && <RaceTrack />}
-      {!isCleanTest && stage >= 1 && <Road />}
-      {!isCleanTest && stage >= 4 && !zombieNight && <PoliceDirector />}
-      {!isCleanTest && stage >= 4 && <ZombieNight />}
-      {!isCleanTest && stage >= 1 && <CityFlags />}
+      {!isCleanTest && !wild && stage >= 1 && <Road />}
+      {!isCleanTest && !wild && stage >= 4 && !zombieNight && <PoliceDirector />}
+      {!isCleanTest && !wild && stage >= 4 && <ZombieNight />}
+      {!isCleanTest && !wild && stage >= 1 && <CityFlags />}
+      {!isCleanTest && stage >= 2 && <Wilderness />}
+      {!isCleanTest && stage >= 2 && <Water />}
+      {!isCleanTest && wild && stage >= 2 && <TreeBatches />}
       {(!isCleanTest || isDuelTest) && <Clouds />}
       {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}
       {showSkyAtmosphere && <MeteoriteSpawner />}
-      {!isCleanTest && stage >= 4 && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
-      {!isCleanTest && stage >= 4 && showSimCitta && <SoldierSpawner />}
+      {!isCleanTest && !wild && stage >= 4 && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}
+      {!isCleanTest && !wild && stage >= 4 && showSimCitta && <SoldierSpawner />}
       {/* Carichiamo i modelli in blocchi separati per non bloccare la fisica */}
       <Suspense fallback={null}>
-        {!isCleanTest && stage >= 4 && !DEBUG_DISABLE_CARS_AND_ENEMIES && (
+        {!isCleanTest && !wild && stage >= 4 && !DEBUG_DISABLE_CARS_AND_ENEMIES && (
           <>
             {/* Spawn Y lowered from 5 -> 1.2 (Claude): with the old cannon-worker
                 setup this height didn't matter -- the car's position was
@@ -216,7 +224,7 @@ const Scene: React.FC = () => {
             arbitrary in-city coordinates -- same drop height as before (a
             short fall onto a plain CuboidCollider, proven safe for both,
             unlike the raycast-suspension cars). */}
-        {!isCarTest && !isRaceTest && stage >= 3 && (isCleanTest || !DEBUG_DISABLE_CARS_AND_ENEMIES) && (
+        {!isCarTest && !isRaceTest && !wild && stage >= 3 && (isCleanTest || !DEBUG_DISABLE_CARS_AND_ENEMIES) && (
           <>
             <Airplane position={[RUNWAY_CENTER[0], 5, RUNWAY_CENTER[1]]} />
             <Helicopter position={[HELIPORT_CENTER[0], 20, HELIPORT_CENTER[1]]} />
@@ -255,8 +263,8 @@ const Scene: React.FC = () => {
             useMemo(..., []). */}
         {isDuelTest && <DuelArena key={duelRound} />}
       </Suspense>
-      <Airport />
-      {!isCleanTest && (
+      {!wild && <Airport />}
+      {!isCleanTest && !wild && (
         <Suspense fallback={null}>
           {stage >= 2 && <City />}
           {stage >= 2 && <BuildingLeds />}
