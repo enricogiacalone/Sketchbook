@@ -76,7 +76,7 @@ function solveSite(x: number, z: number, s: Site) {
   const r = Math.hypot(x, z);
   let phi = Math.asin(Math.min(0.98, r / R));
   const ux = r > 1e-6 ? x / r : 0, uz = r > 1e-6 ? z / r : 0;
-  for (let i = 0; i < 1; i++) {
+  for (let i = 0; i < 3; i++) {
     const sp = Math.sin(phi);
     _v.set(sp * ux, Math.cos(phi), sp * uz).applyQuaternion(_qi);
     _h = surfaceHeight(s.planetSeed, _v.x, _v.y, _v.z);
@@ -102,4 +102,10 @@ export function wildSample(x: number, z: number, s: Site): typeof wildSampleInfo
   wildSampleInfo.y = _y;
   wildSampleInfo.info = surfaceInfo(s.planetSeed, _v.x, _v.y, _v.z, _h);
   return wildSampleInfo;
+}
+
+// direzione del pianeta (riferimento dell'universo) del punto del terreno in (x, z)
+export function wildDir(x: number, z: number, s: Site, out: THREE.Vector3): THREE.Vector3 {
+  solveSite(x, z, s);
+  return out.copy(_v);
 }

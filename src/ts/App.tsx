@@ -6,12 +6,14 @@ import { useShallow } from 'zustand/react/shallow';
 import Scene from './Scene';
 import { createGameRenderer } from './lib/gameRenderer';
 import CityPlayer from './components/CityPlayer';
+import { usePlayerParking } from './lib/playerParking';
 import Drone from './components/Drone';
 import AdaptiveResolution from './components/Environment/AdaptiveResolution';
 import { DUEL_PLAYER_ID } from './components/Environment/DuelArena';
 import NightSky from './components/Environment/NightSky';
 import RagdollPhysicsDebugBridge from './components/Environment/RagdollPhysicsDebugBridge';
 import Sky from './components/Environment/Sky';
+import Clouds from './components/Environment/Clouds';
 import StreetLampGlow from './components/Environment/StreetLampGlow';
 import SunLight from './components/Environment/SunLight';
 import ToonStyle from './components/Environment/ToonStyle';
@@ -62,6 +64,7 @@ const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 const CharLab = React.lazy(() => import('./charLab/CharLab'));
 
 const App: React.FC = () => {
+  const playerParking = usePlayerParking();
   const planetEpoch = usePlanetEpoch();
   const [isJoined, setIsJoined] = useState(false);
   // "Laboratorio cervello mosca" (WelcomeScreen): scena a parte, vedi src/ts/flyLab
@@ -238,6 +241,7 @@ const App: React.FC = () => {
             <SpaceSun />
             <SpaceStars />
             <SpaceController />
+            {(testScene === 'none' || testScene === 'duel') && <Clouds />}
             <NightSky />
             <WorldFog />
             {/* <Ocean /> */}
@@ -317,7 +321,7 @@ const App: React.FC = () => {
                   the fight -- both remount fresh the moment testScene
                   leaves 'duel' (see DuelHUD.tsx's "Esci dal Duello"). */}
 
-              <CityPlayer userName={userName} />
+              {!playerParking.dormant && <CityPlayer key={playerParking.epoch} userName={userName} />}
               {/* "il drone e' il compagno del player e gli fluttua
                       attorno" -- always mounted outside the duel, own
                       persistent entity (see Drone.tsx), not something

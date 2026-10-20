@@ -115,8 +115,25 @@ export async function unmountWorld() {
 // rimonta la scena
 export let worldBornAt = 0; // ms: quando e' nato il mondo montato adesso (le citta' crescono a partire da qui)
 // (in due tempi: i dati si ricalcolano a mondo smontato e si possono "scaldare" a pezzetti, poi si monta)
+// il pianeta di cui sono costruiti adesso i dati del mondo (citta', strade, ...): puo' essere diverso da quello salvato quando si
+// anticipa un pianeta avvicinandosi (previewWorldSeed in lib/worldSeed.ts: la citta' da lontano, CityProxy.tsx)
+let dataSeed = current.seed;
+export const getDataSeed = () => dataSeed;
+let dataVersion = 0;
+const dataListeners = new Set<() => void>();
+export const usePlanetData = (): number =>
+  useSyncExternalStore(
+    (l) => {
+      dataListeners.add(l);
+      return () => dataListeners.delete(l);
+    },
+    () => dataVersion
+  );
 export function rebuildPlanetData() {
   for (const fn of rebuilders) fn();
+  dataSeed = current.seed;
+  dataVersion++;
+  dataListeners.forEach((l) => l());
 }
 export function mountPlanetWorld() {
   worldBornAt = performance.now();

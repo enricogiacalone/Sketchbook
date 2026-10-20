@@ -85,26 +85,44 @@ export interface TreeEntry {
   z: number;
   rotationY: number;
   scale: number;
+  m?: THREE.Matrix4; // matrice gia' pronta (alberi del pianeta: orientati lungo la normale)
+  born?: number; // s: se c'e', l'albero cresce appena nato
 }
-const treeRegistry = new Set<TreeEntry>();
-const treeListeners = new Set<() => void>();
-let treeNotifyPending = false;
-const notifyTrees = () => {
-  if (treeNotifyPending) return;
-  treeNotifyPending = true;
-  queueMicrotask(() => {
-    treeNotifyPending = false;
-    treeListeners.forEach((l) => l());
-  });
+// un registro di alberi disegnati in blocco: quello di default (scena di gioco) e, a parte, quello del pianeta
+export interface TreeSource {
+  registry: Set<TreeEntry>;
+  listeners: Set<() => void>;
+  notify: () => void;
+}
+export const createTreeSource = (): TreeSource => {
+  const registry = new Set<TreeEntry>();
+  const listeners = new Set<() => void>();
+  let pending = false;
+  return {
+    registry,
+    listeners,
+    notify: () => {
+      if (pending) return;
+      pending = true;
+      queueMicrotask(() => {
+        pending = false;
+        listeners.forEach((l) => l());
+      });
+    },
+  };
 };
+const defaultSource = createTreeSource();
+const treeRegistry = defaultSource.registry;
+const treeListeners = defaultSource.listeners;
+const notifyTrees = defaultSource.notify;
 
 // iscrive molti alberi in blocco (boschi): disegnati da TreeBatches, senza un componente per albero
-export function registerTreeEntries(entries: TreeEntry[]): () => void {
-  entries.forEach((e) => treeRegistry.add(e));
-  notifyTrees();
+export function registerTreeEntries(entries: TreeEntry[], source: TreeSource = defaultSource): () => void {
+  entries.forEach((e) => source.registry.add(e));
+  source.notify();
   return () => {
-    entries.forEach((e) => treeRegistry.delete(e));
-    notifyTrees();
+    entries.forEach((e) => source.registry.delete(e));
+    source.notify();
   };
 }
 
@@ -225,7 +243,7 @@ function bakeTreeImpostor(gl: THREE.WebGLRenderer, tpl: TreeTemplate): TreeImpos
 }
 
 // Tutti gli alberi iscritti, disegnati in blocco. Montato una volta (Scene).
-export const TreeBatches: React.FC = () => {
+export const TreeBatches: React.FC<{ source?: TreeSource; local?: boolean }> = ({ source = defaultSource, local = false }) => {
   const gl = useThree((s) => s.gl);
   // le foto degli alberi si scattano solo a backend WebGPU pronto (l'init e'
   // asincrono: prima .clear()/.render() lanciano e rompono tutto l'albero React)
@@ -233,18 +251,18 @@ export const TreeBatches: React.FC = () => {
   const [version, setVersion] = useState(0);
   useEffect(() => {
     const l = () => setVersion((v) => v + 1);
-    treeListeners.add(l);
+    source.listeners.add(l);
     l();
     return () => {
-      treeListeners.delete(l);
+      source.listeners.delete(l);
     };
-  }, []);
+  }, [source]);
   const batches = useMemo(() => {
     const byTemplate = new Map<TreeTemplate, InstanceXform[]>();
-    treeRegistry.forEach((e) => {
+    source.registry.forEach((e) => {
       let arr = byTemplate.get(e.template);
       if (!arr) byTemplate.set(e.template, (arr = []));
-      arr.push({ x: e.x, y: e.y, z: e.z, ry: e.rotationY, s: e.scale });
+      arr.push({ x: e.x, y: e.y, z: e.z, ry: e.rotationY, s: e.scale, m: e.m, b: e.born });
     });
     return [...byTemplate.entries()];
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -279,23 +297,28 @@ export const TreeBatches: React.FC = () => {
     <>
       {batches.map(([tpl, items], ti) => {
         const imp = impostorFor(tpl);
+        // capacita' a scatti (potenze di 2): aggiungere alberi non ricrea i mesh istanziati (costoso, a ogni tessera caricata)
+        const cap = Math.max(256, 2 ** Math.ceil(Math.log2(items.length + 1)));
         return (
           <React.Fragment key={ti}>
             {tpl.parts.map((part, pi) => (
               <CulledInstances
-                key={`${pi}-${items.length}`}
+                key={`${pi}-${cap}`}
+                capacity={cap}
                 name="trees"
                 geometry={part.geometry}
                 material={part.material}
                 items={items}
                 radius={TREE_RADIUS_AT_SCALE_1}
                 maxDist={TREE_LOD_DIST}
+                local={local}
                 castShadow
                 receiveShadow
               />
             ))}
             <CulledInstances
-              key={`imp-${items.length}`}
+              key={`imp-${cap}`}
+              capacity={cap}
               name="tree-impostors"
               geometry={imp.geometry}
               material={imp.material}
@@ -303,6 +326,7 @@ export const TreeBatches: React.FC = () => {
               radius={TREE_RADIUS_AT_SCALE_1}
               minDist={TREE_LOD_DIST}
               maxDist={600}
+              local={local}
               castShadow
               receiveShadow
             />

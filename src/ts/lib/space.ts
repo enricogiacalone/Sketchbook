@@ -189,3 +189,11 @@ export function requestDroneRebase(q: THREE.Quaternion, t: THREE.Vector3) {
 export function requestDroneShift(d: [number, number, number]) {
   requestDroneRebase(new THREE.Quaternion(), new THREE.Vector3(-d[0], -d[1], -d[2]));
 }
+
+// Stato di volo del drone che deve sopravvivere al cambio di sito: il drone sta nel mondo di gioco, che si smonta e si
+// rimonta a ogni cambio di sito, e senza questo il telaio ripartirebbe livellato e dietro al drone (un salto di camera).
+// `droneLive`: l'ultimo stato in volo (lo scrive Drone.tsx a ogni frame); `droneResume`: quello portato nel riferimento nuovo
+// (SpaceController.handoff), che il drone rimontato riprende al posto della partenza normale.
+const flightState = () => ({ valid: false, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), vel: new THREE.Vector3(), dq: new THREE.Quaternion(), dpos: new THREE.Vector3(), last: new THREE.Vector3() });
+export const droneLive = flightState();
+export const droneResume = flightState();

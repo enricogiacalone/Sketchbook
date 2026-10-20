@@ -2,7 +2,13 @@ import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { styleFromSeed, usePlanetEpoch } from '../../lib/planet';
 import { PLANET_RADIUS, seaColor as seaColorOf, surfaceColor, surfaceInfo, surfacePoint } from '../../lib/planetSurface';
-import PlanetLOD, { BASE_STEP } from './PlanetLOD';
+import PlanetQuadtree from './PlanetQuadtree';
+import PlanetNearField from './PlanetNearField';
+import CityProxy from './CityProxy';
+import { rockMix } from '../../lib/nearTile';
+
+const ROCK_C = new THREE.Color('#6a6560');
+const BASE_DROP = 7.2; // la sfera di base sta sotto i nodi del quadtree (PlanetQuadtree.tsx)
 import { getCurrentSite } from '../../lib/site';
 import { useFrame } from '@react-three/fiber';
 import { orbitOf, PLANET_R, SUN_R, siteFrame, spacePlanets, spaceState, sunPos, type SpacePlanet } from '../../lib/space';
@@ -24,6 +30,7 @@ function planetSurfaceGeometry(seed: number): THREE.BufferGeometry {
   const col = new Float32Array((W + 1) * (H + 1) * 3);
   const c = new THREE.Color();
   const pt = new THREE.Vector3();
+  const dv = new THREE.Vector3();
   let k = 0;
   for (let j = 0; j <= H; j++) {
     const v = j / H;
@@ -34,11 +41,14 @@ function planetSurfaceGeometry(seed: number): THREE.BufferGeometry {
       const x = Math.sin(phi) * Math.cos(th), y = Math.cos(phi), z = Math.sin(phi) * Math.sin(th);
       surfacePoint(seed, x, y, z, pt);
       // abbassata del suo passo: i livelli di dettaglio (PlanetLOD) le stanno sopra
-      pt.multiplyScalar(1 - (0.12 * BASE_STEP) / pt.length());
+      pt.multiplyScalar(1 - BASE_DROP / pt.length());
       pos[k] = pt.x;
       pos[k + 1] = pt.y;
       pos[k + 2] = pt.z;
-      surfaceColor(seed, surfaceInfo(seed, x, y, z), c);
+      const info = surfaceInfo(seed, x, y, z);
+      surfaceColor(seed, info, c);
+      dv.set(x, y, z);
+      c.lerp(ROCK_C, rockMix(seed, dv, info.h));
       col[k] = c.r;
       col[k + 1] = c.g;
       col[k + 2] = c.b;
@@ -219,7 +229,13 @@ const SpacePlanets: React.FC = () => {
         <PlanetBody key={p.profile.seed} p={p} halo={halo} marker={marker} />
       ))}
       {planets.map((p) => (
-        <PlanetLOD key={'lod' + p.profile.seed} p={p} />
+        <PlanetQuadtree key={'qt' + p.profile.seed} p={p} />
+      ))}
+      {planets.map((p) => (
+        <PlanetNearField key={'nf' + p.profile.seed} p={p} />
+      ))}
+      {planets.map((p) => (
+        <CityProxy key={'cp' + p.profile.seed} p={p} />
       ))}
       <OrbitRings planets={planets} />
     </group>
@@ -242,7 +258,7 @@ const PlanetBody: React.FC<{ p: SpacePlanet; halo: THREE.Texture; marker: THREE.
   return (
     <group ref={group}>
       <mesh geometry={geo}>
-        <meshStandardMaterial vertexColors roughness={0.95} metalness={0} polygonOffset polygonOffsetFactor={3} polygonOffsetUnits={3} />
+        <meshStandardMaterial vertexColors roughness={0.9} metalness={0} polygonOffset polygonOffsetFactor={3} polygonOffsetUnits={3} />
       </mesh>
       {/* il mare: la sfera al livello zero; le montagne e le coste la bucano */}
       <mesh>

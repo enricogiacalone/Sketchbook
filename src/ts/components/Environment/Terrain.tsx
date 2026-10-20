@@ -123,13 +123,18 @@ const cityHeight = (x: number, z: number): number => {
 // procedurale del pianeta (curvatura + montagne + boschi) sale piano dalla pianura (BLEND m di fusione).
 // Sito selvaggio: solo il terreno del pianeta. Le quote vengono dalla griglia (collider e mesh) se c'e',
 // altrimenti si calcolano.
-const CITY_MARGIN = 50;
-const BLEND = 220;
+const CITY_MARGIN = 40;
+const BLEND = 60;
 let cityHalf = planetGeometry().roadExtent + CITY_MARGIN;
 onPlanetRebuild(() => {
   cityHalf = planetGeometry().roadExtent + CITY_MARGIN;
 });
 export const getCityHalf = () => cityHalf;
+
+// il COLORE del suolo della citta' sfuma nel colore del pianeta piu' largamente delle quote (niente lastra scura con il bordo netto)
+const COLOR_BLEND = 300;
+const colorWeight = (site: Site, x: number, z: number): number =>
+  site.kind === 'wild' ? 1 : smooth(cityHalf, cityHalf + COLOR_BLEND, Math.max(Math.abs(x), Math.abs(z)));
 
 const cityWeight = (site: Site, x: number, z: number): number =>
   site.kind === 'wild' ? 1 : smooth(cityHalf, cityHalf + BLEND, Math.max(Math.abs(x), Math.abs(z)));
@@ -173,10 +178,11 @@ function* terrainJob(site: Site): Generator<void, TerrainData, void> {
   const segments = Math.round((half * 2) / TERRAIN_STEP);
   const size = segments * TERRAIN_STEP;
   const n = segments + 1;
+  const visual = site.kind === 'city'; // nei siti selvaggi il terreno si vede dalle tessere del pianeta (PlanetNearField): qui solo le quote (collider)
   const heights = new Float32Array(n * n);
-  const vertices = new Float32Array(n * n * 3);
-  const normals = new Float32Array(n * n * 3);
-  const colors = new Float32Array(n * n * 3);
+  const vertices = new Float32Array(visual ? n * n * 3 : 0);
+  const normals = new Float32Array(visual ? n * n * 3 : 0);
+  const colors = new Float32Array(visual ? n * n * 3 : 0);
   const dark = new THREE.Color('#1a1a1a');
   const green = new THREE.Color('#24401a');
   const c = new THREE.Color();
@@ -184,20 +190,25 @@ function* terrainJob(site: Site): Generator<void, TerrainData, void> {
   const rock = new THREE.Color('#6a6560');
   let t0 = performance.now();
   // 1) quote e colore di base del bioma (una sola risoluzione della direzione per punto)
-  const baseCol = new Float32Array(n * n * 3);
-  const infoH = new Float32Array(n * n);
+  const baseCol = new Float32Array(visual ? n * n * 3 : 0);
+  const infoH = new Float32Array(visual ? n * n : 0);
   for (let row = 0; row < n; row++) {
     const x = -size / 2 + row * TERRAIN_STEP;
     for (let col = 0; col < n; col++) {
       const z = -size / 2 + col * TERRAIN_STEP;
       const i = col * n + row;
       const w = cityWeight(site, x, z);
-      if (w === 0) {
+      const cw = visual ? colorWeight(site, x, z) : 1;
+      if (w === 0 && cw === 0) {
         heights[i] = cityHeight(x, z);
         continue;
       }
+      if (!visual) {
+        heights[i] = wildHeight(x, z, site);
+        continue;
+      }
       const smp = wildSample(x, z, site);
-      heights[i] = w === 1 ? smp.y : cityHeight(x, z) * (1 - w) + smp.y * w;
+      heights[i] = w === 0 ? cityHeight(x, z) : w === 1 ? smp.y : cityHeight(x, z) * (1 - w) + smp.y * w;
       surfaceColor(site.planetSeed, smp.info, wc);
       baseCol[i * 3] = wc.r;
       baseCol[i * 3 + 1] = wc.g;
@@ -210,7 +221,7 @@ function* terrainJob(site: Site): Generator<void, TerrainData, void> {
     }
   }
   // 2) vertici, normali (differenze centrali), colori
-  for (let row = 0; row < n; row++) {
+  for (let row = 0; visual && row < n; row++) {
     const x = -size / 2 + row * TERRAIN_STEP;
     for (let col = 0; col < n; col++) {
       const z = -size / 2 + col * TERRAIN_STEP;
@@ -226,12 +237,12 @@ function* terrainJob(site: Site): Generator<void, TerrainData, void> {
       normals[k] = nx * il;
       normals[k + 1] = il;
       normals[k + 2] = nz * il;
-      const w = cityWeight(site, x, z);
-      c.copy(dark).lerp(green, w === 1 ? 0 : greenness(x, z));
-      if (w > 0) {
+      const cw = colorWeight(site, x, z);
+      c.copy(dark).lerp(green, cw === 1 ? 0 : greenness(x, z));
+      if (cw > 0) {
         wc.setRGB(baseCol[k], baseCol[k + 1], baseCol[k + 2]);
         wc.lerp(rock, smooth(0.3, 0.6, 1 - normals[k + 1]) * (infoH[i] > 0 ? 1 : 0.4));
-        c.lerp(wc, w);
+        c.lerp(wc, cw);
       }
       colors[k] = c.r;
       colors[k + 1] = c.g;
@@ -243,9 +254,9 @@ function* terrainJob(site: Site): Generator<void, TerrainData, void> {
     }
   }
   // 3) indici
-  const indices = new Uint32Array(segments * segments * 6);
+  const indices = new Uint32Array(visual ? segments * segments * 6 : 0);
   let q = 0;
-  for (let row = 0; row < segments; row++) {
+  for (let row = 0; visual && row < segments; row++) {
     for (let col = 0; col < segments; col++) {
       const a = col * n + row, b = col * n + row + 1, d = (col + 1) * n + row, e = (col + 1) * n + row + 1;
       indices[q++] = a;
@@ -304,6 +315,7 @@ const Terrain: React.FC = () => {
           collisionGroups={groupsExcluding(CollisionGroups.TrimeshColliders, CollisionGroups.TrimeshColliders)}
         />
       </RigidBody>
+      {site.kind === 'city' && (
       <mesh receiveShadow position={[0, 0, 0]} frustumCulled={false}>
         <bufferGeometry>
           <bufferAttribute attach="attributes-position" args={[vertices, 3]} count={vertices.length / 3} array={vertices} itemSize={3} />
@@ -313,6 +325,7 @@ const Terrain: React.FC = () => {
         </bufferGeometry>
         <meshStandardMaterial vertexColors roughness={0.9} />
       </mesh>
+      )}
     </>
   );
 };

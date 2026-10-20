@@ -13,6 +13,14 @@ const LS_KEY_GRID = 'sketchbook-world-grid';
 let seed = 1;
 
 export const getWorldSeed = () => seed;
+// il seme SALVATO (server e browser): quello da cui si riparte; `seed` segue invece i dati costruiti (anche in anteprima)
+let persistedSeed = 0;
+export const getPersistedSeed = () => persistedSeed;
+// anteprima di un pianeta (non lo salva): per costruirne i dati e mostrarne la citta' da lontano
+export function previewWorldSeed(profile: PlanetProfile) {
+  seed = profile.seed;
+  setPlanet(profile);
+}
 
 async function fetchJson(url: string, init?: RequestInit, timeoutMs = 1500): Promise<any | null> {
   const ctl = new AbortController();
@@ -61,6 +69,7 @@ export async function initWorldSeed(): Promise<number> {
     profile = l ? profileFromSeed(l.seed, l.gridRadius ?? DEFAULT_GRID_RADIUS) : profileFromSeed(Math.floor(Math.random() * 2147483646) + 1);
   }
   seed = profile.seed;
+  persistedSeed = profile.seed;
   setPlanet(profile);
   setCurrentSite(citySite(profile.seed)); // si parte sempre dalla citta' (polo nord del pianeta)
   writeLocal(profile);
@@ -70,6 +79,7 @@ export async function initWorldSeed(): Promise<number> {
 // cambio pianeta a runtime (lib/warp.ts): il seme dei numeri casuali segue il profilo
 export function applyWorldSeed(profile: PlanetProfile) {
   seed = profile.seed;
+  persistedSeed = profile.seed;
   setPlanet(profile);
   writeLocal(profile);
 }

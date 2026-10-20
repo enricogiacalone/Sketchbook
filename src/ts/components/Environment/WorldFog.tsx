@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { getPlanetStyle, usePlanetEpoch } from '../../lib/planet';
 import { spaceState } from '../../lib/space';
 import { getCurrentSite } from '../../lib/site';
+import { PLANET_RADIUS } from '../../lib/planetSurface';
 import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
 
 // Atmospheric perspective -- "sistemiamo il cielo... nebbia atmosferica".
@@ -18,6 +19,8 @@ import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
 const NIGHT_FOG = new THREE.Color('#05060d');
 
 const SUNSET_TINT = new THREE.Color('#ffad66');
+const _fp = new THREE.Vector3();
+const _fq = new THREE.Quaternion();
 
 const WorldFog: React.FC = () => {
   const { scene } = useThree();
@@ -53,8 +56,12 @@ const WorldFog: React.FC = () => {
     fog.color.copy(scratch.current);
     // nello spazio non c'e' foschia (lib/space.ts)
     const air = spaceState.fog;
-    // meno foschia fuori dalla citta': si vedono i laghi e le montagne lontane
-    fog.density = 0.0055 * style.fogDensity * air * (getCurrentSite().kind === 'wild' ? 0.3 : 0.5);
+    // meno foschia lontano dalla citta': si vedono i laghi e le montagne lontane. Dipende dalla POSIZIONE sul pianeta
+    // (distanza angolare dal polo), non dal sito montato: cambiare sito non cambia la nebbia
+    const site = getCurrentSite();
+    _fp.set(state.camera.position.x, state.camera.position.y + PLANET_RADIUS + site.hN, state.camera.position.z).applyQuaternion(_fq.copy(site.quat).invert()).normalize();
+    const away = Math.min(1, Math.max(0, (Math.acos(Math.min(1, Math.max(-1, _fp.y))) - 0.1) / 0.2));
+    fog.density = 0.0055 * style.fogDensity * air * (0.5 - 0.2 * away * away * (3 - 2 * away));
   });
 
   return null;

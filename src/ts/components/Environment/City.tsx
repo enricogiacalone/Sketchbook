@@ -1039,6 +1039,36 @@ const farItemsFor = (b: CityBuildingRecord, i: number): FarBuildingItem[] => {
   return out;
 };
 
+// la citta' da LONTANO (CityProxy.tsx, prima che il sito della citta' sia montato): una scatola per palazzo (corpo), con le stesse
+// finestre dello shader di FarBuildings; annessi e terrazzi arrivano col palazzo vero
+let proxyCache: { src: CityBuildingRecord[]; items: FarBuildingItem[] } | null = null;
+export function getCityProxyItems(): FarBuildingItem[] {
+  const src = CITY_LAYOUT.buildings;
+  if (proxyCache && proxyCache.src === src) return proxyCache.items;
+  const items = src.map((b, i): FarBuildingItem => ({
+    key: `p${i}`,
+    x: b.x,
+    y: b.by,
+    z: b.z,
+    w: b.w,
+    h: b.h + BUILDING_WALL_THICKNESS,
+    d: b.d,
+    color: b.color,
+    kind: b.style === 'glass' ? 1 : 0,
+    countW: Math.min(6, Math.max(1, Math.floor(b.w / 3.4) - 1)),
+    countD: Math.min(6, Math.max(1, Math.floor(b.d / 3.4) - 1)),
+    floorHeight: b.floorHeight,
+    numFloors: b.numFloors,
+    roughness: b.style === 'glass' ? 0.1 : b.style === 'brick' ? 0.85 : 0.6,
+    metalness: b.style === 'glass' ? 0.9 : b.style === 'brick' ? 0.05 : 0.25,
+    plinth: b.style === 'brick' ? '#3d2c24' : '#1c1f22',
+    seed: i * 7.31,
+    collider: false,
+  }));
+  proxyCache = { src, items };
+  return items;
+}
+
 const MemoBuilding = React.memo(Building);
 
 const BuildingsStreamer: React.FC = () => {

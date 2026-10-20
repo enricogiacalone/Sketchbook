@@ -3,6 +3,8 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getPlanetStyle } from '../../lib/planet';
 import { getCurrentSite } from '../../lib/site';
+import { noise3 } from '../../lib/planetSurface';
+import { cellDir, cellOf, hashKey, localFromDir, makeCell } from '../../lib/globalGrid';
 import { spaceState } from '../../lib/space';
 import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
 
@@ -49,25 +51,11 @@ const MAX_CLOUDS = (2 * RING + 1) * (2 * RING + 1);
 const TOTAL = MAX_CLOUDS * PUFFS_PER_CLOUD;
 const FADE_FROM = 800;
 const FADE_TO = 1180;
-const BASE_HEIGHT = 170;
-const HEIGHT_VARIATION = 120;
+const ALT_SEA = 300; // m sul livello del mare
+const HEIGHT_VARIATION = 140;
 const R_PLANET = 3000;
 
-const hash = (a: number, b: number, s: number, k: number) => {
-  let h = (Math.imul(a, 374761393) + Math.imul(b, 668265263) + Math.imul(s, 2147483647) + Math.imul(k, 1274126177)) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1103515245);
-  h ^= h >>> 16;
-  return (h >>> 0) / 4294967296;
-};
 const fadeS = (t: number) => t * t * (3 - 2 * t);
-// copertura 0..1 che varia piano (rumore a valori 2D a scala di ~6 celle)
-const coverage = (iu: number, iv: number, s: number) => {
-  const x = iu / 6, y = iv / 6;
-  const xi = Math.floor(x), yi = Math.floor(y);
-  const u = fadeS(x - xi), v = fadeS(y - yi);
-  const c = (dx: number, dy: number) => hash(xi + dx, yi + dy, s, 77);
-  return (c(0, 0) * (1 - u) + c(1, 0) * u) * (1 - v) + (c(0, 1) * (1 - u) + c(1, 1) * u) * v;
-};
 
 const DAY_COLOR = new THREE.Color(1, 1, 1);
 const SUNSET_COLOR = new THREE.Color(1, 0.78, 0.62);
@@ -83,6 +71,15 @@ const _spin = new THREE.Matrix4();
 const _scale = new THREE.Matrix4();
 const _m = new THREE.Matrix4();
 const _tint = new THREE.Color();
+const _axis = new THREE.Vector3();
+const _qw = new THREE.Quaternion();
+const _qwi = new THREE.Quaternion();
+const _qi = new THREE.Quaternion();
+const _dl = new THREE.Vector3();
+const _dc = new THREE.Vector3();
+const _pos0 = new THREE.Vector3();
+const _cell = makeCell();
+const _seen = new Set<number>();
 
 const Clouds: React.FC = () => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
@@ -137,40 +134,49 @@ const Clouds: React.FC = () => {
     _tint.copy(DAY_COLOR).lerp(SUNSET_COLOR, warmth * 0.8);
     material.color.copy(NIGHT_COLOR).lerp(_tint, day);
 
-    // vento: dal seme del pianeta (direzione e velocita')
-    const seed = getCurrentSite().planetSeed | 0;
-    const wa = hash(seed, 1, 5, 9) * Math.PI * 2;
-    const ws = 4 + hash(seed, 2, 5, 9) * 8;
-    const wx = Math.cos(wa) * ws * t, wz = Math.sin(wa) * ws * t;
+    // le nuvole stanno sul PIANETA (celle lat/lon, lib/globalGrid.ts) e scorrono col vento (rotazione del pianeta intorno a
+    // un asse orizzontale dal seme): la stessa nuvola e' sempre nello stesso punto, qualunque sito sia montato
+    const site = getCurrentSite();
+    const seed = site.planetSeed | 0;
+    const ax = hashKey(1, 1, seed) - 0.5, ay = hashKey(2, 1, seed) * 0.4 - 0.2, az = hashKey(3, 1, seed) - 0.5;
+    _axis.set(ax, ay, az).normalize();
+    const omega = (4 + hashKey(4, 1, seed) * 8) / R_PLANET; // rad/s (4-12 m/s)
+    _qw.setFromAxisAngle(_axis, omega * t);
+    _qwi.copy(_qw).invert();
+    _qi.copy(site.quat).invert();
     const cloudiness = getPlanetStyle().cloudiness;
-    // la camera nello spazio delle nuvole (che scorre col vento)
-    const cu = cam.x - wx, cv = cam.z - wz;
-    const i0 = Math.floor(cu / CELL), j0 = Math.floor(cv / CELL);
+    const cy0 = R_PLANET + site.hN;
 
     let i = 0;
-    let nc = 0;
-    for (let dj = -RING; dj <= RING; dj++) {
-      for (let di = -RING; di <= RING; di++) {
-        const iu = i0 + di, iv = j0 + dj;
-        const presence = hash(iu, iv, seed, 1);
-        const chance = Math.min(0.95, cloudiness * 0.34 * (0.15 + 1.7 * coverage(iu, iv, seed)));
-        if (presence > chance) continue;
-        const cx = (iu + hash(iu, iv, seed, 2)) * CELL + wx;
-        const cz = (iv + hash(iu, iv, seed, 3)) * CELL + wz;
-        const dist = Math.hypot(cx - cam.x, cz - cam.z);
+    _seen.clear();
+    const step = CELL / 2;
+    for (let gz = -RING * CELL; gz <= RING * CELL; gz += step) {
+      for (let gx = -RING * CELL; gx <= RING * CELL; gx += step) {
+        // direzione del pianeta sotto questo punto (nel riferimento del vento)
+        _dl.set(cam.x + gx, cy0 + ALT_SEA, cam.z + gz).normalize().applyQuaternion(_qi).applyQuaternion(_qwi);
+        cellOf(_dl.x, _dl.y, _dl.z, CELL, _cell);
+        if (_seen.has(_cell.key)) continue;
+        _seen.add(_cell.key);
+        const k = _cell.key;
+        const cov = noise3((_dl.x * R_PLANET) / 1500 + 3.1, (_dl.y * R_PLANET) / 1500, (_dl.z * R_PLANET) / 1500 + 7.7, seed + 12);
+        const chance = Math.min(0.95, cloudiness * 0.34 * (0.15 + 1.7 * cov));
+        if (hashKey(k, 1, seed) > chance) continue;
+        cellDir(_cell, CELL, hashKey(k, 2, seed), hashKey(k, 3, seed), _dc);
+        _dc.applyQuaternion(_qw); // dal riferimento del vento a quello del pianeta
+        const alt = ALT_SEA + (hashKey(k, 5, seed) - 0.5) * HEIGHT_VARIATION;
+        localFromDir(site, _dc, R_PLANET + alt, _pos0);
+        const dist = Math.hypot(_pos0.x - cam.x, _pos0.z - cam.z);
         const fade = 1 - fadeS(Math.min(1, Math.max(0, (dist - FADE_FROM) / (FADE_TO - FADE_FROM))));
         if (fade <= 0.01) continue;
-        const size = 70 + hash(iu, iv, seed, 4) * 120;
-        const cy = BASE_HEIGHT + (hash(iu, iv, seed, 5) - 0.5) * HEIGHT_VARIATION - (dist * dist) / (2 * R_PLANET);
-        nc++;
+        const size = 70 + hashKey(k, 4, seed) * 120;
         for (let j = 0; j < PUFFS_PER_CLOUD; j++) {
-          const ox = (hash(iu, iv, seed, 10 + j) - 0.5) * size * 0.9;
-          const oy = (hash(iu, iv, seed, 20 + j) - 0.5) * size * 0.25;
-          const oz = (hash(iu, iv, seed, 30 + j) - 0.5) * size * 0.9;
-          const sc = (0.7 + hash(iu, iv, seed, 40 + j) * 0.5) * size * fade;
-          const spin = (hash(iu, iv, seed, 50 + j) < 0.5 ? -1 : 1) * (0.01 + hash(iu, iv, seed, 60 + j) * 0.03);
-          const angle = hash(iu, iv, seed, 70 + j) * Math.PI * 2;
-          _pos.set(cx + ox, cy + oy, cz + oz);
+          const ox = (hashKey(k, 10 + j, seed) - 0.5) * size * 0.9;
+          const oy = (hashKey(k, 20 + j, seed) - 0.5) * size * 0.25;
+          const oz = (hashKey(k, 30 + j, seed) - 0.5) * size * 0.9;
+          const sc = (0.7 + hashKey(k, 40 + j, seed) * 0.5) * size * fade;
+          const spin = (hashKey(k, 50 + j, seed) < 0.5 ? -1 : 1) * (0.01 + hashKey(k, 60 + j, seed) * 0.03);
+          const angle = hashKey(k, 70 + j, seed) * Math.PI * 2;
+          _pos.set(_pos0.x + ox, _pos0.y + oy, _pos0.z + oz);
           // verso la camera tenendo l'alto del mondo (gear, modo 6)
           _look.subVectors(cam, _pos);
           if (_look.lengthSq() < 1e-6) _look.set(0, 0, 1);

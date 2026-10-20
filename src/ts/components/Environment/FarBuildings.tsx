@@ -131,7 +131,7 @@ totalEmissiveRadiance += fbEmissive;`
 const _o = new THREE.Object3D();
 const _c = new THREE.Color();
 
-const FarChunk: React.FC<{ items: FarBuildingItem[] }> = ({ items }) => {
+const FarChunk: React.FC<{ items: FarBuildingItem[]; grow?: boolean }> = ({ items, grow = true }) => {
   const ref = useRef<THREE.InstancedMesh>(null);
   const attrs = useMemo(() => {
     const n = items.length;
@@ -184,7 +184,7 @@ const FarChunk: React.FC<{ items: FarBuildingItem[] }> = ({ items }) => {
   const cz = useMemo(() => items.reduce((a, it) => a + it.z, 0) / Math.max(1, items.length), [items]);
   useFrame(() => {
     const m = ref.current;
-    if (!m) return;
+    if (!m || !grow) return;
     const p = useStore.getState().playerPos;
     const d = Math.hypot(p[0] - cx, p[1] * 0.5, p[2] - cz);
     const k = Math.min(1, Math.max(0, (GROW_FAR - d) / (GROW_FAR - GROW_NEAR)));
@@ -204,7 +204,7 @@ const FarCollider: React.FC<{ it: FarBuildingItem; groups: number }> = ({ it, gr
   return null;
 };
 
-export const FarBuildings: React.FC<{ items: FarBuildingItem[]; colliderGroups: number }> = ({ items, colliderGroups }) => {
+export const FarBuildings: React.FC<{ items: FarBuildingItem[]; colliderGroups: number; grow?: boolean }> = ({ items, colliderGroups, grow = true }) => {
   const chunks = useMemo(() => {
     const map = new Map<string, FarBuildingItem[]>();
     for (const it of items) {
@@ -218,7 +218,7 @@ export const FarBuildings: React.FC<{ items: FarBuildingItem[]; colliderGroups: 
   return (
     <>
       {chunks.map(([k, arr]) => (
-        <FarChunk key={`${k}:${arr.map((a) => a.key).join(',')}`} items={arr} />
+        <FarChunk key={`${k}:${arr.map((a) => a.key).join(',')}`} items={arr} grow={grow} />
       ))}
       {items
         .filter((it) => it.collider)

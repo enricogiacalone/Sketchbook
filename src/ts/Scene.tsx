@@ -6,7 +6,6 @@ import BuildingLeds from './components/Environment/BuildingLeds';
 import City from './components/Environment/City';
 import CityDetails from './components/Environment/CityDetails';
 import CityFlags from './components/Environment/CityFlags';
-import Clouds from './components/Environment/Clouds';
 import Collectibles from './components/Environment/Collectibles';
 import DuelArena from './components/Environment/DuelArena';
 import MeteoriteSpawner from './components/Environment/MeteoriteSpawner';
@@ -19,7 +18,6 @@ import RaceTrack, { RACE_GRID, RACE_START_ROTATION, RACE_TRACK } from './compone
 import Road from './components/Environment/Road';
 import Terrain from './components/Environment/Terrain';
 import Wilderness from './components/Environment/Wilderness';
-import Water from './components/Environment/Water';
 import { getCurrentSite } from './lib/site';
 import OllamaProps from './components/Environment/OllamaProps';
 import UFO from './components/Environment/UFO';
@@ -131,9 +129,6 @@ const Scene: React.FC = () => {
       {!isCleanTest && !wild && stage >= 4 && <ZombieNight />}
       {!isCleanTest && !wild && stage >= 1 && <CityFlags />}
       {!isCleanTest && stage >= 2 && <Wilderness />}
-      {!isCleanTest && stage >= 2 && <Water />}
-      {!isCleanTest && wild && stage >= 2 && <TreeBatches />}
-      {(!isCleanTest || isDuelTest) && <Clouds />}
       {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}
       {showSkyAtmosphere && <MeteoriteSpawner />}
       {!isCleanTest && !wild && stage >= 4 && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}

@@ -26,7 +26,7 @@ function hash3(x: number, y: number, z: number, s: number): number {
   return (h >>> 0) / 4294967296;
 }
 const fade = (t: number) => t * t * (3 - 2 * t);
-function noise3(x: number, y: number, z: number, s: number): number {
+export function noise3(x: number, y: number, z: number, s: number): number {
   const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
   const xf = x - xi, yf = y - yi, zf = z - zi;
   const u = fade(xf), v = fade(yf), w = fade(zf);

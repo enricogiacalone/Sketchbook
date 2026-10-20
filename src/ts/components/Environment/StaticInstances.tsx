@@ -21,6 +21,7 @@ export interface InstanceXform {
   sz?: number;
   color?: THREE.ColorRepresentation;
   m?: THREE.Matrix4; // matrice gia' pronta (ha la precedenza sul resto)
+  b?: number; // nascita (s, performance.now()/1000): l'istanza cresce da 0 a piena in GROW_S secondi
 }
 
 interface Props {
@@ -103,6 +104,12 @@ export default StaticInstances;
 const _frustum = new THREE.Frustum();
 const _pv = new THREE.Matrix4();
 const _sphere = new THREE.Sphere();
+const _inv = new THREE.Matrix4();
+const _cp = new THREE.Vector3();
+const _lv = new THREE.Vector3();
+const _gm = new THREE.Matrix4();
+const _gv = new THREE.Vector3();
+export const GROW_S = 1.6; // s: durata della crescita di un'istanza appena nata
 
 export const CulledInstances: React.FC<{
   geometry: THREE.BufferGeometry;
@@ -112,14 +119,17 @@ export const CulledInstances: React.FC<{
   minDist?: number; // per i livelli di dettaglio: solo oltre questa distanza
   maxDist?: number;
   margin?: number;
+  capacity?: number; // capacita' dell'InstancedMesh (fissata alla creazione): se maggiore delle istanze, si puo' crescere senza ricrearlo
+  local?: boolean; // le istanze stanno nel riferimento del gruppo padre (pianeta): il culling si fa li', in 3D
   castShadow?: boolean;
   receiveShadow?: boolean;
   name?: string;
-}> = ({ geometry, material, items, radius, minDist = 0, maxDist = 260, margin = 18, castShadow, receiveShadow, name }) => {
+}> = ({ geometry, material, items, radius, minDist = 0, maxDist = 260, margin = 18, local = false, capacity, castShadow, receiveShadow, name }) => {
   const ref = useRef<THREE.InstancedMesh>(null);
   const mats = useMemo(
     () =>
       items.map((it) => {
+        if (it.m) return { m: it.m, r: radius * Math.max(it.sx ?? it.s ?? 1, it.sy ?? it.s ?? 1, it.sz ?? it.s ?? 1), x: it.x, y: it.y, z: it.z, b: it.b };
         _o.position.set(it.x, it.y, it.z);
         _o.rotation.set(it.rx ?? 0, it.ry ?? 0, it.rz ?? 0);
         const s = it.s ?? 1;
@@ -135,19 +145,38 @@ export const CulledInstances: React.FC<{
     const camera: THREE.Camera = (import.meta.env.DEV && (window as any).__fixedCam) || liveCamera;
     if (!mesh) return;
     _pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    let cx = camera.position.x, cy = 0, cz = camera.position.z;
+    if (local) {
+      // nel riferimento locale del gruppo (pianeta): il frustum e la camera si portano li'
+      _pv.multiply(mesh.matrixWorld);
+      _inv.copy(mesh.matrixWorld).invert();
+      _cp.copy(camera.position).applyMatrix4(_inv);
+      cx = _cp.x;
+      cy = _cp.y;
+      cz = _cp.z;
+    }
     _frustum.setFromProjectionMatrix(_pv);
-    const cx = camera.position.x,
-      cz = camera.position.z;
     let n = 0;
+    const nowS = performance.now() / 1000;
     for (const e of mats) {
       const dx = e.x - cx,
         dz = e.z - cz;
-      const d2 = dx * dx + dz * dz;
+      const dy = local ? e.y - cy : 0;
+      const d2 = dx * dx + dz * dz + dy * dy;
       if (d2 > maxDist * maxDist || d2 < minDist * minDist) continue;
-      _sphere.center.set(e.x, e.y + e.r * 0.5, e.z);
+      if (local) {
+        _lv.set(e.x, e.y, e.z).normalize();
+        _sphere.center.set(e.x + _lv.x * e.r * 0.5, e.y + _lv.y * e.r * 0.5, e.z + _lv.z * e.r * 0.5);
+      } else _sphere.center.set(e.x, e.y + e.r * 0.5, e.z);
       _sphere.radius = e.r + margin;
       if (!_frustum.intersectsSphere(_sphere)) continue;
-      mesh.setMatrixAt(n++, e.m);
+      const age = e.b === undefined ? GROW_S : nowS - e.b;
+      if (age < GROW_S) {
+        const x = Math.max(0, age) / GROW_S;
+        const g = 1 - (1 - x) * (1 - x) * (1 - x);
+        _gm.copy(e.m).scale(_gv.set(g, g, g));
+        mesh.setMatrixAt(n++, _gm);
+      } else mesh.setMatrixAt(n++, e.m);
     }
     mesh.count = n;
     mesh.instanceMatrix.needsUpdate = true;
@@ -156,7 +185,7 @@ export const CulledInstances: React.FC<{
     <instancedMesh
       ref={ref}
       name={name}
-      args={[geometry, material as THREE.Material, Math.max(1, items.length)]}
+      args={[geometry, material as THREE.Material, Math.max(1, capacity ?? items.length)]}
       castShadow={castShadow}
       receiveShadow={receiveShadow}
       frustumCulled={false}

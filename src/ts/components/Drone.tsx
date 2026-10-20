@@ -1,4 +1,4 @@
-import { droneRebase, getSpaceBoost, PLANET_R, SUN_R, siteFrame, spacePlanets, spaceState, sunPos } from '../lib/space';
+import { droneLive, droneResume, droneRebase, getSpaceBoost, PLANET_R, SUN_R, siteFrame, spacePlanets, spaceState, sunPos } from '../lib/space';
 import { getCurrentSite } from '../lib/site';
 import { hEff, surfaceHeight } from '../lib/planetSurface';
 import { TERRAIN_WINDOW_HALF as WINDOW_HALF } from '../lib/terrainData';
@@ -106,7 +106,9 @@ const SOUND_URLS = {
   impacts: ['drone-sounds/impact1.ogg', 'drone-sounds/impact2.ogg', 'drone-sounds/impact3.ogg', 'drone-sounds/impact4.ogg'],
 };
 
-const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const WORLD_UP = new THREE.Vector3(0, 1, 0); // (dinamico: la normale del pianeta sotto il drone, aggiornato a ogni frame)
+const _upN = new THREE.Vector3();
+const _qn = new THREE.Quaternion();
 const _v1 = new THREE.Vector3();
 const _qSiteInv = new THREE.Quaternion();
 const _v2 = new THREE.Vector3();
@@ -172,6 +174,8 @@ const Drone: React.FC = () => {
   const visualRef = useRef<THREE.Group>(null);
   const droneQuaternion = useRef(new THREE.Quaternion());
   const wasActive = useRef(false);
+  const upPrev = useRef(new THREE.Vector3(0, 1, 0));
+  const upReady = useRef(false);
 
   // telaio del pilota (= la camera di droneWorld)
   const fly = useRef({
@@ -440,6 +444,7 @@ const Drone: React.FC = () => {
       f.lastDronePos.applyQuaternion(droneRebase.q).add(droneRebase.t);
       f.quat.premultiply(droneRebase.q).normalize();
       droneQuaternion.current.premultiply(droneRebase.q).normalize();
+      upPrev.current.applyQuaternion(droneRebase.q); // il "su" precedente passa al riferimento nuovo (non e' curvatura da seguire)
       droneRebase.q.identity();
       droneRebase.t.set(0, 0, 0);
       droneRebase.pending = false;
@@ -448,14 +453,52 @@ const Drone: React.FC = () => {
     const flyPressed = input.consumeJustPressed('fly');
     const isActive = currentControllable === 'drone' && controlledEntityId === DRONE_ID;
 
+    // "su" = la normale del pianeta sotto il drone (non piu' +Y fisso del sito): il pilota resta in bolla anche volando lontano
+    // dal sito, e al cambio di sito (rebase) la camera non si ritrova inclinata rispetto al nuovo "su". Il telaio segue la
+    // curvatura (trasporto parallelo): ruota di quanto ruota la normale tra un frame e l'altro. Oltre 3 km si congela.
+    {
+      // (al rimontaggio dopo un cambio di sito il corpo e' ancora al punto di partenza: vale la posizione ripresa)
+      const tr = droneResume.valid ? droneResume.dpos : body.translation();
+      const site0 = getCurrentSite();
+      let best: { c: [number, number, number]; alt: number } | null = null;
+      for (const pl of spacePlanets()) {
+        const dd = Math.hypot(tr.x - pl.center[0], tr.y - pl.center[1], tr.z - pl.center[2]);
+        const a = dd - PLANET_R;
+        if (!best || a < best.alt) best = { c: pl.center, alt: a };
+      }
+      void site0;
+      if (best && best.alt < 3000) {
+        _upN.set(tr.x - best.c[0], tr.y - best.c[1], tr.z - best.c[2]).normalize();
+        if (upReady.current && isActive && wasActive.current) {
+          _qn.setFromUnitVectors(upPrev.current, _upN);
+          f.quat.premultiply(_qn);
+          droneQuaternion.current.premultiply(_qn);
+        }
+        upPrev.current.copy(_upN);
+        upReady.current = true;
+        WORLD_UP.copy(_upN);
+      } else upReady.current = false;
+    }
+
     if (isActive && !wasActive.current) {
       // Preso il comando: il telaio parte dietro e sopra il drone, livellato,
       // rivolto dove guardava la camera (niente scatti)
       body.setBodyType(rapier.RigidBodyType.KinematicPositionBased, true);
+      if (droneResume.valid) {
+        // il mondo si e' rimontato su un sito nuovo mentre si volava: si riprende il volo dov'era (stesso telaio, stessa
+        // inclinazione, stessa velocita'), portato nel riferimento nuovo, senza rilivellare
+        droneResume.valid = false;
+        body.setTranslation({ x: droneResume.dpos.x, y: droneResume.dpos.y, z: droneResume.dpos.z }, true);
+        _dronePos.copy(droneResume.dpos);
+        f.pos.copy(droneResume.pos);
+        f.quat.copy(droneResume.quat);
+        f.vel.copy(droneResume.vel);
+        droneQuaternion.current.copy(droneResume.dq);
+      } else {
       const t = body.translation();
       _dronePos.set(t.x, t.y, t.z);
       camera.getWorldDirection(_fwd);
-      _fwd.y = 0;
+      _fwd.addScaledVector(WORLD_UP, -_fwd.dot(WORLD_UP)); // orizzontale rispetto al "su" locale
       if (_fwd.lengthSq() < 1e-6) _fwd.set(0, 0, -1);
       _fwd.normalize();
       // Matrix4.lookAt: la camera guarda lungo -Z verso il bersaglio
@@ -464,6 +507,7 @@ const Drone: React.FC = () => {
       // camera = drone - avanti*20 + su*8
       f.pos.copy(_dronePos).addScaledVector(_fwd, -CAM_AHEAD).addScaledVector(WORLD_UP, CAM_BELOW);
       f.vel.set(0, 0, 0);
+      }
       f.pointer.set(0, 0);
       f.accelOff = 0;
       f.gunHeat = 0;
@@ -498,6 +542,7 @@ const Drone: React.FC = () => {
     updateProjectiles(delta);
 
     if (!isActive) {
+      droneLive.valid = false;
       // -- Companion float ----------------------------------------------------
       const t = body.translation();
       _dronePos.set(t.x, t.y, t.z);
@@ -684,6 +729,12 @@ const Drone: React.FC = () => {
     visual.position.copy(_dronePos);
     visual.quaternion.copy(droneQuaternion.current);
     droneOrientation.copy(droneQuaternion.current);
+    droneLive.valid = true;
+    droneLive.pos.copy(f.pos);
+    droneLive.quat.copy(f.quat);
+    droneLive.vel.copy(f.vel);
+    droneLive.dq.copy(droneQuaternion.current);
+    droneLive.dpos.copy(_dronePos);
 
     f.speed = f.lastDronePos.distanceTo(_dronePos) / Math.max(delta, 1e-4);
     f.lastDronePos.copy(_dronePos);
