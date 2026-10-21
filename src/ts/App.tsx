@@ -63,6 +63,24 @@ import GameFreeze from './components/GameFreeze';
 const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 const CharLab = React.lazy(() => import('./charLab/CharLab'));
 
+// Il giocatore (modello, corpo fisico, ragdoll) e' la parte piu' pesante del montaggio del mondo: mentre si pilota il drone non serve subito,
+// quindi in quel caso si monta un po' dopo (appena si scende dal drone, subito).
+const LatePlayer: React.FC<{ userName: string }> = ({ userName }) => {
+  const [ready, setReady] = React.useState(() => !useStore.getState().isDrone);
+  React.useEffect(() => {
+    if (ready) return;
+    const id = window.setTimeout(() => setReady(true), 2500);
+    const unsub = useStore.subscribe((st) => {
+      if (!st.isDrone) setReady(true);
+    });
+    return () => {
+      window.clearTimeout(id);
+      unsub();
+    };
+  }, [ready]);
+  return ready ? <CityPlayer userName={userName} /> : null;
+};
+
 const App: React.FC = () => {
   const playerParking = usePlayerParking();
   const planetEpoch = usePlanetEpoch();
@@ -321,7 +339,7 @@ const App: React.FC = () => {
                   the fight -- both remount fresh the moment testScene
                   leaves 'duel' (see DuelHUD.tsx's "Esci dal Duello"). */}
 
-              {!playerParking.dormant && <CityPlayer key={playerParking.epoch} userName={userName} />}
+              {!playerParking.dormant && <LatePlayer key={playerParking.epoch} userName={userName} />}
               {/* "il drone e' il compagno del player e gli fluttua
                       attorno" -- always mounted outside the duel, own
                       persistent entity (see Drone.tsx), not something

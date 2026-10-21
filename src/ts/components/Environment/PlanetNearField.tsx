@@ -6,6 +6,7 @@ import { siteFrame, type SpacePlanet } from '../../lib/space';
 import { GRID, TILE_CENTERS, TILE_COUNT, TILE_RADIUS } from '../../lib/cubeTiles';
 import { buildTileMesh, buildTileVegetation, makeTileBuffers, TILE_VERTS, type TileBuffers, type Vegetation } from '../../lib/nearTile';
 // (buildTileMesh / makeTileBuffers non servono piu' qui: il terreno e' nel quadtree)
+import { requestVegetation, workerCapacity, workersAvailable } from '../../lib/planetWorkers';
 import { createTreeSource, registerTreeEntries, TreeBatches, useTreeTemplates, type TreeEntry } from './ParkTrees';
 
 // La vegetazione vicina al pianeta, FISSA sul pianeta: alberi, rocce e prato (celle lat/lon, lib/globalGrid.ts). Si carica e si scarica a pezzetti attorno al punto
@@ -95,6 +96,7 @@ interface Tile {
   rockBorn: number;
   tuftBase: THREE.Matrix4[];
   tuftBorn: number;
+  busy: boolean; // un worker sta costruendo la sua vegetazione
 }
 
 const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
@@ -111,6 +113,7 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     poolRocks: [] as THREE.InstancedMesh[],
     poolTufts: [] as THREE.InstancedMesh[],
     poolBuf: [] as TileBuffers[],
+    inflight: 0,
     job: null as null | { tile: Tile; gen: Generator<void, void, void>; kind: 'mesh' | 'veg' | 'tufts' },
     selectT: 0,
     want: [] as number[],
@@ -317,12 +320,13 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     });
 
     // un lavoro alla volta: prima il terreno delle tessere piu' vicine, poi alberi e rocce, poi il prato
-    if (!S.job) {
+    const usingWorkers = workersAvailable();
+    if (!S.job && (!usingWorkers || S.inflight < workerCapacity())) {
       let next: Tile | null = null;
       let kind: 'mesh' | 'veg' | 'tufts' = 'mesh';
       for (const k of S.want) {
         if (!S.tiles.has(k)) {
-          const tile: Tile = { key: k, state: 'veg', terrain: null, water: null, rocks: null, tufts: null, buf: null, veg: { trees: [], rocks: [], tufts: [] }, unregisterTrees: null, treesRegistered: false, tuftsDone: false, born: 0, rockBase: [], rockBorn: 0, tuftBase: [], tuftBorn: 0 };
+          const tile: Tile = { key: k, state: 'veg', terrain: null, water: null, rocks: null, tufts: null, buf: null, veg: { trees: [], rocks: [], tufts: [] }, unregisterTrees: null, treesRegistered: false, tuftsDone: false, born: 0, rockBase: [], rockBorn: 0, tuftBase: [], tuftBorn: 0, busy: false };
           tile.state = 'veg'; // il terreno e l'acqua li disegna il quadtree (PlanetQuadtree.tsx): qui solo la vegetazione
           S.tiles.set(k, tile);
           continue;
@@ -338,7 +342,7 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
         // vegetazione per le tessere con il terreno pronto
         for (const k of S.want) {
           const t = S.tiles.get(k);
-          if (t && t.state === 'veg') {
+          if (t && t.state === 'veg' && !t.busy) {
             next = t;
             kind = 'veg';
             break;
@@ -350,7 +354,7 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
         const cosTuft = Math.cos((TUFT_RANGE + TILE_RADIUS) / R);
         for (const k of S.want) {
           const t = S.tiles.get(k);
-          if (!t || t.state !== 'done' || t.tuftsDone) continue;
+          if (!t || t.state !== 'done' || t.tuftsDone || t.busy) continue;
           const dot = TILE_CENTERS[k * 3] * S.nadir.x + TILE_CENTERS[k * 3 + 1] * S.nadir.y + TILE_CENTERS[k * 3 + 2] * S.nadir.z;
           if (dot > cosTuft) {
             next = t;
@@ -359,7 +363,31 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
           }
         }
       }
-      if (next) {
+      if (next && usingWorkers && kind !== 'mesh') {
+        // vegetazione calcolata nei worker (workers/planetWorker.ts)
+        const t = next;
+        t.busy = true;
+        S.inflight++;
+        requestVegetation(t.key, seed, p.profile.gridRadius, kind === 'veg' ? 'base' : 'tufts')
+          .then((veg) => {
+            S.inflight--;
+            t.busy = false;
+            if (S.tiles.get(t.key) !== t) return; // scaricata nel frattempo
+            if (kind === 'veg') {
+              t.veg = veg;
+              finishVeg(t);
+              t.state = 'done';
+            } else {
+              t.veg.tufts = veg.tufts;
+              finishTufts(t);
+              t.tuftsDone = true;
+            }
+          })
+          .catch(() => {
+            S.inflight--;
+            t.busy = false;
+          });
+      } else if (next) {
         if (kind === 'mesh') {
           next.buf = S.poolBuf.pop() ?? makeTileBuffers();
           S.job = { tile: next, gen: buildTileMesh(next.key, seed, next.buf), kind };

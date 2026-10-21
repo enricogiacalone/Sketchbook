@@ -33,14 +33,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/swift502/Sketchbook.git"
+    "url": "https://github.com/enricogiacalone/Sketchbook.git"
   },
-  "author": "swift502 <blaha.j502@gmail.com> (http://jblaha.art/)",
+  "author": "Enrico Giacalone <enrico.giacalone@gmail.com> (http://enricogiacalone.art/)",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/swift502/Sketchbook/issues"
+    "url": "https://github.com/enricogiacalone/Sketchbook/issues"
   },
-  "homepage": "https://github.com/swift502/Sketchbook",
+  "homepage": "https://github.com/enricogiacalone/Sketchbook",
   "dependencies": {
     "@dgreenheck/ez-tree": "^1.1.0",
     "@react-three/drei": "^10.7.9",

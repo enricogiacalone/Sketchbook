@@ -1,9 +1,12 @@
 import React, { useMemo, useRef } from 'react';
+import { MeshStandardNodeMaterial } from 'three/webgpu';
+import * as TSL from 'three/tsl';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { PLANET_RADIUS as R } from '../../lib/planetSurface';
 import { siteFrame, type SpacePlanet } from '../../lib/space';
 import { faceDir, GRID } from '../../lib/cubeTiles';
+import { requestNode, workerCapacity, workersAvailable } from '../../lib/planetWorkers';
 import { buildNodeMesh, makeNodeBuffers, MAX_LEVEL, NODE_INDEX, NODE_VERTS, GRID_VERTS, nodeSize, type NodeBuffers } from '../../lib/quadNode';
 
 // Il terreno del pianeta come QUADTREE a geomorphing (come i motori planetari tipo Google Earth, CDLOD): ogni faccia della
@@ -17,10 +20,11 @@ import { buildNodeMesh, makeNodeBuffers, MAX_LEVEL, NODE_INDEX, NODE_VERTS, GRID
 //  - tutto e' fisso sul pianeta: cambiare sito (rebase) cambia solo la trasformazione del gruppo.
 const ACTIVE_ALT = 9000; // sotto questa quota (m sulla superficie) il quadtree e' attivo
 const K = 2.6; // un nodo si divide quando la sua distanza e' minore di K x la sua taglia
+const K_FINE = 1.8; // per l'ultima divisione (livello 3 -> 4) un po' meno: ogni divisione crea 4 nodi fini, tanti disegni
+const kOf = (level: number) => (level >= MAX_LEVEL - 1 ? K_FINE : K);
 const HYST = 1.15; // isteresi per non oscillare
 const MORPH_FROM = 0.7; // il morph inizia (x = 1) e finisce (x = MORPH_FROM) al variare della distanza del padre / (K x taglia padre)
 const MAX_NODES = 200;
-const MAX_MORPH_UPDATES = 24; // nodi aggiornati per frame (geomorphing sulla CPU)
 const BUDGET_MS = 5;
 
 const smooth = (a: number, b: number, v: number) => {
@@ -46,6 +50,7 @@ interface QNode {
   m: number; // fattore di morph di questo frame (se e' una foglia mostrata)
   children: QNode[] | null;
   parent: QNode | null;
+  dead: boolean; // scaricato mentre un worker lo stava ancora costruendo
 }
 
 // Indici dell'acqua: solo la griglia
@@ -54,11 +59,7 @@ const TERRAIN_INDEX = new THREE.BufferAttribute(new Uint32Array(NODE_INDEX), 1);
 
 const makeTerrainGeo = () => {
   const g = new THREE.BufferGeometry();
-  for (const name of ['position', 'normal', 'color']) {
-    const a = new THREE.BufferAttribute(new Float32Array(NODE_VERTS * 3), 3);
-    a.setUsage(THREE.DynamicDrawUsage);
-    g.setAttribute(name, a);
-  }
+  for (const name of ['position', 'normal', 'color', 'aMorphPos', 'aMorphNor', 'aMorphCol']) g.setAttribute(name, new THREE.BufferAttribute(new Float32Array(NODE_VERTS * 3), 3));
   g.setIndex(TERRAIN_INDEX);
   return g;
 };
@@ -71,10 +72,28 @@ const makeWaterGeo = () => {
   return g;
 };
 
+// (i tipi di 'three/tsl' del progetto non elencano tutto: si usa il modulo come `any`)
+const { attribute, mix, normalLocal, positionLocal, transformNormalToView, uniform } = TSL as any;
+const _camDir = new THREE.Vector3();
+
 const PlanetQuadtree: React.FC<{ p: SpacePlanet }> = ({ p }) => {
   const group = useRef<THREE.Group>(null);
   const seed = p.profile.seed;
-  const terrainMat = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }), []);
+  // Geomorphing sulla GPU: posizione, normale e colore passano dalla forma del nodo a quella del padre (attributi aMorph*, fissi dopo la
+  // costruzione) col fattore `userData.morph` di OGNI mesh (uniform per oggetto): niente piu' ricalcolo e caricamento di buffer a frame.
+  const terrainMat = useMemo(() => {
+    const m: any = new MeshStandardNodeMaterial();
+    m.roughness = 0.9;
+    m.metalness = 0;
+    const morph: any = uniform(0);
+    morph.onObjectUpdate(function (this: any, frame: any) {
+      this.value = frame.object.userData.morph ?? 0;
+    });
+    m.positionNode = mix(positionLocal, attribute('aMorphPos', 'vec3'), morph);
+    m.normalNode = transformNormalToView(mix(normalLocal, attribute('aMorphNor', 'vec3'), morph).normalize());
+    m.colorNode = mix(attribute('color', 'vec3'), attribute('aMorphCol', 'vec3'), morph);
+    return m;
+  }, []);
   const waterMat = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0 }), []);
   const S = useRef({
     roots: [] as QNode[],
@@ -84,6 +103,7 @@ const PlanetQuadtree: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     poolWGeo: [] as THREE.BufferGeometry[],
     poolBuf: [] as NodeBuffers[],
     queue: [] as QNode[],
+    inflight: 0,
     job: null as null | { node: QNode; gen: Generator<void, void, void> },
     shown: [] as QNode[],
     camLocal: new THREE.Vector3(),
@@ -95,7 +115,7 @@ const PlanetQuadtree: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     const key = `${face}:${level}:${i}:${j}`;
     const T = 1 << level;
     const c = faceDir(face, (i + 0.5) / T, (j + 0.5) / T, new THREE.Vector3());
-    const n: QNode = { key, face, level, i, j, center: c, size: nodeSize(level), state: 0, buf: null, mesh: null, water: null, split: false, lastUsed: 0, lastM: -1, m: 0, children: null, parent };
+    const n: QNode = { key, face, level, i, j, center: c, size: nodeSize(level), state: 0, buf: null, mesh: null, water: null, split: false, lastUsed: 0, lastM: -1, m: 0, children: null, parent, dead: false };
     S.current.all.set(key, n);
     return n;
   };
@@ -117,7 +137,11 @@ const PlanetQuadtree: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     (geo.attributes.position.array as Float32Array).set(buf.pos);
     (geo.attributes.normal.array as Float32Array).set(buf.nor);
     (geo.attributes.color.array as Float32Array).set(buf.col);
-    for (const a of ['position', 'normal', 'color']) geo.attributes[a].needsUpdate = true;
+    (geo.attributes.aMorphPos.array as Float32Array).set(buf.mpos);
+    (geo.attributes.aMorphNor.array as Float32Array).set(buf.mnor);
+    (geo.attributes.aMorphCol.array as Float32Array).set(buf.mcol);
+    for (const a of ['position', 'normal', 'color', 'aMorphPos', 'aMorphNor', 'aMorphCol']) geo.attributes[a].needsUpdate = true;
+    mesh.userData.morph = 1; // (finche' non e' mostrato non importa)
     // sfera di contorno a mano (cosi' il frustum culling non dipende dal morph): centro sul pianeta, raggio = taglia + rilievo
     geo.boundingSphere = new THREE.Sphere(n.center.clone().multiplyScalar(R), n.size * 0.8 + 500);
     n.mesh = mesh;
@@ -142,6 +166,7 @@ const PlanetQuadtree: React.FC<{ p: SpacePlanet }> = ({ p }) => {
 
   const evict = (n: QNode) => {
     const st = S.current;
+    n.dead = true;
     if (n.state === 1 && st.job && st.job.node === n) st.job = null;
     if (n.mesh) {
       group.current?.remove(n.mesh);
@@ -186,10 +211,16 @@ const PlanetQuadtree: React.FC<{ p: SpacePlanet }> = ({ p }) => {
       tmp.copy(n.center).multiplyScalar(R);
       return Math.max(0, tmp.distanceTo(cam) - 0.75 * n.size);
     };
+    // orizzonte: i nodi oltre la curvatura del pianeta (dietro l'orizzonte della camera) non si disegnano ne' si dividono
+    const camLen = cam.length();
+    const camDir = _camDir.copy(cam).divideScalar(camLen || 1);
+    const horizon = camLen > R ? Math.acos(Math.min(1, R / camLen)) : Math.PI / 2;
     const visit = (n: QNode, parentDist: number, parentSize: number) => {
       n.lastUsed = st.frame;
+      const ang = Math.acos(Math.min(1, Math.max(-1, camDir.dot(n.center))));
+      if (ang > horizon + (0.75 * n.size + 500) / R + 0.02) return; // dietro l'orizzonte
       const d = distTo(n);
-      const thr = K * n.size * (n.split ? HYST : 1);
+      const thr = kOf(n.level) * n.size * (n.split ? HYST : 1);
       if (n.level < MAX_LEVEL && d < thr) {
         n.split = true;
         if (!n.children) {
@@ -211,7 +242,7 @@ const PlanetQuadtree: React.FC<{ p: SpacePlanet }> = ({ p }) => {
       // foglia: va mostrata. Fattore di morph dalla distanza del PADRE (alla divisione del padre vale 1: forma del padre)
       let m = 0;
       if (n.level > 0) {
-        const x = parentDist / (K * parentSize);
+        const x = parentDist / (kOf(n.level - 1) * parentSize);
         m = smooth(MORPH_FROM, 1, Math.min(1.2, x));
       }
       n.m = m;
@@ -233,31 +264,58 @@ const PlanetQuadtree: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     st.shown = shown;
 
     // --- geomorphing: posizione, normale e colore tra la forma del nodo e quella del padre ---
-    morphShown(shown, st);
+    for (const n of shown) if (n.mesh) n.mesh.userData.morph = n.m;
 
-    // --- costruzione dei nodi richiesti, il piu' vicino per primo, a pezzetti ---
-    if (!st.job) {
+    // --- costruzione dei nodi richiesti, il piu' vicino per primo ---
+    const useWorkers = workersAvailable();
+    const nearestQueued = (): QNode | null => {
       let best: QNode | null = null;
       let bd = Infinity;
       for (const q of st.queue) {
-        const d = distTo(q) + q.level * -1; // (a parita' di distanza prima i livelli piu' fini)
+        const d = distTo(q) - q.level; // (a parita' di distanza prima i livelli piu' fini)
         if (d < bd) {
           bd = d;
           best = q;
         }
       }
-      if (best) {
-        st.queue = st.queue.filter((q) => q !== best);
-        best.buf = st.poolBuf.pop() ?? makeNodeBuffers();
-        st.job = { node: best, gen: buildNodeMesh(best.face, best.level, best.i, best.j, seed, best.buf) };
+      return best;
+    };
+    if (useWorkers) {
+      // nei worker (workers/planetWorker.ts): il calcolo non occupa il thread principale
+      const cap = workerCapacity();
+      while (st.inflight < cap && st.queue.length > 0) {
+        const node = nearestQueued();
+        if (!node) break;
+        st.queue = st.queue.filter((q) => q !== node);
+        st.inflight++;
+        requestNode(node.face, node.level, node.i, node.j, seed, p.profile.gridRadius)
+          .then((buf) => {
+            st.inflight--;
+            if (node.dead) return; // nel frattempo scaricato
+            node.buf = buf;
+            finish(node);
+          })
+          .catch(() => {
+            st.inflight--;
+            if (!node.dead) node.state = 0; // si riprovera'
+          });
       }
-    }
-    if (st.job) {
-      // un passo per frame: il generatore cede da solo dopo ~5 ms
-      const r = st.job.gen.next();
-      if (r.done) {
-        finish(st.job.node);
-        st.job = null;
+    } else {
+      // senza worker: a pezzetti nel thread principale
+      if (!st.job) {
+        const best = nearestQueued();
+        if (best) {
+          st.queue = st.queue.filter((q) => q !== best);
+          best.buf = st.poolBuf.pop() ?? makeNodeBuffers();
+          st.job = { node: best, gen: buildNodeMesh(best.face, best.level, best.i, best.j, seed, best.buf) };
+        }
+      }
+      if (st.job) {
+        const r = st.job.gen.next();
+        if (r.done) {
+          finish(st.job.node);
+          st.job = null;
+        }
       }
     }
 
@@ -277,36 +335,6 @@ const PlanetQuadtree: React.FC<{ p: SpacePlanet }> = ({ p }) => {
   });
 
   // geomorphing sulla CPU: solo per i nodi mostrati il cui fattore e' cambiato abbastanza
-  const applyMorph = (n: QNode) => {
-    const src = n.buf!;
-    const m = n.m;
-    const geo = n.mesh!.geometry;
-    const pa = geo.attributes.position.array as Float32Array;
-    const na = geo.attributes.normal.array as Float32Array;
-    const ca = geo.attributes.color.array as Float32Array;
-    const len = NODE_VERTS * 3;
-    for (let k = 0; k < len; k++) {
-      pa[k] = src.pos[k] + (src.mpos[k] - src.pos[k]) * m;
-      na[k] = src.nor[k] + (src.mnor[k] - src.nor[k]) * m;
-      ca[k] = src.col[k] + (src.mcol[k] - src.col[k]) * m;
-    }
-    geo.attributes.position.needsUpdate = geo.attributes.normal.needsUpdate = geo.attributes.color.needsUpdate = true;
-    n.lastM = m;
-  };
-  // geomorphing sulla CPU: i nodi appena mostrati subito (altrimenti per un frame comparirebbero col dettaglio pieno), gli
-  // altri solo se il fattore e' cambiato abbastanza, qualche nodo per frame
-  const morphShown = (shown: QNode[], st: typeof S.current) => {
-    void st;
-    for (const n of shown) if (n.mesh && n.buf && n.lastM < 0) applyMorph(n);
-    let budget = MAX_MORPH_UPDATES;
-    for (const n of shown) {
-      if (!n.mesh || !n.buf) continue;
-      if (Math.abs(n.m - n.lastM) < 0.004 && !(n.m === 0 && n.lastM !== 0)) continue;
-      if (budget-- <= 0) break;
-      applyMorph(n);
-    }
-  };
-
   return <group ref={group} visible={false} dispose={null} />;
 };
 

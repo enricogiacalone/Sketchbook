@@ -343,23 +343,30 @@ const CityDetails: React.FC = () => {
     return d;
   }, []);
 
+  // le parti si montano UNA ALLA VOLTA (ognuna crea molte mesh e corpi fisici: tutte insieme congelavano il gioco ~0.5 s)
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    if (step >= 9) return;
+    const id = window.setTimeout(() => setStep((k) => k + 1), 220);
+    return () => window.clearTimeout(id);
+  }, [step]);
+
   return (
     <group>
-      <StreetFurniture furniture={furniture} />
+      {step >= 1 && <StreetFurniture furniture={furniture} />}
       {/* le auto ferme stanno nei parcheggi (ParkingLots.tsx), non lungo i marciapiedi */}
-      <ParkingLots />
+      {step >= 2 && <ParkingLots />}
       {/* arredo urbano esteso (cassonetti, alberi, fermate, chioschi, cartelli, segnaletica a terra) e servizi */}
-      <StreetProps />
-      <CityServices />
-      <CityClimbables />
-      <FireEscapes />
-      <CityMonuments />
+      {step >= 3 && <StreetProps />}
+      {step >= 4 && <CityServices />}
+      {step >= 5 && <CityClimbables />}
+      {step >= 6 && <FireEscapes />}
+      {step >= 7 && <CityMonuments />}
       {/* passanti: la folla (agenti leggeri + pool di corpi veri + sagome
           instanziate), vedi components/city/crowd.ts */}
-      {!zombieNight && <Crowd />}
-      {billboards.map((b, i) => (
-        <Billboard key={`bb-${i}`} x={b.x} z={b.z} rotationY={b.rotationY} schemeIndex={b.schemeIndex} />
-      ))}
+      {step >= 8 && !zombieNight && <Crowd />}
+      {step >= 9 &&
+        billboards.map((b, i) => <Billboard key={`bb-${i}`} x={b.x} z={b.z} rotationY={b.rotationY} schemeIndex={b.schemeIndex} />)}
     </group>
   );
 };

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { useStore } from '../../store';
 import { FarBuildings, type FarBuildingItem } from './FarBuildings';
+import { useStaggered } from '../../lib/useStaggered';
 import * as THREE from 'three';
 import { getTerrainHeight, setTerrainBuildings } from './Terrain';
 import { getRoadOffset } from './Road';
@@ -1165,17 +1166,20 @@ const City: React.FC = () => {
   // Buildings/courtyards/plazas now come from the shared module-level
   // CITY_LAYOUT (see above) instead of a component-local useMemo.
   const { buildings, courtyards, plazas } = CITY_LAYOUT;
+  // le parti si montano UNA ALLA VOLTA (cortili con erba e alberi, piazze, palazzi): tutte insieme congelavano il gioco
+  const nPlaza = Math.max(0, plazas.length - 2);
+  const step = useStaggered(courtyards.length + nPlaza + 3, 100);
 
   return (
     <group>
-      {courtyards.map((c, i) => (
-        <GreenCourtyard key={`court-${i}`} x={c.x} z={c.z} treeTemplates={treeTemplates} />
-      ))}
+      {step >= 1 && <BuildingsStreamer />}
+      {courtyards.map((c, i) => (step > 1 + i ? <GreenCourtyard key={`court-${i}`} x={c.x} z={c.z} treeTemplates={treeTemplates} /> : null))}
       {/* "modifica un po' la citta'": la prima piazza e' il mercato, la
           seconda il deposito dei Serpenti (StoryPlaces.tsx, la missione di
           Missions/StoryMission.tsx) */}
-      <MarketPlaza />
-      {treeTemplates.length > 0 &&
+      {step > 1 + courtyards.length && <MarketPlaza />}
+      {step > 1 + courtyards.length &&
+        treeTemplates.length > 0 &&
         [
           [-17, -17],
           [17, -17],
@@ -1191,8 +1195,9 @@ const City: React.FC = () => {
             template={treeTemplates[i % treeTemplates.length]}
           />
         ))}
-      <WarehouseYard />
+      {step > 2 + courtyards.length && <WarehouseYard />}
       {plazas.slice(2).map((p, i) => (
+        step > 3 + courtyards.length + i ? (
         <React.Fragment key={`plaza-${i}`}>
           <group position={[p.x, getTerrainHeight(p.x, p.z), p.z]}>
             <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
@@ -1249,8 +1254,8 @@ const City: React.FC = () => {
               );
             })}
         </React.Fragment>
+        ) : null
       ))}
-      <BuildingsStreamer />
     </group>
   );
 };

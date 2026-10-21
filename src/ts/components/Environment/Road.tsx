@@ -9,6 +9,7 @@ import { StaticInstances, type InstanceXform } from './StaticInstances';
 import { signalClock, signalFor, type Light } from '../../lib/traffic';
 import { onPlanetRebuild, planetGeometry } from '../../lib/planet';
 import { getCurrentSite } from '../../lib/site';
+import { useStaggered } from '../../lib/useStaggered';
 
 // Shared road-grid layout, also consumed by Player.tsx (getRoadOffset) so the
 // character's manual ground-snapping agrees with the actual road geometry
@@ -550,23 +551,27 @@ const IntersectionDetails: React.FC = () => {
 
 const Road: React.FC = () => {
   const offsets = ROAD_OFFSETS;
+  // le strade (due sezioni per linea, ognuna con mesh e collider) e i dettagli si montano a poco a poco
+  const step = useStaggered(offsets.length + 3, 110);
 
   return (
     <group>
-      {offsets.map((offset, i) => (
-        <React.Fragment key={`road-grid-${i}`}>
-          <group position={[0, 0, offset]}>
-            <RoadSection axis="x" size={roadReach() * 2} />
-          </group>
-          <group position={[offset, 0, 0]}>
-            <RoadSection axis="z" size={roadReach() * 2} />
-          </group>
-        </React.Fragment>
-      ))}
+      {offsets.map((offset, i) =>
+        step > i ? (
+          <React.Fragment key={`road-grid-${i}`}>
+            <group position={[0, 0, offset]}>
+              <RoadSection axis="x" size={roadReach() * 2} />
+            </group>
+            <group position={[offset, 0, 0]}>
+              <RoadSection axis="z" size={roadReach() * 2} />
+            </group>
+          </React.Fragment>
+        ) : null
+      )}
       {/* Intersections Details */}
-      <TrafficLightCycle />
-      <StreetLampCycle />
-      <IntersectionDetails />
+      {step > offsets.length && <TrafficLightCycle />}
+      {step > offsets.length + 1 && <StreetLampCycle />}
+      {step > offsets.length + 2 && <IntersectionDetails />}
     </group>
   );
 };

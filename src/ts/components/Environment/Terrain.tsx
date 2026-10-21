@@ -169,7 +169,7 @@ export const getTerrainHeight = (x: number, z: number, maxHeight: number = 0): n
   return computeHeight(site, x, z);
 };
 
-export const terrainWindowHalf = (site: Site): number => (site.kind === 'city' ? planetGeometry().roadExtent + 900 : 800);
+export const terrainWindowHalf = (site: Site): number => (site.kind === 'city' ? planetGeometry().roadExtent + 420 : 560); // (il collider; il terreno che si vede sta nel quadtree. Meno punti = rimontaggio molto piu' leggero)
 
 // costruzione a pezzetti (generatore: a ogni `yield` si puo' cedere il controllo ai frame)
 const BUDGET_MS = 12;
