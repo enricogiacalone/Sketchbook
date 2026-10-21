@@ -144,6 +144,9 @@ export function useMannequinActor(opts: MannequinActorOptions) {
     const m = new THREE.AnimationMixer(c);
     const map: Record<string, THREE.AnimationClip> = {};
     for (const clip of [...baseAnims, ...addonAnims, ...kimodoAnims]) map[clip.name] = clip;
+    // scavalcare: ClimbUp_1m_RM senza la traccia della radice (la posizione la decide chi scavalca, come
+    // traversal.ts per il giocatore)
+    if (map['ClimbUp_1m_RM']) map['ClimbUp_1m__ip'] = new THREE.AnimationClip('ClimbUp_1m__ip', 0.625, map['ClimbUp_1m_RM'].tracks.filter((t) => t.name !== 'root.position'));
 
     // Assegnazione immediata per evitare ref null durante la fase di setup di useRagdoll
     modelRootRef.current = c;

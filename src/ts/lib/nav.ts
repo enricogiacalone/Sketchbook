@@ -11,9 +11,21 @@ export interface NavRect {
   w: number;
   d: number;
 }
+// Un passaggio "a salto" (scavalcare un muro): da A a B (e viceversa se se ne mette uno per verso). `h` e' l'altezza da
+// superare, `cost` quanto vale in metri di cammino (scavalcare costa piu' che girare solo se il giro e' corto).
+export interface NavLink {
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
+  h: number;
+  cost: number;
+}
 export interface NavPoint {
   x: number;
   z: number;
+  // in questo punto si scavalca verso `to` (il punto dopo nel percorso e' l'atterraggio)
+  vault?: NavLink;
 }
 
 const SQRT2 = Math.SQRT2;
@@ -25,6 +37,8 @@ export class NavGrid {
   // `solid`: i muri veri (ingranditi appena), per la linea di vista
   private blocked: Uint8Array;
   private solid: Uint8Array;
+  // passaggi a salto per cella di partenza
+  private links = new Map<number, Array<{ to: number; link: NavLink }>>();
 
   constructor(
     readonly minX: number,
@@ -49,6 +63,18 @@ export class NavGrid {
     for (const r of rects) {
       mark(this.blocked, r, inflate);
       mark(this.solid, r, 0);
+    }
+  }
+
+  setLinks(links: NavLink[]) {
+    this.links.clear();
+    for (const l of links) {
+      const a = this.idx(l.ax, l.az);
+      const b = this.idx(l.bx, l.bz);
+      if (a < 0 || b < 0 || this.blocked[a] || this.blocked[b]) continue;
+      let arr = this.links.get(a);
+      if (!arr) this.links.set(a, (arr = []));
+      arr.push({ to: b, link: l });
     }
   }
 
@@ -138,6 +164,7 @@ export class NavGrid {
     const gs = new Float32Array(N).fill(Infinity);
     const came = new Int32Array(N).fill(-1);
     const closed = new Uint8Array(N);
+    const viaLink = new Map<number, NavLink>();
     const gx = g % this.cols;
     const gz = Math.floor(g / this.cols);
     const h = (i: number) => {
@@ -210,7 +237,20 @@ export class NavGrid {
           if (ng < gs[ni]) {
             gs[ni] = ng;
             came[ni] = cur;
+            viaLink.delete(ni);
             push(ni, ng + h(ni));
+          }
+        }
+      const ls = this.links.get(cur);
+      if (ls)
+        for (const { to, link } of ls) {
+          if (closed[to]) continue;
+          const ng = gs[cur] + link.cost / this.cell;
+          if (ng < gs[to]) {
+            gs[to] = ng;
+            came[to] = cur;
+            viaLink.set(to, link);
+            push(to, ng + h(to));
           }
         }
     }
@@ -218,21 +258,34 @@ export class NavGrid {
     const cells: number[] = [];
     for (let i = g; i !== -1; i = came[i]) cells.push(i);
     cells.reverse();
-    const pts = cells.map((i) => this.center(i));
-    // accorcia: dal punto corrente al piu' lontano visibile
+    // si spezza nei passaggi a salto: ogni tratto si accorcia per conto suo, il punto di partenza del salto e
+    // l'atterraggio restano nel percorso (non si tagliano)
     const out: NavPoint[] = [];
-    let a = 0;
-    const start: NavPoint = { x: ax, z: az };
-    let from = start;
-    while (a < pts.length - 1) {
-      let b = pts.length - 1;
-      while (b > a + 1 && !this.lineClear(from.x, from.z, pts[b].x, pts[b].z)) b--;
-      out.push(pts[b]);
-      from = pts[b];
-      a = b;
+    let from: NavPoint = { x: ax, z: az };
+    let runStart = 0;
+    const flush = (end: number) => {
+      const pts = cells.slice(runStart, end + 1).map((i) => this.center(i));
+      let a = 0;
+      while (a < pts.length - 1) {
+        let b = pts.length - 1;
+        while (b > a + 1 && !this.lineClear(from.x, from.z, pts[b].x, pts[b].z)) b--;
+        out.push(pts[b]);
+        from = pts[b];
+        a = b;
+      }
+    };
+    for (let k = 1; k < cells.length; k++) {
+      const link = viaLink.get(cells[k]);
+      if (!link || came[cells[k]] !== cells[k - 1]) continue;
+      flush(k - 1);
+      out.push({ x: link.ax, z: link.az, vault: link });
+      out.push({ x: link.bx, z: link.bz });
+      from = { x: link.bx, z: link.bz };
+      runStart = k;
     }
+    flush(cells.length - 1);
     // l'ultimo punto e' proprio la destinazione richiesta se e' libera
-    if (this.isFree(bx, bz) && out.length) out[out.length - 1] = { x: bx, z: bz };
+    if (this.isFree(bx, bz) && out.length && !out[out.length - 1].vault) out[out.length - 1] = { x: bx, z: bz };
     return out;
   }
 }

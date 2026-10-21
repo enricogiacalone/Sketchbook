@@ -5,6 +5,7 @@ import { useStore } from '../../store';
 import EnemyHealthBar from '../Environment/EnemyHealthBar';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { getRoadOffset } from '../Environment/Road';
+import { floorLift } from '../../lib/floors';
 import { damageFighter } from '../Environment/weapons/shootableRegistry';
 import { RUN_CLIP, timeScaleFor } from '../Environment/locomotion';
 import { useMannequinActor } from './useMannequinActor';
@@ -100,7 +101,7 @@ const Zombie: React.FC<ZombieProps> = ({ id, kind, x, z, onGone }) => {
     const dx = pp[0] - pos.x;
     const dz = pp[2] - pos.z;
     const dist = Math.hypot(dx, dz);
-    const gy = getTerrainHeight(pos.x, pos.z) + getRoadOffset(pos.x, pos.z);
+    const gy = getTerrainHeight(pos.x, pos.z) + getRoadOffset(pos.x, pos.z) + floorLift(pos.x, pos.z);
 
     // troppo lontano: se ne va (la regia ne manda un altro vicino al giocatore)
     if (dist > LOST_DIST) {
@@ -125,7 +126,7 @@ const Zombie: React.FC<ZombieProps> = ({ id, kind, x, z, onGone }) => {
         const marchYaw = stepToward(actor, pos, s.step, pp[0], pp[2], K.speed, delta);
         if (marchYaw !== null) g.rotation.y += wrap(marchYaw - g.rotation.y) * Math.min(1, delta * 6);
         const clip = actor.hasClip(K.clip) ? K.clip : 'Walk';
-        actor.play(clip, 0.25, true, K.ts > 0 ? K.ts : timeScaleFor(K.clip, K.speed));
+        if (!s.step.vault) actor.play(clip, 0.25, true, K.ts > 0 ? K.ts : timeScaleFor(K.clip, K.speed));
       } else {
         // a portata: si gira verso di te e graffia
         if (dist > 0.01) g.rotation.y += wrap(Math.atan2(dx, dz) - g.rotation.y) * Math.min(1, delta * 10);
@@ -144,7 +145,7 @@ const Zombie: React.FC<ZombieProps> = ({ id, kind, x, z, onGone }) => {
       }
     }
 
-    g.position.set(pos.x, gy, pos.z);
+    g.position.set(pos.x, gy + s.step.lift, pos.z);
     data.rotation = g.rotation.y + Math.PI;
     if (s.warm < 3 && ++s.warm >= 3) g.visible = true;
 

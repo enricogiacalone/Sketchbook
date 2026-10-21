@@ -13,6 +13,7 @@ import { RUN_CLIP, timeScaleFor } from '../Environment/locomotion';
 import { useMannequinActor } from './useMannequinActor';
 import { cityOpponents } from './cityActors';
 import { LOOK_CLIP, WALK_BASE_SPEED } from './crowdSim';
+import { floorLift } from '../../lib/floors';
 import { allyRegistry, hasLineOfSight, newStepState, npcFire, stepToward } from './npcCombat';
 import { LINES, parseOrder, pick, type Order } from './allyOrders';
 import { reportHit } from '../../lib/wanted';
@@ -210,7 +211,7 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const groundOf = (x: number, z: number) => getTerrainHeight(x, z) + getRoadOffset(x, z);
+  const groundOf = (x: number, z: number) => getTerrainHeight(x, z) + getRoadOffset(x, z) + floorLift(x, z);
   const idleOffset = useMemo(() => (index % 3) - 1, [index]);
 
   useFrame((_state, delta) => {
@@ -504,7 +505,7 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
     // ---- animazione ------------------------------------------------------------
     pistol.setVisible(attacking);
     pistol.update(delta);
-    if (s.shootAnim <= 0) {
+    if (s.shootAnim <= 0 && !s.step.vault) {
       if (s.reloadT > 0 && marchYaw === null) {
         actor.play('Pistol_Reload', 0.1, false);
       } else if (marchYaw !== null) {
@@ -525,7 +526,7 @@ const AllyNpc: React.FC<AllyNpcProps> = ({ id, index, initialPosition, initialHp
       }
     }
 
-    g.position.set(pos.x, groundOf(pos.x, pos.z), pos.z);
+    g.position.set(pos.x, groundOf(pos.x, pos.z) + s.step.lift, pos.z);
     data.rotation = g.rotation.y + Math.PI;
     // visibile solo dopo un paio di frame animati: mai un frame a T alla comparsa
     if (s.warm < 3 && ++s.warm >= 3) g.visible = true;

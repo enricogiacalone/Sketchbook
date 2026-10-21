@@ -11,7 +11,8 @@ import { usePistolModel } from '../Environment/weapons/usePistolModel';
 import { RUN_CLIP, timeScaleFor } from '../Environment/locomotion';
 import { useMannequinActor } from './useMannequinActor';
 import { LOOK_CLIP, WALK_BASE_SPEED } from './crowdSim';
-import { allyRegistry, hasLineOfSight, npcFire, PLAYER_ID } from './npcCombat';
+import { allyRegistry, hasLineOfSight, newStepState, npcFire, PLAYER_ID, stepToward } from './npcCombat';
+import { floorLift } from '../../lib/floors';
 import { addArrest, copRegistry, copSeesPlayer, isPlayerSpotted, isViolent, registerCop, unregisterCop, wanted } from '../../lib/wanted';
 import { insideStatics, queryStatics, segHitsRect, type StaticCircle, type StaticRect } from './crowdObstacles';
 
@@ -182,9 +183,7 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
     sightT: 0,
     sees: false,
     allyTarget: null as string | null,
-    steer: 0,
-    steerT: 0,
-    stuckT: 0,
+    step: newStepState(),
     searchX: 0,
     searchZ: 0,
     searchWait: 0,
@@ -276,7 +275,7 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
     const dz = pp[2] - pos.z;
     const dist = Math.hypot(dx, dz);
     const level = wanted.level;
-    const gy = getTerrainHeight(pos.x, pos.z) + getRoadOffset(pos.x, pos.z);
+    const gy = getTerrainHeight(pos.x, pos.z) + getRoadOffset(pos.x, pos.z) + floorLift(pos.x, pos.z);
     const onFoot = store.currentControllable === 'player';
     const playerDown = store.health <= 0;
 
@@ -384,7 +383,7 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
         // posizione sul percorso (niente fisica: e' la sua strada)
         pos.x = rx;
         pos.z = rz;
-        S.steer = 0;
+        S.step.steer = 0;
       }
     } else if (S.mode === 'chase') {
       S.reactT -= delta;
@@ -527,46 +526,21 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
     // ---- passo con fisica (non in pattuglia: li' e' sul percorso) ------------
     let marchYaw: number | null = null;
     if (moveSpeed > 0 && S.mode !== 'patrol') {
-      let gdx = goalX - pos.x;
-      let gdz = goalZ - pos.z;
-      const gd = Math.hypot(gdx, gdz);
-      if (gd > 0.05) {
-        // distanza dagli altri agenti
-        let sx = 0;
-        let sz = 0;
-        for (const c of copRegistry.values()) {
-          if (c.id === id || c.car) continue;
-          const ex = pos.x - c.x;
-          const ez = pos.z - c.z;
-          const ed = Math.hypot(ex, ez);
-          if (ed > 0.01 && ed < SEP_DIST) {
-            sx += (ex / ed) * (SEP_DIST - ed);
-            sz += (ez / ed) * (SEP_DIST - ed);
-          }
+      // distanza dagli altri agenti
+      let sx = 0;
+      let sz = 0;
+      for (const c of copRegistry.values()) {
+        if (c.id === id || c.car) continue;
+        const ex = pos.x - c.x;
+        const ez = pos.z - c.z;
+        const ed = Math.hypot(ex, ez);
+        if (ed > 0.01 && ed < SEP_DIST) {
+          sx += (ex / ed) * (SEP_DIST - ed);
+          sz += (ez / ed) * (SEP_DIST - ed);
         }
-        gdx = gdx / gd + sx * 0.8;
-        gdz = gdz / gd + sz * 0.8;
-        let ang = Math.atan2(gdx, gdz);
-        if (S.steerT > 0) {
-          S.steerT -= delta;
-          ang += S.steer;
-          if (S.steerT <= 0) S.steer = 0;
-        }
-        const step = Math.min(moveSpeed * delta, gd);
-        const c = actor.ragdoll.resolveBodyMovement(Math.sin(ang) * step, Math.cos(ang) * step, null);
-        pos.x += c.x;
-        pos.z += c.z;
-        // incastrato contro un muro: gira attorno
-        if (Math.hypot(c.x, c.z) < step * 0.25) {
-          S.stuckT += delta;
-          if (S.stuckT > 0.5) {
-            S.stuckT = 0;
-            S.steer = (Math.random() < 0.5 ? -1 : 1) * (0.9 + Math.random() * 0.6);
-            S.steerT = 1 + Math.random() * 0.8;
-          }
-        } else S.stuckT = Math.max(0, S.stuckT - delta);
-        marchYaw = ang;
       }
+      // (dove c'e' un labirinto segue la strada e scavalca: npcCombat.ts)
+      marchYaw = stepToward(actor, pos, S.step, goalX, goalZ, moveSpeed, delta, sx * 0.8, sz * 0.8);
     } else if (S.mode === 'patrol' && moveSpeed > 0) {
       const fx = S.dir >= 0 ? end : start;
       marchYaw = Math.atan2(fx.x - pos.x, fx.z - pos.z);
@@ -621,7 +595,7 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
 
     // ---- animazione ---------------------------------------------------------
     const moving = S.mode === 'patrol' ? moveSpeed > 0 : marchYaw !== null;
-    if (S.shootAnim <= 0) {
+    if (S.shootAnim <= 0 && !S.step.vault) {
       if (S.reloadT > 0 && !moving) {
         actor.play('Pistol_Reload', 0.1, false);
       } else if (moving) {
@@ -647,7 +621,7 @@ const PoliceOfficer: React.FC<PoliceOfficerProps> = ({ id, patrol, spawn, swat, 
       }
     }
 
-    g.position.set(pos.x, gy, pos.z);
+    g.position.set(pos.x, gy + S.step.lift, pos.z);
     data.rotation = g.rotation.y + Math.PI;
     // visibile solo dopo un paio di frame animati: mai un frame a T alla comparsa
     if (S.warm < 3 && ++S.warm >= 3) g.visible = true;

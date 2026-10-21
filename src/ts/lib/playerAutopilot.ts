@@ -15,15 +15,23 @@ export interface PlayerAutoCmd {
   lockOn: boolean;
   // un pugno (si consuma quando il giocatore lo prende)
   attack: boolean;
+  // un salto / scavalcare (si consuma quando il giocatore lo prende)
+  jump: boolean;
   // niente torsione del busto verso la camera (telecamera libera che segue il giocatore: laboratorio)
   freeTorso: boolean;
 }
 
-export const playerAuto: PlayerAutoCmd = { active: false, mx: 0, mz: 0, gait: 'jog', lockOn: false, attack: false, freeTorso: false };
+export const playerAuto: PlayerAutoCmd = { active: false, mx: 0, mz: 0, gait: 'jog', lockOn: false, attack: false, jump: false, freeTorso: false };
 
 export function takeAutoAttack(): boolean {
   const a = playerAuto.attack;
   playerAuto.attack = false;
+  return a;
+}
+
+export function takeAutoJump(): boolean {
+  const a = playerAuto.jump;
+  playerAuto.jump = false;
   return a;
 }
 
@@ -48,7 +56,7 @@ export function withAutopilot<T extends object>(raw: T): T {
           case 'primary':
             return playerAuto.attack;
           case 'consumeJustPressed':
-            return (action: string) => (action === 'primary' ? takeAutoAttack() : target.consumeJustPressed(action));
+            return (action: string) => (action === 'primary' ? takeAutoAttack() : action === 'jump' ? takeAutoJump() || target.consumeJustPressed(action) : target.consumeJustPressed(action));
         }
       }
       return target[key];

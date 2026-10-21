@@ -30,6 +30,7 @@ import { newTravState, stepTraversal, followGround, isTraversing, hangHandTarget
 import { GETUP_CLIP } from './ragdoll/knockdown';
 import { useKnockdown } from './ragdoll/useKnockdown';
 import { K, KIMODO_ANIMS_URL, idleConfig } from '../../lib/kimodo';
+import { playerSettings } from '../../lib/playerSettings';
 import { crowdPanic } from '../city/crowdSim';
 import { castShot, spreadDirection } from './weapons/hitscan';
 import { getShootableCollider, applyFighterHit } from './weapons/shootableRegistry';
@@ -219,6 +220,107 @@ let coverClipHoldAt = 0.9; // s: ricalcolato da coverBackToWall
 // senza la svolta: al bacino (e al suo spostamento) si toglie la rotazione
 // verticale tra il primo e l'ultimo fotogramma; e la si usa da quando la
 // svolta e' finita (prima il bacino girerebbe all'indietro).
+// Le clip di riposo Kimodo (respiro e variazioni) partono e finiscono nella stessa posa NEUTRA (braccia, clavicole, testa e busto: fino a
+// 60 gradi di scarto dalla posa del riposo vero, misurato) e solo nel mezzo hanno il riposo: a ogni giro del loop le spalle e le braccia
+// "scattano" verso la posa neutra e tornano (~0.4 s ogni ~2.7 s). Si tiene solo la parte centrale: dove la posa ha raggiunto il riposo
+// (in testa) e prima che torni alla neutra (in coda).
+const _tq0 = new THREE.Quaternion();
+const _tq1 = new THREE.Quaternion();
+function trimIdleClip(clip: THREE.AnimationClip): THREE.AnimationClip {
+  const bones = ['clavicle_r', 'clavicle_l', 'upperarm_r', 'upperarm_l', 'spine_02', 'head'];
+  const tracks = bones.map((b) => clip.tracks.find((t) => t.name === `${b}.quaternion`)).filter(Boolean) as THREE.KeyframeTrack[];
+  if (tracks.length === 0 || tracks[0].times.length < 8) return clip;
+  const times = tracks[0].times;
+  const n = times.length;
+  // distanza dalla posa iniziale (somma degli angoli delle ossa guida) a ogni fotogramma
+  const dist = new Float32Array(n);
+  for (const tr of tracks) {
+    if (tr.times.length !== n) return clip;
+    const v = tr.values;
+    _tq0.fromArray(v, 0);
+    for (let k = 0; k < n; k++) {
+      _tq1.fromArray(v, k * 4);
+      dist[k] += _tq0.angleTo(_tq1);
+    }
+  }
+  // riposo = il valore tipico nella parte centrale
+  const mid = Array.from(dist.slice(Math.floor(n * 0.3), Math.ceil(n * 0.7))).sort((a, b) => a - b);
+  const plateau = mid[Math.floor(mid.length / 2)];
+  if (!(plateau > 0.2)) return clip; // clip senza questo andamento: non si tocca
+  const thr = plateau * 0.85;
+  let a = 0;
+  while (a < n - 1 && dist[a] < thr) a++;
+  let b = n - 1;
+  while (b > a && dist[b] < thr) b--;
+  if (b - a < 12) return clip;
+  // il giro del loop deve chiudersi senza salto: tra i fotogrammi vicini ai due estremi si scelgono quelli con la posa piu' simile
+  {
+    let best = Infinity, ba = a, bb = b;
+    for (let ia = a; ia < Math.min(n - 2, a + 8); ia++) {
+      for (let ib = b; ib > Math.max(ia + 12, b - 8); ib--) {
+        let diff = 0;
+        for (const tr of tracks) {
+          _tq0.fromArray(tr.values, ia * 4);
+          _tq1.fromArray(tr.values, ib * 4);
+          diff += _tq0.angleTo(_tq1);
+        }
+        // (a parita' di posa si preferisce tenere piu' clip)
+        diff += (ia - a + (b - ib)) * 0.002;
+        if (diff < best) {
+          best = diff;
+          ba = ia;
+          bb = ib;
+        }
+      }
+    }
+    a = ba;
+    b = bb;
+  }
+  const fps = 1 / Math.max(1e-4, times[1] - times[0]);
+  // (subclip conta i fotogrammi dall'inizio del clip: lo si chiama con lo stesso nome, cosi' sostituisce l'originale)
+  const out = THREE.AnimationUtils.subclip(clip, clip.name, a, b + 1, fps);
+  closeLoopSeam(out, 10);
+  return out;
+}
+
+// Chiude il giro del loop: per gli ultimi `k` fotogrammi di ogni traccia si aggiunge una correzione che cresce piano fino a far
+// coincidere l'ultimo fotogramma col primo (rotazioni: delta di quaternione con slerp; posizioni e scale: differenza). Le
+// differenze tra la fine e l'inizio, anche piccole, non si vedono piu' come uno scatto a ogni giro.
+const _sq0 = new THREE.Quaternion();
+const _sq1 = new THREE.Quaternion();
+const _sqd = new THREE.Quaternion();
+const _sqi = new THREE.Quaternion();
+const _sqw = new THREE.Quaternion();
+function closeLoopSeam(clip: THREE.AnimationClip, k: number) {
+  for (const tr of clip.tracks) {
+    const n = tr.times.length;
+    if (n < k + 3) continue;
+    const v = tr.values;
+    if (tr.name.endsWith('.quaternion')) {
+      _sq0.fromArray(v, 0);
+      _sq1.fromArray(v, (n - 1) * 4);
+      _sqd.copy(_sq0).multiply(_sq1.invert()).normalize(); // delta tale che delta * ultimo = primo
+      _sqi.identity();
+      for (let i = 0; i < k; i++) {
+        const idx = n - k + i;
+        const w = (i + 1) / k;
+        _sqw.copy(_sqi).slerp(_sqd, w * w * (3 - 2 * w));
+        _sq1.fromArray(v, idx * 4);
+        _sq1.premultiply(_sqw);
+        _sq1.toArray(v, idx * 4);
+      }
+    } else {
+      const size = tr.getValueSize();
+      for (let i = 0; i < k; i++) {
+        const idx = n - k + i;
+        const w = (i + 1) / k;
+        const ww = w * w * (3 - 2 * w);
+        for (let c = 0; c < size; c++) v[idx * size + c] += (v[c] - v[(n - 1) * size + c]) * ww;
+      }
+    }
+  }
+}
+
 function coverBackToWall(clip: THREE.AnimationClip): THREE.AnimationClip {
   const c = clip.clone();
   const qt = c.tracks.find((t) => /(^|\.|\/)pelvis\.quaternion$/.test(t.name)) as THREE.QuaternionKeyframeTrack | undefined;
@@ -484,6 +586,7 @@ interface PlayerCombatSoldierProps {
 // applied via useRagdoll's applySpineLean), independent of which way the
 // legs are currently facing -- so punches can be aimed in 2D without
 // spinning the whole body around to do it.
+const playerMaterialCache = new Map<THREE.Material, THREE.Material>();
 const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   data,
   opponents,
@@ -609,6 +712,9 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   const celebrateRef = useRef<{ delay: number; left: number }>({ delay: 0, left: 0 });
   // variazioni del riposo: quanto manca alla prossima e quanto dura quella in corso
   const idleVarRef = useRef({ next: 7, left: 0 });
+  const torsoYawRef = useRef(playerSettings.torsoFollowsCamera ? 1 : 0);
+  // variazione del riposo in corso (clip additiva) e quanto e' avanti
+  const idleAddRef = useRef<{ action: THREE.AnimationAction; t: number; dur: number; stop: { t: number; dur: number; w0: number } | null } | null>(null);
   const scheduleCelebration = (victim: FighterData) => {
     const nearEnemy = opponents.some(
       (o) =>
@@ -720,9 +826,16 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
 
     clonedScene.traverse((child: any) => {
       if (child.isSkinnedMesh) {
-        child.material = child.material.clone();
-        child.material.emissive = new THREE.Color(PLAYER_COLOR);
-        child.material.emissiveIntensity = 0.35;
+        // il materiale del giocatore si crea UNA volta per pagina e si riusa a ogni rimontaggio (ogni cambio di sito): un materiale
+        // nuovo costringe il renderer a ricostruire il suo grafo di shader (~0.3 s) e quello dell'ombra
+        let pm: any = playerMaterialCache.get(child.material);
+        if (!pm) {
+          pm = child.material.clone();
+          pm.emissive = new THREE.Color(PLAYER_COLOR);
+          pm.emissiveIntensity = 0.35;
+          playerMaterialCache.set(child.material, pm);
+        }
+        child.material = pm;
         // "a volte quando cade scompare e poi riappare": il volume di
         // visibilita' del modello e' quello della posa a riposo attorno
         // alla radice, che durante il KO resta ferma mentre il corpo vola
@@ -738,7 +851,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     const cMap: Record<string, THREE.AnimationClip> = {};
 
     animations.forEach((clip0) => {
-      const clip = clip0.name === COVER_CLIP ? coverBackToWall(clip0) : clip0;
+      const clip = clip0.name === COVER_CLIP ? coverBackToWall(clip0) : clip0.name.startsWith('Kimodo_idle_') ? trimIdleClip(clip0) : clip0;
       const action = animMixer.clipAction(clip);
       actMap[clip.name] = action;
       cMap[clip.name] = clip;
@@ -794,6 +907,21 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       const c = splitClip(cMap[name], 'upper');
       actMap[c.name] = animMixer.clipAction(c);
       cMap[c.name] = c;
+    }
+
+    // Le variazioni del riposo (peso, sguardo, spalle) sono ADDITIVE sul respiro: la clip e' ridotta alla differenza dal suo primo
+    // fotogramma (che coincide con l'ultimo, vedi closeLoopSeam) e si somma al respiro con un peso che sale e scende piano. Il respiro non
+    // si ferma mai e non c'e' nessuna dissolvenza tra pose diverse: la variazione "nasce" e "svanisce" dal respiro.
+    for (const name of new Set(idleConfig.pool)) {
+      const src = cMap[name];
+      if (!src) continue;
+      const add = src.clone();
+      add.name = `${name}__add`;
+      THREE.AnimationUtils.makeClipAdditive(add, 0, src);
+      const act = animMixer.clipAction(add);
+      act.blendMode = THREE.AdditiveAnimationBlendMode;
+      actMap[add.name] = act;
+      cMap[add.name] = add;
     }
 
     const pickAnim = (candidates: string[], fallback = 'Fighting Idle') => {
@@ -998,6 +1126,8 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     const target = actions[animName] ? animName : animCatalog.idle;
     if (!target || !actions[target]) return 1.0;
     endLocoBlend(target, duration);
+    // un'altra animazione principale (corsa, attacco...): la variazione del riposo finisce subito, svanendo
+    if (idleAddRef.current) stopIdleVariation(Math.min(0.3, Math.max(0.1, duration)));
 
     if (data.currentAnim === target) {
       actions[target].setEffectiveTimeScale(timeScale);
@@ -1220,6 +1350,57 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
   const idleState = () => (weaponRef.current === 'fists' && !isEngaged() ? 'Riposo' : 'In guardia');
   // Fermi: esultanza o fiatone (clip Kimodo) al posto del riposo. true se ha
   // scelto lei l'animazione di questo frame.
+  // --- variazioni del riposo additive ---
+  const IDLE_VAR_FADE_S = 0.9;
+  const smoother = (x: number) => {
+    const c = Math.min(1, Math.max(0, x));
+    return c * c * c * (c * (c * 6 - 15) + 10); // smootherstep: anche l'accelerazione e' continua
+  };
+  const startIdleVariation = (addName: string, dur: number) => {
+    const old = idleAddRef.current;
+    if (old) old.action.stop();
+    const a = actions[addName];
+    if (!a) {
+      idleAddRef.current = null;
+      return;
+    }
+    a.reset();
+    a.setLoop(THREE.LoopOnce, 1);
+    a.clampWhenFinished = true;
+    a.setEffectiveTimeScale(1);
+    a.setEffectiveWeight(0);
+    a.play();
+    idleAddRef.current = { action: a, t: 0, dur, stop: null };
+  };
+  // chiamata a OGNI frame (anche mentre si corre): il peso sale e scende a campana liscia, e se la variazione viene interrotta
+  // scende dal peso che ha in quel momento (fadeOut di three ripartirebbe da 1: uno scatto)
+  const updateIdleVariation = (dt: number) => {
+    const v = idleAddRef.current;
+    if (!v) return;
+    if (v.stop) {
+      v.stop.t += dt;
+      const w = v.stop.w0 * (1 - smoother(v.stop.t / v.stop.dur));
+      v.action.setEffectiveWeight(w);
+      if (v.stop.t >= v.stop.dur) {
+        v.action.stop();
+        idleAddRef.current = null;
+      }
+      return;
+    }
+    v.t += dt;
+    const f = Math.min(IDLE_VAR_FADE_S, v.dur * 0.35);
+    v.action.setEffectiveWeight(smoother(v.t / f) * smoother((v.dur - v.t) / f));
+    if (v.t >= v.dur) {
+      v.action.stop();
+      idleAddRef.current = null;
+    }
+  };
+  const stopIdleVariation = (fade: number) => {
+    const v = idleAddRef.current;
+    if (v && !v.stop) v.stop = { t: 0, dur: Math.max(0.05, fade), w0: v.action.getEffectiveWeight() };
+    idleVarRef.current.left = 0;
+  };
+
   const kimodoIdle = (dt: number): boolean => {
     if (weaponRef.current !== 'fists' || isEngaged()) {
       celebrateRef.current = { delay: 0, left: 0 };
@@ -1258,11 +1439,13 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       iv.next -= dt;
       if (iv.next <= 0) {
         iv.next = idleConfig.minS + Math.random() * Math.max(0, idleConfig.maxS - idleConfig.minS);
-        const pool = idleConfig.pool.filter((n) => actions[n]);
+        const pool = idleConfig.pool.filter((n) => actions[`${n}__add`]);
         if (pool.length) {
           const clip = pool[Math.floor(Math.random() * pool.length)];
           iv.left = clipsMap[clip]?.duration ?? 3;
-          transitionToAnimation(clip, 0.4, true);
+          // il respiro deve essere la clip in corso (altrimenti si porta li' prima)
+          if (data.currentAnim !== idleConfig.base && actions[idleConfig.base]) transitionToAnimation(idleConfig.base, 0.4, true);
+          startIdleVariation(`${clip}__add`, iv.left);
           return true;
         }
       }
@@ -1632,6 +1815,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       skeletonRef.current?.pose();
     } else if (mixer) {
       inert.ripristina();
+      updateIdleVariation(delta * globalSpeed);
       mixer.update(delta * globalSpeed);
       inert.applica(delta * globalSpeed);
       // pistola rilassata come in GTA: braccio lungo il fianco come nella
@@ -1784,10 +1968,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
     // telecamera libera che segue il giocatore (laboratorio personaggi): niente allaccio tra busto e orbita,
     // il busto resta quello della clip (si spegne e riaccende piano)
     torsoFreeRef.current = THREE.MathUtils.clamp(torsoFreeRef.current + (playerAuto.freeTorso ? 1 : -1) * delta * 6, 0, 1);
+    // interruttore del pannello Debug ("Busto verso la camera"): spento, niente torsione verso la camera (la inclinazione su/giu' resta)
+    torsoYawRef.current += ((playerSettings.torsoFollowsCamera ? 1 : 0) - torsoYawRef.current) * Math.min(1, delta * 6);
     if (!tPoseBench && !benchClip && !traving() && !inCarBody())
       ragdoll.applySpineLean(
         THREE.MathUtils.clamp(camPitch, -SPINE_LEAN_MAX, SPINE_LEAN_MAX) * coverTwistRef.current,
-        THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX) * (isGun() ? gunTwistRef.current : 1) * coverTwistRef.current,
+        THREE.MathUtils.clamp(yawDiff, -SPINE_TWIST_MAX, SPINE_TWIST_MAX) * (isGun() ? gunTwistRef.current : 1) * coverTwistRef.current * torsoYawRef.current,
         spineLeanWRef.current * (1 - torsoFreeRef.current)
       );
     // Fucile: e' agganciato al petto (calcio alla spalla, vedi
@@ -3296,7 +3482,10 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
       data.state = idleState();
       const snapIdle = locoSnapRef.current;
       locoSnapRef.current = false;
-      if (!kimodoIdle(dtL)) transitionToAnimation(idleName(), snapIdle ? 0.03 : 0.2, true);
+      // (il rientro da una variazione del riposo al respiro e' piu' lento: la posa delle due clip differisce di una ventina di gradi su
+      // spalle e braccia, in 0.2 s si vedeva come uno scattino)
+      const fromVariation = data.currentAnim.startsWith('Kimodo_idle_') && data.currentAnim !== idleConfig.base;
+      if (!kimodoIdle(dtL)) transitionToAnimation(idleName(), snapIdle ? 0.03 : fromVariation ? 0.7 : 0.2, true);
     }
 
     applyTransform();

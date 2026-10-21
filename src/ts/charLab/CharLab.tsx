@@ -22,8 +22,13 @@ import {
 import { markPlayerHit } from '../lib/wanted';
 import { buildMaze, WALL_H, MAZE_CELL, DIRS, type Maze } from './maze';
 import { Autopilot, type AutoStatus } from './autopilot';
+import { vaultLinks } from './vault';
+import { CLIMBABLE_GROUPS, STAIR_RAMP_GROUPS, registerLadder, unregisterLadder } from '../components/Environment/traversal/traversalWorld';
+import { registerStepFlights, stepTreads } from '../components/Environment/stairSteps';
+import { setFloorLift } from '../lib/floors';
 import CityPlayer from '../components/CityPlayer';
 import { playerAuto } from '../lib/playerAutopilot';
+import { playerSettings } from '../lib/playerSettings';
 import { NavGrid, setNav } from '../lib/nav';
 import Enemy from '../components/Enemy';
 import Motorcycle from '../components/Vehicles/Motorcycle';
@@ -98,6 +103,7 @@ const PilotDriver: React.FC<PilotDriverProps> = ({ pilot, pilotOn }) => {
       playerAuto.active = false;
       return;
     }
+    (window as any).__pilot = ap; // per le prove dalla console
     const st = useStore.getState();
     const cmd = ap.step(dt, st.playerPos[0], st.playerPos[2], st.health, cityOpponents);
     playerAuto.active = ap.mode !== 'uscito' && ap.mode !== 'sconfitto';
@@ -106,6 +112,7 @@ const PilotDriver: React.FC<PilotDriverProps> = ({ pilot, pilotOn }) => {
     playerAuto.gait = cmd.gait;
     playerAuto.lockOn = cmd.lockOn;
     if (cmd.attack) playerAuto.attack = true;
+    if (cmd.jump) playerAuto.jump = true;
     // riprende fiato quando e' al sicuro (la rigenerazione del gioco si ferma a meta' vita)
     if (ap.calm && st.health > 0 && st.health < 100) useStore.setState({ health: Math.min(100, st.health + 3 * dt) });
   });
@@ -489,8 +496,8 @@ const MazeWalls: React.FC<{ maze: ReturnType<typeof buildMaze>; gy: number }> = 
     if (!m) return;
     const o = new THREE.Object3D();
     maze.walls.forEach((w, i) => {
-      o.position.set(LAB_X + w.x, gy + WALL_H / 2, LAB_Z + w.z);
-      o.scale.set(w.w, WALL_H, w.d);
+      o.position.set(LAB_X + w.x, gy + w.y0 + w.h / 2, LAB_Z + w.z);
+      o.scale.set(w.w, w.h, w.d);
       o.updateMatrix();
       m.setMatrixAt(i, o.matrix);
     });
@@ -505,7 +512,7 @@ const MazeWalls: React.FC<{ maze: ReturnType<typeof buildMaze>; gy: number }> = 
       {/* un solo corpo fisso con un collider per muro */}
       <RigidBody type="fixed" colliders={false}>
         {maze.walls.map((w, i) => (
-          <CuboidCollider key={i} args={[w.w / 2, WALL_H / 2, w.d / 2]} position={[LAB_X + w.x, gy + WALL_H / 2, LAB_Z + w.z]} friction={0} />
+          <CuboidCollider key={i} args={[w.w / 2, w.h / 2, w.d / 2]} position={[LAB_X + w.x, gy + w.y0 + w.h / 2, LAB_Z + w.z]} friction={0} collisionGroups={CLIMBABLE_GROUPS} />
         ))}
       </RigidBody>
       {/* la piazza al centro, di un colore diverso */}
@@ -513,6 +520,94 @@ const MazeWalls: React.FC<{ maze: ReturnType<typeof buildMaze>; gy: number }> = 
         <planeGeometry args={[maze.plazaHalf * 2, maze.plazaHalf * 2]} />
         <meshStandardMaterial color="#6b7a63" />
       </mesh>
+    </>
+  );
+};
+
+// I livelli: blocchi pieni sotto le fasce alte e le scale (rampa di collisione liscia su cui si cammina davvero,
+// come nell'arena parkour; i gradini sono solo visibili e per l'IK dei piedi)
+const STAIR_T = 0.3; // spessore della rampa di collisione
+const MazeLevels: React.FC<{ maze: ReturnType<typeof buildMaze>; gy: number }> = ({ maze, gy }) => {
+  useEffect(
+    () =>
+      registerStepFlights(
+        maze.stairs.map((s) => ({ xa: LAB_X + s.xa, ya: gy + s.ya, xb: LAB_X + s.xb, yb: gy + s.yb, z: LAB_Z + s.z, halfWidth: s.width / 2, steps: s.steps }))
+      ),
+    [maze, gy]
+  );
+  useEffect(() => {
+    maze.ladders.forEach((l, i) =>
+      registerLadder({ id: `maze-ladder-${i}`, x: LAB_X + l.x, z: LAB_Z + l.z, nx: l.nx, nz: l.nz, bottomY: gy + l.bottomY, topY: gy + l.topY, halfWidth: l.halfWidth })
+    );
+    return () => maze.ladders.forEach((_, i) => unregisterLadder(`maze-ladder-${i}`));
+  }, [maze, gy]);
+  const ladderMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#6b4a2b', roughness: 0.7 }), []);
+  const stairMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#4f46e5', roughness: 0.7, metalness: 0.1 }), []);
+  const slabMat = useMemo(() => new THREE.MeshStandardMaterial({ color: '#5b6372', roughness: 0.9 }), []);
+  return (
+    <>
+      <RigidBody type="fixed" colliders={false}>
+        {maze.slabs.map((b, i) => (
+          <CuboidCollider key={`b${i}`} args={[b.w / 2, b.h / 2, b.d / 2]} position={[LAB_X + b.x, gy + b.h / 2, LAB_Z + b.z]} collisionGroups={CLIMBABLE_GROUPS} />
+        ))}
+        {maze.stairs.map((s, i) => {
+          const run = Math.abs(s.xb - s.xa);
+          const rise = s.yb - s.ya;
+          const len = Math.hypot(run, rise);
+          const phi = Math.atan2(rise, run) * Math.sign(s.xb - s.xa);
+          const xm = (s.xa + s.xb) / 2;
+          const ym = (s.ya + s.yb) / 2;
+          return (
+            <CuboidCollider
+              key={`r${i}`}
+              args={[len / 2, STAIR_T / 2, s.width / 2]}
+              position={[LAB_X + xm + Math.sin(phi) * (STAIR_T / 2), gy + ym - Math.cos(phi) * (STAIR_T / 2), LAB_Z + s.z]}
+              rotation={[0, 0, phi]}
+              collisionGroups={STAIR_RAMP_GROUPS}
+            />
+          );
+        })}
+      </RigidBody>
+      {maze.slabs.map((b, i) => (
+        <mesh key={`bm${i}`} position={[LAB_X + b.x, gy + b.h / 2, LAB_Z + b.z]} material={slabMat} castShadow receiveShadow>
+          <boxGeometry args={[b.w, b.h, b.d]} />
+        </mesh>
+      ))}
+      {/* scale a pioli: due montanti e un piolo ogni 30 cm, sulla parete del blocco */}
+      {maze.ladders.map((l, i) => {
+        const hgt = l.topY - l.bottomY;
+        const rungs: number[] = [];
+        for (let y = 0.3; y < hgt; y += 0.3) rungs.push(y);
+        return (
+          <group key={`l${i}`} position={[LAB_X + l.x, gy + l.bottomY, LAB_Z + l.z]}>
+            {[-l.halfWidth, l.halfWidth].map((o) => (
+              <mesh key={o} position={[0, hgt / 2 + 0.3, o]} material={ladderMat} castShadow>
+                <boxGeometry args={[0.06, hgt + 0.6, 0.06]} />
+              </mesh>
+            ))}
+            {rungs.map((y) => (
+              <mesh key={y} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]} material={ladderMat} castShadow>
+                <cylinderGeometry args={[0.022, 0.022, l.halfWidth * 2, 8]} />
+              </mesh>
+            ))}
+          </group>
+        );
+      })}
+      {/* gradini: pieni dal pavimento sotto la scala fino alla pedata */}
+      {maze.stairs.flatMap((s, i) => {
+        const run = s.xb - s.xa;
+        const stepRise = (s.yb - s.ya) / s.steps;
+        return stepTreads({ ya: s.ya, yb: s.yb, steps: s.steps }).map((t, k) => {
+          const x0 = s.xa + t.u0 * run;
+          const x1 = s.xa + t.u1 * run;
+          const hgt = t.top - Math.min(s.ya, s.yb) + stepRise;
+          return (
+            <mesh key={`s${i}_${k}`} position={[LAB_X + (x0 + x1) / 2, gy + Math.min(s.ya, s.yb) - stepRise + hgt / 2, LAB_Z + s.z]} material={stairMat} castShadow receiveShadow>
+              <boxGeometry args={[Math.abs(x1 - x0) + 0.01, hgt, s.width - 0.02]} />
+            </mesh>
+          );
+        });
+      })}
     </>
   );
 };
@@ -567,17 +662,24 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
       band(0, h + 4, 2 * m + 2, 8),
       band(0, -h - 4, 2 * m + 2, 8),
     ];
-    return {
-      seed,
-      mazeOn,
-      maze,
-      nav: new NavGrid(LAB_X - m, LAB_Z - m, LAB_X + m, LAB_Z + m, 0.5, wallRects, 0.6),
-      huntNav: new NavGrid(LAB_X - m, LAB_Z - m, LAB_X + m, LAB_Z + m, 0.5, [...wallRects, plug, ...outside], 0.6),
-    };
+    const nav = new NavGrid(LAB_X - m, LAB_Z - m, LAB_X + m, LAB_Z + m, 0.5, wallRects, 0.6);
+    const huntNav = new NavGrid(LAB_X - m, LAB_Z - m, LAB_X + m, LAB_Z + m, 0.5, [...wallRects, plug, ...outside], 0.6);
+    // i muri interni si scavalcano (giocatore, pilota automatico e cacciatori); quello esterno no
+    if (mazeOn) {
+      const links = vaultLinks(maze, LAB_X, LAB_Z);
+      nav.setLinks(links);
+      huntNav.setLinks(links);
+    }
+    return { seed, mazeOn, maze, nav, huntNav };
   };
-  // di partenza senza labirinto (spazio libero per fare un giro); il pulsante lo rimette
-  const [world, setWorld] = useState(() => makeWorld(7, false));
+  // di partenza con il labirinto acceso; il pulsante lo toglie (spazio libero per fare un giro)
+  const [world, setWorld] = useState(() => makeWorld(7, true));
   const { maze, nav, huntNav } = world;
+  useEffect(() => {
+    // chi cammina senza fisica verticale (cacciatori) prende la quota dei piani dal labirinto
+    setFloorLift(world.mazeOn ? (x, z) => maze.heightAt(x - LAB_X, z - LAB_Z) : null);
+    return () => setFloorLift(null);
+  }, [world.mazeOn, maze]);
   useEffect(() => {
     setNav(huntNav);
     return () => setNav(null);
@@ -588,6 +690,7 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const [pilotOnState, setPilotOnState] = useState(false);
   const [resetKey, setResetKey] = useState(0);
   const [follow, setFollow] = useState(true);
+  const [torso, setTorso] = useState(playerSettings.torsoFollowsCamera);
   const [fpName, setFpName] = useState<string | null>(null);
   const [pilotStatus, setPilotStatus] = useState<AutoStatus | null>(null);
   // un pilota nuovo a ogni ricomincia / nuovo labirinto (non prima: i valori memorizzati non sono una garanzia)
@@ -720,7 +823,7 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
       toggleMaze,
       exit: () => ({ x: LAB_X + maze.exit.x, z: LAB_Z + maze.exit.z }),
       setWhere,
-      maze: () => ({ walls: maze.walls.length, cells: maze.corridorCells.length }),
+      maze: () => ({ walls: maze.walls.length, cells: maze.corridorCells.length, ladders: maze.ladders.map((l) => ({ x: LAB_X + l.x, z: LAB_Z + l.z, nx: l.nx, bottomY: l.bottomY, topY: l.topY })), stairs: maze.stairs.map((s) => ({ xa: LAB_X + s.xa, xb: LAB_X + s.xb, z: LAB_Z + s.z, ya: s.ya, yb: s.yb })) }),
       agents: () => agentsRef.current.map((a) => ({ id: a.id, slot: a.slot, gone: a.gone })),
       rows: () => rowsRef.current,
       list: () => listRef.current,
@@ -751,6 +854,7 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
             <CheckerFloor y={gy} />
             <WorldHandle />
             {world.mazeOn && <MazeWalls maze={maze} gy={gy} />}
+            {world.mazeOn && <MazeLevels maze={maze} gy={gy} />}
             {world.mazeOn && <ExitBeacon maze={maze} gy={gy} />}
             <CityPlayer key={resetKey} userName="Lab" />
             <PilotDriver pilot={pilot} pilotOn={pilotOn} />
@@ -783,14 +887,25 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         <OrbitControls makeDefault target={[LAB_X, gy + 1, LAB_Z]} />
       </Canvas>
 
-      <div style={{ position: 'absolute', top: 12, left: 12, width: 260, color: '#e6edf3', font: '13px system-ui', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ position: 'absolute', top: 12, left: 12, width: 250, maxHeight: 'calc(100vh - 24px)', overflowY: 'auto', color: '#e6edf3', font: '12px system-ui', display: 'flex', flexDirection: 'column', gap: 5, padding: 8, background: '#0d1117cc', borderRadius: 8 }}>
         <div style={{ fontSize: 16, fontWeight: 700 }}>Laboratorio personaggi</div>
         <div style={{ opacity: 0.7 }}>WASD muove il giocatore blu (Maiusc corre)</div>
-        {KINDS.map((k) => (
-          <button key={k.kind} onClick={() => spawn(k.kind)} style={btn}>
-            + {k.label}
-          </button>
-        ))}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 5 }}>
+          {KINDS.map((k) => (
+            <button key={k.kind} onClick={() => spawn(k.kind)} style={btn}>
+              + {k.label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => {
+            playerSettings.torsoFollowsCamera = !playerSettings.torsoFollowsCamera;
+            setTorso(playerSettings.torsoFollowsCamera);
+          }}
+          style={{ ...btn, background: torso ? '#15803d' : '#4b5563' }}
+        >
+          Busto verso la camera: {torso ? 'acceso' : 'spento'}
+        </button>
         <button onClick={() => provoke(false)} style={{ ...btn, background: '#b45309' }}>
           Colpisci un passante (pugni)
         </button>
@@ -856,7 +971,7 @@ const btn: React.CSSProperties = {
   color: '#fff',
   border: 0,
   borderRadius: 6,
-  padding: '7px 10px',
+  padding: '6px 8px',
   cursor: 'pointer',
   textAlign: 'left',
 };

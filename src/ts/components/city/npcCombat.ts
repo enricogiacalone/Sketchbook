@@ -8,6 +8,9 @@ import type { PistolModelApi } from '../Environment/weapons/usePistolModel';
 import { cityOpponents } from './cityActors';
 import { crowdPanic } from './crowdSim';
 import type { MannequinActor } from './useMannequinActor';
+import { getNav } from '../../lib/nav';
+import { newPathState, steerTo, vaultDone, type PathState } from './brains/pathFollow';
+import { newVaultRun, stepVaultRun, type VaultRun } from './brains/vaultMove';
 
 // Spari degli NPC armati (poliziotti, alleati): colpo istantaneo come quello
 // del giocatore, con gli stessi effetti. Il danno va solo a chi `canHurt`
@@ -135,12 +138,19 @@ export function hasLineOfSight(world: World, rapier: any, fromX: number, fromY: 
 // Un passo verso (gx, gz) con la fisica del corpo; se resta incastrato
 // contro un muro gira un po' di lato per aggirarlo. Ritorna la direzione di
 // marcia (yaw) o null se e' arrivato.
+//
+// Dove c'e' una griglia di navigazione (lib/nav.ts: il laboratorio) segue il percorso A* e scavalca i muri come i
+// cacciatori (brains/vaultMove.ts); `lift` e' di quanto e' sollevato sopra il piano (lo scavalco): il chiamante lo somma
+// alla quota (terreno + strada + lib/floors.ts).
 export interface StepState {
   steer: number;
   steerT: number;
   stuckT: number;
+  path: PathState;
+  vault: VaultRun | null;
+  lift: number;
 }
-export const newStepState = (): StepState => ({ steer: 0, steerT: 0, stuckT: 0 });
+export const newStepState = (): StepState => ({ steer: 0, steerT: 0, stuckT: 0, path: newPathState(), vault: null, lift: 0 });
 
 export function stepToward(
   actor: MannequinActor,
@@ -153,10 +163,34 @@ export function stepToward(
   sepX = 0,
   sepZ = 0
 ): number | null {
+  st.lift = 0;
+  if (st.vault) {
+    const v = stepVaultRun(st.vault, actor, pos, delta);
+    st.lift = v.lift;
+    if (v.done) {
+      st.vault = null;
+      vaultDone(st.path);
+      st.path.replanT = 0;
+    }
+    return v.yaw;
+  }
   let dx = gx - pos.x;
   let dz = gz - pos.z;
-  const d = Math.hypot(dx, dz);
+  let d = Math.hypot(dx, dz);
   if (d < 0.05) return null;
+  const nav = getNav();
+  if (nav) {
+    const sg = steerTo(st.path, nav, pos.x, pos.z, gx, gz, delta);
+    if (sg.vault) {
+      st.vault = newVaultRun(sg.vault, pos.x, pos.z);
+      return Math.atan2(sg.vault.bx - sg.vault.ax, sg.vault.bz - sg.vault.az);
+    }
+    if (!sg.dx && !sg.dz) return null;
+    // la strada: stessa distanza, direzione del percorso
+    dx = sg.dx * d;
+    dz = sg.dz * d;
+    d = Math.max(d, 0.05);
+  }
   dx = dx / d + sepX;
   dz = dz / d + sepZ;
   let ang = Math.atan2(dx, dz);

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useStore } from '../../store';
 import { acquireDebugGui, debugSection, releaseDebugGui } from '../../lib/debugGui';
+import { playerSettings } from '../../lib/playerSettings';
 
 const CameraCalibrationGUI: React.FC = () => {
   useEffect(() => {
@@ -38,6 +39,8 @@ const CameraCalibrationGUI: React.FC = () => {
     folder.add(bind, 'vehicleRadius', 1.0, 8.0, 0.1).name('Distanza Veicolo').listen();
     folder.add(bind, 'footTargetY', 0.0, 2.5, 0.05).name('Altezza Target Player').listen();
     folder.add(bind, 'vehicleTargetY', -1.0, 2.0, 0.05).name('Altezza Target Veicolo').listen();
+    // torsione del busto verso la camera (spenta: il busto resta quello dell'animazione, niente spalle che girano)
+    folder.add(playerSettings, 'torsoFollowsCamera').name('Busto verso la camera').listen();
     return () => {
       folder.destroy();
       releaseDebugGui();
