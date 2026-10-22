@@ -31,7 +31,7 @@ Il laboratorio fa comparire i personaggi a 1,2 s l'uno dall'altro per prudenza (
 - `brains/hostile.ts` con navigazione: vede solo con la linea d'aria libera (22 m), sente da vicino anche dietro i muri (7 m), va
   dove l'ha visto l'ultima volta, poi lo cerca in giro (raggio che cresce col tempo); `persistent` (cacciatore) non rinuncia mai.
   Se resta incastrato rifa' il percorso e cambia zona di ricerca.
-- Laboratorio: labirinto 11x11 con piazza al centro e un'uscita nel muro esterno (faro verde), cacciatori (i tre pulsanti "+ 3
+- Laboratorio: labirinto 25x25 su 3 livelli con piazza al centro e un'uscita nel muro esterno (faro verde), cacciatori (i tre pulsanti "+ 3
   cacciatori"), e il **giocatore vero** (`CityPlayer` -> `PlayerCombatSoldier`, con la sua locomozione Kimodo, i pugni, la fisica)
   guidato da un **pilota automatico**.
 - Pilota automatico: `lib/playerAutopilot.ts` e' un comando in coordinate del mondo (direzione, andatura, lock-on, pugno) che
@@ -93,7 +93,7 @@ Tra una clip di prova e l'altra (e quando si toglie la prova) il manichino torna
   Riferimento dell'origine del personaggio: come `Driving` dell'auto (`VEH_SEAT.motorcycle`: 0,45 m sotto la sella). Finche' le clip
   mancano il giocatore usa `Driving` / `Sitting_Enter` / `Sitting_Exit`; con le clip presenti (nomi in `K.moto`) usa ride/stopped (a
   velocita' 1,5 m/s), mount e dismount. Le due clip di inclinazione non sono ancora collegate.
-- Laboratorio: pavimento a quadretti da 1 m; il labirinto parte spento (pulsante "Labirinto").
+- Laboratorio: pavimento a quadretti da 1 m; il labirinto parte acceso (pulsante "Labirinto").
 
 ### Moto in citta'
 
@@ -107,3 +107,28 @@ Tra una clip di prova e l'altra (e quando si toglie la prova) il manichino torna
 ## Sospensioni della moto
 
 `lib/motoSuspension.ts`: massa sospesa (telaio, sella, pilota) con due gradi di liberta' (sobbalzo e beccheggio), molla + smorzatore come la macchina ma piu' dure (`HEAVE_W`, `PITCH_W`, smorzamento ~0,35). Frenando la moto si abbassa sull'avantreno, accelerando si impenna un po'; dossi e salti la fanno rimbalzare. `MotorcycleModel` separa parte sospesa (telaio, foderi forcella, forcellone, mono) e non sospesa (ruote, steli dorati); `applyMotoSuspension()` aggiorna forcellone e mono-ammortizzatore. Usato da `Motorcycle.tsx` e `TrafficMoto.tsx`; la sella (`seat_1`) e' sulla massa sospesa, quindi il pilota segue.
+
+- Nemici a pugni della folla (`city/brains/hostile.ts`): si fermano a 0.8 m dal bersaglio (`BRAWL_STOP`) e colpiscono entro 1.15 m (`BRAWL_RANGE`); prima 1.3 m / 1.5 m, troppo lontano perche' il pugno frontale arrivasse.
+
+## Scavalcare i muri del labirinto (laboratorio)
+
+- I muri interni sono alti 2.2 m (`WALL_H`, `charLab/maze.ts`) e hanno il collider `CLIMBABLE_GROUPS`: il giocatore li scavalca come nell'arena parkour (Spazio vicino al muro: `traversal.ts` ci si tira su, attraversa la cima e scende dall'altra parte). Il muro esterno resta invalicabile.
+- `lib/nav.ts`: `NavLink` = passaggio a salto (A, B, altezza, costo). `NavGrid.setLinks` li aggiunge all'A*; il percorso li riporta come punti con `vault` (non si accorciano mai) e `steerTo` (`brains/pathFollow.ts`) restituisce `vault` quando si e' arrivati alla partenza. `charLab/vault.ts` genera un link per verso su ogni muro interno (partenza e atterraggio a 1.3 m dal muro, costo 7 m).
+- Cacciatori (`brains/hostile.ts`, `S.vault`): traiettoria scriptata da A a B in 1.7 s in tre tempi come il giocatore: si tira su (Climb Wall), scavalca la cima (ClimbUp_1m__ip, la copia in-place di ClimbUp_1m_RM creata in `useMannequinActor`), cade dall'altra parte (Jump_air, Jump_Land). Non e' fisica: il corpo e' tenuto da un solo punto.
+- Pilota automatico (`charLab/autopilot.ts`): le distanze per scappare contano anche i muri superabili (costo `VAULT_COST / MAZE_CELL` celle) per se' e per chi lo insegue; quando il percorso dice "scavalca" va dritto al muro e preme Spazio (`playerAuto.jump`) quando e' a portata delle mani (< 0.8 m dalla faccia), poi spinge avanti fino a essere oltre. Prove dalla console: `window.__pilot.vaultLog` (esiti 'ok' / 'scaduto').
+- Prova (3 cacciatori + pilota): i cacciatori scavalcano per inseguire, il pilota scavalca per scappare (3 scavalchi su 3 riusciti prima di essere raggiunto).
+
+## Livelli e scale del labirinto (laboratorio)
+
+- `charLab/maze.ts`: 25x25 celle in 5 fasce di 5 colonne (`BAND_LEVELS = [2,1,0,1,2]`, `LEVEL_STEP = 2.8` m): al centro il piano terra con la piazza, verso i lati fasce a +2.8 m e +5.6 m su blocchi pieni (`slabs`). Ogni fascia e' un labirinto per conto suo; le fasce vicine si collegano con 2 scale per confine (`stairs`: due celle di rampa, larghe una cella, sempre lungo x, 15 gradini). Il muro tra due fasce e' la parete del blocco (non si scavalca); i muri dentro una fascia si scavalcano (`canVault`). Le uscite e i punti di comparsa stanno sempre a terra. Il labirinto si rigenera (seme + 7919 k) finche' tutte le celle sono raggiungibili dalla piazza.
+- Fisica (`CharLab.tsx`, `MazeLevels`): blocchi `CLIMBABLE_GROUPS`, rampa di collisione liscia `STAIR_RAMP_GROUPS` come nell'arena parkour (si cammina sulla rampa; i gradini sono visibili e per l'IK dei piedi, `registerStepFlights`). Il giocatore sale con la solita locomozione (`supportHeight`).
+- Chi cammina senza fisica verticale (`brains/hostile.ts`: cacciatori e nemici della folla) prende la quota da `lib/floors.ts` (`setFloorLift`, registrata dal laboratorio con `maze.heightAt`); lo scavalco usa quella quota come base. Il percorso A* e' gia' 2D e le scale sono celle libere, quindi inseguono e scappano anche su per le scale.
+- Prova: il giocatore (pilota) sale la rampa fino a 2.8 m; i cacciatori inseguono su per le scale fino al livello +5.6 m (quota letta dalle ossa radice 4.2 / 5.9 m a meta' rampa).
+- Poliziotti, alleati e zombi (`npcCombat.ts`, `stepToward`): dove c'e' una griglia di navigazione seguono il percorso A* (`steerTo`) e scavalcano i muri come i cacciatori. La traiettoria dello scavalco e' in `brains/vaultMove.ts` (`stepVaultRun`, condivisa con `hostile.ts`); `StepState` porta `path`, `vault` e `lift`. Il chiamante somma `floorLift` (quota dei livelli) e `step.lift` (sollevamento dello scavalco) alla quota del terreno e non sovrascrive l'animazione mentre `step.vault` e' attivo. `PoliceOfficer.tsx` ora usa `stepToward` (prima aveva il passo inline). Senza griglia (citta') il comportamento e' quello di prima.
+
+## Copertura dietro i muri (laboratorio)
+
+- `brains/cover.ts`: `findCover(nav, x, z, tx, tz)` cerca (a anelli di 1.2..8 m, 16 settori) un punto libero e raggiungibile in linea d'aria da cui il tiratore non si vede (`NavGrid.lineOfSight`), piu' un punto "da sporgersi" a 0.8..1.7 m da cui invece lo si vede. `armedShooters` / `liveShooters()` e' il registro dei tiratori armati che si aggiornano (`hostile.ts`), ignorando quelli fermi da piu' di 0.5 s.
+- Nemici armati (`hostile.ts`, `stepCover`, `S.cover`): in modo 'shoot' con la griglia, vanno dietro il muro piu' vicino, aspettano 1-2.5 s, si sporgono, sparano 1-2 colpi (solo da sporti, `cv.canShoot`) e rientrano; se vengono feriti rientrano subito; se il giocatore si e' spostato di piu' di 3 m o la copertura non copre piu' ne cercano un'altra. Senza copertura trovata sparano allo scoperto come prima.
+- Pilota automatico (`charLab/autopilot.ts`): se un armato lo vede (e nessun nemico e' a meno di 2.5 m) va alla copertura piu' vicina, ci resta 2.5-4 s (`coverHold`), poi riparte (`coverCd` 2 s); `mode` = 'scappa'. Prove: `window.__pilot.coverLog` (coperture prese).
+- Non verificato nel browser: durante questa sessione il browser integrato non ha potuto aprire localhost (navigazione negata), quindi la copertura e l'inseguimento di poliziotti/zombi su per le scale sono solo controllati dal compilatore.

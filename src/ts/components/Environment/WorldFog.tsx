@@ -6,6 +6,7 @@ import { spaceState } from '../../lib/space';
 import { getCurrentSite } from '../../lib/site';
 import { PLANET_RADIUS } from '../../lib/planetSurface';
 import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
+import { useStore } from '../../store';
 
 // Atmospheric perspective -- "sistemiamo il cielo... nebbia atmosferica".
 // The city/terrain extend ~300 units from the origin with nothing at all
@@ -17,6 +18,7 @@ import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
 // instead of a random gray that doesn't match anything.
 
 const NIGHT_FOG = new THREE.Color('#05060d');
+const NEON_FOG = new THREE.Color('#0c1c3d'); // nebbia blu della notte neon
 
 const SUNSET_TINT = new THREE.Color('#ffad66');
 const _fp = new THREE.Vector3();
@@ -48,7 +50,7 @@ const WorldFog: React.FC = () => {
     const dayFactor = getDayFactor(dir.y);
     const warmth = getWarmth(dir.y);
 
-    scratch.current.copy(NIGHT_FOG).lerp(dayFog, dayFactor);
+    scratch.current.copy(NIGHT_FOG).lerp(NEON_FOG, useStore.getState().neonNight ? 1 : 0).lerp(dayFog, dayFactor);
     // Sunset/sunrise warm tint only shows up during the day/twilight
     // transition (warmth*dayFactor is ~0 both at full night and at noon,
     // peaking right around the horizon), not as a constant offset.

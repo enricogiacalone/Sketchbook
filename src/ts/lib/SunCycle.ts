@@ -46,6 +46,7 @@ const _spaceSun = new THREE.Vector3();
 // e scorre; rispenta: torna giorno.
 export const FIXED_DAY_HOUR = 10.5;
 export const ZOMBIE_NIGHT_HOUR = 23.5;
+export const NEON_NIGHT_HOUR = 22.5;
 let cycleStartElapsed: number | null = null;
 
 export const getTimeOfDay = (elapsedTime: number): number => {
@@ -53,6 +54,8 @@ export const getTimeOfDay = (elapsedTime: number): number => {
   if (typeof forced === 'number') return forced;
   // modalita' zombi notturna: sempre notte fonda
   if (useStore.getState().zombieNight) return ZOMBIE_NIGHT_HOUR;
+  // notte blu neon: sempre notte (la casella e' ricordata)
+  if (useStore.getState().neonNight) return NEON_NIGHT_HOUR;
   if (!useStore.getState().dayCycle) {
     cycleStartElapsed = null;
     return FIXED_DAY_HOUR;

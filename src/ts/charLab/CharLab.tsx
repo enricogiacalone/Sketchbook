@@ -26,6 +26,7 @@ import { vaultLinks } from './vault';
 import { CLIMBABLE_GROUPS, STAIR_RAMP_GROUPS, registerLadder, unregisterLadder } from '../components/Environment/traversal/traversalWorld';
 import { registerStepFlights, stepTreads } from '../components/Environment/stairSteps';
 import { setFloorLift } from '../lib/floors';
+import ToonStyle from '../components/Environment/ToonStyle';
 import CityPlayer from '../components/CityPlayer';
 import { playerAuto } from '../lib/playerAutopilot';
 import { playerSettings } from '../lib/playerSettings';
@@ -691,6 +692,7 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const [resetKey, setResetKey] = useState(0);
   const [follow, setFollow] = useState(true);
   const [torso, setTorso] = useState(playerSettings.torsoFollowsCamera);
+  const neonNight = useStore((st) => st.neonNight);
   const [fpName, setFpName] = useState<string | null>(null);
   const [pilotStatus, setPilotStatus] = useState<AutoStatus | null>(null);
   // un pilota nuovo a ogni ricomincia / nuovo labirinto (non prima: i valori memorizzati non sono una garanzia)
@@ -842,10 +844,12 @@ const CharLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         dpr={[1, 1.5]}
         onCreated={(state) => ((window as any).__r3fState = state)}
       >
-        <color attach="background" args={['#161b22']} />
-        <ambientLight intensity={0.8} />
-        <hemisphereLight args={['#bcd4ff', '#2a2f3a', 0.6]} />
-        <directionalLight position={[LAB_X + 10, gy + 20, LAB_Z + 6]} intensity={2} castShadow />
+        <ToonStyle />
+        <color attach="background" args={[neonNight ? '#081329' : '#161b22']} />
+        {neonNight && <fogExp2 attach="fog" args={['#0c1c3d', 0.012]} />}
+        <ambientLight intensity={neonNight ? 0.25 : 0.8} color={neonNight ? '#9aaeff' : '#ffffff'} />
+        <hemisphereLight args={neonNight ? ['#7088e0', '#1c2240', 0.5] : ['#bcd4ff', '#2a2f3a', 0.6]} />
+        <directionalLight position={[LAB_X + 10, gy + 20, LAB_Z + 6]} intensity={neonNight ? 1.0 : 2} color={neonNight ? '#c4d0ff' : '#ffffff'} castShadow />
         <Suspense fallback={null}>
           <Physics gravity={[0, -20, 0]} numSolverIterations={15} timeStep={1 / 120} interpolate={false}>
             <RigidBody type="fixed" colliders={false} position={[LAB_X, gy - 0.5, LAB_Z]}>

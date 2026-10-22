@@ -22,6 +22,12 @@ const GraphicsGUI: React.FC = () => {
       set skyShader(v: boolean) {
         skySettings.shader = v;
       },
+      get neon() {
+        return st().neonNight;
+      },
+      set neon(v: boolean) {
+        st().setNeonNight(v);
+      },
       get giornata() {
         return st().dayCycle;
       },
@@ -79,6 +85,7 @@ const GraphicsGUI: React.FC = () => {
     };
     const ctrls = [
       folder.add(bind, 'toon').name('Stile toon').listen(),
+      folder.add(bind, 'neon').name('Notte blu neon (sempre notte)').listen(),
       folder.add(bind, 'skyShader').name('Shader del cielo').listen(),
       folder.add(bind, 'giornata').name('Scorre la giornata (giorno/notte)').listen(),
       folder.add(bind, 'zombi').name('Modalità zombi notturna').listen(),

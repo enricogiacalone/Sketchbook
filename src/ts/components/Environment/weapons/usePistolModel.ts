@@ -4,6 +4,7 @@ import { useGLTF } from '../../../lib/gltf';
 import { useThree } from '@react-three/fiber';
 import { acquireAudioListener, releaseAudioListener } from '../../../lib/sharedAudioListener';
 import { SkeletonUtils } from 'three-stdlib';
+import { mergeStaticMeshes } from '../../../lib/mergeMeshes';
 import {
   RIFLE_MODEL_URL,
   RIFLE_LENGTH_M,
@@ -170,6 +171,8 @@ export function useGunModel(modelRootRef: React.RefObject<THREE.Object3D | null>
       }
     });
     inner.updateMatrixWorld(true);
+    // decine di pezzi piccoli -> poche mesh (carrello e caricatore restano nodi mobili): meno draw call per arma
+    mergeStaticMeshes(inner, [spec.slideNode, spec.magNode]);
     const box = new THREE.Box3().setFromObject(inner);
     const size = box.getSize(new THREE.Vector3());
     const scale = spec.lengthM / Math.max(1e-6, size.z);

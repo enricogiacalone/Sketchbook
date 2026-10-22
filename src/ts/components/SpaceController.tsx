@@ -116,9 +116,9 @@ const SpaceController: React.FC = () => {
     // il sole dello shader del cielo e quello vero devono coincidere gia' prima che il sole vero si veda
     spaceState.sunBlend = smooth(800, 4500, alt);
     spaceState.fog = Math.exp(-Math.max(0, alt) / 350); // l'aria sottile: la foschia cala esponenzialmente con la quota
-    spaceState.cloud = 1 - smooth(500, 3200, alt); // poi le nuvole restano sotto
-    const dk = smooth(1500, 11000, alt);
-    spaceState.dark = dk * dk * (3 - 2 * dk); // il cielo si scurisce piano, fino al nero
+    spaceState.cloud = 1 - smooth(450, 1500, alt); // poi lo strato di nuvole del pianeta (PlanetSky) prende il loro posto
+    const dk = smooth(450, 4500, alt);
+    spaceState.dark = dk * dk * (3 - 2 * dk); // il cielo si scurisce piano (azzurro -> blu scuro -> nero), tutto sotto i ~4.5 km
     // Velocita': il limite cresce con la quota sul corpo piu' vicino (pianeta o sole)
     const speedAlt = Math.max(0, Math.min(alt, Math.hypot(sdx, sdy, sdz) - SUN_R));
     spaceState.vmax = Math.min(35000, 40 + 0.4 * speedAlt);

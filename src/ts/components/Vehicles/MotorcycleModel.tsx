@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { MOTO } from '../../lib/motorcycleGeometry';
+import { mergeStaticMeshes } from '../../lib/mergeMeshes';
 
 // Modello della moto, fatto di forme semplici (nessun file). Nel sistema della moto (lib/motorcycleGeometry.ts):
 // +Z avanti, +X a sinistra, y = 0 sotto le ruote.
@@ -102,6 +103,14 @@ const MotorcycleModel: React.FC<MotorcycleModelRefs> = ({
   children,
 }) => {
   const BODY = color;
+  // ~43 mesh piccole per moto = ~43 draw call e nodi da aggiornare: i pezzi fermi di ogni gruppo mobile (ruote, forcella,
+  // testa, massa sospesa...) con lo stesso materiale diventano una sola mesh (lib/mergeMeshes.ts)
+  const rootRef = useRef<THREE.Group>(null);
+  useLayoutEffect(() => {
+    const cur = (r: unknown) => (r && typeof r === 'object' && 'current' in (r as object) ? ((r as { current: THREE.Object3D | null }).current ?? null) : null);
+    if (rootRef.current) mergeStaticMeshes(rootRef.current, [cur(rearWheelRef), cur(frontWheelRef), cur(forkRef), cur(frontSteerRef), cur(sprungRef), cur(swingarmRef), cur(shockRef), cur(sliderRef)]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [hx, hy, hz] = MOTO.steerHead;
   // i foderi (parte alta, sospesa) e gli steli (parte bassa, non sospesa) si sovrappongono: ~0,18 m di corsa utile
   const UPPER = FORK_LEN * 0.72;
@@ -110,7 +119,7 @@ const MotorcycleModel: React.FC<MotorcycleModelRefs> = ({
   const forkQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), FORK_DIR);
   const forkEuler = new THREE.Euler().setFromQuaternion(forkQuat);
   return (
-    <group>
+    <group ref={rootRef}>
       {/* ------------------------------------------------------------ NON SOSPESO */}
       <Wheel ref={rearWheelRef} position={MOTO.rearWheel} />
       <group position={MOTO.frontWheel}>

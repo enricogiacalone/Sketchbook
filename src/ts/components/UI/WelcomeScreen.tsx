@@ -30,6 +30,8 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
   const controlMethod = 'auto';
   const toonStyle = useStore((st) => st.toonStyle);
   const setToonStyle = useStore((st) => st.setToonStyle);
+  const neonNight = useStore((st) => st.neonNight);
+  const setNeonNight = useStore((st) => st.setNeonNight);
   const ollamaNpcChat = useStore((st) => st.ollamaNpcChat);
   const setOllamaNpcChat = useStore((st) => st.setOllamaNpcChat);
   const dayCycle = useStore((st) => st.dayCycle);
@@ -108,6 +110,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
             <label className="welcome-label">Grafica</label>
             <label style={checkRow}>
               <input type="checkbox" checked={toonStyle} onChange={(e) => setToonStyle(e.target.checked)} /> Stile toon
+            </label>
+            <label style={checkRow}>
+              <input type="checkbox" checked={neonNight} onChange={(e) => setNeonNight(e.target.checked)} /> Notte blu neon &mdash; sempre notte,
+              bagliore e insegne luminose (spento: giorno o giornata)
             </label>
             <label style={checkRow}>
               <input type="checkbox" checked={dayCycle} onChange={(e) => setDayCycle(e.target.checked)} /> Scorre la giornata (giorno e

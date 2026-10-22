@@ -45,7 +45,8 @@ const CROSSWALK_OFFSET = ROAD_WIDTH / 2 + 2;
 
 const isSkippedBlock = (i: number, j: number): boolean => (i === 0 && j === 0) || (i === -GRID_RADIUS && j === GRID_RADIUS) || (i === GRID_RADIUS && j === -GRID_RADIUS);
 
-export const CIVILIAN_COLORS = ['#8d6e63', '#607d8b', '#9e9d24', '#6d4c41', '#78909c', '#a1887f', '#5d4037', '#827717', '#455a64'];
+// manichini a tinta unita viola e verde (stile notte neon), con qualche ciano/magenta
+export const CIVILIAN_COLORS = ['#7c3aed', '#8b5cf6', '#22c55e', '#16a34a', '#a855f7', '#4ade80', '#6d28d9', '#14b8a6', '#c026d3'];
 export const WALK_CLIPS = ['Walk'];
 // (le Kimodo_* solo se generate: CrowdPedestrian ripiega su Idle_A)
 export const IDLE_CLIPS = ['Idle_A', 'Idle_TalkingPhone', 'Idle_FoldArms', 'Idle_Talking', 'Idle_Subtle', ...K.crowdIdles];

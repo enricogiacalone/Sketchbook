@@ -3,6 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
 import { spaceState } from '../../lib/space';
+import { useStore } from '../../store';
 
 // The actual lighting rig behind the sky dome -- "sistemiamo il cielo...
 // sole vero collegato alla luce". Before this, the sky shader computed a
@@ -56,6 +57,8 @@ const SunLight: React.FC = () => {
     // nello spazio e' sempre giorno sul lato illuminato dal sole vero (lib/space.ts)
     const dayFactor = Math.max(getDayFactor(dir.y), spaceState.t);
     const warmth = getWarmth(dir.y);
+    // notte blu neon: la notte resta leggibile (ambiente e luna blu) invece che nera
+    const neon = useStore.getState().neonNight ? 1 - dayFactor : 0;
 
     if (lightRef.current) {
       const light = lightRef.current;
@@ -90,7 +93,8 @@ const SunLight: React.FC = () => {
         camera.position.z - dir.z * SHADOW_DISTANCE
       );
       moon.target = target;
-      moon.intensity = (1 - dayFactor) * 0.3;
+      moon.intensity = (1 - dayFactor) * 0.3 + neon * 1.8;
+      moon.color.set('#7f9cff');
     }
 
     if (hemiRef.current) {
@@ -108,9 +112,17 @@ const SunLight: React.FC = () => {
         THREE.MathUtils.lerp(0.03, 0.22, dayFactor),
         THREE.MathUtils.lerp(0.04, 0.18, dayFactor)
       );
+      if (neon > 0) {
+        skyColor.r = THREE.MathUtils.lerp(skyColor.r, 0.22, neon);
+        skyColor.g = THREE.MathUtils.lerp(skyColor.g, 0.4, neon);
+        skyColor.b = THREE.MathUtils.lerp(skyColor.b, 0.95, neon);
+        groundColor.r = THREE.MathUtils.lerp(groundColor.r, 0.1, neon);
+        groundColor.g = THREE.MathUtils.lerp(groundColor.g, 0.1, neon);
+        groundColor.b = THREE.MathUtils.lerp(groundColor.b, 0.24, neon);
+      }
       hemi.color.copy(skyColor);
       hemi.groundColor.copy(groundColor);
-      hemi.intensity = THREE.MathUtils.lerp(0.15, 0.9, dayFactor);
+      hemi.intensity = THREE.MathUtils.lerp(0.15 + neon * 2.4, 0.9, dayFactor);
     }
   });
 

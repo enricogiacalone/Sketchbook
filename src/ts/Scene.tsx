@@ -3,6 +3,7 @@ import EnemySpawner from './components/EnemySpawner';
 import Airport, { HELIPORT_CENTER, RUNWAY_CENTER } from './components/Environment/Airport';
 import BuildingLedGlow from './components/Environment/BuildingLedGlow';
 import BuildingLeds from './components/Environment/BuildingLeds';
+import NeonSigns from './components/Environment/NeonSigns';
 import City from './components/Environment/City';
 import CityDetails from './components/Environment/CityDetails';
 import CityFlags from './components/Environment/CityFlags';
@@ -282,6 +283,7 @@ const Scene: React.FC = () => {
         <Suspense fallback={null}>
           {stage >= 3 && <City />}
           {stage >= 4 && <BuildingLeds />}
+          {stage >= 4 && <NeonSigns />}
           {stage >= 5 && <BuildingLedGlow />}
           {stage >= 6 && <Park />}
           {stage >= 6 && <TreeBatches />}

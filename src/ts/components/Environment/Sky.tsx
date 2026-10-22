@@ -13,6 +13,9 @@ import { getDayFactor } from '../../lib/SunCycle';
 const SUN_DISTANCE = 400000;
 
 const SPACE_BG = new THREE.Color('#01020a');
+// la cupola scura passa dal blu profondo dell'alta atmosfera al nero dello spazio
+const DOME_BLUE = new THREE.Color('#0d2c66');
+const DOME_BLACK = new THREE.Color('#000208');
 const FLAT_BG = new THREE.Color();
 const FLAT_DAY = new THREE.Color();
 const FLAT_NIGHT = new THREE.Color('#05060d');
@@ -89,7 +92,9 @@ const Sky: React.FC = () => {
     if (domeRef.current) {
       domeRef.current.position.copy(camera.position);
       domeRef.current.visible = dark > 0.002;
-      (domeRef.current.material as THREE.MeshBasicMaterial).opacity = Math.pow(dark, 0.85);
+      const dm = domeRef.current.material as THREE.MeshBasicMaterial;
+      dm.opacity = Math.pow(dark, 0.85);
+      dm.color.copy(DOME_BLUE).lerp(DOME_BLACK, THREE.MathUtils.smoothstep(dark, 0.35, 0.95));
     }
 
     // Aggiorniamo la posizione del sole sulla UniformNode di SkyMesh

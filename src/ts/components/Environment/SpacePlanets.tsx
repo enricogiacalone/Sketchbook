@@ -4,6 +4,7 @@ import { styleFromSeed, usePlanetEpoch } from '../../lib/planet';
 import { PLANET_RADIUS, seaColor as seaColorOf, surfaceColor, surfaceInfo, surfacePoint } from '../../lib/planetSurface';
 import PlanetQuadtree from './PlanetQuadtree';
 import PlanetNearField from './PlanetNearField';
+import PlanetSky from './PlanetSky';
 import CityProxy from './CityProxy';
 import { rockMix } from '../../lib/nearTile';
 
@@ -265,7 +266,8 @@ const PlanetBody: React.FC<{ p: SpacePlanet; halo: THREE.Texture; marker: THREE.
         <sphereGeometry args={[PLANET_RADIUS, 256, 128]} />
         <meshStandardMaterial color={seaColor} roughness={0.3} metalness={0} transparent opacity={0.9} polygonOffset polygonOffsetFactor={2} polygonOffsetUnits={2} />
       </mesh>
-      <PlanetHalo tint={tint} map={halo} fadeWithAltitude={p.isCurrent} />
+      {/* l'aria del pianeta: alone dell'atmosfera e strato di nuvole (PlanetSky.tsx) */}
+      {!(window as unknown as { __noSky?: boolean }).__noSky && <PlanetSky p={p} />}
       {/* la citta': colonna di luce al polo, si vede da vicino, e un punto di dimensione fissa sullo schermo,
           che si vede da qualsiasi distanza */}
       {(!p.isCurrent || getCurrentSite().kind === 'wild') && (

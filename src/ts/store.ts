@@ -274,6 +274,9 @@ interface GameState {
   ollamaNpcChat: boolean;
   setOllamaNpcChat: (on: boolean) => void;
   toonStyle: boolean;
+  // notte blu con neon (lib/neon.ts): sempre notte, contorni scuri blu, bagliore e insegne luminose. Spenta: giorno / giornata
+  neonNight: boolean;
+  setNeonNight: (on: boolean) => void;
   dayCycle: boolean;
   // modalita' zombi notturna: notte fonda, pioggia, zombi (components/city/ZombieNight.tsx)
   zombieNight: boolean;
@@ -572,6 +575,7 @@ export const useStore = create<GameState>((set) => ({
   showSimCitta: false,
   ollamaNpcChat: readSetting('ollamaNpcChat', false),
   toonStyle: readSetting('toonStyle', true),
+  neonNight: readSetting('neonNight', false),
   dayCycle: readSetting('dayCycle', false),
   zombieNight: false,
   adaptiveResolution: readSetting('adaptiveResolution', true),
@@ -715,6 +719,10 @@ export const useStore = create<GameState>((set) => ({
   setToonStyle: (toonStyle) => {
     writeSetting('toonStyle', toonStyle);
     set({ toonStyle });
+  },
+  setNeonNight: (neonNight) => {
+    writeSetting('neonNight', neonNight);
+    set({ neonNight });
   },
   setZombieNight: (zombieNight) => set({ zombieNight }),
   setDayCycle: (dayCycle) => {
