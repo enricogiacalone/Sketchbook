@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { PLANET_RADIUS as R, hEff, seaColor, surfaceColor, surfaceHeight, surfaceInfo } from './planetSurface';
+import { PLANET_RADIUS as R, hEff, noise3, seaColor, surfaceColor, surfaceHeight, surfaceInfo } from './planetSurface';
 import { GRID, faceDir } from './cubeTiles';
-import { rockMix } from './nearTile';
+import { rockMix, pathMix, pathColor } from './nearTile';
 
 // Un nodo del quadtree del pianeta (una faccia della cubo-sfera, livello 0 = tutta la faccia, livello MAX_LEVEL = tessera da
 // ~4.6 m): una griglia GRID x GRID di celle, piu' una "gonna" lungo i bordi (copre le fessure tra livelli diversi) e per
@@ -43,6 +43,9 @@ export const makeNodeBuffers = (): NodeBuffers => ({
 const CITY_DROP = 1.5;
 const cityDrop = (ang: number) => CITY_DROP * (1 - smooth(0.07, 0.1, ang));
 const ROCK = new THREE.Color('#6a6560');
+const DRY = new THREE.Color('#b0a05a');
+const MOSS = new THREE.Color('#3f5a2a');
+const LITTER = new THREE.Color('#4a3a22');
 const SHALLOW = new THREE.Color('#58b9b4');
 const BUDGET_MS = 3;
 
@@ -100,7 +103,23 @@ export function* buildNodeMesh(face: number, level: number, ni: number, nj: numb
       const info = surfaceInfo(seed, dx, dy, dz, h);
       surfaceColor(seed, info, colr);
       d.set(dx, dy, dz);
-      colr.lerp(ROCK, rockMix(seed, d, h));
+      const rm = rockMix(seed, d, h);
+      colr.lerp(ROCK, rm);
+      // il suolo non e' di un colore solo: chiazze piu' chiare e piu' scure (35 m e 9 m), erba che vira al secco, nel bosco
+      // lettiera scura e muschio; sulla riva e in acqua niente
+      if (h > 1.5) {
+        const sx = dx * R, sy = dy * R, sz = dz * R;
+        const v = (noise3(sx / 38, sy / 38, sz / 38, seed + 404) - 0.5) * 0.34 + (noise3(sx / 9, sy / 9, sz / 9, seed + 405) - 0.5) * 0.12;
+        colr.multiplyScalar(1 + v);
+        const dry = Math.max(0, noise3(sx / 140, sy / 140, sz / 140, seed + 406) - 0.58) * 1.8 * (1 - info.forest);
+        if (dry > 0) colr.lerp(DRY, Math.min(0.4, dry * 0.3));
+        if (info.forest > 0.2) colr.lerp(noise3(sx / 21, sy / 21, sz / 21, seed + 407) > 0.5 ? MOSS : LITTER, Math.min(0.5, info.forest * 0.45));
+      }
+      // sentieri: solo dai nodi piu' fini (livello 3: celle di ~9 m, livello 4: ~4.6 m): sotto non sono risolvibili
+      if (level >= 3) {
+        const pm = pathMix(seed, d.x, d.y, d.z, h, rm) * (level === 3 ? 0.65 : 1);
+        if (pm > 0.002) colr.lerp(pathColor(), pm * 0.85);
+      }
       out.col[o] = colr.r;
       out.col[o + 1] = colr.g;
       out.col[o + 2] = colr.b;

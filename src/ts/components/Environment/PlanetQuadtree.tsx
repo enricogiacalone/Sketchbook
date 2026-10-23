@@ -1,4 +1,5 @@
 import React, { useMemo, useRef } from 'react';
+import { makeWaterMaterial } from '../../lib/waterMaterial';
 import { MeshStandardNodeMaterial } from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { useFrame } from '@react-three/fiber';
@@ -94,7 +95,7 @@ const PlanetQuadtree: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     m.colorNode = mix(attribute('color', 'vec3'), attribute('aMorphCol', 'vec3'), morph);
     return m;
   }, []);
-  const waterMat = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0 }), []);
+  const waterMat = useMemo(() => makeWaterMaterial(p), []); // eslint-disable-line react-hooks/exhaustive-deps
   const S = useRef({
     roots: [] as QNode[],
     all: new Map<string, QNode>(),

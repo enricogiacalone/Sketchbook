@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { mergeBufferGeometries } from 'three-stdlib';
 import { RigidBody, CylinderCollider } from '@react-three/rapier';
-import { Tree } from '@dgreenheck/ez-tree';
+import { Tree, TreePreset } from '@dgreenheck/ez-tree';
 import * as THREE from 'three';
 import { getTerrainHeight } from './Terrain';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
@@ -67,6 +67,49 @@ export const useTreeTemplates = (variationCount: number = 3): TreeTemplate[] => 
     return templates;
   }, [variationCount]);
 };
+
+// Gli alberi del PIANETA: specie vere (i preset di ez-tree: frassino, pioppo tremulo, quercia, pino), ognuna con due semi,
+// invece dello stesso albero di default ripetuto. L'ordine conta: nearTile.ts sceglie la specie con questi indici
+// (0-7 latifoglie, 8-11 pini). Generati una volta sola.
+export const PLANET_TREE_SPECIES = ['Ash Medium', 'Aspen Medium', 'Oak Medium', 'Oak Large', 'Pine Medium', 'Pine Large'];
+let planetTemplates: TreeTemplate[] | null = null;
+export const usePlanetTreeTemplates = (): TreeTemplate[] =>
+  useMemo(() => {
+    if (planetTemplates) return planetTemplates;
+    const out: TreeTemplate[] = [];
+    const t0 = performance.now();
+    for (const name of PLANET_TREE_SPECIES) {
+      for (const seed of [11, 29]) {
+        try {
+          const t = new Tree();
+          t.loadPreset(name as keyof typeof TreePreset);
+          t.options.seed = seed;
+          t.generate();
+          const parts: TreeTemplatePart[] = [];
+          t.traverse((child: THREE.Object3D) => {
+            if (child instanceof THREE.Mesh && child.geometry && child.material) {
+              parts.push({ geometry: child.geometry.clone(), material: (child.material as THREE.Material).clone() });
+            }
+          });
+          // le chiome non vanno al nero nell'ombra: un po' di luce propria verde (e il colore un filo piu' vivo)
+          for (const part of parts) {
+            const mt = part.material as THREE.MeshStandardMaterial;
+            if (mt.alphaTest > 0 || mt.transparent) {
+              mt.emissive = new THREE.Color(name.startsWith('Pine') ? 0.03 : 0.07, name.startsWith('Pine') ? 0.1 : 0.17, 0.035);
+              mt.emissiveIntensity = 1;
+              mt.color.multiplyScalar(1.2);
+            }
+          }
+          if (parts.length > 0) out.push({ parts, trunkHeight: 20 });
+        } catch (e) {
+          console.warn('usePlanetTreeTemplates: albero non generato', name, e);
+        }
+      }
+    }
+    planetTemplates = out;
+    if (import.meta.env.DEV) console.info(`[alberi] ${out.length} modelli del pianeta in ${Math.round(performance.now() - t0)} ms`);
+    return out;
+  }, []);
 
 // One tree, placed at absolute WORLD x/z (ground height looked up
 // internally via getTerrainHeight, same convention as everything else in

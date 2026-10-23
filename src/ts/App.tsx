@@ -51,6 +51,7 @@ import WelcomeScreen from './components/UI/WelcomeScreen';
 import { useStore } from './store';
 import Ocean from './components/Environment/Ocean';
 import Minimap from './components/UI/Minimap';
+import UnderwaterOverlay from './components/UI/UnderwaterOverlay';
 import PauseMap from './components/UI/PauseMap';
 import { getPlanetStyle, usePlanetEpoch } from './lib/planet';
 import WorldGate from './components/WorldGate';
@@ -59,6 +60,7 @@ import PlanetMenu from './components/UI/PlanetMenu';
 import SpaceHud from './components/UI/SpaceHud';
 import SpacePlanets, { SpaceStars, SpaceSun } from './components/Environment/SpacePlanets';
 import SpaceController from './components/SpaceController';
+import SpaceEnemies from './components/SpaceEnemies';
 import GameFreeze from './components/GameFreeze';
 const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 const CharLab = React.lazy(() => import('./charLab/CharLab'));
@@ -259,6 +261,7 @@ const App: React.FC = () => {
             <SpaceSun />
             <SpaceStars />
             <SpaceController />
+            <SpaceEnemies />
             {(testScene === 'none' || testScene === 'duel') && <Clouds />}
             <NightSky />
             <WorldFog />
@@ -366,6 +369,7 @@ const App: React.FC = () => {
       <CityGUI />
       <ScenariosGUI />
       <Minimap key={planetEpoch} />
+      <UnderwaterOverlay />
       <SpaceHud />
       <WeaponWheel />
       <RagdollBenchGUI />

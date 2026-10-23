@@ -186,3 +186,9 @@ andati oltre. Non verificato in gioco (solo `ragdoll-fit` e controllo dei tipi).
 3. ~~Ragdoll: una capsula per mano e `SpineHigh` accorciata~~ (fatto, sezione 4).
 4. Poi la locomozione avanzata (vedi la risposta nel thread: famiglia generata in un colpo solo, pose imposte, aggancio per fase, motion
    matching leggero, inerzializzazione, IK dei piedi).
+
+## Collo piu' lungo dopo neck_02 (corretto)
+
+- Sintomo: da quando c'e' `neck_02` il collo del manichino sembrava piu' lungo. Misurato: `neck_02 -> head` = 0.103 m invece di 0.066 (totale `neck_01 -> head` 0.168 invece di 0.132, +4 cm).
+- Causa: `head` e' diventata figlia di `neck_02` e la sua traslazione a riposo e' la meta' di prima (0.066, `scripts/rig-add-neck02.mjs`), ma TUTTE le animazioni di base e addon (162 clip) hanno ancora il canale `head.translation` di prima (0.1029): la clip sposta la testa a 0.1029 dal nuovo genitore. Il rig a riposo, i pesi della pelle e le matrici di bind erano corretti (controllati: errore 0, spostamento della pelle sotto 1 cm).
+- Correzione: `scripts/anim-fix-head-translation.mjs` toglie i canali `translation` di `head` (e di `neck_02`) dalle animazioni (`assets-src/models/` e `public/`); le clip muovono la testa solo con la rotazione. Idempotente: va rilanciato se si rigenerano le animazioni dai sorgenti. (`neck_01.translation` ha ancora il valore delle clip, 0.1654 contro 0.1748 a riposo: scarto di 9 mm, lasciato com'era.)

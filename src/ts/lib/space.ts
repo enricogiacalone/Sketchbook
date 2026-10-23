@@ -166,6 +166,7 @@ export const spaceState = {
   // strati dell'atmosfera, ciascuno una funzione continua della quota (SpaceController):
   sunBlend: 0, // quanto il sole del cielo/della luce coincide col sole vero del sistema (1 oltre ~4.5 km)
   dark: 0, // 0 = cielo di giorno, 1 = nero (la cupola scura copre il cielo)
+  underwater: 0, // 0..1: la camera e' sotto la superficie del mare (lib/waterMaterial.ts)
   fog: 1, // quanta nebbia resta
   cloud: 1, // quante nuvole restano
   boost: 1, // moltiplicatore della spinta del drone
@@ -197,3 +198,21 @@ export function requestDroneShift(d: [number, number, number]) {
 const flightState = () => ({ valid: false, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), vel: new THREE.Vector3(), dq: new THREE.Quaternion(), dpos: new THREE.Vector3(), last: new THREE.Vector3() });
 export const droneLive = flightState();
 export const droneResume = flightState();
+
+// Coordinate: l'universo (stabile, e' dove orbitano i pianeti) <-> il riferimento del sito corrente (quello del gioco).
+// Servono a chi simula cose che vivono nello spazio e non nel mondo montato (SpaceEnemies.tsx).
+export function planetCenterUniv(seed: number, t: number, out: THREE.Vector3): THREE.Vector3 {
+  return centerUniv(seed, t, out);
+}
+const _fo = new THREE.Vector3();
+const _fq = new THREE.Quaternion();
+export function univToSite(u: THREE.Vector3, out: THREE.Vector3, t = spaceTime()): THREE.Vector3 {
+  const site = getCurrentSite();
+  siteOriginUniv(site, t, _fo);
+  return out.copy(u).sub(_fo).applyQuaternion(site.quat);
+}
+export function siteToUniv(p: THREE.Vector3, out: THREE.Vector3, t = spaceTime()): THREE.Vector3 {
+  const site = getCurrentSite();
+  siteOriginUniv(site, t, _fo);
+  return out.copy(p).applyQuaternion(_fq.copy(site.quat).invert()).add(_fo);
+}

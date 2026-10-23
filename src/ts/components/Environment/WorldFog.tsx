@@ -18,6 +18,7 @@ import { useStore } from '../../store';
 // instead of a random gray that doesn't match anything.
 
 const NIGHT_FOG = new THREE.Color('#05060d');
+const UNDER_FOG = new THREE.Color('#0a5a6c');
 const NEON_FOG = new THREE.Color('#0c1c3d'); // nebbia blu della notte neon
 
 const SUNSET_TINT = new THREE.Color('#ffad66');
@@ -55,6 +56,9 @@ const WorldFog: React.FC = () => {
     // transition (warmth*dayFactor is ~0 both at full night and at noon,
     // peaking right around the horizon), not as a constant offset.
     scratch.current.lerp(SUNSET_TINT, warmth * dayFactor * 0.55);
+    // sott'acqua (lib/waterMaterial.ts): foschia fitta azzurro-verde
+    const uw = spaceState.underwater;
+    if (uw > 0.002) scratch.current.lerp(UNDER_FOG.clone().multiplyScalar(0.35 + 0.65 * dayFactor), uw);
     fog.color.copy(scratch.current);
     // nello spazio non c'e' foschia (lib/space.ts)
     const air = spaceState.fog;
@@ -64,6 +68,7 @@ const WorldFog: React.FC = () => {
     _fp.set(state.camera.position.x, state.camera.position.y + PLANET_RADIUS + site.hN, state.camera.position.z).applyQuaternion(_fq.copy(site.quat).invert()).normalize();
     const away = Math.min(1, Math.max(0, (Math.acos(Math.min(1, Math.max(-1, _fp.y))) - 0.1) / 0.2));
     fog.density = 0.0055 * style.fogDensity * air * (0.5 - 0.2 * away * away * (3 - 2 * away));
+    fog.density = THREE.MathUtils.lerp(fog.density, 0.035, uw);
   });
 
   return null;

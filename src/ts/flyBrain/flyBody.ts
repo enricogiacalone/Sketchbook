@@ -53,7 +53,9 @@ const FLY_LEGACY_SHAPES: Record<string, { radius: number; lengthScale?: number }
   Foot_L: { radius: 0.075, lengthScale: 1.4 },
   Foot_R: { radius: 0.075, lengthScale: 1.4 },
 };
-const FLY_SEGMENTS: RagdollSegment[] = ACTIVE_RAGDOLL_SEGMENTS.map((s) => ({
+// (solo i pezzi di allora: il commit 'locomotion' ha aggiunto al ragdoll del gioco le mani, Hand_L e Hand_R; nel corpo della mosca
+// diventavano due pezzi in piu', con i loro giunti, e Rapier andava in panico al primo passo di fisica: il laboratorio non partiva)
+const FLY_SEGMENTS: RagdollSegment[] = ACTIVE_RAGDOLL_SEGMENTS.filter((s) => s.name in FLY_LEGACY_SHAPES).map((s) => ({
   name: s.name,
   drivingBone: s.drivingBone,
   parent: s.parent,

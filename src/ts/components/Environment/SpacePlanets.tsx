@@ -5,6 +5,7 @@ import { PLANET_RADIUS, seaColor as seaColorOf, surfaceColor, surfaceInfo, surfa
 import PlanetQuadtree from './PlanetQuadtree';
 import PlanetNearField from './PlanetNearField';
 import PlanetSky from './PlanetSky';
+import { updateWater } from '../../lib/waterMaterial';
 import CityProxy from './CityProxy';
 import { rockMix } from '../../lib/nearTile';
 
@@ -220,6 +221,8 @@ const PlanetHalo: React.FC<{ tint: string; map: THREE.Texture; fadeWithAltitude:
 
 const SpacePlanets: React.FC = () => {
   const epoch = usePlanetEpoch();
+  // l'acqua di tutti i pianeti: sole, cielo riflesso, e se la camera e' sott'acqua (lib/waterMaterial.ts)
+  useFrame((state) => updateWater(state.camera, state.clock.elapsedTime));
   // (ricalcolato a ogni cambio di riferimento: le posizioni dipendono dal pianeta corrente)
   const planets = useMemo<SpacePlanet[]>(() => spacePlanets(), [epoch]); // eslint-disable-line react-hooks/exhaustive-deps
   const halo = useMemo(() => haloTexture(1 / 1.28), []);

@@ -59,7 +59,7 @@ const ToonOutline: React.FC = () => {
       creaseMin: uniform(0.6),
       creaseMax: uniform(1.2),
       creaseFar: uniform(45),
-      lineFar: uniform(160),
+      lineFar: uniform(110),
       saturation: uniform(1.25),
       inkDark: uniform(0.18),
       // notte blu neon: 0..1 (inchiostro blu scuro e linee piu' sottili, bagliore sulle luci, colori piu' accesi)

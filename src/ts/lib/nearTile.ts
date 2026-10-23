@@ -130,8 +130,10 @@ export interface Vegetation {
   tufts: VegItem[];
 }
 
-export const TREE_CELL = 12;
-export const TUFT_CELL = 6;
+export const TREE_CELL = 8.4;
+export const TUFT_CELL = 2.7;
+// copertura del suolo (campo `t` dei 'tufts'): 0 erba, 1 fiori, 2 felci, 3 cespugli
+export const COVER_GRASS = 0, COVER_FLOWER = 1, COVER_FERN = 2, COVER_BUSH = 3, COVER_TALL = 4;
 
 const _q = new THREE.Quaternion();
 const _qy = new THREE.Quaternion();
@@ -181,6 +183,59 @@ export function rockMix(seed: number, d: THREE.Vector3, h: number): number {
   return smooth(0.3, 0.6, 1 - 1 / Math.hypot(1, g)) * (h > 0 ? 1 : 0.4);
 }
 
+// --- sentieri ------------------------------------------------------------------------------------------------------
+// Linee di livello del rumore sul pianeta: dove il rumore vale 0.5 passa un sentiero. La distanza dalla linea (in metri) si
+// stima dal valore e dal gradiente (|n - 0.5| / |grad n|), cosi' la larghezza e' vera anche dove il rumore e' piatto.
+// Due famiglie: i sentieri principali (lunghi, larghi) e i viottoli (piu' sottili, a tratti).
+const PATH_MAIN = 520; // m: scala del rumore dei sentieri principali
+const PATH_MINOR = 190;
+const PATH_COLOR = new THREE.Color('#8b7350');
+function lineDist(seed: number, sx: number, sy: number, sz: number, scale: number, off: number): number {
+  const x = sx / scale + off, y = sy / scale + off * 0.7, z = sz / scale - off * 0.4;
+  const e = 0.02;
+  const n0 = noise3(x, y, z, seed);
+  const gx = (noise3(x + e, y, z, seed) - n0) / e;
+  const gy = (noise3(x, y + e, z, seed) - n0) / e;
+  const gz = (noise3(x, y, z + e, seed) - n0) / e;
+  const g = Math.max(0.12, Math.hypot(gx, gy, gz));
+  return (Math.abs(n0 - 0.5) / g) * scale;
+}
+// 0..1: quanto sentiero c'e' nel punto (direzione unitaria)
+export function pathMask(seed: number, dx: number, dy: number, dz: number): number {
+  const sx = dx * R, sy = dy * R, sz = dz * R;
+  const ps = (seed ^ 0x9a71) | 0;
+  const wob = (noise3(sx / 55, sy / 55, sz / 55, ps + 5) - 0.5) * 7; // i bordi ondeggiano
+  const d1 = lineDist(seed ^ 0x3c1d, sx, sy, sz, PATH_MAIN, 7.3) + wob;
+  // (bordo morbido: i vertici del terreno sono ogni ~4.6 m, un bordo netto farebbe i gradini)
+  let m = 1 - smooth(1.2, 6.0, d1);
+  // viottoli: solo dove un rumore largo lo permette
+  if (m < 1) {
+    const on = noise3(sx / 400 + 2, sy / 400, sz / 400, ps + 9);
+    if (on > 0.34) {
+      const d2 = lineDist(seed ^ 0x6b2f, sx, sy, sz, PATH_MINOR, 3.1) + wob * 0.5;
+      m = Math.max(m, (1 - smooth(0.6, 3.6, d2)) * smooth(0.34, 0.5, on));
+    }
+  }
+  return m;
+}
+// il sentiero sul colore del terreno: non sull'acqua, sulla spiaggia, sulla neve, sulle pendenze forti (rocciose)
+export function pathMix(seed: number, dx: number, dy: number, dz: number, h: number, rock: number): number {
+  if (h < 1.2 || h > 150) return 0;
+  const m = pathMask(seed, dx, dy, dz);
+  return m * (1 - Math.min(1, rock * 1.6));
+}
+export const pathColor = (): THREE.Color => PATH_COLOR;
+
+// specie dell'albero (indice nei modelli di PlanetNearField, vedi PLANET_TREE_SPECIES: 0-7 latifoglie, 8-11 pini): i pini
+// salgono di quota, le querce stanno in basso, frassini e pioppi in mezzo; un po' di tutto ovunque
+function speciesAt(h: number, a: number, b: number): number {
+  const pine = smooth(35, 110, h) * 0.9 + 0.06;
+  if (a < pine) return 8 + Math.floor(b * 4) % 4;
+  // latifoglie: querce (4-7) in basso, frassini e pioppi (0-3) piu' su
+  const oak = 1 - smooth(20, 80, h);
+  return b < oak ? 4 + Math.floor((b / Math.max(0.01, oak)) * 4) % 4 : Math.floor(((b - oak) / Math.max(0.01, 1 - oak)) * 4) % 4;
+}
+
 // alberi e rocce (e, se `withTufts`, prato) di una tessera, per cella della griglia lat/lon del pianeta
 export function* buildTileVegetation(key: number, seed: number, what: 'base' | 'tufts', out: Vegetation): Generator<void, void, void> {
   const { face, i, j } = tileParts(key);
@@ -217,17 +272,24 @@ export function* buildTileVegetation(key: number, seed: number, what: 'base' | '
   if (what === 'base') yield* drive(TREE_CELL, (c, dd, h) => {
     const info = surfaceInfo(seed, dd.x, dd.y, dd.z, h);
     if (info.h < 3) return; // acqua / spiaggia
+    if (pathMask(seed, dd.x, dd.y, dd.z) > 0.1) return; // i sentieri restano liberi
     const k = c.key;
     const roll = hashKey(k, 3, rseed);
     const rad = R + hEff(h);
-    if (info.forest > 0.05 && roll < info.forest * 0.85) {
+    if (info.forest > 0.05 && roll < info.forest * 0.92) {
       if (slopeAt(seed, dd, h) < 0.6) {
         const s = 0.17 + hashKey(k, 5, rseed) * 0.14;
-        out.trees.push({ m: placeMatrix(dd, rad, hashKey(k, 4, rseed) * Math.PI * 2, s, s, s), x: dd.x * rad, y: dd.y * rad, z: dd.z * rad, t: Math.floor(hashKey(k, 6, rseed) * 100) });
+        out.trees.push({ m: placeMatrix(dd, rad, hashKey(k, 4, rseed) * Math.PI * 2, s, s, s), x: dd.x * rad, y: dd.y * rad, z: dd.z * rad, t: speciesAt(info.h, hashKey(k, 11, rseed), hashKey(k, 6, rseed)) });
       }
-    } else if (roll > 0.9) {
+    } else if (info.forest <= 0.05 && info.h > 4 && info.h < 140 && info.snow < 0.05 && info.sand < 0.2 && roll < 0.06 * (0.3 + noise3((dd.x * R) / 90, (dd.y * R) / 90, (dd.z * R) / 90, rseed + 21) * 1.4)) {
+      // alberi sparsi nei prati (a gruppetti, piu' piccoli)
+      if (slopeAt(seed, dd, h) < 0.45) {
+        const s = 0.13 + hashKey(k, 5, rseed) * 0.1;
+        out.trees.push({ m: placeMatrix(dd, rad, hashKey(k, 4, rseed) * Math.PI * 2, s, s, s), x: dd.x * rad, y: dd.y * rad, z: dd.z * rad, t: speciesAt(info.h, hashKey(k, 11, rseed), hashKey(k, 6, rseed)) });
+      }
+    } else if (roll > 0.86) {
       const sl = slopeAt(seed, dd, h);
-      if (sl > 0.35 || info.rock > 0.3) {
+      if (sl > 0.3 || info.rock > 0.25 || (roll > 0.985 && sl > 0.08)) {
         const s = 0.5 + hashKey(k, 7, rseed) * 2.4;
         const r2 = rad + s * 0.2;
         out.rocks.push({ m: placeMatrix(dd, r2, hashKey(k, 8, rseed) * Math.PI * 2, s * 1.3, s * 0.8, s), x: dd.x * r2, y: dd.y * r2, z: dd.z * r2, t: 0 });
@@ -235,19 +297,74 @@ export function* buildTileVegetation(key: number, seed: number, what: 'base' | '
     }
   });
   if (what !== 'tufts') return;
-  // prato: a chiazze (rumore sul pianeta a ~35 m e ~9 m), piu' fitto dove e' alto
+  // copertura del suolo: erba a chiazze (rumore sul pianeta a ~35 m e ~9 m), con felci e cespugli nel bosco, fiori a macchie
+  // di un colore nei prati e qualche cespuglio; piu' fitta dove e' alto; mai sui sentieri (ai bordi si dirada)
   const green = new THREE.Color();
+  const bloom = [0xfff9e6, 0xffe96b, 0xffb3cc, 0xd2bcff, 0xb5d6ff, 0xffc08a]; // pastelli: sul prato scuro i colori saturi diventano marroni
   yield* drive(TUFT_CELL, (c, dd, h) => {
     const k = c.key;
     const sx = dd.x * R, sy = dd.y * R, sz = dd.z * R;
     const patch = noise3(sx / 35, sy / 35, sz / 35, tseed + 2) * 0.7 + noise3(sx / 9, sy / 9, sz / 9, tseed + 3) * 0.3;
-    if (hashKey(k, 4, tseed) > Math.max(0, patch - 0.3) * 2.1) return;
+    const pm = pathMask(seed, dd.x, dd.y, dd.z);
+    if (pm > 0.35) return;
+    // (soglia piu' bassa di prima: il prato copre di piu'; ai bordi dei sentieri si dirada)
+    if (hashKey(k, 4, tseed) > Math.max(0, patch - 0.04) * 3.9 * (1 - pm * 2)) return;
     const info = surfaceInfo(seed, dd.x, dd.y, dd.z, h);
     if (info.h < 1.5 || info.sand > 0.3 || info.snow > 0.1 || info.rock > 0.3) return;
     if (slopeAt(seed, dd, h) > 0.5) return;
     const rad = R + hEff(h);
-    const sc = 1 + hashKey(k, 5, tseed) * 1.1;
-    green.setHSL(0.2 + hashKey(k, 6, tseed) * 0.1, 0.5, 0.45 + hashKey(k, 7, tseed) * 0.15);
-    out.tufts.push({ m: placeMatrix(dd, rad, hashKey(k, 8, tseed) * Math.PI * 2, sc, sc * (0.8 + hashKey(k, 9, tseed) * 0.6), sc), x: dd.x * rad, y: dd.y * rad, z: dd.z * rad, t: 0, color: green.getHex() });
+    const roll = hashKey(k, 10, tseed);
+    const yaw = hashKey(k, 8, tseed) * Math.PI * 2;
+    let kind = COVER_GRASS;
+    // erba alta e bassa mescolate (i ciuffi piu' alti arrivano a ~2 m)
+    let sc = 0.9 + Math.pow(hashKey(k, 5, tseed), 1.6) * 1.7;
+    let sy2 = sc * (0.8 + hashKey(k, 9, tseed) * 0.6);
+    let hex = 0;
+    if (info.forest > 0.25) {
+      // sottobosco: felci e cespugli
+      if (roll < 0.24) {
+        kind = COVER_FERN;
+        sc = 0.9 + hashKey(k, 5, tseed) * 0.8;
+        sy2 = sc * (0.8 + hashKey(k, 9, tseed) * 0.5);
+        green.setHSL(0.27 + hashKey(k, 6, tseed) * 0.05, 0.5, 0.26 + hashKey(k, 7, tseed) * 0.14);
+        hex = green.getHex();
+      } else if (roll < 0.34) {
+        kind = COVER_BUSH;
+        sc = 0.8 + hashKey(k, 5, tseed) * 1.1;
+        sy2 = sc * (0.75 + hashKey(k, 9, tseed) * 0.4);
+        green.setHSL(0.26 + hashKey(k, 6, tseed) * 0.06, 0.42, 0.2 + hashKey(k, 7, tseed) * 0.14);
+        hex = green.getHex();
+      }
+    } else {
+      // prato aperto: macchie di fiori (un colore per macchia), cespugli sparsi
+      const fl = noise3(sx / 16, sy / 16, sz / 16, tseed + 11);
+      const tall = noise3(sx / 28, sy / 28, sz / 28, tseed + 19);
+      if (tall > 0.56 && roll < 0.5) {
+        // erba alta da prateria (spighe), a macchie larghe
+        kind = COVER_TALL;
+        sc = 0.9 + hashKey(k, 5, tseed) * 0.9;
+        sy2 = sc * (0.8 + hashKey(k, 9, tseed) * 0.7);
+        green.setHSL(0.15 + hashKey(k, 6, tseed) * 0.07, 0.45, 0.46 + hashKey(k, 7, tseed) * 0.14);
+        hex = green.getHex();
+      } else if (fl > 0.5 && roll < 0.6) {
+        kind = COVER_FLOWER;
+        sc = 0.8 + hashKey(k, 5, tseed) * 0.6;
+        sy2 = sc * (0.85 + hashKey(k, 9, tseed) * 0.4);
+        hex = bloom[Math.floor(noise3(sx / 60, sy / 60, sz / 60, tseed + 13) * 5.99) % bloom.length];
+      } else if (roll > 0.94) {
+        kind = COVER_BUSH;
+        sc = 0.7 + hashKey(k, 5, tseed) * 0.9;
+        sy2 = sc * (0.75 + hashKey(k, 9, tseed) * 0.4);
+        green.setHSL(0.24 + hashKey(k, 6, tseed) * 0.08, 0.45, 0.24 + hashKey(k, 7, tseed) * 0.14);
+        hex = green.getHex();
+      }
+    }
+    if (kind === COVER_GRASS) {
+      // erba: verdi vari, con chiazze secche (gialle) dove il rumore e' alto
+      const dry = Math.max(0, noise3(sx / 70, sy / 70, sz / 70, tseed + 17) - 0.58) * 2.4;
+      green.setHSL(0.2 + hashKey(k, 6, tseed) * 0.1 - dry * 0.06, 0.5 - dry * 0.1, 0.42 + hashKey(k, 7, tseed) * 0.16 + dry * 0.05);
+      hex = green.getHex();
+    }
+    out.tufts.push({ m: placeMatrix(dd, rad, yaw, sc, sy2, sc), x: dd.x * rad, y: dd.y * rad, z: dd.z * rad, t: kind, color: hex });
   });
 }

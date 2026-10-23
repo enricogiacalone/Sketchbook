@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import { makeWaterMaterial } from '../../lib/waterMaterial';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { PLANET_RADIUS as R } from '../../lib/planetSurface';
@@ -7,7 +8,8 @@ import { GRID, TILE_CENTERS, TILE_COUNT, TILE_RADIUS } from '../../lib/cubeTiles
 import { buildTileMesh, buildTileVegetation, makeTileBuffers, TILE_VERTS, type TileBuffers, type Vegetation } from '../../lib/nearTile';
 // (buildTileMesh / makeTileBuffers non servono piu' qui: il terreno e' nel quadtree)
 import { requestVegetation, workerCapacity, workersAvailable } from '../../lib/planetWorkers';
-import { createTreeSource, registerTreeEntries, TreeBatches, useTreeTemplates, type TreeEntry } from './ParkTrees';
+import { createTreeSource, registerTreeEntries, TreeBatches, usePlanetTreeTemplates, type TreeEntry } from './ParkTrees';
+import { COVER, COVER_KINDS } from './groundCover';
 
 // La vegetazione vicina al pianeta, FISSA sul pianeta: alberi, rocce e prato (celle lat/lon, lib/globalGrid.ts). Si carica e si scarica a pezzetti attorno al punto
 // sotto la camera e non dipende dal sito su cui e' montato il mondo di gioco: cambiare sito (rebase del riferimento)
@@ -17,7 +19,8 @@ const NEAR_ALT = 2600; // sotto questa quota (m sulla superficie) si caricano le
 const FAR_ALT = 4200; // sopra questa si scaricano tutte
 const LOAD_RANGE = 1000; // m dal punto sotto la camera
 const KEEP_RANGE = 1300;
-const TUFT_RANGE = 420;
+const COVER_SHOW = 190; // m: oltre (piu' il raggio della tessera) la copertura non si disegna
+const TUFT_RANGE = 250; // m: la copertura (erba, fiori...) solo vicino: e' la cosa piu' pesante da disegnare
 const SELECT_EVERY = 0.2; // s
 const EMERGE_S = 1.4; // s: una tessera nuova sale da sotto i livelli di dettaglio
 const EMERGE_FROM = 16; // m sotto la quota vera, all'inizio
@@ -48,29 +51,7 @@ const makeGeo = (withNormal: boolean) => {
 // i pezzi grafici si riusano (non si distruggono mai: il renderer WebGPU non ama buffer liberati mentre sono in uso)
 const ROCK_GEO = new THREE.IcosahedronGeometry(1, 1);
 const ROCK_MAT = new THREE.MeshStandardMaterial({ color: '#8a8782', roughness: 0.95, flatShading: true });
-const TUFT_GEO = (() => {
-  const pos: number[] = [], col: number[] = [], nor: number[] = [];
-  const blades = 7;
-  for (let b = 0; b < blades; b++) {
-    const a = (b / blades) * Math.PI * 2 + b * 0.7;
-    const lean = 0.18 + (b % 3) * 0.08;
-    const hgt = 0.55 + (b % 4) * 0.12;
-    const dx = Math.cos(a), dz = Math.sin(a);
-    const bx = dx * 0.06, bz = dz * 0.06;
-    const px = -dz * 0.05, pz = dx * 0.05;
-    pos.push(bx - px, 0, bz - pz, bx + px, 0, bz + pz, bx + dx * lean, hgt, bz + dz * lean);
-    col.push(0.6, 0.68, 0.5, 0.6, 0.68, 0.5, 1, 1, 0.9);
-    nor.push(0, 1, 0, 0, 1, 0, 0, 1, 0);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
-  return g;
-})();
-const TUFT_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, side: THREE.DoubleSide, roughness: 1 });
 const ROCK_CAP = 120;
-const TUFT_CAP = 3200;
 
 const _gm = new THREE.Matrix4();
 const _g0 = new THREE.Vector3(0.001, 0.001, 0.001);
@@ -85,7 +66,7 @@ interface Tile {
   terrain: THREE.Mesh | null;
   water: THREE.Mesh | null;
   rocks: THREE.InstancedMesh | null;
-  tufts: THREE.InstancedMesh | null;
+  cover: Array<{ kind: number; mesh: THREE.InstancedMesh; base: THREE.Matrix4[] }>;
   buf: TileBuffers | null;
   veg: Vegetation;
   unregisterTrees: (() => void) | null;
@@ -94,7 +75,6 @@ interface Tile {
   born: number; // s: quando il terreno e' comparso
   rockBase: THREE.Matrix4[];
   rockBorn: number;
-  tuftBase: THREE.Matrix4[];
   tuftBorn: number;
   busy: boolean; // un worker sta costruendo la sua vegetazione
 }
@@ -102,16 +82,16 @@ interface Tile {
 const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
   const group = useRef<THREE.Group>(null);
   const seed = p.profile.seed;
-  const templates = useTreeTemplates();
+  const templates = usePlanetTreeTemplates();
   const source = useMemo(() => createTreeSource(), []);
   const terrainMat = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 }), []);
-  const waterMat = useMemo(() => new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0 }), []);
+  const waterMat = useMemo(() => makeWaterMaterial(p), []); // eslint-disable-line react-hooks/exhaustive-deps
   const st = useRef({
     tiles: new Map<number, Tile>(),
     poolTerrain: [] as THREE.Mesh[],
     poolWater: [] as THREE.Mesh[],
     poolRocks: [] as THREE.InstancedMesh[],
-    poolTufts: [] as THREE.InstancedMesh[],
+    poolCover: {} as Record<number, THREE.InstancedMesh[]>,
     poolBuf: [] as TileBuffers[],
     inflight: 0,
     job: null as null | { tile: Tile; gen: Generator<void, void, void>; kind: 'mesh' | 'veg' | 'tufts' },
@@ -143,11 +123,12 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     const S = st.current;
     if (S.job && S.job.tile === tile) S.job = null;
     tile.unregisterTrees?.();
-    for (const m of [tile.terrain, tile.water, tile.rocks, tile.tufts]) if (m) group.current?.remove(m);
+    for (const m of [tile.terrain, tile.water, tile.rocks, ...tile.cover.map((c) => c.mesh)]) if (m) group.current?.remove(m);
     if (tile.terrain) S.poolTerrain.push(tile.terrain);
     if (tile.water) S.poolWater.push(tile.water);
     if (tile.rocks) S.poolRocks.push(tile.rocks);
-    if (tile.tufts) S.poolTufts.push(tile.tufts);
+    for (const c of tile.cover) (S.poolCover[c.kind] ??= []).push(c.mesh);
+    tile.cover = [];
     if (tile.buf) S.poolBuf.push(tile.buf);
     S.tiles.delete(tile.key);
   };
@@ -216,23 +197,33 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
       group.current?.add(m);
     }
   };
+  // copertura del suolo (erba, fiori, felci, cespugli): un pezzo grafico instanziato per tipo (il tipo e' il campo `t`)
   const finishTufts = (tile: Tile) => {
     const S = st.current;
-    const tufts = tile.veg.tufts.slice(0, TUFT_CAP);
-    if (tufts.length === 0) return;
-    const m = instanced(S.poolTufts, TUFT_GEO, TUFT_MAT, TUFT_CAP, false);
+    const byKind = new Map<number, typeof tile.veg.tufts>();
+    for (const t of tile.veg.tufts) {
+      const l = byKind.get(t.t);
+      if (l) l.push(t);
+      else byKind.set(t.t, [t]);
+    }
     const c = new THREE.Color();
-    tile.tuftBase = tufts.map((t) => t.m);
     tile.tuftBorn = performance.now() / 1000;
-    tufts.forEach((t, i) => {
-      m.setMatrixAt(i, _gm.copy(t.m).scale(_g0));
-      m.setColorAt(i, c.setHex(t.color ?? 0x66aa44));
-    });
-    m.count = tufts.length;
-    m.instanceMatrix.needsUpdate = true;
-    if (m.instanceColor) m.instanceColor.needsUpdate = true;
-    tile.tufts = m;
-    group.current?.add(m);
+    for (const kind of COVER_KINDS) {
+      const spec = COVER[kind];
+      const items = (byKind.get(kind) ?? []).slice(0, spec.cap);
+      if (items.length === 0) continue;
+      const m = instanced((S.poolCover[kind] ??= []), spec.geo, spec.mat, spec.cap, spec.shadow);
+      const base = items.map((t) => t.m);
+      items.forEach((t, i) => {
+        m.setMatrixAt(i, _gm.copy(t.m).scale(_g0));
+        m.setColorAt(i, c.setHex(t.color ?? 0x66aa44));
+      });
+      m.count = items.length;
+      m.instanceMatrix.needsUpdate = true;
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      tile.cover.push({ kind, mesh: m, base });
+      group.current?.add(m);
+    }
   };
 
   useEffect(
@@ -286,6 +277,7 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
 
     // animazioni di nascita: le tessere salgono, rocce e prato crescono
     const nowS = performance.now() / 1000;
+    const cosCover = Math.cos((COVER_SHOW + TILE_RADIUS) / R);
     S.tiles.forEach((tile) => {
       if (tile.terrain) {
         const x = (nowS - tile.born) / EMERGE_S;
@@ -296,26 +288,31 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
           tile.water?.position.copy(o);
         }
       }
-      for (const kind of ['rock', 'tuft'] as const) {
-        const mesh = kind === 'rock' ? tile.rocks : tile.tufts;
-        const base = kind === 'rock' ? tile.rockBase : tile.tuftBase;
-        const born = kind === 'rock' ? tile.rockBorn : tile.tuftBorn;
-        if (!mesh || base.length === 0) continue;
+      // la copertura si disegna solo vicino (le tessere piu' lontane restano caricate ma nascoste): e' la parte piu' pesante
+      if (tile.cover.length) {
+        const dot = TILE_CENTERS[tile.key * 3] * S.nadir.x + TILE_CENTERS[tile.key * 3 + 1] * S.nadir.y + TILE_CENTERS[tile.key * 3 + 2] * S.nadir.z;
+        const show = dot > cosCover;
+        for (const c of tile.cover) c.mesh.visible = show;
+      }
+      // rocce e copertura crescono dopo la nascita (da piccolissime alla loro taglia)
+      const grow = (mesh: THREE.InstancedMesh, base: THREE.Matrix4[], born: number, done: () => void) => {
+        if (base.length === 0 || born === 0) return;
         const x = (nowS - born) / GROW_S;
         if (x >= 1) {
-          if (born > 0) {
-            base.forEach((m, i) => mesh.setMatrixAt(i, m));
-            mesh.instanceMatrix.needsUpdate = true;
-            if (kind === 'rock') tile.rockBorn = 0;
-            else tile.tuftBorn = 0;
-          }
-          continue;
+          base.forEach((m, i) => mesh.setMatrixAt(i, m));
+          mesh.instanceMatrix.needsUpdate = true;
+          done();
+          return;
         }
-        if (born === 0) continue;
         const gg = Math.max(0.001, ease(Math.max(0, x)));
         _gv.set(gg, gg, gg);
         base.forEach((m, i) => mesh.setMatrixAt(i, _gm.copy(m).scale(_gv)));
         mesh.instanceMatrix.needsUpdate = true;
+      };
+      if (tile.rocks) grow(tile.rocks, tile.rockBase, tile.rockBorn, () => (tile.rockBorn = 0));
+      if (tile.tuftBorn > 0) {
+        for (const c of tile.cover) grow(c.mesh, c.base, tile.tuftBorn, () => undefined);
+        if (nowS - tile.tuftBorn >= GROW_S) tile.tuftBorn = 0;
       }
     });
 
@@ -326,7 +323,7 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
       let kind: 'mesh' | 'veg' | 'tufts' = 'mesh';
       for (const k of S.want) {
         if (!S.tiles.has(k)) {
-          const tile: Tile = { key: k, state: 'veg', terrain: null, water: null, rocks: null, tufts: null, buf: null, veg: { trees: [], rocks: [], tufts: [] }, unregisterTrees: null, treesRegistered: false, tuftsDone: false, born: 0, rockBase: [], rockBorn: 0, tuftBase: [], tuftBorn: 0, busy: false };
+          const tile: Tile = { key: k, state: 'veg', terrain: null, water: null, rocks: null, cover: [], buf: null, veg: { trees: [], rocks: [], tufts: [] }, unregisterTrees: null, treesRegistered: false, tuftsDone: false, born: 0, rockBase: [], rockBorn: 0, tuftBorn: 0, busy: false };
           tile.state = 'veg'; // il terreno e l'acqua li disegna il quadtree (PlanetQuadtree.tsx): qui solo la vegetazione
           S.tiles.set(k, tile);
           continue;

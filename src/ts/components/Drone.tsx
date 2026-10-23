@@ -14,7 +14,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { CollisionGroups, groupsExcluding } from '../enums/CollisionGroups';
 import { droneMouseDelta, droneOrientation, droneShake, droneCamPose, droneHud, DroneHudTarget, dronePad, droneExit } from '../lib/droneFlight';
 import { acquireAudioListener, releaseAudioListener } from '../lib/sharedAudioListener';
-import { cityOpponents } from './city/cityActors';
+import { cityOpponents, getDroneTargets, isFlyer } from './city/cityActors';
 import type { FighterData } from './Environment/SquadArenaTypes';
 import { getShootableCollider, applyFighterHit } from './Environment/weapons/shootableRegistry';
 import { emitShotFx } from './Environment/weapons/weaponFx';
@@ -79,6 +79,7 @@ const BULLET_RATE = 35; // colpi/s
 const BULLET_LIFE = 1; // s
 const BULLET_DAMAGE = 5;
 const BULLET_PROXIMITY = 0.7; // m dal petto del bersaglio (droneWorld: 10 unita')
+const FLYER_HIT = 3.2; // m dal centro di un drone nemico (SpaceEnemies.tsx)
 const GUN_HEAT_S = 1.5; // secondi di fuoco per surriscaldarsi
 const GUN_COOL_PER_S = 0.6;
 const LOCK_S = 2; // secondi nel cerchio focale per agganciare
@@ -145,6 +146,8 @@ interface Boom {
 // bersagli dell'HUD: nemici della citta' e altri giocatori, vivi
 const isHudTarget = (d: FighterData) => !d.isDead && (d.team === 'CITY_ENEMY' || d.team.startsWith('REMOTE_'));
 const chestOf = (d: FighterData, out: THREE.Vector3) => {
+  // i droni nemici volano: la posizione e' gia' quella vera
+  if (isFlyer(d)) return out.copy(d.position);
   const x = d.position.x, z = d.position.z;
   return out.set(x, getTerrainHeight(x, z) + getRoadOffset(x, z) + TARGET_CHEST_Y, z);
 };
@@ -353,11 +356,11 @@ const Drone: React.FC = () => {
         } else {
           // spoletta di prossimita' (droneWorld: 10 unita' dal bersaglio)
           _seg.set(b.pos, _v2.copy(b.pos).addScaledVector(dir, step));
-          for (const d of cityOpponents) {
+          for (const d of getDroneTargets()) {
             if (!isHudTarget(d)) continue;
             chestOf(d, _v3);
             _seg.closestPointToPoint(_v3, true, _closest);
-            if (_closest.distanceTo(_v3) < BULLET_PROXIMITY) {
+            if (_closest.distanceTo(_v3) < (isFlyer(d) ? FLYER_HIT : BULLET_PROXIMITY)) {
               point = _closest.clone();
               target = d;
               surface = 'body';
@@ -774,9 +777,11 @@ const Drone: React.FC = () => {
     const targets: DroneHudTarget[] = [];
     let anyInSight = false;
     let gunTarget: { d: FighterData; lead: THREE.Vector3; score: number } | null = null;
-    for (const d of cityOpponents) {
+    for (const d of getDroneTargets()) {
       if (!isHudTarget(d)) continue;
       const tp = chestOf(d, new THREE.Vector3());
+      // i droni nemici lontani non affollano l'HUD: compaiono dentro 9 km
+      if (isFlyer(d) && camera.position.distanceTo(tp) > 9000) continue;
       // velocita' del bersaglio (per l'anticipo)
       const last = f.lastTargetPos.get(d.id);
       const vel = f.targetVel.get(d.id) ?? new THREE.Vector3();
@@ -899,7 +904,7 @@ const Drone: React.FC = () => {
       let bestD = Infinity;
       for (const t of targets) {
         if (!t.inSight || t.distance >= bestD) continue;
-        const d = cityOpponents.find((o) => o.id === t.id);
+        const d = getDroneTargets().find((o) => o.id === t.id);
         if (d && !d.isDead) {
           bestD = t.distance;
           best = d;
