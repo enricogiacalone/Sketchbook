@@ -277,6 +277,12 @@ interface GameState {
   // notte blu con neon (lib/neon.ts): sempre notte, contorni scuri blu, bagliore e insegne luminose. Spenta: giorno / giornata
   neonNight: boolean;
   setNeonNight: (on: boolean) => void;
+  // droni nemici interstellari (components/SpaceEnemies.tsx): spenti di default, si accendono dal menu o dal pannello Debug
+  enemyDrones: boolean;
+  setEnemyDrones: (on: boolean) => void;
+  // meteo dei pianeti (lib/weather.ts): pioggia a perturbazioni e nebbia al mattino. Acceso di default
+  weatherOn: boolean;
+  setWeatherOn: (on: boolean) => void;
   dayCycle: boolean;
   // modalita' zombi notturna: notte fonda, pioggia, zombi (components/city/ZombieNight.tsx)
   zombieNight: boolean;
@@ -576,6 +582,8 @@ export const useStore = create<GameState>((set) => ({
   ollamaNpcChat: readSetting('ollamaNpcChat', false),
   toonStyle: readSetting('toonStyle', true),
   neonNight: readSetting('neonNight', false),
+  enemyDrones: readSetting('enemyDrones', false),
+  weatherOn: readSetting('weatherOn', true),
   dayCycle: readSetting('dayCycle', false),
   zombieNight: false,
   adaptiveResolution: readSetting('adaptiveResolution', true),
@@ -723,6 +731,14 @@ export const useStore = create<GameState>((set) => ({
   setNeonNight: (neonNight) => {
     writeSetting('neonNight', neonNight);
     set({ neonNight });
+  },
+  setEnemyDrones: (enemyDrones) => {
+    writeSetting('enemyDrones', enemyDrones);
+    set({ enemyDrones });
+  },
+  setWeatherOn: (weatherOn) => {
+    writeSetting('weatherOn', weatherOn);
+    set({ weatherOn });
   },
   setZombieNight: (zombieNight) => set({ zombieNight }),
   setDayCycle: (dayCycle) => {

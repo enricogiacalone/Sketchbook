@@ -48,9 +48,11 @@ interface Props {
   autoPush: number;
   // alzarsi: "mano che aiuta" (0..1), lo stesso livello dell'addestramento
   assist: number;
+  // camminare: velocita' del riferimento (curriculum)
+  walkScale: number;
 }
 
-const LabFly: React.FC<Props> = ({ graph, params, paramsVersion, task, x, color, ghost, episodeSeconds, restartNonce, status, paused, pushNonce, autoPush, assist }) => {
+const LabFly: React.FC<Props> = ({ graph, params, paramsVersion, task, x, color, ghost, episodeSeconds, restartNonce, status, paused, pushNonce, autoPush, assist, walkScale }) => {
   const { world, rapier } = useRapier();
   const { scene } = useGLTF(MODEL_URL);
   const { animations: baseAnims } = useGLTF(BASE_ANIMS_URL);
@@ -98,6 +100,7 @@ const LabFly: React.FC<Props> = ({ graph, params, paramsVersion, task, x, color,
       simRef.current = null;
     }
   };
+  const walkScaleRef = useRef(walkScale);
   const createSim = () => {
     destroySim();
     refRoot.position.set(x, 0, 0);
@@ -108,6 +111,7 @@ const LabFly: React.FC<Props> = ({ graph, params, paramsVersion, task, x, color,
     const brain = new ConnectomeBrain(graph, layout, p);
     const ctl = new FlyController(fb, brain, { idle: clips['Idle_A'], walk: clips['Walk'], lay: clips['LayToIdle'] }, refRoot, task);
     ctl.groundY = 0;
+    ctl.setWalkScale(walkScaleRef.current);
     ctl.start(0);
     // upAt: quando e' in piedi (-1 = ancora a terra, solo per "alzarsi")
     simRef.current = { fb, ctl, sub: 0, downFor: 0, age: 0, straightSince: -1, upAt: task === 'getup' ? -1 : 0 };
@@ -136,7 +140,9 @@ const LabFly: React.FC<Props> = ({ graph, params, paramsVersion, task, x, color,
   // in addestramento. Cosi' se il browser rallenta (per esempio mentre i
   // worker addestrano) animazione di riferimento e corpo restano a tempo.
   const assistRef = useRef(assist);
-  assistRef.current = task === 'getup' ? assist : 0;
+  assistRef.current = assist;
+  walkScaleRef.current = walkScale;
+  if (simRef.current) simRef.current.ctl.setWalkScale(walkScale);
   useBeforePhysicsStep((w) => {
     const sim = simRef.current;
     if (!sim || paused) return;
@@ -145,7 +151,7 @@ const LabFly: React.FC<Props> = ({ graph, params, paramsVersion, task, x, color,
       sim.age += 1 / CONTROL_HZ;
     }
     sim.sub = (sim.sub + 1) % 4;
-    if (assistRef.current > 0) assistUp(sim.fb, assistRef.current, (w as any).timestep ?? 1 / 120, sim.ctl.assistHipY, sim.ctl.assistChestY, sim.ctl.assistCentre);
+    if (assistRef.current > 0) assistUp(sim.fb, assistRef.current, (w as any).timestep ?? 1 / 120, sim.ctl.assistHipY, sim.ctl.assistChestY, sim.ctl.assistCentre, sim.ctl.task === 'walk');
   });
 
   useFrame((_s, delta) => {

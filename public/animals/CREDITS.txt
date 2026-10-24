@@ -1,0 +1,2 @@
+fox.glb, horse.glb, bird.glb: rigged animals with animations from Mesh2Motion (https://github.com/Mesh2Motion/mesh2motion-app, static/animations/{fox,horse,bird}-animations.glb).
+License: CC0 1.0 Universal (LICENSE-CC0.MD of the mesh2motion-app repository: "All 3d models, blend files, rigs, animations").

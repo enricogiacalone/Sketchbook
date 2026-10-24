@@ -136,3 +136,21 @@ Tra una clip di prova e l'altra (e quando si toglie la prova) il manichino torna
 ## Laboratorio cervello mosca: corpo con 17 pezzi
 
 - `flyBrain/flyBody.ts`: `FLY_SEGMENTS` prende solo i pezzi che hanno una forma in `FLY_LEGACY_SHAPES` (i 17 con cui sono stati addestrati i cervelli). Il commit "locomotion" (17 ottobre 2026) ha aggiunto `Hand_L` e `Hand_R` a `ACTIVE_RAGDOLL_SEGMENTS`: nel corpo della mosca diventavano due pezzi in piu', con i loro giunti, e al primo passo di fisica Rapier andava in panico (`RuntimeError: unreachable`, poi "recursive use of an object"): il laboratorio non partiva piu'. Trovato per bisezione dei commit (funziona fino a 0685d11, rotto da 3b633d2). Regola: se si aggiungono pezzi al ragdoll del gioco, il corpo della mosca non li prende finche' non si aggiungono anche a `FLY_LEGACY_SHAPES` e si riaddestrano i cervelli (`FLY_BODY_VERSION`).
+
+## Laboratorio cervello mosca: aiuto per camminare (ottobre 2026)
+
+La mosca faceva fatica a camminare da zero (senza aiuto cade in ~1 s, punteggio ~0.08). Ora l'aiuto ("bretelle": molle su bacino e petto verso le altezze dell'animazione di riferimento) vale per tutti i compiti, non solo per l'alzarsi:
+
+- **Aiuto**: `assist` 0..1. Default: stare in piedi 0, camminare 1, alzarsi 1. Cala di 0.05 quando almeno il 66% degli episodi riesce, risale di 0.05 se non ne riesce nessuno (per stare in piedi non risale da 0). Per `stand` il baricentro e' anche tirato sopra il centro dei piedi (`centre`).
+- **Velocita'**: `walkScale` (solo camminare), parte a 0.5 e sale di 0.1 quando riescono ≥66% degli episodi, scende di 0.1 se nessuno (minimo 0.3, massimo 1). `FlyController.setWalkScale` scala sia la velocita' comandata sia il tempo dell'animazione.
+- **"Riuscito" camminando**: non caduta, testa >1.1 m, inclinazione <50°, avanzato ≥40% di `velocita'*secondi`.
+- Partenza da pesi di 'stand' (gia' c'era) e fase del passo come input (gia' c'era).
+- I file pesi salvano `assist` e `walkScale`; la tabella mostra "aiuto% / vel%".
+- Prova senza cervello (`npm run mosca:walkassist`): camminare a vel 0.5 aiuto 0 → cade sempre (0.08), aiuto 0.5 → cade (0.15), aiuto 1 → non cade (0.68). In piedi: aiuto 0 cade (0.13), aiuto 0.5 sta (0.89).
+- Non verificato: l'effetto sull'addestramento lungo (in browser ~20 s a generazione).
+
+Aggiornamento (dopo 290 generazioni senza differenza vero/rimescolato): l'aiuto per stare in piedi/camminare ora cala di 3 punti solo dopo due misure di fila riuscite (misura ogni 5 generazioni, 5 prove, soglia 60%), risale di 5 se non riesce mai; nella ricompensa del cammino l'avanzamento pesa 0.25 (posa 0.4, estremita' 0.2, altezza 0.15). I punteggi non sono confrontabili con quelli di prima: ripartire "Da zero".
+
+Camminavano piegate in avanti ("in obliquo"): le molle dell'aiuto controllavano solo l'altezza di bacino e petto, e la ricompensa non guardava il busto. Ora per il cammino l'aiuto tira anche il petto sopra il bacino (`assistUp(..., straight)`), la ricompensa ha un termine d'inclinazione del busto rispetto al riferimento (0.25) e il criterio "riuscito" accetta al massimo 35 gradi. Prova senza cervello a velocita' 0.5, aiuto 1: testa 1.36 m, 3 riusciti su 3 (prima testa 1.24, 0 su 3).
+
+Gambe che non si attraversano: `FLY_BODY_VERSION` 3. Coscia, stinco e piede di un lato ora urtano quelli dell'altro lato (`legGroups`/`groupsFor` in `flyBody.ts`: bit 10 per la sinistra, 11 per la destra, ognuno vede solo l'altro); tutti gli altri pezzi del ragdoll continuano a non toccarsi. I pesi salvati con versione 2 vengono ignorati (anche dalla mosca che combatte nel gioco, che senza pesi validi non usa il cervello): serve riaddestrare. Prova senza cervello invariata nell'ordine di grandezza (cammino aiuto 1: 0.70, 3/3 riusciti; in piedi aiuto 0.5: 0.89).

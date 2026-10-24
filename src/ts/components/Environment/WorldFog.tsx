@@ -7,6 +7,7 @@ import { getCurrentSite } from '../../lib/site';
 import { PLANET_RADIUS } from '../../lib/planetSurface';
 import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
 import { useStore } from '../../store';
+import { weather } from '../../lib/weather';
 
 // Atmospheric perspective -- "sistemiamo il cielo... nebbia atmosferica".
 // The city/terrain extend ~300 units from the origin with nothing at all
@@ -22,8 +23,10 @@ const UNDER_FOG = new THREE.Color('#0a5a6c');
 const NEON_FOG = new THREE.Color('#0c1c3d'); // nebbia blu della notte neon
 
 const SUNSET_TINT = new THREE.Color('#ffad66');
+const GREY_FOG = new THREE.Color('#9aa3ab'); // nebbia e pioggia: grigio chiaro (scuro di notte, vedi sotto)
 const _fp = new THREE.Vector3();
 const _fq = new THREE.Quaternion();
+const _gf = new THREE.Color();
 
 const WorldFog: React.FC = () => {
   const { scene } = useThree();
@@ -59,6 +62,8 @@ const WorldFog: React.FC = () => {
     // sott'acqua (lib/waterMaterial.ts): foschia fitta azzurro-verde
     const uw = spaceState.underwater;
     if (uw > 0.002) scratch.current.lerp(UNDER_FOG.clone().multiplyScalar(0.35 + 0.65 * dayFactor), uw);
+    // meteo (lib/weather.ts): pioggia e nebbia mattutina schiariscono e ingrigiscono la foschia
+    if (weather.grey > 0.002) scratch.current.lerp(_gf.copy(GREY_FOG).multiplyScalar(0.18 + 0.82 * dayFactor), weather.grey * (0.35 + 0.65 * dayFactor));
     fog.color.copy(scratch.current);
     // nello spazio non c'e' foschia (lib/space.ts)
     const air = spaceState.fog;
@@ -68,6 +73,7 @@ const WorldFog: React.FC = () => {
     _fp.set(state.camera.position.x, state.camera.position.y + PLANET_RADIUS + site.hN, state.camera.position.z).applyQuaternion(_fq.copy(site.quat).invert()).normalize();
     const away = Math.min(1, Math.max(0, (Math.acos(Math.min(1, Math.max(-1, _fp.y))) - 0.1) / 0.2));
     fog.density = 0.0055 * style.fogDensity * air * (0.5 - 0.2 * away * away * (3 - 2 * away));
+    fog.density *= weather.fogMul;
     fog.density = THREE.MathUtils.lerp(fog.density, 0.035, uw);
   });
 

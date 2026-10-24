@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
+import { weather } from '../../lib/weather';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -87,8 +88,11 @@ const Sky: React.FC = () => {
       FLAT_BG.copy(FLAT_NIGHT).lerp(FLAT_DAY.set(getPlanetStyle().fogTint), dayF).lerp(SPACE_BG, dark);
     }
     const st = getPlanetStyle();
-    sky.rayleigh.value = st.skyRayleigh * (0.15 + 0.85 * air);
-    sky.mieCoefficient.value = 0.005 * (0.1 + 0.9 * air);
+    // meteo (lib/weather.ts): con pioggia e nebbia il cielo diventa lattiginoso (piu' torbido, meno blu)
+    const gr = weather.grey;
+    sky.turbidity.value = st.skyTurbidity + 16 * gr;
+    sky.rayleigh.value = st.skyRayleigh * (0.15 + 0.85 * air) * (1 - 0.65 * gr);
+    sky.mieCoefficient.value = 0.005 * (0.1 + 0.9 * air) + 0.03 * gr * air;
     if (domeRef.current) {
       domeRef.current.position.copy(camera.position);
       domeRef.current.visible = dark > 0.002;

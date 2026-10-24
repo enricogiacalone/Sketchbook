@@ -43,7 +43,10 @@ const PUSHES = [
   { v: 50, label: 'forti (50 N·s)' },
 ];
 
-type Weights = FlyWeightsFile & { history?: GenStats[]; assist?: number; getupMethod?: number };
+type Weights = FlyWeightsFile & { history?: GenStats[]; assist?: number; walkScale?: number; getupMethod?: number };
+// aiuto di partenza quando si ricomincia (stare in piedi: nessuno, come prima): camminare parte con le bretelle e piano
+const DEFAULT_ASSIST: Record<FlyTask, number> = { stand: 0, walk: 1, getup: 1 };
+const DEFAULT_WALK_SCALE = 0.5;
 
 async function loadGraph(): Promise<FlyGraph> {
   const [j, b] = await Promise.all([
@@ -116,6 +119,8 @@ interface BrainRun {
   best: React.MutableRefObject<number>;
   // alzarsi: livello attuale della "mano che aiuta" (0..1)
   assist: React.MutableRefObject<number>;
+  // camminare: velocita' del riferimento (curriculum)
+  walkScale: React.MutableRefObject<number>;
   setParams: (p: Float32Array | null) => void;
   bumpVersion: () => void;
   setGen: (g: number) => void;
@@ -132,7 +137,8 @@ function useBrainRun(variant: BrainVariant): BrainRun {
   const status = useRef<LabFlyStatus>({ upFor: 0, episodes: 0, bestUp: 0 });
   const best = useRef(-Infinity);
   const assist = useRef(1);
-  return { variant, params, paramsVersion, gen, history, last, trainer, status, best, assist, setParams, bumpVersion: () => setPV((v) => v + 1), setGen, setHistory, setLast };
+  const walkScale = useRef(1);
+  return { variant, params, paramsVersion, gen, history, last, trainer, status, best, assist, walkScale, setParams, bumpVersion: () => setPV((v) => v + 1), setGen, setHistory, setLast };
 }
 
 // media delle ultime n misure del cervello (smussa il rumore degli episodi)
@@ -233,7 +239,8 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
       p = f.p;
       note = (oldGetup ? 'metodo vecchio, ' : w ? 'pesi vecchi, ' : '') + f.note;
     }
-    run.assist.current = t !== 'getup' ? 0 : d ? w!.assist ?? 1 : 1;
+    run.assist.current = d ? w!.assist ?? (t === 'getup' ? 1 : 0) : DEFAULT_ASSIST[t];
+    run.walkScale.current = t !== 'walk' ? 1 : d ? w!.walkScale ?? 1 : DEFAULT_WALK_SCALE;
     run.best.current = d ? w!.score : -Infinity;
     run.setParams(p.slice());
     run.bumpVersion();
@@ -260,7 +267,7 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
   const startRun = async (run: BrainRun, workers: number) => {
     if (!run.params || !layout) return;
     let tr = run.trainer.current;
-    const conf: LabConfig = { ...cfg, workers, task, brain: run.variant, assist: run.assist.current };
+    const conf: LabConfig = { ...cfg, workers, task, brain: run.variant, assist: run.assist.current, walkScale: run.walkScale.current };
     if (!tr || tr.workers.length !== workers || tr.cfg.brain !== run.variant) {
       tr?.dispose();
       tr = new LabTrainer(conf);
@@ -276,6 +283,7 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
     };
     tr.onGen = (st) => {
       run.assist.current = tr!.cfg.assist;
+      run.walkScale.current = tr!.cfg.walkScale;
       run.setGen(st.gen);
       run.setLast(st);
       run.setHistory(tr!.history.slice());
@@ -323,7 +331,8 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
       const { p, note } = await freshStart(b, task);
       notes.push(note);
       r.best.current = -Infinity;
-      r.assist.current = task === 'getup' ? 1 : 0;
+      r.assist.current = DEFAULT_ASSIST[task];
+      r.walkScale.current = task === 'walk' ? DEFAULT_WALK_SCALE : 1;
       r.setParams(p.slice());
       r.bumpVersion();
       r.setGen(0);
@@ -387,12 +396,12 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
                 const meta = BRAINS.find((x) => x.id === b)!;
                 return (
                   <LabFly key={b} graph={graphs[b]!} params={r.params} paramsVersion={r.paramsVersion} task={task} x={xOf(b)} color={meta.color}
-                    ghost={ghost} episodeSeconds={epSec} restartNonce={restartNonce} status={r.status} paused={false} pushNonce={pushNonce} autoPush={scenePushV} assist={r.assist.current} />
+                    ghost={ghost} episodeSeconds={epSec} restartNonce={restartNonce} status={r.status} paused={false} pushNonce={pushNonce} autoPush={scenePushV} assist={r.assist.current} walkScale={r.walkScale.current} />
                 );
               })}
               {withBaseline && (
                 <LabFly graph={graph} params={null} paramsVersion={0} task={task} x={xOf('none')} color="#6b7280"
-                  ghost={false} episodeSeconds={epSec} restartNonce={restartNonce} status={baseStatus} paused={false} pushNonce={pushNonce} autoPush={scenePushV} assist={0} />
+                  ghost={false} episodeSeconds={epSec} restartNonce={restartNonce} status={baseStatus} paused={false} pushNonce={pushNonce} autoPush={scenePushV} assist={0} walkScale={r0.walkScale.current} />
               )}
             </Physics>
           )}
@@ -462,7 +471,7 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
           </div>
           <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 6 }}>media delle ultime 5 misure di ogni cervello; i controlli sono mediati tra loro</div>
           <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-            <thead><tr style={{ opacity: 0.6 }}><td>cervello</td><td>gen</td><td>punteggio</td><td>in piedi (record)</td><td>{task === 'getup' ? 'aiuto' : 's/gen'}</td></tr></thead>
+            <thead><tr style={{ opacity: 0.6 }}><td>cervello</td><td>gen</td><td>punteggio</td><td>in piedi (record)</td><td>{task === 'getup' ? 'aiuto' : task === 'walk' ? 'aiuto / vel.' : 's/gen'}</td></tr></thead>
             <tbody>
               {active.map((b) => {
                 const r = runOf(b);
@@ -474,7 +483,7 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
                     <td>{r.gen}</td>
                     <td style={{ color: meta.color }}>{c !== null ? c.toFixed(3) : '-'}</td>
                     <td>{r.status.current.upFor.toFixed(1)} ({r.status.current.bestUp.toFixed(1)})</td>
-                    <td>{task === 'getup' ? <b style={{ color: r.assist.current <= 0 ? '#22c55e' : '#eee' }}>{Math.round(r.assist.current * 100)}%</b> : r.last ? r.last.sec.toFixed(1) : '-'}</td>
+                    <td>{task === 'getup' ? <b style={{ color: r.assist.current <= 0 ? '#22c55e' : '#eee' }}>{Math.round(r.assist.current * 100)}%</b> : task === 'walk' ? <b style={{ color: r.assist.current <= 0 && r.walkScale.current >= 1 ? '#22c55e' : '#eee' }}>{Math.round(r.assist.current * 100)}% / {Math.round(r.walkScale.current * 100)}%</b> : r.last ? r.last.sec.toFixed(1) : '-'}</td>
                   </tr>
                 );
               })}

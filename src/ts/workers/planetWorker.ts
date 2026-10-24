@@ -37,13 +37,14 @@ self.onmessage = (e: MessageEvent) => {
       (self as unknown as Worker).postMessage({ type: 'node', id: msg.id, buf }, [buf.pos.buffer, buf.nor.buffer, buf.col.buffer, buf.mpos.buffer, buf.mnor.buffer, buf.mcol.buffer, buf.wpos.buffer, buf.wcol.buffer]);
     } else if (msg.type === 'veg') {
       ensureProfile(msg.seed, msg.gridRadius);
-      const veg: Vegetation = { trees: [], rocks: [], tufts: [] };
+      const veg: Vegetation = { trees: [], rocks: [], tufts: [], houses: [] };
       const g = buildTileVegetation(msg.key, msg.seed, msg.what, veg);
       while (!g.next().done);
-      const trees = pack(veg.trees, false), rocks = pack(veg.rocks, false), tufts = pack(veg.tufts, true);
-      const tr: Transferable[] = [trees.m.buffer, trees.t.buffer, rocks.m.buffer, rocks.t.buffer, tufts.m.buffer, tufts.t.buffer];
+      const trees = pack(veg.trees, false), rocks = pack(veg.rocks, false), tufts = pack(veg.tufts, true), houses = pack(veg.houses, true);
+      const tr: Transferable[] = [trees.m.buffer, trees.t.buffer, rocks.m.buffer, rocks.t.buffer, tufts.m.buffer, tufts.t.buffer, houses.m.buffer, houses.t.buffer];
+      if (houses.c) tr.push(houses.c.buffer);
       if (tufts.c) tr.push(tufts.c.buffer);
-      (self as unknown as Worker).postMessage({ type: 'veg', id: msg.id, trees, rocks, tufts }, tr);
+      (self as unknown as Worker).postMessage({ type: 'veg', id: msg.id, trees, rocks, tufts, houses }, tr);
     }
   } catch (err) {
     (self as unknown as Worker).postMessage({ type: 'error', id: msg.id, error: String(err) });

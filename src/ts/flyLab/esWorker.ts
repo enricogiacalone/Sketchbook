@@ -48,7 +48,7 @@ self.onmessage = async (ev: MessageEvent) => {
         perturbed(base, job.seed, job.sign, msg.sigma, eps, theta);
         let s = 0, u = 0;
         for (const ep of msg.episodes as number[]) {
-          const r = env.runEpisode(theta, msg.task as Task, ep, msg.seconds, undefined, { push: msg.push ?? 0, assist: msg.assist ?? 0, rsi: !!msg.rsi });
+          const r = env.runEpisode(theta, msg.task as Task, ep, msg.seconds, undefined, { push: msg.push ?? 0, assist: msg.assist ?? 0, rsi: !!msg.rsi, walkScale: msg.walkScale ?? 1 });
           s += r.score;
           u += r.up ? 1 : 0;
           steps += r.steps;

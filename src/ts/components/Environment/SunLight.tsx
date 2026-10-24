@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getSunDirection, getDayFactor, getWarmth } from '../../lib/SunCycle';
+import { weather } from '../../lib/weather';
 import { spaceState } from '../../lib/space';
 import { useStore } from '../../store';
 
@@ -76,7 +77,7 @@ const SunLight: React.FC = () => {
       light.color.copy(lightColor);
       // Bright by day, off at night -- moonlight (below) and the
       // hemisphere ambient carry night visibility instead.
-      light.intensity = THREE.MathUtils.lerp(0, 2.0, dayFactor);
+      light.intensity = THREE.MathUtils.lerp(0, 2.0, dayFactor) * weather.sunMul; // (il meteo copre il sole: lib/weather.ts)
     }
 
     // "un po' di luce lunare" -- a second, cheap directional light (no

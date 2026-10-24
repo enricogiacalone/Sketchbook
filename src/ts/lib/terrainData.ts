@@ -8,7 +8,7 @@ export interface TerrainData {
   siteId: string;
   size: number;
   segments: number;
-  heights: Float32Array; // colonna-maggiore come Rapier: heights[col * (segments+1) + row], row = x, col = z
+  heights: Float32Array; // heights[col * (segments+1) + row], row = x, col = z (come i vertici). Al collider Rapier va la TRASPOSTA (Terrain.tsx)
   vertices: Float32Array;
   normals: Float32Array;
   colors: Float32Array;

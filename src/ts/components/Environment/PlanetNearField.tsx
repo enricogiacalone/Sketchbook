@@ -10,6 +10,8 @@ import { buildTileMesh, buildTileVegetation, makeTileBuffers, TILE_VERTS, type T
 import { requestVegetation, workerCapacity, workersAvailable } from '../../lib/planetWorkers';
 import { createTreeSource, registerTreeEntries, TreeBatches, usePlanetTreeTemplates, type TreeEntry } from './ParkTrees';
 import { COVER, COVER_KINDS } from './groundCover';
+import { getDayFactor, getSunDirection } from '../../lib/SunCycle';
+import { VILLAGE_MATERIALS, villageGeometry, villageHasGlow } from './villageModels';
 
 // La vegetazione vicina al pianeta, FISSA sul pianeta: alberi, rocce e prato (celle lat/lon, lib/globalGrid.ts). Si carica e si scarica a pezzetti attorno al punto
 // sotto la camera e non dipende dal sito su cui e' montato il mondo di gioco: cambiare sito (rebase del riferimento)
@@ -52,6 +54,7 @@ const makeGeo = (withNormal: boolean) => {
 const ROCK_GEO = new THREE.IcosahedronGeometry(1, 1);
 const ROCK_MAT = new THREE.MeshStandardMaterial({ color: '#8a8782', roughness: 0.95, flatShading: true });
 const ROCK_CAP = 120;
+const HOUSE_CAP = 128;
 
 const _gm = new THREE.Matrix4();
 const _g0 = new THREE.Vector3(0.001, 0.001, 0.001);
@@ -67,6 +70,7 @@ interface Tile {
   water: THREE.Mesh | null;
   rocks: THREE.InstancedMesh | null;
   cover: Array<{ kind: number; mesh: THREE.InstancedMesh; base: THREE.Matrix4[] }>;
+  houses: Array<{ kind: number; mesh: THREE.InstancedMesh }>;
   buf: TileBuffers | null;
   veg: Vegetation;
   unregisterTrees: (() => void) | null;
@@ -92,6 +96,7 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     poolWater: [] as THREE.Mesh[],
     poolRocks: [] as THREE.InstancedMesh[],
     poolCover: {} as Record<number, THREE.InstancedMesh[]>,
+    poolHouses: {} as Record<number, THREE.InstancedMesh[]>,
     poolBuf: [] as TileBuffers[],
     inflight: 0,
     job: null as null | { tile: Tile; gen: Generator<void, void, void>; kind: 'mesh' | 'veg' | 'tufts' },
@@ -129,6 +134,11 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     if (tile.rocks) S.poolRocks.push(tile.rocks);
     for (const c of tile.cover) (S.poolCover[c.kind] ??= []).push(c.mesh);
     tile.cover = [];
+    for (const h of tile.houses) {
+      group.current?.remove(h.mesh);
+      (S.poolHouses[h.kind] ??= []).push(h.mesh);
+    }
+    tile.houses = [];
     if (tile.buf) S.poolBuf.push(tile.buf);
     S.tiles.delete(tile.key);
   };
@@ -185,6 +195,32 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
   const finishVeg = (tile: Tile) => {
     const S = st.current;
     registerTrees(tile);
+    // villaggi: un pezzo grafico instanziato per tipo (case, fienili, chiesa, recinti, lampioni...)
+    if (tile.veg.houses.length > 0 && tile.houses.length === 0) {
+      const byKind = new Map<number, typeof tile.veg.houses>();
+      for (const h of tile.veg.houses) (byKind.get(h.t) ?? byKind.set(h.t, []).get(h.t)!).push(h);
+      const col = new THREE.Color();
+      for (const kind of byKind.keys()) {
+        const items = (byKind.get(kind) ?? []).slice(0, HOUSE_CAP);
+        if (items.length === 0) continue;
+        const m = (S.poolHouses[kind] ??= []).pop() ?? (() => {
+          const im = new THREE.InstancedMesh(villageGeometry(kind), villageHasGlow(kind) ? VILLAGE_MATERIALS : VILLAGE_MATERIALS[0], HOUSE_CAP);
+          im.frustumCulled = false;
+          im.castShadow = true;
+          im.receiveShadow = true;
+          return im;
+        })();
+        items.forEach((h, i) => {
+          m.setMatrixAt(i, h.m);
+          m.setColorAt(i, col.setHex(h.color ?? 0xffffff));
+        });
+        m.count = items.length;
+        m.instanceMatrix.needsUpdate = true;
+        if (m.instanceColor) m.instanceColor.needsUpdate = true;
+        tile.houses.push({ kind, mesh: m });
+        group.current?.add(m);
+      }
+    }
     const rocks = tile.veg.rocks.slice(0, ROCK_CAP);
     if (rocks.length > 0) {
       const m = instanced(S.poolRocks, ROCK_GEO, ROCK_MAT, ROCK_CAP, true);
@@ -238,6 +274,9 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
     const g = group.current;
     if (!g) return;
     const S = st.current;
+    // le finestre del villaggio (e le lanterne) si accendono col buio: il sole sotto l'orizzonte le porta a piena luce
+    const night = 1 - getDayFactor(getSunDirection(state.clock.elapsedTime).y);
+    (VILLAGE_MATERIALS[1] as THREE.MeshStandardMaterial).emissiveIntensity = 0.04 + 1.15 * night;
     g.position.set(p.center[0], p.center[1], p.center[2]);
     g.quaternion.copy(siteFrame.quat);
     S.qi.copy(siteFrame.quat).invert();
@@ -323,7 +362,7 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
       let kind: 'mesh' | 'veg' | 'tufts' = 'mesh';
       for (const k of S.want) {
         if (!S.tiles.has(k)) {
-          const tile: Tile = { key: k, state: 'veg', terrain: null, water: null, rocks: null, cover: [], buf: null, veg: { trees: [], rocks: [], tufts: [] }, unregisterTrees: null, treesRegistered: false, tuftsDone: false, born: 0, rockBase: [], rockBorn: 0, tuftBorn: 0, busy: false };
+          const tile: Tile = { key: k, state: 'veg', terrain: null, water: null, rocks: null, cover: [], houses: [], buf: null, veg: { trees: [], rocks: [], tufts: [], houses: [] }, unregisterTrees: null, treesRegistered: false, tuftsDone: false, born: 0, rockBase: [], rockBorn: 0, tuftBorn: 0, busy: false };
           tile.state = 'veg'; // il terreno e l'acqua li disegna il quadtree (PlanetQuadtree.tsx): qui solo la vegetazione
           S.tiles.set(k, tile);
           continue;
@@ -391,7 +430,7 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
         } else if (kind === 'veg') {
           S.job = { tile: next, gen: buildTileVegetation(next.key, seed, 'base', next.veg), kind };
         } else {
-          const extra: Vegetation = { trees: [], rocks: [], tufts: [] };
+          const extra: Vegetation = { trees: [], rocks: [], tufts: [], houses: [] };
           const t = next;
           S.job = {
             tile: t,

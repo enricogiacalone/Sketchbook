@@ -66,8 +66,8 @@ const smoothstep = (a: number, b: number, v: number) => {
   return t * t * (3 - 2 * t);
 };
 
-// quota (m) sulla direzione unitaria d = (x,y,z) del pianeta `seed` (rispetto al livello del mare)
-export function surfaceHeight(seed: number, x: number, y: number, z: number): number {
+// quota (m) sulla direzione unitaria d = (x,y,z) del pianeta `seed` (rispetto al livello del mare), senza i villaggi
+function surfaceHeightBase(seed: number, x: number, y: number, z: number): number {
   const s = seed & 0x7fffffff;
   // continenti: dove il campo e' alto c'e' terra
   const cont = fbm(x * 1.7 + 11.3, y * 1.7, z * 1.7, s, 4); // ~0.2..0.8
@@ -118,6 +118,130 @@ export function surfaceHeight(seed: number, x: number, y: number, z: number): nu
   const riverA = 1 - smoothstep(0.004, 0.012, Math.abs(q + wig));
   if (lakeA > 0) h = h + (Math.min(h, -12) - h) * lakeA;
   if (riverA > 0) h = h + (Math.min(h, -6) - h) * riverA;
+  return h;
+}
+
+// --- villaggi --------------------------------------------------------------------------------------------------
+// Ogni pianeta ha alcuni villaggi sparsi (come la citta', una zolla piatta sul piano tangente al loro centro, che il
+// pianeta include nella sua superficie, raccordata al rilievo). I siti si scelgono dal seme su terra asciutta e poco
+// ripida; case e strade stanno in lib/village.ts.
+export interface VillageSite {
+  id: number;
+  x: number; y: number; z: number; // direzione unitaria del centro
+  h: number; // quota (m) della zolla
+  yaw: number; // orientamento delle strade
+  flat: number; // m: raggio della zolla piatta
+}
+export const VILLAGE_BLEND = 55; // m: raccordo al rilievo oltre la zolla
+const VILLAGE_FLAT = 118;
+// base ortonormale tangente in d (e1 = d x u, e2 = d x e1, con u un asse non parallelo a d): [e1, e2]
+export function tangentBasis(dx: number, dy: number, dz: number): [number, number, number, number, number, number] {
+  const ux = Math.abs(dy) > 0.9 ? 1 : 0, uy = Math.abs(dy) > 0.9 ? 0 : 1;
+  let e1x = -dz * uy, e1y = dz * ux, e1z = dx * uy - dy * ux;
+  const l1 = Math.hypot(e1x, e1y, e1z) || 1;
+  e1x /= l1; e1y /= l1; e1z /= l1;
+  return [e1x, e1y, e1z, dy * e1z - dz * e1y, dz * e1x - dx * e1z, dx * e1y - dy * e1x];
+}
+const villageCache = new Map<number, VillageSite[]>();
+export function villagesOf(seed: number): VillageSite[] {
+  const key = seed & 0x7fffffff;
+  let list = villageCache.get(key);
+  if (list) return list;
+  list = [];
+  villageCache.set(key, list); // (prima di cercare: surfaceHeightBase non guarda i villaggi, ma cosi' non c'e' ricorsione possibile)
+  const want = 6;
+  const ringR = 150 / PLANET_RADIUS;
+  for (let a = 0; a < 2500 && list.length < want; a++) {
+    // il primo villaggio sta a ~1,3 km dalla citta' (si vede salendo sulle colline), gli altri ovunque
+    let dx: number, dy: number, dz: number;
+    if (list.length === 0 && a < 700) {
+      const th = 0.36 + hash3(key, a, 3, 555) * 0.22, az = hash3(key, a, 4, 555) * Math.PI * 2;
+      dx = Math.sin(th) * Math.cos(az); dy = Math.cos(th); dz = Math.sin(th) * Math.sin(az);
+    } else {
+      dy = 1 - 2 * hash3(key, a, 1, 555);
+      const az = hash3(key, a, 2, 555) * Math.PI * 2, rr = Math.sqrt(Math.max(0, 1 - dy * dy));
+      dx = rr * Math.cos(az); dz = rr * Math.sin(az);
+    }
+    if (Math.abs(dy) > 0.82 || dy > 0.9) continue; // niente calotte polari ne' pianura della citta'
+    if (list.some((v) => Math.acos(Math.min(1, v.x * dx + v.y * dy + v.z * dz)) < 0.22)) continue;
+    // terra asciutta e poco ripida nel centro e su un anello di 150 m
+    const h0 = surfaceHeightBase(seed, dx, dy, dz);
+    if (h0 < 9 || h0 > 110) continue;
+    const [e1x, e1y, e1z, e2x, e2y, e2z] = tangentBasis(dx, dy, dz);
+    let ok = true, sum = h0;
+    for (let k = 0; k < 12 && ok; k++) {
+      const ang = (k / 12) * Math.PI * 2;
+      let px = dx + (Math.cos(ang) * e1x + Math.sin(ang) * e2x) * ringR, py = dy + (Math.cos(ang) * e1y + Math.sin(ang) * e2y) * ringR, pz = dz + (Math.cos(ang) * e1z + Math.sin(ang) * e2z) * ringR;
+      const l = Math.hypot(px, py, pz);
+      px /= l; py /= l; pz /= l;
+      const h = surfaceHeightBase(seed, px, py, pz);
+      if (h < 5 || Math.abs(h - h0) > 30) ok = false;
+      sum += h;
+    }
+    if (!ok) continue;
+    list.push({ id: list.length, x: dx, y: dy, z: dz, h: sum / 13, yaw: hash3(key, a, 5, 555) * Math.PI, flat: VILLAGE_FLAT });
+  }
+  return list;
+}
+// villaggio piu' vicino (se la direzione e' entro `range` metri dal suo centro): la distanza in metri
+export function villageNear(seed: number, x: number, y: number, z: number, range: number): { v: VillageSite; dist: number } | null {
+  const vs = villagesOf(seed);
+  const cosR = Math.cos(range / PLANET_RADIUS);
+  for (const v of vs) {
+    const dot = v.x * x + v.y * y + v.z * z;
+    if (dot > cosR) return { v, dist: Math.acos(Math.min(1, dot)) * PLANET_RADIUS };
+  }
+  return null;
+}
+
+// --- rovine ---------------------------------------------------------------------------------------------------------------
+// Qualche rovina antica per pianeta (muri spezzati, colonne, un arco), su terra asciutta lontano dai villaggi e dalla citta'.
+// Non spianano il terreno: ogni pezzo sta sulla quota vera (lib/village.ts `ruinItems`, nearTile.ts).
+export interface RuinSite { id: number; x: number; y: number; z: number; yaw: number; h: number }
+const ruinCache = new Map<number, RuinSite[]>();
+export function ruinsOf(seed: number): RuinSite[] {
+  const key = seed & 0x7fffffff;
+  let list = ruinCache.get(key);
+  if (list) return list;
+  list = [];
+  ruinCache.set(key, list);
+  const vs = villagesOf(seed);
+  for (let a = 0; a < 1800 && list.length < 5; a++) {
+    const dy = 1 - 2 * hash3(key, a, 11, 777), az = hash3(key, a, 12, 777) * Math.PI * 2, rr = Math.sqrt(Math.max(0, 1 - dy * dy));
+    const dx = rr * Math.cos(az), dz = rr * Math.sin(az);
+    if (dy > 0.93 || Math.abs(dy) > 0.85) continue; // non sulla citta' ne' sui ghiacci
+    if (vs.some((v) => Math.acos(Math.min(1, v.x * dx + v.y * dy + v.z * dz)) < 0.12)) continue;
+    if (list.some((r) => Math.acos(Math.min(1, r.x * dx + r.y * dy + r.z * dz)) < 0.3)) continue;
+    const h0 = surfaceHeightBase(seed, dx, dy, dz);
+    if (h0 < 10 || h0 > 150) continue;
+    const [e1x, e1y, e1z, e2x, e2y, e2z] = tangentBasis(dx, dy, dz);
+    let ok = true;
+    for (let k = 0; k < 8 && ok; k++) {
+      const ang = (k / 8) * Math.PI * 2, rad = 30 / PLANET_RADIUS;
+      const px = dx + (Math.cos(ang) * e1x + Math.sin(ang) * e2x) * rad, py = dy + (Math.cos(ang) * e1y + Math.sin(ang) * e2y) * rad, pz = dz + (Math.cos(ang) * e1z + Math.sin(ang) * e2z) * rad;
+      const l = Math.hypot(px, py, pz);
+      const h = surfaceHeightBase(seed, px / l, py / l, pz / l);
+      if (h < 5 || Math.abs(h - h0) > 9) ok = false;
+    }
+    if (ok) list.push({ id: list.length, x: dx, y: dy, z: dz, yaw: hash3(key, a, 13, 777) * Math.PI, h: h0 });
+  }
+  return list;
+}
+export function ruinNear(seed: number, x: number, y: number, z: number, range: number): boolean {
+  const cosR = Math.cos(range / PLANET_RADIUS);
+  return ruinsOf(seed).some((r) => r.x * x + r.y * y + r.z * z > cosR);
+}
+
+export function surfaceHeight(seed: number, x: number, y: number, z: number): number {
+  let h = surfaceHeightBase(seed, x, y, z);
+  const vn = villageNear(seed, x, y, z, VILLAGE_FLAT + VILLAGE_BLEND);
+  if (vn) {
+    const { v, dist } = vn;
+    const a = dist / PLANET_RADIUS;
+    const flat = v.h + (PLANET_RADIUS + v.h) * (1 / Math.cos(a) - 1);
+    const w = 1 - smoothstep(v.flat, v.flat + VILLAGE_BLEND, dist);
+    h = h + (flat - h) * w;
+  }
   return h;
 }
 

@@ -3,6 +3,8 @@ import { PLANET_RADIUS as R, hEff, noise3, seaColor, surfaceColor, surfaceHeight
 import { GRID, TILES, tileOfDir, tileParts, tileVertexDir, faceDir } from './cubeTiles';
 import { cellDir, cellOf, hashKey, makeCell } from './globalGrid';
 import { planetCatalog } from './planet';
+import { roadMask, ruinItemPlacement, ruinItems, villageBlocked, villageFrame, villageGround, villageItemMatrix, villageItemPos, villageItems, villageLocal } from './village';
+import { villagesOf, villageNear, tangentBasis, ruinsOf, ruinNear } from './planetSurface';
 
 // Costruzione (a pezzetti, con un generatore) delle tessere del pianeta e della loro vegetazione. Tutto nel riferimento
 // del PIANETA: nessuna dipendenza dal sito, quindi nessun salto cambiando sito.
@@ -128,6 +130,7 @@ export interface Vegetation {
   trees: VegItem[];
   rocks: VegItem[];
   tufts: VegItem[];
+  houses: VegItem[]; // villaggi: t = tipo (VK), color = tinta; m include la scala
 }
 
 export const TREE_CELL = 8.4;
@@ -202,12 +205,15 @@ function lineDist(seed: number, sx: number, sy: number, sz: number, scale: numbe
 }
 // 0..1: quanto sentiero c'e' nel punto (direzione unitaria)
 export function pathMask(seed: number, dx: number, dy: number, dz: number): number {
+  const rm = roadMask(seed, dx, dy, dz);
+  if (rm > 0.98) return 1;
   const sx = dx * R, sy = dy * R, sz = dz * R;
   const ps = (seed ^ 0x9a71) | 0;
   const wob = (noise3(sx / 55, sy / 55, sz / 55, ps + 5) - 0.5) * 7; // i bordi ondeggiano
   const d1 = lineDist(seed ^ 0x3c1d, sx, sy, sz, PATH_MAIN, 7.3) + wob;
   // (bordo morbido: i vertici del terreno sono ogni ~4.6 m, un bordo netto farebbe i gradini)
   let m = 1 - smooth(1.2, 6.0, d1);
+  m = Math.max(m, rm);
   // viottoli: solo dove un rumore largo lo permette
   if (m < 1) {
     const on = noise3(sx / 400 + 2, sy / 400, sz / 400, ps + 9);
@@ -234,6 +240,70 @@ function speciesAt(h: number, a: number, b: number): number {
   // latifoglie: querce (4-7) in basso, frassini e pioppi (0-3) piu' su
   const oak = 1 - smooth(20, 80, h);
   return b < oak ? 4 + Math.floor((b / Math.max(0.01, oak)) * 4) % 4 : Math.floor(((b - oak) / Math.max(0.01, 1 - oak)) * 4) % 4;
+}
+
+
+// --- ponti ---------------------------------------------------------------------------------------------------------
+// Dove un sentiero attraversa l'acqua (fiume o lago stretto) c'e' un ponte di legno. Si cerca per tessera su una griglia di
+// BRIDGE_GRID m: dove il sentiero e' forte e il terreno e' sotto il livello del mare si segue la direzione del sentiero nei due
+// versi fino alla terra; se il tratto e' < BRIDGE_MAX m si piazza un ponte (kind BRIDGE_BASE + lunghezza/4) al centro, appartiene
+// alla tessera che contiene il centro (niente doppioni). Il piano del ponte e' tangente: quota = riva piu' alta + 0.4 m.
+export const BRIDGE_BASE = 200; // kind = BRIDGE_BASE + b: ponte lungo 4*b metri (b = 3..22); sopra i tipi del villaggio (< 32 * 4)
+export const BRIDGE_WIDTH = 4.2;
+const BRIDGE_GRID = 10;
+const BRIDGE_MAX = 78;
+const BRIDGE_STEP = 2.5;
+interface Bridge { c: THREE.Vector3; t: THREE.Vector3; deck: number; len: number }
+const _bd = new THREE.Vector3(), _bp = new THREE.Vector3(), _bt = new THREE.Vector3();
+function offsetDir(d: THREE.Vector3, e1: number[], e2: number[], ang: number, dist: number, out: THREE.Vector3): THREE.Vector3 {
+  const k = dist / R, c = Math.cos(ang) * k, s = Math.sin(ang) * k;
+  return out.set(d.x + e1[0] * c + e2[0] * s, d.y + e1[1] * c + e2[1] * s, d.z + e1[2] * c + e2[2] * s).normalize();
+}
+function findBridge(seed: number, d: THREE.Vector3): Bridge | null {
+  const b = tangentBasis(d.x, d.y, d.z);
+  const e1 = [b[0], b[1], b[2]], e2 = [b[3], b[4], b[5]];
+  // direzione del sentiero: l'angolo dove la maschera e' alta da entrambi i lati
+  let best = -1;
+  let ang = 0;
+  for (let k = 0; k < 12; k++) {
+    const a = (k / 12) * Math.PI;
+    const m = pathMask(seed, ...(offsetDir(d, e1, e2, a, 12, _bp).toArray() as [number, number, number])) + pathMask(seed, ...(offsetDir(d, e1, e2, a + Math.PI, 12, _bp).toArray() as [number, number, number]));
+    if (m > best) { best = m; ang = a; }
+  }
+  if (best < 1.0) return null;
+  // tra qualche angolo vicino alla direzione del sentiero si prende l'attraversamento piu' corto (il ponte taglia il fiume
+  // quasi dritto invece di seguirlo di sbieco); verso la terra, nei due versi
+  let ends: Array<{ s: number; h: number }> | null = null;
+  let span = Infinity;
+  let angUsed = ang;
+  for (const da of [0, -0.26, 0.26, -0.52, 0.52]) {
+    const e: Array<{ s: number; h: number }> = [];
+    for (const sign of [1, -1]) {
+      let found: { s: number; h: number } | null = null;
+      for (let s = BRIDGE_STEP; s <= BRIDGE_MAX / 2 + 6; s += BRIDGE_STEP) {
+        offsetDir(d, e1, e2, ang + da, sign * s, _bp);
+        const h = surfaceHeight(seed, _bp.x, _bp.y, _bp.z);
+        if (h > 1.4) { found = { s: sign * s, h }; break; }
+      }
+      if (!found) break;
+      e.push(found);
+    }
+    if (e.length < 2) continue;
+    const sp = Math.abs(e[0].s - e[1].s);
+    if (sp < span - 1) { span = sp; ends = e; angUsed = ang + da; }
+  }
+  if (!ends) return null;
+  ang = angUsed;
+  if (span < 6 || span > BRIDGE_MAX) return null;
+  const mid = (ends[0].s + ends[1].s) / 2;
+  const c = offsetDir(d, e1, e2, ang, mid, new THREE.Vector3());
+  // la tangente al centro (verso il bordo '+')
+  offsetDir(d, e1, e2, ang, mid + 1, _bd);
+  _bt.copy(_bd).sub(c);
+  _bt.addScaledVector(c, -_bt.dot(c)).normalize();
+  // le rive: la quota piu' alta + 0.4 m (e almeno 2.2 m sull'acqua)
+  const deck = Math.max(2.2, Math.max(ends[0].h, ends[1].h) + 0.4);
+  return { c, t: _bt.clone(), deck, len: span + 5 };
 }
 
 // alberi e rocce (e, se `withTufts`, prato) di una tessera, per cella della griglia lat/lon del pianeta
@@ -268,11 +338,71 @@ export function* buildTileVegetation(key: number, seed: number, what: 'base' | '
     }
   };
 
+  // villaggi: case e arredi di questa tessera (le posizioni sono nel piano tangente al centro del villaggio)
+  if (what === 'base') {
+    for (const v of villagesOf(seed)) {
+      const fr = villageFrame(v, seed);
+      for (const it of villageItems(seed, v)) {
+        villageItemPos(it, fr, _pos);
+        const l = _pos.length();
+        if (tileOfDir(_pos.x / l, _pos.y / l, _pos.z / l) !== key) continue;
+        const m = villageItemMatrix(it, fr);
+        out.houses.push({ m, x: _pos.x, y: _pos.y, z: _pos.z, t: it.kind, color: it.tint });
+      }
+    }
+  }
+  // rovine: ogni pezzo alla quota vera del terreno
+  if (what === 'base') {
+    const rd = new THREE.Vector3(), rm = new THREE.Matrix4();
+    for (const r of ruinsOf(seed)) {
+      for (const it of ruinItems(seed, r)) {
+        if (!ruinItemPlacement(seed, r, it, rm, rd)) continue;
+        if (tileOfDir(rd.x, rd.y, rd.z) !== key) continue;
+        const e = rm.elements;
+        out.houses.push({ m: rm.clone(), x: e[12], y: e[13], z: e[14], t: it.kind, color: it.tint });
+      }
+    }
+  }
+  // ponti: dove un sentiero attraversa l'acqua
+  if (what === 'base') {
+    const n = Math.ceil((tileLen * 1.05) / BRIDGE_GRID);
+    const done = new Set<string>();
+    const centers: THREE.Vector3[] = [];
+    const bd = new THREE.Vector3();
+    for (let sj = 0; sj < n; sj++) {
+      for (let si = 0; si < n; si++) {
+        faceDir(face, (i + (si + 0.5) / n) / TILES, (j + (sj + 0.5) / n) / TILES, bd);
+        if (pathMask(seed, bd.x, bd.y, bd.z) < 0.3) continue;
+        if (surfaceHeight(seed, bd.x, bd.y, bd.z) > -0.3) continue; // solo dove c'e' acqua
+        if (inCityRect(seed, bd.x, bd.y, bd.z)) continue;
+        // vicino a un ponte gia' trovato in questa tessera: niente doppioni
+        if (centers.some((c) => c.distanceToSquared(bd) < (100 / R) ** 2)) continue;
+        const br = findBridge(seed, bd);
+        if (!br) continue;
+        if (tileOfDir(br.c.x, br.c.y, br.c.z) !== key) continue;
+        const k = `${Math.round(br.c.x * R / 8)},${Math.round(br.c.y * R / 8)},${Math.round(br.c.z * R / 8)}`;
+        if (done.has(k)) continue;
+        done.add(k);
+        centers.push(br.c.clone());
+        const bucket = Math.min(22, Math.max(3, Math.ceil(br.len / 4)));
+        const rad = R + br.deck;
+        const x = new THREE.Vector3().crossVectors(br.c, br.t);
+        const m = new THREE.Matrix4().makeBasis(x, br.c, br.t).setPosition(br.c.x * rad, br.c.y * rad, br.c.z * rad);
+        out.houses.push({ m, x: br.c.x * rad, y: br.c.y * rad, z: br.c.z * rad, t: BRIDGE_BASE + bucket, color: 0xffffff });
+      }
+      if (performance.now() - t0 > BUDGET_MS) {
+        yield;
+        t0 = performance.now();
+      }
+    }
+  }
   // alberi e rocce
   if (what === 'base') yield* drive(TREE_CELL, (c, dd, h) => {
     const info = surfaceInfo(seed, dd.x, dd.y, dd.z, h);
     if (info.h < 3) return; // acqua / spiaggia
     if (pathMask(seed, dd.x, dd.y, dd.z) > 0.1) return; // i sentieri restano liberi
+    if (villageNear(seed, dd.x, dd.y, dd.z, 135)) return; // niente alberi ne' rocce dentro il villaggio
+    if (ruinNear(seed, dd.x, dd.y, dd.z, 16)) return; // le rovine restano libere (l'erba invece le copre)
     const k = c.key;
     const roll = hashKey(k, 3, rseed);
     const rad = R + hEff(h);
@@ -307,6 +437,11 @@ export function* buildTileVegetation(key: number, seed: number, what: 'base' | '
     const patch = noise3(sx / 35, sy / 35, sz / 35, tseed + 2) * 0.7 + noise3(sx / 9, sy / 9, sz / 9, tseed + 3) * 0.3;
     const pm = pathMask(seed, dd.x, dd.y, dd.z);
     if (pm > 0.35) return;
+    const vl = villageLocal(seed, dd.x, dd.y, dd.z, 125);
+    if (vl) {
+      // nel villaggio l'erba cresce solo fuori dalle strade e dalle case, piu' rada
+      if (villageGround(seed, dd.x, dd.y, dd.z) > 0.12 || hashKey(k, 12, tseed) > 0.45 || villageBlocked(seed, vl.v, vl.u, vl.w, 1.8)) return;
+    }
     // (soglia piu' bassa di prima: il prato copre di piu'; ai bordi dei sentieri si dirada)
     if (hashKey(k, 4, tseed) > Math.max(0, patch - 0.04) * 3.9 * (1 - pm * 2)) return;
     const info = surfaceInfo(seed, dd.x, dd.y, dd.z, h);

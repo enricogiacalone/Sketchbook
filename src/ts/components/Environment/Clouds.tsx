@@ -1,4 +1,5 @@
 import React, { useRef, useMemo, useEffect } from 'react';
+import { weather } from '../../lib/weather';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { getPlanetStyle } from '../../lib/planet';
@@ -70,6 +71,7 @@ const _basis = new THREE.Matrix4();
 const _spin = new THREE.Matrix4();
 const _scale = new THREE.Matrix4();
 const _m = new THREE.Matrix4();
+const _greyCloud = new THREE.Color('#6f747a');
 const _tint = new THREE.Color();
 const _axis = new THREE.Vector3();
 const _qw = new THREE.Quaternion();
@@ -133,6 +135,8 @@ const Clouds: React.FC = () => {
     const warmth = getWarmth(sun.y);
     _tint.copy(DAY_COLOR).lerp(SUNSET_COLOR, warmth * 0.8);
     material.color.copy(NIGHT_COLOR).lerp(_tint, day);
+    // meteo: nuvole grigie con pioggia e nebbia (lib/weather.ts)
+    if (weather.grey > 0.01) material.color.lerp(_greyCloud, weather.grey * 0.75 * (0.3 + 0.7 * day));
 
     // le nuvole stanno sul PIANETA (celle lat/lon, lib/globalGrid.ts) e scorrono col vento (rotazione del pianeta intorno a
     // un asse orizzontale dal seme): la stessa nuvola e' sempre nello stesso punto, qualunque sito sia montato

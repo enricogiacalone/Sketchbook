@@ -15,6 +15,8 @@ export interface GenStats {
   // misura del centro, frazione di prove in cui si e' alzato
   assist?: number;
   up?: number | null;
+  // camminare: velocita' del riferimento in questa generazione (curriculum, 0.2..1)
+  walkScale?: number;
   sec: number;
   stepsPerSec: number;
 }
@@ -24,8 +26,10 @@ export interface LabConfig {
   brain: BrainVariant;
   // spinte casuali durante gli episodi (N*s, 0 = niente)
   push: number;
-  // alzarsi: livello della "mano che aiuta" (0..1), si aggiorna da solo
+  // livello dell'aiuto (0..1), si aggiorna da solo: alzarsi = la "mano che aiuta"; stare in piedi e camminare = le "bretelle"
   assist: number;
+  // camminare: velocita' del riferimento (0.2..1): sale da sola quando senza aiuto cammina
+  walkScale: number;
   pop: number;
   sigma: number;
   lr: number;
@@ -73,7 +77,7 @@ export class LabTrainer {
   // punteggio del corpo SENZA cervello (parametri iniziali = uscite a zero)
   // sugli stessi episodi usati per il "centro": la riga di riferimento
   async baseline(theta0: Float32Array): Promise<number> {
-    const r = await this.evalJobs(theta0, [{ seed: 0, sign: 1 }], [1005, 2005, 3005], false, 0);
+    const r = await this.evalJobs(theta0, [{ seed: 0, sign: 1 }], [1005, 2005, 3005], false, 0, 1);
     return r.scores[0];
   }
 
@@ -84,7 +88,7 @@ export class LabTrainer {
   }
 
   // rsi: partenze a meta' (solo per imparare); assist: aiuto per alzarsi
-  private evalJobs(theta: Float32Array, jobs: { seed: number; sign: number }[], episodes: number[], rsi: boolean, assist: number) {
+  private evalJobs(theta: Float32Array, jobs: { seed: number; sign: number }[], episodes: number[], rsi: boolean, assist: number, walkScale = 1) {
     const W = this.workers;
     const chunks: { seed: number; sign: number }[][] = W.map(() => []);
     jobs.forEach((j, i) => chunks[i % W.length].push(j));
@@ -106,7 +110,7 @@ export class LabTrainer {
               }
             };
             w.addEventListener('message', handler);
-            w.postMessage({ type: 'eval', id, theta: theta.buffer.slice(0), jobs: chunks[wi], sigma: this.cfg.sigma, task: this.cfg.task, episodes, seconds: this.cfg.seconds, push: this.cfg.push, assist, rsi });
+            w.postMessage({ type: 'eval', id, theta: theta.buffer.slice(0), jobs: chunks[wi], sigma: this.cfg.sigma, task: this.cfg.task, episodes, seconds: this.cfg.seconds, push: this.cfg.push, assist, rsi, walkScale });
           })
       )
     ).then((res) => {
@@ -121,6 +125,8 @@ export class LabTrainer {
   }
 
   // una generazione
+  private upStreak = 0;
+
   async step(): Promise<GenStats> {
     const opt = this.opt!;
     opt.sigma = this.cfg.sigma;
@@ -131,19 +137,35 @@ export class LabTrainer {
     const seeds = generationSeeds(g, pairs);
     const jobs = seeds.flatMap((s) => [{ seed: s, sign: 1 }, { seed: s, sign: -1 }]);
     const getup = this.cfg.task === 'getup';
-    const assist = getup ? this.cfg.assist : 0;
-    const { scores, steps } = await this.evalJobs(opt.theta, jobs, [g * 31 + 1, g * 31 + 2], getup, assist);
+    const assist = this.cfg.assist;
+    const walkScale = this.cfg.task === 'walk' ? this.cfg.walkScale : 1;
+    const { scores, steps } = await this.evalJobs(opt.theta, jobs, [g * 31 + 1, g * 31 + 2], getup, assist, walkScale);
     opt.step(seeds, scores);
     let centre: number | null = null;
     let up: number | null = null;
     let extra = 0;
     if (g % 5 === 0) {
       // il centro parte sempre sdraiato (niente partenze a meta')
-      const r = await this.evalJobs(opt.theta, [{ seed: 0, sign: 1 }], [1000 + g, 2000 + g, 3000 + g], false, assist);
+      const r = await this.evalJobs(opt.theta, [{ seed: 0, sign: 1 }], getup ? [1000 + g, 2000 + g, 3000 + g] : [1000 + g, 2000 + g, 3000 + g, 4000 + g, 5000 + g], false, assist, walkScale);
       centre = r.scores[0];
       up = r.ups[0];
       extra = r.steps;
       if (getup) this.cfg.assist = nextAssist(this.cfg.assist, up);
+      else if (this.cfg.assist > 0) {
+        // stare in piedi / camminare (l'aiuto non risale da zero): cala di 3 punti solo dopo due misure di fila
+        // riuscite (5 prove, >=60%), cosi' l'ottimizzatore fa in tempo a seguire; risale di 5 se non riesce mai
+        if ((up ?? 0) >= 0.6) {
+          if (++this.upStreak >= 2) { this.cfg.assist = Math.max(0, Math.round((this.cfg.assist - 0.03) * 100) / 100); this.upStreak = 0; }
+        } else {
+          this.upStreak = 0;
+          if ((up ?? 0) <= 0) this.cfg.assist = Math.min(1, Math.round((this.cfg.assist + 0.05) * 100) / 100);
+        }
+      }
+      else if (this.cfg.task === 'walk') {
+        // senza aiuto: la velocita' sale di 0.1 quando cammina in almeno 2 prove su 3, scende se non ci riesce mai
+        if ((up ?? 0) >= 0.66 && this.cfg.walkScale < 1) this.cfg.walkScale = Math.min(1, Math.round((this.cfg.walkScale + 0.1) * 100) / 100);
+        else if ((up ?? 0) <= 0 && this.cfg.walkScale > 0.3) this.cfg.walkScale = Math.max(0.3, Math.round((this.cfg.walkScale - 0.1) * 100) / 100);
+      }
     }
     const sec = (performance.now() - t0) / 1000;
     const st: GenStats = {
@@ -152,7 +174,8 @@ export class LabTrainer {
       mean: scores.reduce((a, b) => a + b, 0) / scores.length,
       best: Math.max(...scores),
       centre,
-      ...(getup ? { assist, up } : {}),
+      ...(getup || assist > 0 || this.cfg.task === 'walk' ? { assist, up } : {}),
+      ...(this.cfg.task === 'walk' ? { walkScale } : {}),
       sec,
       stepsPerSec: ((steps + extra) * 4) / sec,
     };
@@ -184,7 +207,7 @@ export class LabTrainer {
     this.workers = [];
   }
 
-  weightsFile(score: number): FlyWeightsFile & { history: GenStats[]; assist?: number; getupMethod?: number } {
+  weightsFile(score: number): FlyWeightsFile & { history: GenStats[]; assist?: number; walkScale?: number; getupMethod?: number } {
     return {
       task: this.cfg.task,
       brain: this.cfg.brain,
@@ -198,7 +221,8 @@ export class LabTrainer {
       score,
       params: encodeParams(this.opt!.theta),
       history: this.history,
-      ...(this.cfg.task === 'getup' ? { assist: this.cfg.assist, getupMethod: GETUP_METHOD } : {}),
+      ...(this.cfg.task === 'getup' ? { assist: this.cfg.assist, getupMethod: GETUP_METHOD } : this.cfg.assist > 0 ? { assist: this.cfg.assist } : {}),
+      ...(this.cfg.task === 'walk' ? { walkScale: this.cfg.walkScale } : {}),
     };
   }
 }

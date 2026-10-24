@@ -2612,6 +2612,7 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
           jumpPressed: input.consumeJustPressed('jump'),
           move: _tMove,
           moveSpeed: input.shift && !aimingRef.current ? LT.runSpeed : LT.walkSpeed,
+          groundSpeed: locoRef.current.speed,
         },
         canAct: data.attackLock <= 0 && data.state !== 'Si rialza' && !isDodgingRef.current,
       };
@@ -2631,6 +2632,12 @@ const PlayerCombatSoldier: React.FC<PlayerCombatSoldierProps> = ({
                     : 'Arrampica';
         applyTransform();
         return;
+      }
+      // atterrati camminando/correndo: le clip del salto hanno azzerato il
+      // passo (endLocoBlend), si riparte con lo slancio che si aveva in aria
+      if (travRef.current.landSpeed > 0) {
+        locoRef.current.speed = Math.min(travRef.current.landSpeed, LT.runSpeed);
+        travRef.current.landSpeed = 0;
       }
     }
 

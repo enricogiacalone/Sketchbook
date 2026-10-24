@@ -58,6 +58,9 @@ export class FlyController {
   // alzata nominale finita: la mano centra anche il corpo sopra i piedi
   assistCentre = false;
   cmdSpeed = 0;
+  // camminare: scala della velocita' del riferimento (1 = la clip Walk a 0.73 m/s); il curriculum parte piano
+  // (la clip rallentata e il comando di velocita' in proporzione) e sale a 1
+  walkScale = 1;
   // quota del pavimento su cui poggia (0 in addestramento, la sala nel gioco)
   groundY = 0;
   obs: Float32Array;
@@ -80,6 +83,11 @@ export class FlyController {
     this.out = new Float32Array(fb.nAct);
     this.ref = new Float32Array(fb.nAct);
     this.tgt = new Float32Array(fb.nAct);
+  }
+
+  setWalkScale(s: number) {
+    this.walkScale = Math.min(1, Math.max(0.2, s));
+    if (this.task === 'walk') this.cmdSpeed = WALK_CLIP_SPEED * this.walkScale;
   }
 
   // mette le ossa di riferimento alla posa della clip al tempo t
@@ -175,6 +183,14 @@ export class FlyController {
     const tRef = this.refTime();
     this.poseRef(this.refClip, tRef);
     jointAnglesFromBones(this.fb, this.ref);
+    // stare in piedi / camminare: le "bretelle" (assistUp) tirano bacino e petto verso l'altezza che hanno nel riferimento
+    // adesso; col livello a zero non fanno niente (vedi flyEnv.assistUp)
+    if (task !== 'getup') {
+      this.refRoot.getWorldPosition(_v0);
+      this.assistHipY = this.groundY + (this.fb.segs[0].bone.getWorldPosition(_rp).y - _v0.y);
+      this.assistChestY = this.groundY + (this.chestSeg().bone.getWorldPosition(_rp).y - _v0.y);
+      this.assistCentre = task === 'stand';
+    }
     observe(this.fb, this.obs);
     const input = this.input;
     let k = 0;
@@ -201,6 +217,7 @@ export class FlyController {
       this.tNominal += (1 / CONTROL_HZ) * GETUP_SPEED;
       this.updateAssistTargets();
     }
+    if (task === 'walk') speed = this.walkScale;
     this.t += (1 / CONTROL_HZ) * speed;
   }
 }

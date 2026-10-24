@@ -75,10 +75,19 @@ const LIMIT_MARGIN = THREE.MathUtils.degToRad(1);
 // Versione del corpo: cambia quando cambiano osservazioni o fisica, cosi'
 // i pesi addestrati su un corpo diverso vengono ignorati invece di usarli
 // su un corpo che non conoscono. 2 = piedi a scatola, muscoli PD, sensori
-// di contatto dei piedi.
-export const FLY_BODY_VERSION = 2;
+// di contatto dei piedi. 3 = le due gambe si urtano tra loro (non si attraversano).
+export const FLY_BODY_VERSION = 3;
 
 export const FLY_COLLISION_GROUPS = ((1 << 5) << 16) | (0xffff & ~((1 << 1) | (1 << 5)));
+// Gambe: sinistra e destra si urtano tra loro (non si incrociano attraversandosi); gli altri pezzi del
+// ragdoll continuano a non toccarsi. Ognuna ha un bit proprio (10 / 11): vede il bit dell'altra gamba
+// ma non il proprio, quindi coscia-stinco-piede dello stesso lato restano liberi.
+const legGroups = (side: 'L' | 'R') => {
+  const mine = side === 'L' ? 1 << 10 : 1 << 11;
+  const theirs = side === 'L' ? 1 << 11 : 1 << 10;
+  return (((1 << 5) | mine) << 16) | (0xffff & ~((1 << 1) | (1 << 5) | mine) | theirs);
+};
+const groupsFor = (name: string) => (/^(Thigh|Shin|Foot)_([LR])$/.test(name) ? legGroups(name.endsWith('_L') ? 'L' : 'R') : FLY_COLLISION_GROUPS);
 const LIN_DAMPING = 0.05;
 const ANG_DAMPING = 0.3;
 const FRICTION = 0.6;
@@ -248,7 +257,7 @@ export function createFlyBody(
         R.ColliderDesc.cuboid(FOOT_WIDTH / 2, heightM / 2, lenM / 2)
           .setTranslation(cBody.x, cBody.y, cBody.z)
           .setRotation({ x: qBody.x, y: qBody.y, z: qBody.z, w: qBody.w })
-          .setCollisionGroups(FLY_COLLISION_GROUPS)
+          .setCollisionGroups(groupsFor(seg.name))
           .setFriction(FOOT_FRICTION)
           .setMass(mass),
         body
@@ -258,7 +267,7 @@ export function createFlyBody(
         R.ColliderDesc.capsule(halfHeight, seg.radius)
           .setTranslation(capsuleOffset.x, capsuleOffset.y, capsuleOffset.z)
           .setRotation({ x: capsuleRot.x, y: capsuleRot.y, z: capsuleRot.z, w: capsuleRot.w })
-          .setCollisionGroups(FLY_COLLISION_GROUPS)
+          .setCollisionGroups(groupsFor(seg.name))
           .setFriction(FRICTION)
           .setMass(mass),
         body

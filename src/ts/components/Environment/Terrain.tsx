@@ -305,12 +305,21 @@ const Terrain: React.FC = () => {
     return d;
   }, [site.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const { size, segments, heights, vertices, normals, colors, indices } = data;
+  // Rapier legge l'indice di colonna come x e quello di riga come z: `heights` ha riga = x e colonna = z (come i vertici), quindi
+  // al collider va la trasposta. Misurato con raycast dal vivo (sito selvaggio): senza, il suolo fisico era lo specchio del
+  // terreno rispetto alla diagonale x = z (errori di decine di metri: muri e buchi invisibili, soprattutto col drone).
+  const colliderHeights = useMemo(() => {
+    const n = segments + 1;
+    const t = new Float32Array(n * n);
+    for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) t[b * n + a] = heights[a * n + b];
+    return t;
+  }, [heights, segments]);
 
   return (
     <>
       <RigidBody type="fixed" colliders={false} position={[0, 0, 0]} friction={0.7} restitution={0}>
         <HeightfieldCollider
-          args={[segments, segments, heights as unknown as number[], { x: size, y: 1, z: size }]}
+          args={[segments, segments, colliderHeights as unknown as number[], { x: size, y: 1, z: size }]}
           // Escludi gli altri TrimeshColliders (le strade): sono tutti statici
           collisionGroups={groupsExcluding(CollisionGroups.TrimeshColliders, CollisionGroups.TrimeshColliders)}
         />

@@ -104,7 +104,7 @@ const massCache = new WeakMap<FlyBody, number>();
 // centre = alzata (nominale) finita: la mano allora tiene anche bacino e
 // petto sopra il punto medio dei piedi, cosi' con tanto aiuto la mosca sta
 // in equilibrio VERO (e il cervello vede com'e'), non appesa storta
-export function assistUp(fb: FlyBody, level: number, dt: number, hipY: number, chestY: number, centre = false) {
+export function assistUp(fb: FlyBody, level: number, dt: number, hipY: number, chestY: number, centre = false, straight = false) {
   if (level <= 0) return;
   let M = massCache.get(fb);
   if (M === undefined) {
@@ -122,6 +122,14 @@ export function assistUp(fb: FlyBody, level: number, dt: number, hipY: number, c
       const p = b.translation(), v = b.linvel();
       fx = m * (ASSIST_KH * ((a.x + c.x) / 2 - p.x) - ASSIST_DH * v.x);
       fz = m * (ASSIST_KH * ((a.z + c.z) / 2 - p.z) - ASSIST_DH * v.z);
+      const cap = m * 9.81 * 0.5, h = Math.hypot(fx, fz);
+      if (h > cap) { fx *= cap / h; fz *= cap / h; }
+    }
+    if (straight && s !== fb.segs[0]) {
+      // busto dritto: il petto e' tirato sopra il bacino (senza, camminano piegate in avanti appese alle molle)
+      const p = b.translation(), q = fb.segs[0].body.translation(), v = b.linvel();
+      fx = m * (ASSIST_KH * (q.x - p.x) - ASSIST_DH * v.x);
+      fz = m * (ASSIST_KH * (q.z - p.z) - ASSIST_DH * v.z);
       const cap = m * 9.81 * 0.5, h = Math.hypot(fx, fz);
       if (h > cap) { fx *= cap / h; fz *= cap / h; }
     }
@@ -250,6 +258,7 @@ export interface EpisodeOpts {
   push?: number; // spinte casuali (N*s)
   assist?: number; // aiuto per alzarsi 0..1
   rsi?: boolean; // alzarsi: parte da un punto a caso dell'animazione
+  walkScale?: number; // camminare: velocita' del riferimento (0.2..1, curriculum)
 }
 export interface EpisodeResult { score: number; steps: number; fell: boolean; meanPose: number; headEnd: number; dist: number; up: boolean }
 
@@ -278,7 +287,9 @@ export class FlyEnv {
     const A = this.A;
     const o: EpisodeOpts = typeof opts === 'number' ? { push: opts } : opts;
     const push = o.push ?? 0;
-    const assist = task === 'getup' ? o.assist ?? 0 : 0;
+    // l'aiuto vale per tutti i compiti: alzarsi (tira su da terra), stare in piedi e camminare (bretelle: bacino e petto
+    // non scendono sotto l'altezza del riferimento, il centro del corpo resta sopra i piedi se si sta fermi)
+    const assist = o.assist ?? 0;
     const R = rng(epSeed);
     const world = new A.R.World({ x: 0, y: -9.81, z: 0 });
     world.timestep = 1 / (CONTROL_HZ * SUBSTEPS);
@@ -293,6 +304,7 @@ export class FlyEnv {
     const fb = createFlyBody(A.R, world, A.model.root, A.model.bones, A.clips['Fighting Idle']);
     const brain = new ConnectomeBrain(A.graph, A.layout, params);
     const ctl = new FlyController(fb, brain, clips, A.model.root, task);
+    ctl.setWalkScale(o.walkScale ?? 1);
     ctl.mixer = this.mixer; // un solo mixer sul modello
     ctl.start(phase0);
     const cur = new Float32Array(A.nAct);
@@ -311,7 +323,7 @@ export class FlyEnv {
       }
       ctl.control();
       for (let s = 0; s < SUBSTEPS; s++) {
-        if (assist > 0) assistUp(fb, assist, world.timestep, ctl.assistHipY, ctl.assistChestY, ctl.assistCentre);
+        if (assist > 0) assistUp(fb, assist, world.timestep, ctl.assistHipY, ctl.assistChestY, ctl.assistCentre, task === 'walk');
         world.step();
       }
       // ricompensa: corpo dopo il passo contro il riferimento del passo dopo
@@ -339,7 +351,8 @@ export class FlyEnv {
         const vs = lv.x * _v.z - lv.z * _v.x;
         rV = Math.exp(-3 * ((vf - ctl.cmdSpeed) ** 2 + vs * vs));
       }
-      let r = 0.45 * rPose + 0.2 * rEE + 0.2 * rH + 0.15 * rV;
+      // camminare: avanzamento 0.2 e busto dritto come nel riferimento 0.25 (senza, imparano a camminare piegate in avanti)
+      let r = task === 'walk' ? 0.3 * rPose + 0.15 * rEE + 0.1 * rH + 0.2 * rV + 0.25 * Math.exp(-4 * tiltErrorVsRef(fb) ** 2) : 0.45 * rPose + 0.2 * rEE + 0.2 * rH + 0.15 * rV;
       // alzarsi: posa, estremita', altezza della testa e inclinazione del
       // busto uguale a quella del riferimento (niente "in piedi storto")
       // piedi orientati come nell'animazione (in piano quando si e' in piedi,
@@ -357,8 +370,12 @@ export class FlyEnv {
     }
     const end = fb.segs[0].body.translation();
     const headEnd = fb.bySeg.Head.body.translation().y;
-    const up = !fell && isStanding(fb);
     const dist = Math.hypot(end.x - sx, end.z - sz);
+    // "riuscito": in piedi per davvero; camminando, alto, non troppo piegato (50 gradi: chi cammina si inclina) e avanzato almeno il 40% di quanto doveva
+    const up =
+      task === 'walk'
+        ? !fell && headEnd > GETUP_UP_HEAD - 0.1 && bodyTiltDeg(fb) < UPRIGHT_MAX_TILT_DEG + 10 && dist >= 0.4 * ctl.cmdSpeed * seconds
+        : !fell && isStanding(fb);
     destroyFlyBody(fb);
     world.free();
     return { score: total / steps, steps: n, fell, meanPose: poseSum / Math.max(1, n), headEnd, dist, up };

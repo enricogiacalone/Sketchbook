@@ -21,13 +21,13 @@ import Terrain from './components/Environment/Terrain';
 import Wilderness from './components/Environment/Wilderness';
 import { getCurrentSite } from './lib/site';
 import { useStaggered } from './lib/useStaggered';
-import OllamaProps from './components/Environment/OllamaProps';
 import UFO from './components/Environment/UFO';
 // (la vecchia catena di 3 missioni, MissionManager.tsx, e' sostituita dalla
 // missione con i personaggi: Missions/StoryMission.tsx)
 import StoryMission from './components/Missions/StoryMission';
 import HeistMission from './components/Missions/HeistMission';
 import SoldierSpawner from './components/SoldierSpawner';
+import VillageFolk from './components/Environment/VillageFolk';
 import Airplane from './components/Vehicles/Airplane'; // Import Airplane
 import Car from './components/Vehicles/Car'; // Import Car
 import Motorcycle from './components/Vehicles/Motorcycle';
@@ -132,13 +132,14 @@ const Scene: React.FC = () => {
   return (
     <>
       <Terrain />
-      <OllamaProps />
       {isRaceTest && <RaceTrack />}
       {!isCleanTest && !wild && stage >= 1 && <Road />}
       {!isCleanTest && !wild && stage >= 10 && !zombieNight && <PoliceDirector />}
       {!isCleanTest && !wild && stage >= 11 && <ZombieNight />}
       {!isCleanTest && !wild && stage >= 2 && <CityFlags />}
       {!isCleanTest && stage >= 2 && <Wilderness />}
+      {/* abitanti dei villaggi vicini (solo nei siti selvaggi: i villaggi stanno fuori dalla citta') */}
+      {!isCleanTest && wild && stage >= 4 && <Suspense fallback={null}><VillageFolk /></Suspense>}
       {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}
       {showSkyAtmosphere && <MeteoriteSpawner />}
       {!isCleanTest && !wild && stage >= 12 && !DEBUG_DISABLE_CARS_AND_ENEMIES && !DEBUG_DISABLE_ENEMIES && <EnemySpawner />}

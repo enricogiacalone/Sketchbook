@@ -61,6 +61,8 @@ import SpaceHud from './components/UI/SpaceHud';
 import SpacePlanets, { SpaceStars, SpaceSun } from './components/Environment/SpacePlanets';
 import SpaceController from './components/SpaceController';
 import SpaceEnemies from './components/SpaceEnemies';
+import Weather from './components/Environment/Weather';
+import AmbientSounds from './components/Environment/AmbientSounds';
 import GameFreeze from './components/GameFreeze';
 const FlyLab = React.lazy(() => import('./flyLab/FlyLab'));
 const CharLab = React.lazy(() => import('./charLab/CharLab'));
@@ -122,6 +124,7 @@ const App: React.FC = () => {
     }))
   );
   const renderDpr = useStore((state) => state.renderDpr);
+  const enemyDrones = useStore((state) => state.enemyDrones);
 
   // TEMP DEBUG (Claude) turned permanent test convenience: joining used to
   // mean clicking through WelcomeScreen (type a name, click "Enter
@@ -261,10 +264,12 @@ const App: React.FC = () => {
             <SpaceSun />
             <SpaceStars />
             <SpaceController />
-            <SpaceEnemies />
+            {enemyDrones && <SpaceEnemies />}
             {(testScene === 'none' || testScene === 'duel') && <Clouds />}
             <NightSky />
             <WorldFog />
+            <Weather />
+            <AmbientSounds />
             {/* <Ocean /> */}
             {/* Real sun-linked directional light + hemisphere ambient --
                 "sistemiamo il cielo... sole vero collegato alla luce".

@@ -46,6 +46,9 @@ const FALL_POSE_MIN = 1.8;
 const HARD_FALL = 1.3;
 const BIG_FALL = 2.4;
 const ROLL_MIN_SPEED = 2.5;
+// salto preso di corsa: oltre questa velocita' a terra (m/s, la corsa
+// leggera e' 3.2) si vola nella posa "Run Jump" e si tiene lo slancio
+const RUN_JUMP_MIN_SPEED = 2.8;
 const SHIMMY_SPEED = 0.6;
 const MAX_STEP_DOWN = 0.12; // m per frame seguiti senza "cadere" (pendii, gradini)
 
@@ -54,6 +57,9 @@ const MAX_STEP_DOWN = 0.12; // m per frame seguiti senza "cadere" (pendii, gradi
 export const TRAV_CLIPS = {
   jumpStart: 'Jump_Start',
   air: 'Jump_air',
+  // posa ciclica a mezz'aria in spaccata (in-place, bacino 17 cm piu' basso
+  // del riposo): sostituisce Jump_Start + Jump_air nel salto in corsa
+  runJump: 'Run Jump',
   land: 'Jump_Land',
   // posa di caduta: primi 0.29 s di Land_Three_Point (la caduta da cui
   // parte quell'atterraggio) resi in-place, vedi PlayerCombatSoldier
@@ -76,6 +82,9 @@ export interface TravInput {
   // direzione voluta rispetto alla camera (orizzontale, lunghezza 0 o 1)
   move: THREE.Vector3;
   moveSpeed: number; // velocita' a terra corrente (camminata/corsa)
+  // velocita' del passo (locomozione del giocatore): la misura dallo
+  // spostamento tra due frame balla quando i frame non durano uguale
+  groundSpeed: number;
 }
 
 export interface TravCtx {
@@ -117,6 +126,12 @@ export interface TravState {
   apexY: number;
   fallPose: boolean;
   upPlayed: boolean;
+  // salto in corsa: in aria resta la posa Run Jump (niente Jump_air)
+  runJump: boolean;
+  // velocita' orizzontale all'atterraggio, se si continua a muoversi: il
+  // passo riparte da qui invece che da fermo (la legge e la azzera
+  // PlayerCombatSoldier)
+  landSpeed: number;
 }
 
 export function newTravState(feetY: number, x: number, z: number): TravState {
@@ -124,7 +139,7 @@ export function newTravState(feetY: number, x: number, z: number): TravState {
     mode: 'ground', t: 0, feetY, vy: 0, vel: new THREE.Vector3(), lastX: x, lastZ: z,
     coyote: 0, grabCooldown: 0, from: new THREE.Vector3(), to: new THREE.Vector3(), dur: 0,
     next: 'ground', ledge: null, ladder: null, lockLeft: 0, started: false,
-    apexY: feetY, fallPose: false, upPlayed: false,
+    apexY: feetY, fallPose: false, upPlayed: false, runJump: false, landSpeed: 0,
   };
 }
 
@@ -137,6 +152,7 @@ function enter(s: TravState, mode: TravMode) {
   s.mode = mode;
   s.t = 0;
   s.started = false;
+  s.runJump = false;
   if (mode === 'air') {
     s.apexY = s.feetY;
     s.fallPose = false;
@@ -177,12 +193,24 @@ function startHangFrom(s: TravState, ctx: TravCtx, l: LedgeInfo, dur: number) {
 
 function startJump(s: TravState, ctx: TravCtx) {
   s.vy = JUMP_V;
+  // velocita' vera a terra (passo del giocatore, o misurata nello stato
+  // 'ground'): la corsa con X non passa da input.moveSpeed, che senza Shift
+  // vale quella della camminata
+  const ground = Math.max(ctx.input.groundSpeed, Math.hypot(s.vel.x, s.vel.z));
+  const run = ground >= RUN_JUMP_MIN_SPEED;
   // la velocita' a terra diventa quella del salto
   const m = ctx.input.move;
-  if (m.lengthSq() > 0.0001) s.vel.set(m.x * ctx.input.moveSpeed, 0, m.z * ctx.input.moveSpeed);
+  const sp = run ? Math.max(ground, ctx.input.moveSpeed) : ctx.input.moveSpeed;
+  if (m.lengthSq() > 0.0001) s.vel.set(m.x * sp, 0, m.z * sp);
   s.coyote = 0;
   enter(s, 'air');
-  ctx.play(TRAV_CLIPS.jumpStart, 0.08, false, 1.6, 0.22);
+  if (run) {
+    s.runJump = true;
+    s.started = true;
+    ctx.play(TRAV_CLIPS.runJump, 0.1, true, 1.2);
+  } else {
+    ctx.play(TRAV_CLIPS.jumpStart, 0.08, false, 1.6, 0.22);
+  }
 }
 
 function tryLadder(s: TravState, ctx: TravCtx, fx: number, fz: number): boolean {
@@ -395,6 +423,7 @@ export function stepTraversal(s: TravState, ctx: TravCtx): boolean {
         }
         if (inp.move.lengthSq() > 0.0001) {
           enter(s, 'ground');
+          s.landSpeed = hSpeed;
           return false;
         }
         enter(s, 'land');

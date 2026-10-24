@@ -28,6 +28,18 @@ const GraphicsGUI: React.FC = () => {
       set neon(v: boolean) {
         st().setNeonNight(v);
       },
+      get meteo() {
+        return st().weatherOn;
+      },
+      set meteo(v: boolean) {
+        st().setWeatherOn(v);
+      },
+      get droniNemici() {
+        return st().enemyDrones;
+      },
+      set droniNemici(v: boolean) {
+        st().setEnemyDrones(v);
+      },
       get giornata() {
         return st().dayCycle;
       },
@@ -87,6 +99,8 @@ const GraphicsGUI: React.FC = () => {
       folder.add(bind, 'toon').name('Stile toon').listen(),
       folder.add(bind, 'neon').name('Notte blu neon (sempre notte)').listen(),
       folder.add(bind, 'skyShader').name('Shader del cielo').listen(),
+      folder.add(bind, 'meteo').name('Meteo (pioggia e nebbia)').listen(),
+      folder.add(bind, 'droniNemici').name('Droni nemici nello spazio').listen(),
       folder.add(bind, 'giornata').name('Scorre la giornata (giorno/notte)').listen(),
       folder.add(bind, 'zombi').name('Modalità zombi notturna').listen(),
       folder.add(bind, 'adattiva').name('Risoluzione adattiva').listen(),

@@ -32,6 +32,10 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
   const setToonStyle = useStore((st) => st.setToonStyle);
   const neonNight = useStore((st) => st.neonNight);
   const setNeonNight = useStore((st) => st.setNeonNight);
+  const weatherOn = useStore((st) => st.weatherOn);
+  const setWeatherOn = useStore((st) => st.setWeatherOn);
+  const enemyDrones = useStore((st) => st.enemyDrones);
+  const setEnemyDrones = useStore((st) => st.setEnemyDrones);
   const ollamaNpcChat = useStore((st) => st.ollamaNpcChat);
   const setOllamaNpcChat = useStore((st) => st.setOllamaNpcChat);
   const dayCycle = useStore((st) => st.dayCycle);
@@ -114,6 +118,13 @@ const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onJoin }) => {
             <label style={checkRow}>
               <input type="checkbox" checked={neonNight} onChange={(e) => setNeonNight(e.target.checked)} /> Notte blu neon &mdash; sempre notte,
               bagliore e insegne luminose (spento: giorno o giornata)
+            </label>
+            <label style={checkRow}>
+              <input type="checkbox" checked={weatherOn} onChange={(e) => setWeatherOn(e.target.checked)} /> Meteo: pioggia e nebbia del mattino
+            </label>
+            <label style={checkRow}>
+              <input type="checkbox" checked={enemyDrones} onChange={(e) => setEnemyDrones(e.target.checked)} /> Droni nemici nello spazio
+              &mdash; spenti di default
             </label>
             <label style={checkRow}>
               <input type="checkbox" checked={dayCycle} onChange={(e) => setDayCycle(e.target.checked)} /> Scorre la giornata (giorno e

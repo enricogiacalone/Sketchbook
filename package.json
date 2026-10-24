@@ -29,7 +29,8 @@
     "kimodo": "bash tools/kimodo/kimodo.sh",
     "mosca:train": "node --experimental-strip-types --import ./training/fly-brain/register.mjs training/fly-brain/train.ts",
     "mosca:eval": "node --experimental-strip-types --import ./training/fly-brain/register.mjs training/fly-brain/evaluate.ts",
-    "mosca:test": "node --experimental-strip-types --import ./training/fly-brain/register.mjs training/fly-brain/quicktest.ts"
+    "mosca:test": "node --experimental-strip-types --import ./training/fly-brain/register.mjs training/fly-brain/quicktest.ts",
+    "mosca:walkassist": "node --experimental-strip-types --import ./training/fly-brain/register.mjs training/fly-brain/walkassist.ts"
   },
   "repository": {
     "type": "git",
