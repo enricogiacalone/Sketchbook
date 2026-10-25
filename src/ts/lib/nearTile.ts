@@ -3,8 +3,11 @@ import { PLANET_RADIUS as R, hEff, noise3, seaColor, surfaceColor, surfaceHeight
 import { GRID, TILES, tileOfDir, tileParts, tileVertexDir, faceDir } from './cubeTiles';
 import { cellDir, cellOf, hashKey, makeCell } from './globalGrid';
 import { planetCatalog } from './planet';
-import { roadMask, ruinItemPlacement, ruinItems, villageBlocked, villageFrame, villageGround, villageItemMatrix, villageItemPos, villageItems, villageLocal } from './village';
-import { villagesOf, villageNear, tangentBasis, ruinsOf, ruinNear } from './planetSurface';
+import { BRIDGE_BASE } from './culture';
+import { buildRoadsForTile, type RoadBuf } from './roadMesh';
+import { roadMask } from './roads';
+import { villageFieldTint, ruinItemPlacement, ruinItems, villageBlocked, villageFrame, villageGround, villageItemMatrix, villageItemPos, villageItems, villageLocal, villageTileItems } from './village';
+import { villagesOf, siteNear, tangentBasis, ruinsOf, ruinNear } from './planetSurface';
 
 // Costruzione (a pezzetti, con un generatore) delle tessere del pianeta e della loro vegetazione. Tutto nel riferimento
 // del PIANETA: nessuna dipendenza dal sito, quindi nessun salto cambiando sito.
@@ -131,6 +134,7 @@ export interface Vegetation {
   rocks: VegItem[];
   tufts: VegItem[];
   houses: VegItem[]; // villaggi: t = tipo (VK), color = tinta; m include la scala
+  roads?: RoadBuf | null; // nastri delle strade degli abitati (lib/roadMesh.ts)
 }
 
 export const TREE_CELL = 8.4;
@@ -162,6 +166,7 @@ export function inCityRect(seed: number, dx: number, dy: number, dz: number, mar
   return Math.abs(x) < half && Math.abs(z) < half;
 }
 
+const _fieldc = new THREE.Color();
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
@@ -248,7 +253,7 @@ function speciesAt(h: number, a: number, b: number): number {
 // BRIDGE_GRID m: dove il sentiero e' forte e il terreno e' sotto il livello del mare si segue la direzione del sentiero nei due
 // versi fino alla terra; se il tratto e' < BRIDGE_MAX m si piazza un ponte (kind BRIDGE_BASE + lunghezza/4) al centro, appartiene
 // alla tessera che contiene il centro (niente doppioni). Il piano del ponte e' tangente: quota = riva piu' alta + 0.4 m.
-export const BRIDGE_BASE = 200; // kind = BRIDGE_BASE + b: ponte lungo 4*b metri (b = 3..22); sopra i tipi del villaggio (< 32 * 4)
+export { BRIDGE_BASE } from './culture'; // ponti: kind = BRIDGE_BASE + b (lunghezza 4*b metri, b = 3..22)
 export const BRIDGE_WIDTH = 4.2;
 const BRIDGE_GRID = 10;
 const BRIDGE_MAX = 78;
@@ -307,7 +312,7 @@ function findBridge(seed: number, d: THREE.Vector3): Bridge | null {
 }
 
 // alberi e rocce (e, se `withTufts`, prato) di una tessera, per cella della griglia lat/lon del pianeta
-export function* buildTileVegetation(key: number, seed: number, what: 'base' | 'tufts', out: Vegetation): Generator<void, void, void> {
+export function* buildTileVegetation(key: number, seed: number, what: 'base' | 'tufts', out: Vegetation, withRoads = true): Generator<void, void, void> {
   const { face, i, j } = tileParts(key);
   const cell = makeCell();
   const seen = new Set<number>();
@@ -338,19 +343,20 @@ export function* buildTileVegetation(key: number, seed: number, what: 'base' | '
     }
   };
 
-  // villaggi: case e arredi di questa tessera (le posizioni sono nel piano tangente al centro del villaggio)
+  // abitati: case e arredi di questa tessera (le posizioni sono sul piano della zolla, riportate sulla sfera)
   if (what === 'base') {
     for (const v of villagesOf(seed)) {
+      const list = villageTileItems(seed, v, key);
+      if (list.length === 0) continue;
       const fr = villageFrame(v, seed);
-      for (const it of villageItems(seed, v)) {
+      for (const it of list) {
         villageItemPos(it, fr, _pos);
-        const l = _pos.length();
-        if (tileOfDir(_pos.x / l, _pos.y / l, _pos.z / l) !== key) continue;
         const m = villageItemMatrix(it, fr);
         out.houses.push({ m, x: _pos.x, y: _pos.y, z: _pos.z, t: it.kind, color: it.tint });
       }
     }
   }
+  if (what === 'base' && withRoads) out.roads = buildRoadsForTile(seed, key);
   // rovine: ogni pezzo alla quota vera del terreno
   if (what === 'base') {
     const rd = new THREE.Vector3(), rm = new THREE.Matrix4();
@@ -401,7 +407,8 @@ export function* buildTileVegetation(key: number, seed: number, what: 'base' | '
     const info = surfaceInfo(seed, dd.x, dd.y, dd.z, h);
     if (info.h < 3) return; // acqua / spiaggia
     if (pathMask(seed, dd.x, dd.y, dd.z) > 0.1) return; // i sentieri restano liberi
-    if (villageNear(seed, dd.x, dd.y, dd.z, 135)) return; // niente alberi ne' rocce dentro il villaggio
+    if (siteNear(seed, dd.x, dd.y, dd.z, 26)) return; // niente alberi ne' rocce dentro l'abitato
+    if (siteNear(seed, dd.x, dd.y, dd.z, 200) && villageFieldTint(seed, dd.x, dd.y, dd.z, _fieldc) > 0.3) return; // ne' sui campi coltivati
     if (ruinNear(seed, dd.x, dd.y, dd.z, 16)) return; // le rovine restano libere (l'erba invece le copre)
     const k = c.key;
     const roll = hashKey(k, 3, rseed);
@@ -437,7 +444,8 @@ export function* buildTileVegetation(key: number, seed: number, what: 'base' | '
     const patch = noise3(sx / 35, sy / 35, sz / 35, tseed + 2) * 0.7 + noise3(sx / 9, sy / 9, sz / 9, tseed + 3) * 0.3;
     const pm = pathMask(seed, dd.x, dd.y, dd.z);
     if (pm > 0.35) return;
-    const vl = villageLocal(seed, dd.x, dd.y, dd.z, 125);
+    if (siteNear(seed, dd.x, dd.y, dd.z, 200) && villageFieldTint(seed, dd.x, dd.y, dd.z, _fieldc) > 0.3) return; // campi: terra e colture, non erba selvatica
+    const vl = villageLocal(seed, dd.x, dd.y, dd.z, 20);
     if (vl) {
       // nel villaggio l'erba cresce solo fuori dalle strade e dalle case, piu' rada
       if (villageGround(seed, dd.x, dd.y, dd.z) > 0.12 || hashKey(k, 12, tseed) > 0.45 || villageBlocked(seed, vl.v, vl.u, vl.w, 1.8)) return;

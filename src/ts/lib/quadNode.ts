@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { PLANET_RADIUS as R, hEff, noise3, seaColor, surfaceColor, surfaceHeight, surfaceInfo } from './planetSurface';
 import { GRID, faceDir } from './cubeTiles';
 import { rockMix, pathMix, pathColor } from './nearTile';
-import { villageGround } from './village';
-const VILLAGE_DIRT = new THREE.Color('#a08a68');
+import { villageFieldTint, villageGroundTint } from './village';
+const _vgc = new THREE.Color();
 
 // Un nodo del quadtree del pianeta (una faccia della cubo-sfera, livello 0 = tutta la faccia, livello MAX_LEVEL = tessera da
 // ~4.6 m): una griglia GRID x GRID di celle, piu' una "gonna" lungo i bordi (copre le fessure tra livelli diversi) e per
@@ -122,8 +122,13 @@ export function* buildNodeMesh(face: number, level: number, ni: number, nj: numb
         const pm = pathMix(seed, d.x, d.y, d.z, h, rm) * (level === 3 ? 0.65 : 1);
         if (pm > 0.002) colr.lerp(pathColor(), pm * 0.85);
         // villaggi: strade battute e piazza
-        const vg = villageGround(seed, d.x, d.y, d.z);
-        if (vg > 0.002) colr.lerp(VILLAGE_DIRT, vg * (level === 3 ? 0.7 : 0.92));
+        const vg = villageGroundTint(seed, d.x, d.y, d.z, _vgc);
+        if (vg > 0.002) colr.lerp(_vgc, vg * (level === 3 ? 0.7 : 0.95));
+        else if (h > 1.5) {
+          // i campi coltivati attorno all'abitato (rettangoli di colore per cultura)
+          const fm = villageFieldTint(seed, d.x, d.y, d.z, _vgc);
+          if (fm > 0.002) colr.lerp(_vgc, fm * (level === 3 ? 0.6 : 0.85));
+        }
       }
       out.col[o] = colr.r;
       out.col[o + 1] = colr.g;

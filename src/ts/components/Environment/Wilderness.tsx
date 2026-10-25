@@ -2,10 +2,12 @@ import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { getCurrentSite } from '../../lib/site';
-import { PLANET_RADIUS as R } from '../../lib/planetSurface';
+import { PLANET_RADIUS as R, villagesOf } from '../../lib/planetSurface';
+import { deckSegments } from '../../lib/roadMesh';
 import { TILE_CENTERS, TILE_COUNT, TILE_RADIUS } from '../../lib/cubeTiles';
 import { BRIDGE_BASE, BRIDGE_WIDTH, buildTileVegetation, type Vegetation } from '../../lib/nearTile';
-import { VILLAGE_SPECS, VK, kindOf } from '../../lib/village';
+import { VK, cultureOfKind, dimOf } from '../../lib/village';
+import { roleOf } from '../../lib/culture';
 import { getTerrainHeight } from './Terrain';
 import { useStaticBoxes, type StaticBox } from './staticColliders';
 
@@ -21,6 +23,7 @@ const GROUPS = groupsExcluding(CollisionGroups.Default);
 const _v = new THREE.Vector3();
 const _hp = new THREE.Vector3(), _hs = new THREE.Vector3();
 const _hq = new THREE.Quaternion();
+const _dx = new THREE.Vector3(), _dy = new THREE.Vector3(), _dz = new THREE.Vector3(), _dm = new THREE.Matrix4();
 
 const Wilderness: React.FC = () => {
   const site = getCurrentSite();
@@ -33,7 +36,7 @@ const Wilderness: React.FC = () => {
       const dot = TILE_CENTERS[k * 3] * n[0] + TILE_CENTERS[k * 3 + 1] * n[1] + TILE_CENTERS[k * 3 + 2] * n[2];
       if (dot < cos) continue;
       const veg: Vegetation = { trees: [], rocks: [], tufts: [], houses: [] };
-      const gen = buildTileVegetation(k, site.planetSeed, 'base', veg);
+      const gen = buildTileVegetation(k, site.planetSeed, 'base', veg, false);
       while (!gen.next().done);
       // case e arredi del villaggio: un cuboide per pezzo (orientato come il modello, nel riferimento del sito)
       for (const h of veg.houses) {
@@ -54,17 +57,20 @@ const Wilderness: React.FC = () => {
           }
           continue;
         }
-        const kd = kindOf(h.t);
-        const sp = VILLAGE_SPECS[kd];
-        if (!sp?.solid || kd === VK.Fence) continue;
+        const role = roleOf(h.t), cu = cultureOfKind(h.t);
+        const sp = dimOf(cu, role);
+        if (!sp.solid || role === VK.Fence) continue;
         _v.set(h.x, h.y, h.z).applyQuaternion(site.quat);
         if (Math.hypot(_v.x, _v.z) > RADIUS + 60) continue;
         h.m.decompose(_hp, _hq, _hs);
         _hq.premultiply(site.quat);
-        const s = _hs.x;
         const y = getTerrainHeight(_v.x, _v.z);
-        const hy = (sp.h * s) / 2;
-        out.push({ half: [(sp.w * s) / 2, hy, (sp.d * s) / 2], pos: [_v.x, y + hy, _v.z], rot: [_hq.x, _hq.y, _hq.z, _hq.w], groups: GROUPS });
+        // (la matrice porta gia' scala e allungamenti: le semidimensioni sono quelle del modello per la scala sui tre assi)
+        const sx = Math.hypot(h.m.elements[0], h.m.elements[1], h.m.elements[2]);
+        const sy = Math.hypot(h.m.elements[4], h.m.elements[5], h.m.elements[6]);
+        const sz = Math.hypot(h.m.elements[8], h.m.elements[9], h.m.elements[10]);
+        const hy = (sp.h * sy) / 2;
+        out.push({ half: [(sp.w * sx) / 2, hy, (sp.d * sz) / 2], pos: [_v.x, y + hy, _v.z], rot: [_hq.x, _hq.y, _hq.z, _hq.w], groups: GROUPS });
       }
       for (const t of veg.trees) {
         // dal riferimento del pianeta a quello del sito (il centro del pianeta sta in (0, -(R + hN), 0))
@@ -78,6 +84,26 @@ const Wilderness: React.FC = () => {
         const rad = Math.max(0.12, tr[0] * s * 0.7);
         const th = Math.max(2.5, tr[1] * s * 0.55);
         out.push({ half: [th / 2, rad, 0], pos: [x, y + th / 2, z], shape: 'cylinder', groups: GROUPS });
+      }
+    }
+    // impalcati delle sopraelevate (con le sponde): piani e parapetti inclinati come la rampa
+    for (const v of villagesOf(site.planetSeed)) {
+      if (v.tier < 3) continue;
+      for (const d of deckSegments(site.planetSeed, v)) {
+        _v.copy(d.c).applyQuaternion(site.quat);
+        if (Math.hypot(_v.x, _v.z) > RADIUS + 120) continue;
+        _dz.copy(d.t).applyQuaternion(site.quat);
+        _dy.copy(d.up).applyQuaternion(site.quat);
+        _dx.crossVectors(_dy, _dz).normalize();
+        _dm.makeBasis(_dx, _dy, _dz);
+        _hq.setFromRotationMatrix(_dm);
+        const q: [number, number, number, number] = [_hq.x, _hq.y, _hq.z, _hq.w];
+        const cy = _v.y - (R + site.hN);
+        out.push({ half: [d.width / 2, 0.4, d.len / 2 + 0.3], pos: [_v.x, cy - 0.4, _v.z], rot: q, groups: GROUPS });
+        for (const sg of [-1, 1]) {
+          _hp.set(sg * (d.width / 2 - 0.25), 0.5, 0).applyQuaternion(_hq);
+          out.push({ half: [0.25, 0.5, d.len / 2 + 0.3], pos: [_v.x + _hp.x, cy + _hp.y, _v.z + _hp.z], rot: q, groups: GROUPS });
+        }
       }
     }
     return out;

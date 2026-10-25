@@ -1,5 +1,6 @@
 import { useStore } from '../store';
 import { fetchJson, getWorldSeed } from './worldSeed';
+import { initialStory, type MainStoryState } from '../story/mainStory';
 
 // "colleghiamo il db per ricordare dove mi trovo, le missioni completate e i
 // soldi accumulati": un salvataggio per giocatore (il nome del menu
@@ -17,6 +18,8 @@ export interface SaveData {
   planet?: number;
   cash: number;
   completed: string[];
+  // storia principale (story/mainStory.ts)
+  story?: MainStoryState;
   savedAt: number;
 }
 
@@ -44,6 +47,7 @@ export async function loadGame(player: string): Promise<SaveData | null> {
   if (!save) return null;
   st.setCash(save.cash);
   st.setCompletedMissions(save.completed ?? []);
+  st.setMainStory(save.story ? { ...initialStory(), ...save.story } : initialStory());
   // la posizione vale solo sul pianeta dove e' stata salvata
   st.setSpawnPoint(save.planet === undefined || save.planet === getWorldSeed() ? (save.pos ?? null) : null);
   return save;
@@ -53,7 +57,7 @@ export async function loadGame(player: string): Promise<SaveData | null> {
 function snapshot(): SaveData | null {
   const st = useStore.getState();
   if (!st.gameJoined || !st.playerName) return null;
-  const data: SaveData = { v: 1, planet: getWorldSeed(), cash: st.cash, completed: st.completedMissions, savedAt: Date.now() };
+  const data: SaveData = { v: 1, planet: getWorldSeed(), cash: st.cash, completed: st.completedMissions, story: st.mainStory, savedAt: Date.now() };
   // la posizione solo in citta' e col personaggio (a piedi o in auto), non
   // col drone o in un test
   const keepPos = st.testScene === 'none' && !st.isDrone;

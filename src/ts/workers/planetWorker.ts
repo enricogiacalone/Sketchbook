@@ -42,9 +42,11 @@ self.onmessage = (e: MessageEvent) => {
       while (!g.next().done);
       const trees = pack(veg.trees, false), rocks = pack(veg.rocks, false), tufts = pack(veg.tufts, true), houses = pack(veg.houses, true);
       const tr: Transferable[] = [trees.m.buffer, trees.t.buffer, rocks.m.buffer, rocks.t.buffer, tufts.m.buffer, tufts.t.buffer, houses.m.buffer, houses.t.buffer];
+      const roads = veg.roads ?? null;
+      if (roads) tr.push(roads.pos.buffer, roads.nor.buffer, roads.col.buffer);
       if (houses.c) tr.push(houses.c.buffer);
       if (tufts.c) tr.push(tufts.c.buffer);
-      (self as unknown as Worker).postMessage({ type: 'veg', id: msg.id, trees, rocks, tufts, houses }, tr);
+      (self as unknown as Worker).postMessage({ type: 'veg', id: msg.id, trees, rocks, tufts, houses, roads }, tr);
     }
   } catch (err) {
     (self as unknown as Worker).postMessage({ type: 'error', id: msg.id, error: String(err) });

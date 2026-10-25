@@ -14,7 +14,7 @@ const SaveGameManager: React.FC = () => {
       if (st.gameJoined && !st.isPaused) saveGame();
     }, AUTOSAVE_S * 1000);
     const unsub = useStore.subscribe((st, prev) => {
-      if (st.gameJoined && (st.cash !== prev.cash || st.completedMissions !== prev.completedMissions)) saveGame();
+      if (st.gameJoined && (st.cash !== prev.cash || st.completedMissions !== prev.completedMissions || st.mainStory !== prev.mainStory)) saveGame();
     });
     const onHide = () => {
       if (document.visibilityState === 'hidden') saveGame({ beacon: true });

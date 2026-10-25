@@ -10,6 +10,8 @@ import {
   type FlyGraph, type FlyWeightsFile, type BrainVariant, type PolicyLayout,
 } from '../flyBrain/connectomePolicy';
 import { flyDims, FLY_BODY_VERSION } from '../flyBrain/flyBody';
+import { useStore } from '../store';
+import { ENDING_TEXT, fragmentPlanets } from '../story/mainStory';
 import { N_CMD, type FlyTask } from '../flyBrain/flyController';
 import { GETUP_METHOD } from '../flyBrain/flyEnv';
 
@@ -145,6 +147,44 @@ function useBrainRun(variant: BrainVariant): BrainRun {
 const recentMean = (h: GenStats[], n = 5): number | null => {
   const c = h.filter((x) => x.centre !== null).slice(-n).map((x) => x.centre as number);
   return c.length ? c.reduce((a, b) => a + b, 0) / c.length : null;
+};
+
+// "Il Seme" (story/mainStory.ts, docs/storia.md): qui si chiude la storia. Con i frammenti di tutti i pianeti si sceglie il finale.
+const seedBtn = (bg: string): React.CSSProperties => ({ background: bg, color: '#fff', border: 0, borderRadius: 8, padding: '7px 12px', cursor: 'pointer', fontWeight: 600, fontSize: 13 });
+const SeedStory: React.FC = () => {
+  const btn = seedBtn;
+  const story = useStore((s) => s.mainStory);
+  const setStory = useStore((s) => s.setMainStory);
+  if (!story.started) return null;
+  const total = fragmentPlanets(story).length;
+  const have = story.fragments.length;
+  const box: React.CSSProperties = { border: '1px solid #7cf0ff55', background: '#7cf0ff10', borderRadius: 8, padding: '8px 10px', margin: '0 0 10px', fontSize: 12 };
+  if (story.ending) {
+    const e = ENDING_TEXT[story.ending];
+    return (
+      <div style={box}>
+        <div style={{ color: '#7cf0ff', fontWeight: 800, letterSpacing: 2 }}>{e.title}</div>
+        <div style={{ marginTop: 4, lineHeight: 1.35 }}>{e.text}</div>
+        <button style={{ ...btn('#334155'), marginTop: 6 }} onClick={() => setStory({ ending: null })}>Riapri la storia</button>
+      </div>
+    );
+  }
+  return (
+    <div style={box}>
+      <div style={{ color: '#7cf0ff', fontWeight: 800, letterSpacing: 2 }}>IL SEME · {have}/{total} frammenti</div>
+      {have < total ? (
+        <div style={{ marginTop: 4, opacity: 0.85 }}>La mosca dorme ancora: i frammenti della sua mente sono nelle rovine dei pianeti. Trovali tutti.</div>
+      ) : (
+        <>
+          <div style={{ marginTop: 4, lineHeight: 1.35 }}>I frammenti vibrano insieme. La mosca sta per decidere se aprire gli occhi.</div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            <button style={btn('#0e7490')} onClick={() => setStory({ ending: 'awaken' })}>Risveglia la mosca</button>
+            <button style={btn('#334155')} onClick={() => setStory({ ending: 'dream' })}>Lascia che sogni</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
 };
 
 const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
@@ -426,6 +466,8 @@ const FlyLab: React.FC<{ onExit: () => void }> = ({ onExit }) => {
         <div style={{ opacity: 0.7, fontSize: 12, marginBottom: 8 }}>
           Esperimento: il cablaggio della Drosophila (FlyWire, {graph ? `${graph.N} neuroni, ${graph.pre.length.toLocaleString()} sinapsi` : '...'}) aiuta un corpo umano a imparare, rispetto allo stesso cervello con le sinapsi rimescolate a caso?
         </div>
+
+        <SeedStory />
 
         <div style={row}>
           <span>Compito</span>

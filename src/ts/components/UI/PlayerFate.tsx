@@ -3,6 +3,7 @@ import { useStore } from '../../store';
 import { clearWanted, wanted } from '../../lib/wanted';
 import { fateEvents, playerControl } from '../../lib/playerControl';
 import { talkState } from '../../lib/dialogue';
+import { getCurrentSite } from '../../lib/site';
 import { HOSPITAL_SPAWN, POLICE_SPAWN } from '../Environment/streetPropsData';
 
 // "Wasted" e "Busted" alla GTA.
@@ -50,13 +51,17 @@ const PlayerFate: React.FC = () => {
       if (!f.moved && t >= moveAt) {
         f.moved = true;
         const pp = st.playerPos;
-        const [x, z] = nearest(f.kind === 'wasted' ? HOSPITALS : STATIONS, pp[0], pp[2]);
+        // fuori dalla citta' (siti selvatici: villaggi, altri pianeti) l'ospedale non esiste: ci si rialza dove si e' atterrati
+        // (portare il giocatore alle coordinate della citta' lo faceva cadere nel vuoto, morire di nuovo e ripartire da capo, all'infinito)
+        const wild = getCurrentSite().kind === 'wild';
+        const [x, z] = wild ? [0, 0] : nearest(f.kind === 'wasted' ? HOSPITALS : STATIONS, pp[0], pp[2]);
         // sulla strada, di fronte all'edificio piu' vicino non serve: e' un incrocio
         playerControl.teleport?.(x, z, 0);
-        const fee = f.kind === 'wasted' ? Math.min(st.cash, Math.round(st.cash * 0.1 + 50)) : Math.min(st.cash, Math.round(st.cash * 0.05 + 25));
+        const fee = wild ? 0 : f.kind === 'wasted' ? Math.min(st.cash, Math.round(st.cash * 0.1 + 50)) : Math.min(st.cash, Math.round(st.cash * 0.05 + 25));
         st.addCash(-fee);
-        f.note =
-          f.kind === 'wasted' ? `Dimesso dall'ospedale. Spese mediche: $${fee}` : `Rilasciato dalla stazione di polizia. Cauzione: $${fee}`;
+        f.note = wild
+          ? 'Ti rialzi dove eri atterrato'
+          : f.kind === 'wasted' ? `Dimesso dall'ospedale. Spese mediche: $${fee}` : `Rilasciato dalla stazione di polizia. Cauzione: $${fee}`;
         clearWanted();
         talkState.open = false;
       }

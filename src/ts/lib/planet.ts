@@ -225,7 +225,7 @@ export const getPlanetStyle = (): PlanetStyle => styleFromSeed(current.seed);
 
 // i pianeti raggiungibili: sempre gli stessi (stesso seme = stesso pianeta);
 // quello dove si e' viene per primo
-const DESTINATION_SEEDS = [101, 202, 303, 404, 505];
+export const DESTINATION_SEEDS = [101, 202, 303, 404, 505];
 export function planetCatalog(): PlanetProfile[] {
   const all = new Map<number, PlanetProfile>();
   DESTINATION_SEEDS.forEach((sd, i) => all.set(sd, profileFromSeed(sd, GRID_RADII[i % GRID_RADII.length])));

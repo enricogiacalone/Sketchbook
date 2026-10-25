@@ -1,3 +1,4 @@
+import { initialStory, type MainStoryState } from './story/mainStory';
 import { DEFAULT_RAGDOLL_BENCH, type RagdollBenchSettings } from './components/Environment/ragdoll/ragdollBench';
 import { create } from 'zustand';
 import type { GameMode, FighterData } from './components/Environment/SquadArenaTypes';
@@ -283,6 +284,11 @@ interface GameState {
   // meteo dei pianeti (lib/weather.ts): pioggia a perturbazioni e nebbia al mattino. Acceso di default
   weatherOn: boolean;
   setWeatherOn: (on: boolean) => void;
+  // storia principale "Il Seme" (story/mainStory.ts, salvata in lib/saveGame.ts) e la bussola (distanza e verso del bersaglio)
+  mainStory: MainStoryState;
+  setMainStory: (patch: Partial<MainStoryState>) => void;
+  storyHint: { text: string; kind: string; dist: number | null; arrow: number | null } | null;
+  setStoryHint: (h: GameState['storyHint']) => void;
   dayCycle: boolean;
   // modalita' zombi notturna: notte fonda, pioggia, zombi (components/city/ZombieNight.tsx)
   zombieNight: boolean;
@@ -584,6 +590,8 @@ export const useStore = create<GameState>((set) => ({
   neonNight: readSetting('neonNight', false),
   enemyDrones: readSetting('enemyDrones', false),
   weatherOn: readSetting('weatherOn', true),
+  mainStory: initialStory(),
+  storyHint: null,
   dayCycle: readSetting('dayCycle', false),
   zombieNight: false,
   adaptiveResolution: readSetting('adaptiveResolution', true),
@@ -740,6 +748,8 @@ export const useStore = create<GameState>((set) => ({
     writeSetting('weatherOn', weatherOn);
     set({ weatherOn });
   },
+  setMainStory: (patch) => set((state) => ({ mainStory: { ...state.mainStory, ...patch } })),
+  setStoryHint: (storyHint) => set({ storyHint }),
   setZombieNight: (zombieNight) => set({ zombieNight }),
   setDayCycle: (dayCycle) => {
     writeSetting('dayCycle', dayCycle);

@@ -25,6 +25,7 @@ import UFO from './components/Environment/UFO';
 // (la vecchia catena di 3 missioni, MissionManager.tsx, e' sostituita dalla
 // missione con i personaggi: Missions/StoryMission.tsx)
 import StoryMission from './components/Missions/StoryMission';
+import MainStory from './components/Missions/MainStory';
 import HeistMission from './components/Missions/HeistMission';
 import SoldierSpawner from './components/SoldierSpawner';
 import VillageFolk from './components/Environment/VillageFolk';
@@ -138,6 +139,8 @@ const Scene: React.FC = () => {
       {!isCleanTest && !wild && stage >= 11 && <ZombieNight />}
       {!isCleanTest && !wild && stage >= 2 && <CityFlags />}
       {!isCleanTest && stage >= 2 && <Wilderness />}
+      {/* storia principale "Il Seme": anziani dei villaggi, frammento nelle rovine, bussola (Missions/MainStory.tsx) */}
+      {!isCleanTest && stage >= 5 && <Suspense fallback={null}><MainStory /></Suspense>}
       {/* abitanti dei villaggi vicini (solo nei siti selvaggi: i villaggi stanno fuori dalla citta') */}
       {!isCleanTest && wild && stage >= 4 && <Suspense fallback={null}><VillageFolk /></Suspense>}
       {showSkyAtmosphere && <UFO initialPosition={[0, 150, 0]} />}

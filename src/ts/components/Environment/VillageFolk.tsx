@@ -4,7 +4,9 @@ import * as THREE from 'three';
 import { useStore } from '../../store';
 import { getCurrentSite } from '../../lib/site';
 import { PLANET_RADIUS, villagesOf, type VillageSite } from '../../lib/planetSurface';
-import { VK, VILLAGE_SPECS, kindOf, villageFrame, villageItemMatrix, villageItems } from '../../lib/village';
+import { VK, fromSiteXZ, siteFrameOf, toSiteXZ, villageFrame, villageItemMatrix, settlementOf, dimOf, type SiteFrame } from '../../lib/village';
+import { PALETTE, roleOf, cultureOfKind } from '../../lib/culture';
+import { nearestNode, shortestPath, type Settlement } from '../../lib/settlement';
 import { getTimeOfDay } from '../../lib/SunCycle';
 import { weather } from '../../lib/weather';
 import { useMannequinActor } from '../city/useMannequinActor';
@@ -23,14 +25,11 @@ import { SkeletonUtils } from 'three-stdlib';
 // dentro (spariscono); se li colpisci o ti avvicini armato scappano verso la fine della strada piu' lontana da te. Si calcolano
 // nel riferimento del sito; da lontano il corpo si addormenta da solo (useMannequinActor). Animali: sotto, in Animal.
 const RANGE = 380; // m dal sito: villaggi da popolare
-const PER_VILLAGE = 9;
+const PER_TIER = [5, 9, 16, 26]; // abitanti per taglia (casale, villaggio, paese, citta')
 const SHOW_DIST = 140; // m dalla camera: oltre non si animano gli animali
 const WALK_CLIP_SPEED = 0.73; // m/s a cui la clip 'Walk' avanza a velocita' 1
-const LANE = 3.3; // m dall'asse della strada
-const MAIN_U = 84, TRANS_W0 = -56, TRANS_W1 = 60;
 const FLEE_SPEED = 3.7;
 const FLEE_CLIPS = ['Run_Female', 'Run_Anime', 'Run_Stealth'];
-const SHIRTS = ['#8d6e63', '#607d8b', '#7e8f5c', '#a1887f', '#6d7b8d', '#9c7a5b', '#7b6d8d', '#86a07a'];
 const CORPSE_S = 30;
 
 interface Plan {
@@ -40,6 +39,8 @@ interface Plan {
   rng: number;
   still: boolean; // sta in piazza tutto il giorno e tutta la notte
   home: [number, number]; // porta di casa (u, w)
+  homeNode: number; // nodo del grafo stradale vicino alla porta
+  culture: number;
 }
 const hash = (a: number, b: number) => {
   let h = (Math.imul(a, 374761393) + Math.imul(b, 668265263)) | 0;
@@ -47,30 +48,12 @@ const hash = (a: number, b: number) => {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 };
 
-// il villaggio nel riferimento del sito: centro, assi A e B (proiettati sul suolo) e quota del piano
-interface SiteFrame { cx: number; cz: number; ax: number; az: number; bx: number; bz: number; baseY: number; inv: number }
-const _v = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3();
-function siteFrameOf(v: VillageSite, planetSeed: number): SiteFrame {
-  const site = getCurrentSite();
-  const fr = villageFrame(v, planetSeed);
-  _v.copy(fr.c).multiplyScalar(fr.rad).applyQuaternion(site.quat);
-  _a.copy(fr.A).applyQuaternion(site.quat);
-  _b.copy(fr.B).applyQuaternion(site.quat);
-  const det = _a.x * _b.z - _a.z * _b.x;
-  return { cx: _v.x, cz: _v.z, ax: _a.x, az: _a.z, bx: _b.x, bz: _b.z, baseY: _v.y - (PLANET_RADIUS + site.hN), inv: 1 / (det || 1) };
-}
-const toSiteXZ = (f: SiteFrame, u: number, w: number, out: THREE.Vector3): THREE.Vector3 => out.set(f.cx + f.ax * u + f.bx * w, f.baseY, f.cz + f.az * u + f.bz * w);
-const fromSiteXZ = (f: SiteFrame, x: number, z: number): [number, number] => {
-  const dx = x - f.cx, dz = z - f.cz;
-  return [(dx * f.bz - dz * f.bx) * f.inv, (f.ax * dz - f.az * dx) * f.inv];
+// cammino sul grafo stradale del villaggio (lib/settlement.ts) da (u, w) a un nodo, come lista di punti
+const settleOf = (plan: { seed: number; village: VillageSite }): Settlement => settlementOf(plan.seed, plan.village);
+const pathPoints = (S: Settlement, from: [number, number], toNode: number): Array<[number, number]> => {
+  const a = nearestNode(S.graph, from[0], from[1]);
+  return shortestPath(S.graph, a, toNode).map((i) => S.graph.nodes[i] as [number, number]);
 };
-
-// (route di corsie) da (u, w) a un punto sulla corsia, passando dall'incrocio se serve
-const onMainLane = (u: number, w: number) => Math.abs(w) < LANE + 2.2 && !(Math.abs(u) <= LANE + 2.2 && Math.abs(w) > LANE + 2.2);
-function laneRoute(from: [number, number], toMain: boolean, target: [number, number], side: number): Array<[number, number]> {
-  const J: [number, number] = [side * LANE, side * LANE];
-  return onMainLane(from[0], from[1]) === toMain ? [target] : [J, target];
-}
 
 const Villager: React.FC<{ plan: Plan }> = ({ plan }) => {
   const npcId = `village-${plan.key}`;
@@ -78,7 +61,7 @@ const Villager: React.FC<{ plan: Plan }> = ({ plan }) => {
     id: npcId,
     name: 'Abitante',
     team: `CIVILIAN_${npcId}`,
-    color: SHIRTS[Math.floor(plan.rng * SHIRTS.length) % SHIRTS.length],
+    color: PALETTE[plan.culture].shirts[Math.floor(plan.rng * PALETTE[plan.culture].shirts.length) % PALETTE[plan.culture].shirts.length],
     hp: 60,
     x: 0,
     z: -1000,
@@ -125,35 +108,32 @@ const Villager: React.FC<{ plan: Plan }> = ({ plan }) => {
 
   const wanderRoute = (): Array<[number, number]> => {
     const s = S.current;
-    const goMain = rnd() < 0.55;
-    const tu = goMain ? (rnd() * 2 - 1) * MAIN_U : s.side * LANE;
-    const tw = goMain ? s.side * LANE : TRANS_W0 + rnd() * (TRANS_W1 - TRANS_W0);
-    return laneRoute([s.u, s.w], goMain, [tu, tw], s.side);
+    const St = settleOf(plan);
+    // meta': in piazza o in un punto a caso dell'abitato (piu' spesso vicino al centro)
+    const near = rnd() < 0.5;
+    let target = 0;
+    for (let k = 0; k < 6; k++) {
+      const i = Math.floor(rnd() * St.graph.nodes.length);
+      const [nu, nw] = St.graph.nodes[i];
+      if (!near || Math.hypot(nu, nw) < 45) { target = i; break; }
+      target = i;
+    }
+    return pathPoints(St, [s.u, s.w], target);
   };
   const homeRoute = (): Array<[number, number]> => {
     const s = S.current;
-    const [du, dw] = plan.home;
-    const homeMain = Math.abs(dw) > Math.abs(du); // la casa sta sulla strada principale
-    const join: [number, number] = homeMain ? [du, Math.sign(dw) * LANE] : [Math.sign(du) * LANE, dw];
-    return [...laneRoute([s.u, s.w], homeMain, join, s.side), plan.home];
+    return [...pathPoints(settleOf(plan), [s.u, s.w], plan.homeNode), plan.home];
   };
   const fleeRoute = (px: number, pz: number): Array<[number, number]> => {
     const s = S.current;
     const f = frameRef.current;
     if (!f) return [];
     const [tu, tw] = fromSiteXZ(f, px, pz);
-    const ends: Array<{ p: [number, number]; main: boolean }> = [
-      { p: [MAIN_U, s.side * LANE], main: true },
-      { p: [-MAIN_U, s.side * LANE], main: true },
-      { p: [s.side * LANE, TRANS_W0], main: false },
-      { p: [s.side * LANE, TRANS_W1], main: false },
-    ];
-    let best = ends[0], bd = -1;
-    for (const e of ends) {
-      const d = Math.hypot(e.p[0] - tu, e.p[1] - tw);
-      if (d > bd) { bd = d; best = e; }
-    }
-    return laneRoute([s.u, s.w], best.main, best.p, s.side);
+    const St = settleOf(plan);
+    // nodo lontano dal pericolo (tra i piu' lontani, a caso) raggiunto per le strade
+    const ranked = St.graph.nodes.map((n, i) => ({ i, d: Math.hypot(n[0] - tu, n[1] - tw) - Math.hypot(n[0] - s.u, n[1] - s.w) * 0.3 })).sort((a, b) => b.d - a.d).slice(0, 6);
+    const pick = ranked[Math.floor(rnd() * ranked.length)] ?? ranked[0];
+    return pick ? pathPoints(St, [s.u, s.w], pick.i) : [];
   };
 
   useFrame((state, delta) => {
@@ -379,12 +359,18 @@ const Animal: React.FC<{ plan: AnimalPlan }> = ({ plan }) => {
       const a = rnd() * Math.PI * 2, r = 140 + rnd() * 70;
       return [Math.cos(a) * r, Math.sin(a) * r];
     }
-    if (plan.kind === 'dog') return rnd() < 0.6 ? [(rnd() * 2 - 1) * MAIN_U, (rnd() < 0.5 ? 1 : -1) * 5] : [(rnd() < 0.5 ? 1 : -1) * 5, TRANS_W0 + rnd() * (TRANS_W1 - TRANS_W0)];
+    const S = settlementOf(plan.seed, plan.village);
+    if (plan.kind === 'dog') { const nd = S.graph.nodes[Math.floor(rnd() * S.graph.nodes.length)] ?? [0, 0]; return [nd[0] + (rnd() - 0.5) * 2, nd[1] + (rnd() - 0.5) * 2]; }
     if (plan.kind === 'horse' && plan.barn) {
       const lx = (rnd() * 2 - 1) * 9, lz = 6.2 + rnd() * 3.2, cb = Math.cos(plan.barn.f), sb = Math.sin(plan.barn.f);
       return [plan.barn.u - lx * cb + lz * sb, plan.barn.w + lx * sb + lz * cb];
     }
-    return [(rnd() * 2 - 1) * 70, (rnd() < 0.5 ? 1 : -1) * (14 + rnd() * 16)];
+    // galline: nei cortili dietro le case (dietro la porta di una casa a caso)
+    const dr = S.doors[Math.floor(rnd() * S.doors.length)];
+    if (!dr) return [(rnd() * 2 - 1) * 40, (rnd() * 2 - 1) * 40];
+    const it = S.items[dr.index], dd = dimOf(cultureOfKind(it.kind), roleOf(it.kind));
+    const back = (dd.d * (it.sz ?? 1)) / 2 + 3 + rnd() * 5;
+    return [it.u - Math.sin(it.f) * back + (rnd() - 0.5) * 6, it.w - Math.cos(it.f) * back + (rnd() - 0.5) * 6];
   };
   const group = useRef<THREE.Group>(null);
   const { camera } = useThree();
@@ -513,11 +499,6 @@ const Animal: React.FC<{ plan: AnimalPlan }> = ({ plan }) => {
 // --- fumo dai camini ----------------------------------------------------------------------------------------------------
 // Qualche sbuffo grigio per camino (cottage, fattorie, case lunghe) che sale, si allarga e svanisce, spinto da un po' di vento.
 // Un solo InstancedMesh per tutti; le posizioni dei camini (sito) si calcolano una volta.
-const CHIMNEYS: Record<number, Array<[number, number, number]>> = {
-  [VK.Cottage]: [[1.7, 5.9, -0.6]],
-  [VK.Farm]: [[-2.4, 8.5, -0.8]],
-  [VK.Long]: [[-3.6, 5.5, -0.5], [3.6, 5.5, -0.5]],
-};
 const PUFFS = 4;
 const _cm = new THREE.Matrix4(), _cp = new THREE.Vector3(), _cq = new THREE.Quaternion(), _cs = new THREE.Vector3();
 const ChimneySmoke: React.FC<{ villages: VillageSite[]; seed: number }> = ({ villages, seed }) => {
@@ -527,14 +508,12 @@ const ChimneySmoke: React.FC<{ villages: VillageSite[]; seed: number }> = ({ vil
     const out: THREE.Vector3[] = [];
     for (const v of villages) {
       const fr = villageFrame(v, seed);
-      for (const it of villageItems(seed, v)) {
-        const list = CHIMNEYS[kindOf(it.kind)];
-        if (!list) continue;
+      for (const it of settlementOf(seed, v).items) {
+        const ch = dimOf(cultureOfKind(it.kind), roleOf(it.kind)).chimney;
+        if (!ch) continue;
         villageItemMatrix(it, fr, _cm);
-        for (const c of list) {
-          _cp.set(c[0], c[1], c[2]).applyMatrix4(_cm).applyQuaternion(site.quat);
-          out.push(new THREE.Vector3(_cp.x, _cp.y - (PLANET_RADIUS + site.hN), _cp.z));
-        }
+        _cp.set(ch[0], ch[1], ch[2]).applyMatrix4(_cm).applyQuaternion(site.quat);
+        out.push(new THREE.Vector3(_cp.x, _cp.y - (PLANET_RADIUS + site.hN), _cp.z));
       }
     }
     return out;
@@ -574,27 +553,26 @@ const VillageFolk: React.FC = () => {
     const an: AnimalPlan[] = [];
     for (const v of villagesOf(site.planetSeed)) {
       const f = siteFrameOf(v, site.planetSeed);
-      if (Math.hypot(f.cx, f.cz) > RANGE) continue;
+      if (Math.hypot(f.cx, f.cz) > RANGE + v.radius * 0.9) continue;
       near.push(v);
-      // le case dove abitano (porta davanti)
-      const houses = villageItems(site.planetSeed, v).filter((it) => {
-        const k = kindOf(it.kind);
-        return k === VK.Cottage || k === VK.Farm || k === VK.Long;
-      });
-      for (let k = 0; k < PER_VILLAGE; k++) {
+      // le case dove abitano: le porte del grafo stradale del villaggio
+      const S = settlementOf(site.planetSeed, v);
+      // le case piu' vicine al punto d'atterraggio (l'origine del sito): negli abitati grandi gli abitanti vivono dove sta il giocatore
+      const tmp = new THREE.Vector3();
+      const ranked = S.doors.map((dr, i) => { toSiteXZ(f, dr.u, dr.w, tmp); return { i, d: Math.hypot(tmp.x, tmp.z) }; }).sort((a, b) => a.d - b.d).slice(0, Math.max(12, PER_TIER[v.tier] * 5));
+      for (let k = 0; k < PER_TIER[v.tier]; k++) {
         const rng = hash(site.planetSeed + v.id * 31, k * 7 + 1);
-        const it = houses.length ? houses[Math.floor(hash(rng * 1000, 9) * houses.length) % houses.length] : null;
-        const sp = it ? VILLAGE_SPECS[kindOf(it.kind)] : null;
-        const off = sp && it ? (sp.d / 2) * it.s + 1.6 : 4;
-        const home: [number, number] = it ? [it.u + Math.sin(it.f) * off, it.w + Math.cos(it.f) * off] : [LANE, LANE];
-        vs.push({ key: `${v.id}-${k}`, village: v, seed: site.planetSeed, rng, still: k % 5 === 4, home });
+        const pickI = ranked.length ? ranked[Math.floor(hash(rng * 1000, 9) * ranked.length) % ranked.length].i : -1;
+        const dr = pickI >= 0 ? S.doors[pickI] : null;
+        const home: [number, number] = dr ? [dr.u, dr.w] : [0, 4];
+        vs.push({ key: `${v.id}-${k}`, village: v, seed: site.planetSeed, rng, still: k % 5 === 4, home, homeNode: dr ? dr.node : 0, culture: S.culture });
       }
       for (let k = 0; k < 7; k++) an.push({ key: `${v.id}-h${k}`, village: v, seed: site.planetSeed, kind: 'hen', rng: hash(v.id * 17 + k, 5) });
       for (let k = 0; k < 2; k++) an.push({ key: `${v.id}-d${k}`, village: v, seed: site.planetSeed, kind: 'dog', rng: hash(v.id * 23 + k, 6) });
       for (let k = 0; k < 2; k++) an.push({ key: `${v.id}-f${k}`, village: v, seed: site.planetSeed, kind: 'fox', rng: hash(v.id * 29 + k, 7) });
       for (let k = 0; k < 4; k++) an.push({ key: `${v.id}-b${k}`, village: v, seed: site.planetSeed, kind: 'bird', rng: hash(v.id * 37 + k, 8) });
       // cavalli nel recinto dei fienili (2 per fienile, al massimo 4)
-      const barns = villageItems(site.planetSeed, v).filter((it) => kindOf(it.kind) === VK.Barn);
+      const barns = S.items.filter((it) => roleOf(it.kind) === VK.Granary);
       let nh = 0;
       for (const b of barns) for (let k = 0; k < 2 && nh < 4; k++, nh++) an.push({ key: `${v.id}-o${nh}`, village: v, seed: site.planetSeed, kind: 'horse', rng: hash(v.id * 41 + nh, 9), barn: { u: b.u, w: b.w, f: b.f } });
     }

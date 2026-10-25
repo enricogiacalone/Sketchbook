@@ -38,6 +38,9 @@ let handlers: Handlers | null = null;
 export function setDialogueHandlers(h: Handlers | null) {
   handlers = h;
 }
+// (la storia principale presta i comandi del dialogo e poi li restituisce a chi li aveva)
+export const getDialogueHandlers = (): Handlers | null => handlers;
+export type DialogueHandlers = Handlers;
 export const dialogueInput = {
   choose: (i: number) => handlers?.choose(i),
   advance: () => handlers?.advance(),

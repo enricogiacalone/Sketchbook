@@ -9,7 +9,7 @@ import { audioCtx, loopNoise, makeEmitter, playBellStroke, playStep } from '../.
 import { weather } from '../../lib/weather';
 import { DAY_CYCLE_SECONDS, getTimeOfDay } from '../../lib/SunCycle';
 import { villagesOf } from '../../lib/planetSurface';
-import { VK, kindOf, villageItemSitePos, villageItems } from '../../lib/village';
+import { VK, cultureOfKind, kindOf, siteFrameOf, villageItemSitePos, villageItems } from '../../lib/village';
 
 // Suoni ambientali dei pianeti, tutti sintetizzati (lib/proceduralAudio.ts) e collegati all'ascoltatore condiviso:
 // - vento: rumore filtrato con raffiche, piu' forte in quota, in campagna e con la pioggia (in citta' e' ovattato);
@@ -81,8 +81,10 @@ const AmbientSounds: React.FC = () => {
     s.bells = [];
     const site = getCurrentSite();
     for (const v of villagesOf(site.planetSeed)) {
+      const fc = siteFrameOf(v, site.planetSeed);
+      if (Math.hypot(fc.cx, fc.cz) > BELL_RANGE + v.radius + 60) continue; // (non si generano gli abitati lontani)
       for (const it of villageItems(site.planetSeed, v)) {
-        if (kindOf(it.kind) !== VK.Chapel) continue;
+        if (kindOf(it.kind) !== VK.Temple || cultureOfKind(it.kind) === 2) continue; // (la moschea non ha campane)
         const pos = villageItemSitePos(site.planetSeed, v, it, site, 10.5, new THREE.Vector3());
         if (Math.hypot(pos.x, pos.z) > BELL_RANGE) continue;
         const holder = new THREE.Object3D();

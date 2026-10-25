@@ -121,19 +121,11 @@ function surfaceHeightBase(seed: number, x: number, y: number, z: number): numbe
   return h;
 }
 
-// --- villaggi --------------------------------------------------------------------------------------------------
-// Ogni pianeta ha alcuni villaggi sparsi (come la citta', una zolla piatta sul piano tangente al loro centro, che il
-// pianeta include nella sua superficie, raccordata al rilievo). I siti si scelgono dal seme su terra asciutta e poco
-// ripida; case e strade stanno in lib/village.ts.
-export interface VillageSite {
-  id: number;
-  x: number; y: number; z: number; // direzione unitaria del centro
-  h: number; // quota (m) della zolla
-  yaw: number; // orientamento delle strade
-  flat: number; // m: raggio della zolla piatta
-}
-export const VILLAGE_BLEND = 55; // m: raccordo al rilievo oltre la zolla
-const VILLAGE_FLAT = 118;
+// --- civilta': insediamenti di ogni taglia ---------------------------------------------------------------------------------
+// Ogni pianeta ha una gerarchia di insediamenti: poche citta', qualche citta' piccola, molti paesi e villaggi, tanti casali, distribuiti
+// su terra asciutta e poco ripida, ognuno con la sua cultura (regioni del pianeta: lib/culture.ts) e la sua pianta (lib/settlement.ts).
+// Un insediamento sta su una zolla "piatta in quota" (stessa quota radiale: segue la curvatura del pianeta, a differenza di un piano
+// tangente) con un piano appena inclinato che segue il pendio, raccordata al rilievo. Le strade tra insediamenti: lib/roads.ts.
 // base ortonormale tangente in d (e1 = d x u, e2 = d x e1, con u un asse non parallelo a d): [e1, e2]
 export function tangentBasis(dx: number, dy: number, dz: number): [number, number, number, number, number, number] {
   const ux = Math.abs(dy) > 0.9 ? 1 : 0, uy = Math.abs(dy) > 0.9 ? 0 : 1;
@@ -142,56 +134,187 @@ export function tangentBasis(dx: number, dy: number, dz: number): [number, numbe
   e1x /= l1; e1y /= l1; e1z /= l1;
   return [e1x, e1y, e1z, dy * e1z - dz * e1y, dz * e1x - dx * e1z, dx * e1y - dy * e1x];
 }
-const villageCache = new Map<number, VillageSite[]>();
-export function villagesOf(seed: number): VillageSite[] {
+export interface VillageSite {
+  id: number;
+  tier: 0 | 1 | 2 | 3; // 0 casale, 1 villaggio, 2 paese, 3 citta'
+  x: number; y: number; z: number; // direzione unitaria del centro
+  h: number; // quota (m) del centro della zolla
+  gx: number; gw: number; // pendenza (m/m) del piano lungo A e B
+  yaw: number; // orientamento dell'asse A
+  flat: number; // m: raggio della zolla (quota fissa)
+  radius: number; // m: raggio dell'abitato
+  blend: number; // m: raccordo al rilievo oltre la zolla
+  culture: number; // regione culturale
+  ax: number; ay: number; az: number; bx: number; by: number; bz: number; // assi del piano (A, B) in tangente al centro
+}
+// per taglia: quanti, distanza minima in rad tra i centri, raggio della zolla piatta, raggio dell'abitato, raccordo minimo al rilievo,
+// dislivello massimo tollerato (terrazzamento) e quanti candidati si provano
+const TIER_DEF: Array<{ n: number; minSep: number; flat: number; radius: number; blend: number; relief: number; tries: number; minLand: number }> = [
+  { n: 28, minSep: 0.075, flat: 50, radius: 46, blend: 30, relief: 26, tries: 1400, minLand: 5 },
+  { n: 14, minSep: 0.16, flat: 112, radius: 106, blend: 55, relief: 40, tries: 1800, minLand: 5 },
+  { n: 6, minSep: 0.27, flat: 270, radius: 262, blend: 90, relief: 62, tries: 2400, minLand: 6 },
+  { n: 3, minSep: 0.5, flat: 520, radius: 500, blend: 130, relief: 90, tries: 3200, minLand: 6 },
+];
+export const VILLAGE_BLEND = 55;
+const siteCache = new Map<number, VillageSite[]>();
+// griglia di celle sulla sfera (cubo, 96 x 96 per faccia: celle di ~200 m) per trovare in fretta gli insediamenti vicini a una direzione
+const CELLS = 96;
+function cellKey(x: number, y: number, z: number): number {
+  const ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
+  let f: number, a: number, b: number, d: number;
+  if (ax >= ay && ax >= az) { f = x > 0 ? 0 : 1; d = ax; a = y; b = z; }
+  else if (ay >= az) { f = y > 0 ? 2 : 3; d = ay; a = x; b = z; }
+  else { f = z > 0 ? 4 : 5; d = az; a = x; b = y; }
+  const i = Math.min(CELLS - 1, Math.max(0, Math.floor((a / d * 0.5 + 0.5) * CELLS)));
+  const j = Math.min(CELLS - 1, Math.max(0, Math.floor((b / d * 0.5 + 0.5) * CELLS)));
+  return (f * CELLS + i) * CELLS + j;
+}
+const siteGrid = new Map<number, Map<number, number[]>>();
+function gridOf(seed: number): Map<number, number[]> {
   const key = seed & 0x7fffffff;
-  let list = villageCache.get(key);
-  if (list) return list;
-  list = [];
-  villageCache.set(key, list); // (prima di cercare: surfaceHeightBase non guarda i villaggi, ma cosi' non c'e' ricorsione possibile)
-  const want = 6;
-  const ringR = 150 / PLANET_RADIUS;
-  for (let a = 0; a < 2500 && list.length < want; a++) {
-    // il primo villaggio sta a ~1,3 km dalla citta' (si vede salendo sulle colline), gli altri ovunque
-    let dx: number, dy: number, dz: number;
-    if (list.length === 0 && a < 700) {
-      const th = 0.36 + hash3(key, a, 3, 555) * 0.22, az = hash3(key, a, 4, 555) * Math.PI * 2;
-      dx = Math.sin(th) * Math.cos(az); dy = Math.cos(th); dz = Math.sin(th) * Math.sin(az);
-    } else {
-      dy = 1 - 2 * hash3(key, a, 1, 555);
-      const az = hash3(key, a, 2, 555) * Math.PI * 2, rr = Math.sqrt(Math.max(0, 1 - dy * dy));
-      dx = rr * Math.cos(az); dz = rr * Math.sin(az);
-    }
-    if (Math.abs(dy) > 0.82 || dy > 0.9) continue; // niente calotte polari ne' pianura della citta'
-    if (list.some((v) => Math.acos(Math.min(1, v.x * dx + v.y * dy + v.z * dz)) < 0.22)) continue;
-    // terra asciutta e poco ripida nel centro e su un anello di 150 m
-    const h0 = surfaceHeightBase(seed, dx, dy, dz);
-    if (h0 < 9 || h0 > 110) continue;
-    const [e1x, e1y, e1z, e2x, e2y, e2z] = tangentBasis(dx, dy, dz);
-    let ok = true, sum = h0;
-    for (let k = 0; k < 12 && ok; k++) {
-      const ang = (k / 12) * Math.PI * 2;
-      let px = dx + (Math.cos(ang) * e1x + Math.sin(ang) * e2x) * ringR, py = dy + (Math.cos(ang) * e1y + Math.sin(ang) * e2y) * ringR, pz = dz + (Math.cos(ang) * e1z + Math.sin(ang) * e2z) * ringR;
+  let g = siteGrid.get(key);
+  if (g) return g;
+  g = new Map();
+  siteGrid.set(key, g);
+  const list = villagesOf(seed);
+  list.forEach((v, idx) => {
+    const reach = (Math.max(v.flat + v.blend, v.radius + 200)) / PLANET_RADIUS + 0.012;
+    // si marcano le celle in un quadrato attorno al centro (sulla sfera: campioni su una griglia di direzioni)
+    const [e1x, e1y, e1z, e2x, e2y, e2z] = tangentBasis(v.x, v.y, v.z);
+    const step = 0.0085;
+    const n = Math.ceil(reach / step);
+    for (let i = -n; i <= n; i++) for (let k = -n; k <= n; k++) {
+      if (Math.hypot(i, k) * step > reach + step) continue;
+      let px = v.x + (e1x * i + e2x * k) * step, py = v.y + (e1y * i + e2y * k) * step, pz = v.z + (e1z * i + e2z * k) * step;
       const l = Math.hypot(px, py, pz);
       px /= l; py /= l; pz /= l;
-      const h = surfaceHeightBase(seed, px, py, pz);
-      if (h < 5 || Math.abs(h - h0) > 30) ok = false;
-      sum += h;
+      const ck = cellKey(px, py, pz);
+      let arr = g!.get(ck);
+      if (!arr) { arr = []; g!.set(ck, arr); }
+      if (!arr.includes(idx)) arr.push(idx);
     }
-    if (!ok) continue;
-    list.push({ id: list.length, x: dx, y: dy, z: dz, h: sum / 13, yaw: hash3(key, a, 5, 555) * Math.PI, flat: VILLAGE_FLAT });
+  });
+  return g;
+}
+// regioni culturali: alcuni centri sul pianeta, a ognuno una cultura; un insediamento ha quella del centro piu' vicino
+export function regionsOf(seed: number): Array<{ x: number; y: number; z: number; culture: number }> {
+  const key = seed & 0x7fffffff;
+  const out: Array<{ x: number; y: number; z: number; culture: number }> = [];
+  const n = 5;
+  const order = [0, 1, 2, 3, Math.floor(hash3(key, 1, 1, 321) * 4)];
+  // un po' mescolate per pianeta
+  for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(hash3(key, i, 2, 321) * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  for (let i = 0; i < n; i++) {
+    const y = 1 - 2 * ((i + 0.5 + (hash3(key, i, 3, 321) - 0.5) * 0.5) / n), az = hash3(key, i, 4, 321) * Math.PI * 2 + i * 2.4, r = Math.sqrt(Math.max(0, 1 - y * y));
+    out.push({ x: r * Math.cos(az), y, z: r * Math.sin(az), culture: order[i] });
+  }
+  return out;
+}
+export function cultureAtDir(seed: number, x: number, y: number, z: number): number {
+  const rg = regionsOf(seed);
+  let best = 0, bd = -2;
+  rg.forEach((r, i) => { const d = r.x * x + r.y * y + r.z * z; if (d > bd) { bd = d; best = i; } });
+  return rg[best].culture;
+}
+
+export function villagesOf(seed: number): VillageSite[] {
+  const key = seed & 0x7fffffff;
+  let list = siteCache.get(key);
+  if (list) return list;
+  list = [];
+  siteCache.set(key, list); // (surfaceHeightBase non guarda gli insediamenti: nessuna ricorsione possibile)
+  for (let tier = 3; tier >= 0; tier--) {
+    const def = TIER_DEF[tier];
+    // si provano molti candidati: terra asciutta e poco ripida; poi si scelgono i piu' piani (a parita' di taglia) rispettando le distanze
+    interface Cand { dx: number; dy: number; dz: number; relief: number; h: number; gx: number; gw: number; yaw: number; A: [number, number, number]; B: [number, number, number] }
+    const cands: Cand[] = [];
+    for (let a = 0; a < def.tries; a++) {
+      const dy = 1 - 2 * hash3(key, a, 1 + tier * 7, 555), az = hash3(key, a, 2 + tier * 7, 555) * Math.PI * 2, rr = Math.sqrt(Math.max(0, 1 - dy * dy));
+      const dx = rr * Math.cos(az), dz = rr * Math.sin(az);
+      if (Math.abs(dy) > 0.83) continue; // niente ghiacci
+      const polar = Math.acos(Math.min(1, Math.max(-1, dy)));
+      if (polar < (tier >= 2 ? 0.46 : 0.3)) continue; // la citta' di partenza sta al polo
+      const h0 = surfaceHeightBase(seed, dx, dy, dz);
+      if (h0 < def.minLand + 4 || h0 > 95) continue;
+      const [e1x, e1y, e1z, e2x, e2y, e2z] = tangentBasis(dx, dy, dz);
+      const yaw = hash3(key, a, 5 + tier * 7, 555) * Math.PI;
+      const cs = Math.cos(yaw), sn = Math.sin(yaw);
+      const A: [number, number, number] = [e1x * cs + e2x * sn, e1y * cs + e2y * sn, e1z * cs + e2z * sn];
+      const B: [number, number, number] = [-e1x * sn + e2x * cs, -e1y * sn + e2y * cs, -e1z * sn + e2z * cs];
+      // campioni a 0.7 del raggio piatto in 8 direzioni: terra asciutta e dislivello contenuto
+      let hmin = h0, hmax = h0, sum = h0, sux = 0, suw = 0, ok = true;
+      const rad = def.flat * 0.7;
+      for (let k = 0; k < 8 && ok; k++) {
+        const ang = (k / 8) * Math.PI * 2, ca = Math.cos(ang), sa = Math.sin(ang);
+        const du = ca * rad / PLANET_RADIUS, dw = sa * rad / PLANET_RADIUS;
+        const px = dx + A[0] * du + B[0] * dw, py = dy + A[1] * du + B[1] * dw, pz = dz + A[2] * du + B[2] * dw;
+        const l = Math.hypot(px, py, pz);
+        const h = surfaceHeightBase(seed, px / l, py / l, pz / l);
+        if (h < def.minLand) ok = false;
+        hmin = Math.min(hmin, h); hmax = Math.max(hmax, h);
+        sum += h; sux += h * ca; suw += h * sa;
+      }
+      if (!ok || hmax - hmin > def.relief) continue;
+      const slope = (v: number) => Math.max(-0.06, Math.min(0.06, v));
+      cands.push({ dx, dy, dz, relief: hmax - hmin, h: sum / 9, gx: slope(sux / (4 * rad)), gw: slope(suw / (4 * rad)), yaw, A, B });
+    }
+    cands.sort((p, q) => p.relief - q.relief);
+    let made = 0;
+    for (const c of cands) {
+      if (made >= def.n) break;
+      let ok = true;
+      for (const o of list) {
+        const sep = Math.max(def.minSep, TIER_DEF[o.tier].minSep * 0.55);
+        if (Math.acos(Math.min(1, o.x * c.dx + o.y * c.dy + o.z * c.dz)) < sep) { ok = false; break; }
+      }
+      if (!ok) continue;
+      // il raccordo cresce col dislivello: pendii piu' dolci attorno a una zolla che ha dovuto tagliare di piu'
+      const blend = Math.max(def.blend, c.relief * 2.6);
+      list.push({
+        id: list.length, tier: tier as 0 | 1 | 2 | 3, x: c.dx, y: c.dy, z: c.dz, h: c.h, gx: c.gx, gw: c.gw, yaw: c.yaw,
+        flat: def.flat, radius: def.radius, blend, culture: cultureAtDir(seed, c.dx, c.dy, c.dz),
+        ax: c.A[0], ay: c.A[1], az: c.A[2], bx: c.B[0], by: c.B[1], bz: c.B[2],
+      });
+      made++;
+    }
   }
   return list;
 }
-// villaggio piu' vicino (se la direzione e' entro `range` metri dal suo centro): la distanza in metri
+// insediamento piu' vicino se la direzione sta entro `range` m dal suo centro: la distanza in metri
 export function villageNear(seed: number, x: number, y: number, z: number, range: number): { v: VillageSite; dist: number } | null {
   const vs = villagesOf(seed);
-  const cosR = Math.cos(range / PLANET_RADIUS);
-  for (const v of vs) {
+  const cell = gridOf(seed).get(cellKey(x, y, z));
+  if (!cell) return null;
+  let best: { v: VillageSite; dist: number } | null = null;
+  for (const i of cell) {
+    const v = vs[i];
     const dot = v.x * x + v.y * y + v.z * z;
-    if (dot > cosR) return { v, dist: Math.acos(Math.min(1, dot)) * PLANET_RADIUS };
+    const dist = Math.acos(Math.min(1, dot)) * PLANET_RADIUS;
+    if (dist < range && (!best || dist < best.dist)) best = { v, dist };
   }
-  return null;
+  return best;
+}
+// insediamento piu' vicino se la direzione sta entro il suo raggio piu' `pad` m: la distanza dal centro in metri
+export function siteNear(seed: number, x: number, y: number, z: number, pad: number): { v: VillageSite; dist: number } | null {
+  const vs = villagesOf(seed);
+  const cell = gridOf(seed).get(cellKey(x, y, z));
+  if (!cell) return null;
+  let best: { v: VillageSite; dist: number } | null = null;
+  for (const i of cell) {
+    const v = vs[i];
+    const dot = v.x * x + v.y * y + v.z * z;
+    if (dot < 0.9) continue;
+    const dist = Math.acos(Math.min(1, dot)) * PLANET_RADIUS;
+    if (dist < v.radius + pad && (!best || dist < best.dist)) best = { v, dist };
+  }
+  return best;
+}
+// coordinate locali (u lungo A, w lungo B) in m di una direzione rispetto al centro di un insediamento (gnomoniche: sulla sfera)
+export function siteLocal(v: VillageSite, x: number, y: number, z: number): [number, number] {
+  const dot = v.x * x + v.y * y + v.z * z;
+  const k = PLANET_RADIUS / Math.max(0.2, dot);
+  const px = x * k - v.x * PLANET_RADIUS, py = y * k - v.y * PLANET_RADIUS, pz = z * k - v.z * PLANET_RADIUS;
+  return [px * v.ax + py * v.ay + pz * v.az, px * v.bx + py * v.by + pz * v.bz];
 }
 
 // --- rovine ---------------------------------------------------------------------------------------------------------------
@@ -234,13 +357,15 @@ export function ruinNear(seed: number, x: number, y: number, z: number, range: n
 
 export function surfaceHeight(seed: number, x: number, y: number, z: number): number {
   let h = surfaceHeightBase(seed, x, y, z);
-  const vn = villageNear(seed, x, y, z, VILLAGE_FLAT + VILLAGE_BLEND);
+  // insediamenti: zolla a quota fissa (con piano inclinato) raccordata al rilievo; le cime e le valli si livellano
+  const vn = villageNear(seed, x, y, z, 1900);
   if (vn) {
     const { v, dist } = vn;
-    const a = dist / PLANET_RADIUS;
-    const flat = v.h + (PLANET_RADIUS + v.h) * (1 / Math.cos(a) - 1);
-    const w = 1 - smoothstep(v.flat, v.flat + VILLAGE_BLEND, dist);
-    h = h + (flat - h) * w;
+    const w = 1 - smoothstep(v.flat, v.flat + v.blend, dist);
+    if (w > 0) {
+      const [u, ww] = siteLocal(v, x, y, z);
+      h = h + (v.h + v.gx * u + v.gw * ww - h) * w;
+    }
   }
   return h;
 }
