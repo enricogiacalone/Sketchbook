@@ -205,6 +205,31 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoJoinName]);
 
+  // Joystick dello smartphone (public/controller.html -> server.js 'phoneControllerInput'): i comandi arrivano qui e li leggono
+  // useInput.ts e useThirdPersonCamera.ts da window.__phoneControllerInput. (Questo ricevitore era sparito dalla riscrittura di App.tsx
+  // del 5 ottobre, commit ac80ee84: il telefono mandava i comandi e nessuno li ascoltava.)
+  useEffect(() => {
+    let socket: { disconnect: () => void } | null = null;
+    let cancelled = false;
+    import('socket.io-client').then(({ io }) => {
+      if (cancelled) return;
+      const s = io(`${window.location.protocol}//${window.location.hostname}:3000/update`);
+      s.on('phoneControllerInput', (data) => {
+        (window as any).__phoneControllerInput = data;
+      });
+      // telefono scollegato o server giu': niente comandi rimasti appesi (il personaggio camminerebbe da solo)
+      s.on('disconnect', () => {
+        (window as any).__phoneControllerInput = null;
+      });
+      socket = s;
+    });
+    return () => {
+      cancelled = true;
+      socket?.disconnect();
+      (window as any).__phoneControllerInput = null;
+    };
+  }, []);
+
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden && !(window as any).__disableAutoPause) setPaused(true);

@@ -16,6 +16,7 @@ import SpeechBubble from '../UI/SpeechBubble';
 import { acquireAudioListener, releaseAudioListener } from '../../lib/sharedAudioListener';
 import { audioCtx, makeEmitter, playBark, playChirp, playCluck } from '../../lib/proceduralAudio';
 import { getTerrainHeight } from './Terrain';
+import { devTime } from '../../lib/devTime';
 import { useGLTF } from '../../lib/gltf';
 import { SkeletonUtils } from 'three-stdlib';
 
@@ -25,7 +26,7 @@ import { SkeletonUtils } from 'three-stdlib';
 // dentro (spariscono); se li colpisci o ti avvicini armato scappano verso la fine della strada piu' lontana da te. Si calcolano
 // nel riferimento del sito; da lontano il corpo si addormenta da solo (useMannequinActor). Animali: sotto, in Animal.
 const RANGE = 380; // m dal sito: villaggi da popolare
-const PER_TIER = [5, 9, 16, 26]; // abitanti per taglia (casale, villaggio, paese, citta')
+const PER_TIER = [5, 9, 24, 44]; // abitanti per taglia (casale, villaggio, paese, citta')
 const SHOW_DIST = 140; // m dalla camera: oltre non si animano gli animali
 const WALK_CLIP_SPEED = 0.73; // m/s a cui la clip 'Walk' avanza a velocita' 1
 const FLEE_SPEED = 3.7;
@@ -78,7 +79,7 @@ const Villager: React.FC<{ plan: Plan }> = ({ plan }) => {
     pause: 0,
     speed: 0.95 + hash(plan.rng * 977, 1) * 0.35,
     side: hash(plan.rng * 313, 2) < 0.5 ? 1 : -1,
-    bed: 20 + hash(plan.rng * 71, 3) * 3, // ora in cui rientra
+    bed: (plan.village.tier >= 2 ? 22.6 : 20) + hash(plan.rng * 71, 3) * (plan.village.tier >= 2 ? 1.3 : 3), // ora in cui rientra (in citta' piu' tardi)
     wake: 5.8 + hash(plan.rng * 53, 4) * 1.8, // ora in cui esce
     fear: 0,
     yaw: hash(plan.rng * 11, 5) * 6.28,
@@ -504,7 +505,7 @@ const _cm = new THREE.Matrix4(), _cp = new THREE.Vector3(), _cq = new THREE.Quat
 const ChimneySmoke: React.FC<{ villages: VillageSite[]; seed: number }> = ({ villages, seed }) => {
   const mesh = useRef<THREE.InstancedMesh>(null);
   const site = getCurrentSite();
-  const chimneys = useMemo(() => {
+  const chimneys = useMemo(() => devTime('Chimneys', () => {
     const out: THREE.Vector3[] = [];
     for (const v of villages) {
       const fr = villageFrame(v, seed);
@@ -517,7 +518,7 @@ const ChimneySmoke: React.FC<{ villages: VillageSite[]; seed: number }> = ({ vil
       }
     }
     return out;
-  }, [site.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [site.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const geo = useMemo(() => new THREE.IcosahedronGeometry(0.4, 0), []);
   const matr = useMemo(() => new THREE.MeshStandardMaterial({ color: '#d4d4d4', roughness: 1, transparent: true, opacity: 0.42, depthWrite: false }), []);
   useFrame((state) => {
@@ -547,7 +548,7 @@ const ChimneySmoke: React.FC<{ villages: VillageSite[]; seed: number }> = ({ vil
 
 const VillageFolk: React.FC = () => {
   const site = getCurrentSite();
-  const { villagers, animals, near } = useMemo(() => {
+  const { villagers, animals, near } = useMemo(() => devTime('VillageFolk plans', () => {
     const near: VillageSite[] = [];
     const vs: Plan[] = [];
     const an: AnimalPlan[] = [];
@@ -565,7 +566,8 @@ const VillageFolk: React.FC = () => {
         const pickI = ranked.length ? ranked[Math.floor(hash(rng * 1000, 9) * ranked.length) % ranked.length].i : -1;
         const dr = pickI >= 0 ? S.doors[pickI] : null;
         const home: [number, number] = dr ? [dr.u, dr.w] : [0, 4];
-        vs.push({ key: `${v.id}-${k}`, village: v, seed: site.planetSeed, rng, still: k % 5 === 4, home, homeNode: dr ? dr.node : 0, culture: S.culture });
+        // (in citta' uno su tre sta fuori anche di notte)
+        vs.push({ key: `${v.id}-${k}`, village: v, seed: site.planetSeed, rng, still: v.tier >= 2 ? k % 3 === 2 : k % 5 === 4, home, homeNode: dr ? dr.node : 0, culture: S.culture });
       }
       for (let k = 0; k < 7; k++) an.push({ key: `${v.id}-h${k}`, village: v, seed: site.planetSeed, kind: 'hen', rng: hash(v.id * 17 + k, 5) });
       for (let k = 0; k < 2; k++) an.push({ key: `${v.id}-d${k}`, village: v, seed: site.planetSeed, kind: 'dog', rng: hash(v.id * 23 + k, 6) });
@@ -577,7 +579,7 @@ const VillageFolk: React.FC = () => {
       for (const b of barns) for (let k = 0; k < 2 && nh < 4; k++, nh++) an.push({ key: `${v.id}-o${nh}`, village: v, seed: site.planetSeed, kind: 'horse', rng: hash(v.id * 41 + nh, 9), barn: { u: b.u, w: b.w, f: b.f } });
     }
     return { villagers: vs, animals: an, near };
-  }, [site.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [site.id]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <>
       {villagers.map((p) => (

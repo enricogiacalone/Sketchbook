@@ -1,14 +1,17 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import * as THREE from 'three';
 import { CollisionGroups, groupsExcluding } from '../../enums/CollisionGroups';
 import { getCurrentSite } from '../../lib/site';
+import { requestVegetation, workersAvailable } from '../../lib/planetWorkers';
+import { spacePlanets } from '../../lib/space';
 import { PLANET_RADIUS as R, villagesOf } from '../../lib/planetSurface';
 import { deckSegments } from '../../lib/roadMesh';
 import { TILE_CENTERS, TILE_COUNT, TILE_RADIUS } from '../../lib/cubeTiles';
 import { BRIDGE_BASE, BRIDGE_WIDTH, buildTileVegetation, type Vegetation } from '../../lib/nearTile';
-import { VK, cultureOfKind, dimOf } from '../../lib/village';
+import { VK, cultureOfKind, dimOf, siteFrameOf } from '../../lib/village';
 import { roleOf } from '../../lib/culture';
 import { getTerrainHeight } from './Terrain';
+import { devTime } from '../../lib/devTime';
 import { useStaticBoxes, type StaticBox } from './staticColliders';
 
 // La natura si VEDE dalle tessere del pianeta (PlanetNearField.tsx, fisse sul pianeta, sempre montate): alberi, rocce e
@@ -25,19 +28,19 @@ const _hp = new THREE.Vector3(), _hs = new THREE.Vector3();
 const _hq = new THREE.Quaternion();
 const _dx = new THREE.Vector3(), _dy = new THREE.Vector3(), _dz = new THREE.Vector3(), _dm = new THREE.Matrix4();
 
+const vegCache = new Map<string, Promise<Vegetation>>();
 const Wilderness: React.FC = () => {
   const site = getCurrentSite();
 
-  const boxes = useMemo<StaticBox[]>(() => {
+  const [boxes, setBoxes] = useState<StaticBox[]>([]);
+  const make = (vegOf: (k: number) => Vegetation): StaticBox[] => {
     const out: StaticBox[] = [];
     const cos = Math.cos((RADIUS + TILE_RADIUS) / R);
     const n = site.n;
     for (let k = 0; k < TILE_COUNT; k++) {
       const dot = TILE_CENTERS[k * 3] * n[0] + TILE_CENTERS[k * 3 + 1] * n[1] + TILE_CENTERS[k * 3 + 2] * n[2];
       if (dot < cos) continue;
-      const veg: Vegetation = { trees: [], rocks: [], tufts: [], houses: [] };
-      const gen = buildTileVegetation(k, site.planetSeed, 'base', veg, false);
-      while (!gen.next().done);
+      const veg = vegOf(k);
       // case e arredi del villaggio: un cuboide per pezzo (orientato come il modello, nel riferimento del sito)
       for (const h of veg.houses) {
         if (h.t >= BRIDGE_BASE) {
@@ -89,6 +92,8 @@ const Wilderness: React.FC = () => {
     // impalcati delle sopraelevate (con le sponde): piani e parapetti inclinati come la rampa
     for (const v of villagesOf(site.planetSeed)) {
       if (v.tier < 3) continue;
+      const fc = siteFrameOf(v, site.planetSeed);
+      if (Math.hypot(fc.cx, fc.cz) > RADIUS + v.radius + 120) continue; // (non si genera una citta' lontana: costa ~300 ms)
       for (const d of deckSegments(site.planetSeed, v)) {
         _v.copy(d.c).applyQuaternion(site.quat);
         if (Math.hypot(_v.x, _v.z) > RADIUS + 120) continue;
@@ -107,6 +112,37 @@ const Wilderness: React.FC = () => {
       }
     }
     return out;
+  };
+  // alberi e case si calcolano nei worker (lo stesso lavoro delle tessere: ~270 ms sul thread principale a ogni cambio di sito, due volte
+  // in sviluppo); le tessere gia' calcolate si riusano
+  useEffect(() => {
+    let dead = false;
+    const cos = Math.cos((RADIUS + TILE_RADIUS) / R);
+    const keys: number[] = [];
+    for (let k = 0; k < TILE_COUNT; k++) if (TILE_CENTERS[k * 3] * site.n[0] + TILE_CENTERS[k * 3 + 1] * site.n[1] + TILE_CENTERS[k * 3 + 2] * site.n[2] >= cos) keys.push(k);
+    const gr = spacePlanets().find((p) => p.profile.seed === site.planetSeed)?.profile.gridRadius ?? 2;
+    const get = (k: number): Promise<Vegetation> => {
+      if (!workersAvailable()) {
+        const veg: Vegetation = { trees: [], rocks: [], tufts: [], houses: [] };
+        const gen = buildTileVegetation(k, site.planetSeed, 'base', veg, false);
+        while (!gen.next().done);
+        return Promise.resolve(veg);
+      }
+      const ck = `${site.planetSeed}:${k}`;
+      let p = vegCache.get(ck);
+      if (!p) {
+        p = requestVegetation(k, site.planetSeed, gr, 'base', false);
+        vegCache.set(ck, p);
+        if (vegCache.size > 80) vegCache.delete(vegCache.keys().next().value as string);
+      }
+      return p;
+    };
+    Promise.all(keys.map(get)).then((vs) => {
+      if (dead) return;
+      const m = new Map<number, Vegetation>(keys.map((k, i) => [k, vs[i]]));
+      setBoxes(devTime('Wilderness boxes', () => make((k) => m.get(k)!)));
+    });
+    return () => { dead = true; };
   }, [site.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useStaticBoxes([0, 0, 0], boxes);

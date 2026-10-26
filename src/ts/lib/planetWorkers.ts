@@ -73,7 +73,7 @@ const toItems = (p: { m: Float32Array; t: Int32Array; c?: Uint32Array | null }):
   return out;
 };
 
-export async function requestVegetation(key: number, seed: number, gridRadius: number, what: 'base' | 'tufts'): Promise<Vegetation> {
-  const r = await send<{ trees: any; rocks: any; tufts: any; houses: any; roads: any }>({ type: 'veg', key, seed, gridRadius, what });
+export async function requestVegetation(key: number, seed: number, gridRadius: number, what: 'base' | 'tufts', withRoads = true): Promise<Vegetation> {
+  const r = await send<{ trees: any; rocks: any; tufts: any; houses: any; roads: any }>({ type: 'veg', key, seed, gridRadius, what, withRoads });
   return { trees: toItems(r.trees), rocks: toItems(r.rocks), tufts: toItems(r.tufts), houses: toItems(r.houses), roads: r.roads ?? null };
 }

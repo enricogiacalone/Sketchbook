@@ -8,6 +8,7 @@ import { PLANET_RADIUS as R, ruinsOf, villagesOf } from '../../lib/planetSurface
 import { fromSiteXZ, siteFrameOf, toSiteXZ } from '../../lib/village';
 import { getTerrainHeight } from '../Environment/Terrain';
 import { talkState, getDialogueHandlers, setDialogueHandlers, type DialogueHandlers, type DialogueTree } from '../../lib/dialogue';
+import { devTime } from '../../lib/devTime';
 import { getWorldSeed } from '../../lib/worldSeed';
 import { audioCtx } from '../../lib/proceduralAudio';
 import { currentObjective, elderDialogue, elderId, elderName, fragmentPlanets, planetName } from '../../story/mainStory';
@@ -74,7 +75,7 @@ const MainStory: React.FC = () => {
   }, [joined]);
 
   // anziani e rovina di questo pianeta, nel riferimento del sito
-  const world = useMemo(() => {
+  const world = useMemo(() => devTime('MainStory world', () => {
     const elders: Elder[] = [];
     for (const v of villagesOf(here)) {
       if (v.tier < 1) continue; // (i casali non hanno un anziano)
@@ -90,7 +91,7 @@ const MainStory: React.FC = () => {
       ruin = { x: _c.x, z: _c.z };
     }
     return { elders, ruin };
-  }, [site.id, here]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [site.id, here]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (import.meta.env.DEV) (window as any).__mainStory = world; // (prove dal vivo)
   const fragmentHere = fragmentPlanets(story).includes(here);

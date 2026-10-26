@@ -8,6 +8,7 @@ import { acquireAudioListener, releaseAudioListener } from '../../lib/sharedAudi
 import { audioCtx, loopNoise, makeEmitter, playBellStroke, playStep } from '../../lib/proceduralAudio';
 import { weather } from '../../lib/weather';
 import { DAY_CYCLE_SECONDS, getTimeOfDay } from '../../lib/SunCycle';
+import { devTime } from '../../lib/devTime';
 import { villagesOf } from '../../lib/planetSurface';
 import { VK, cultureOfKind, kindOf, siteFrameOf, villageItemSitePos, villageItems } from '../../lib/village';
 
@@ -76,7 +77,7 @@ const AmbientSounds: React.FC = () => {
     };
   }, [camera, scene]);
 
-  const buildBells = (s: NonNullable<typeof S.current>, t: number) => {
+  const buildBells = (s: NonNullable<typeof S.current>, t: number) => devTime('buildBells', () => {
     s.bells.forEach((b) => b.emitter.dispose());
     s.bells = [];
     const site = getCurrentSite();
@@ -98,7 +99,7 @@ const AmbientSounds: React.FC = () => {
       }
     }
     s.siteId = site.id;
-  };
+  });
 
   useFrame((state, dt) => {
     const s = S.current;

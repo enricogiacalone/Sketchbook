@@ -38,7 +38,7 @@ self.onmessage = (e: MessageEvent) => {
     } else if (msg.type === 'veg') {
       ensureProfile(msg.seed, msg.gridRadius);
       const veg: Vegetation = { trees: [], rocks: [], tufts: [], houses: [] };
-      const g = buildTileVegetation(msg.key, msg.seed, msg.what, veg);
+      const g = buildTileVegetation(msg.key, msg.seed, msg.what, veg, msg.withRoads !== false);
       while (!g.next().done);
       const trees = pack(veg.trees, false), rocks = pack(veg.rocks, false), tufts = pack(veg.tufts, true), houses = pack(veg.houses, true);
       const tr: Transferable[] = [trees.m.buffer, trees.t.buffer, rocks.m.buffer, rocks.t.buffer, tufts.m.buffer, tufts.t.buffer, houses.m.buffer, houses.t.buffer];

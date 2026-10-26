@@ -594,6 +594,7 @@ const geoCache = new Map<number, THREE.BufferGeometry>();
 export function villageGeometry(kind: number): THREE.BufferGeometry {
   let g = geoCache.get(kind);
   if (!g) {
+    const t0 = performance.now();
     const b = new Builder();
     if (kind >= BRIDGE_BASE) bridge(b, (kind - BRIDGE_BASE) * 4);
     else {
@@ -604,6 +605,7 @@ export function villageGeometry(kind: number): THREE.BufferGeometry {
     g = b.build();
     g.computeBoundingSphere();
     geoCache.set(kind, g);
+    if (import.meta.env.DEV) (((window as any).__dt ??= []) as any[]).push([`geometry role${kind & 63} v${(kind >> 6) & 7} c${(kind >> 9) & 3}`, Math.round(performance.now() - t0), Math.round(t0)]);
   }
   return g;
 }

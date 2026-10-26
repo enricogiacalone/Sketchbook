@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PLANET_RADIUS as R, VILLAGE_BLEND, hEff, ruinsOf, siteLocal, siteNear, surfaceHeight, tangentBasis, villagesOf, type RuinSite, type VillageSite } from './planetSurface';
 import { hashKey } from './globalGrid';
+import { devTime } from './devTime';
 import { TILE_CENTERS, TILE_RADIUS, tileOfDir } from './cubeTiles';
 import { getCurrentSite } from './site';
 
@@ -27,7 +28,7 @@ export function settlementOf(seed: number, v: VillageSite): Settlement {
   const key = `${seed}:${v.id}:${v.culture}`;
   let s = settleCache.get(key);
   if (!s) {
-    s = v.tier >= 2 ? generateTown(seed, v) : generateSettlement(seed, v.id, v.culture, v.tier);
+    s = devTime(`settlement t${v.tier} #${v.id}`, () => (v.tier >= 2 ? generateTown(seed, v) : generateSettlement(seed, v.id, v.culture, v.tier)));
     settleCache.set(key, s);
   }
   return s;

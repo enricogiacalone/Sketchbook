@@ -7,6 +7,7 @@ import { siteFrame, type SpacePlanet } from '../../lib/space';
 import { GRID, TILE_CENTERS, TILE_COUNT, TILE_RADIUS } from '../../lib/cubeTiles';
 import { buildTileMesh, buildTileVegetation, makeTileBuffers, TILE_VERTS, type TileBuffers, type Vegetation } from '../../lib/nearTile';
 // (buildTileMesh / makeTileBuffers non servono piu' qui: il terreno e' nel quadtree)
+import { devTime } from '../../lib/devTime';
 import { requestVegetation, workerCapacity, workersAvailable } from '../../lib/planetWorkers';
 import { createTreeSource, registerTreeEntries, TreeBatches, usePlanetTreeTemplates, type TreeEntry } from './ParkTrees';
 import { COVER, COVER_KINDS } from './groundCover';
@@ -200,7 +201,7 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
       return m;
     })();
 
-  const finishVeg = (tile: Tile) => {
+  const finishVeg = (tile: Tile) => devTime('finishVeg', () => {
     const S = st.current;
     registerTrees(tile);
     // strade degli abitati: un solo nastro per tessera
@@ -257,7 +258,7 @@ const PlanetNearField: React.FC<{ p: SpacePlanet }> = ({ p }) => {
       tile.rocks = m;
       group.current?.add(m);
     }
-  };
+  });
   // copertura del suolo (erba, fiori, felci, cespugli): un pezzo grafico instanziato per tipo (il tipo e' il campo `t`)
   const finishTufts = (tile: Tile) => {
     const S = st.current;

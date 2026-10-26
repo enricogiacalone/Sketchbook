@@ -329,6 +329,12 @@
             const handle = document.getElementById(handleId);
             const maxDist = 55;
             let touchId = null;
+            // Forma della risposta (meno nervosa, soprattutto nelle direzioni oblique): zona morta circolare, curva che
+            // addolcisce i piccoli spostamenti e media dei valori recenti (niente scatti tra una diagonale e l'altra).
+            // Camminata: DEAD 0.14, EXP 1.7, SMOOTH 0.28. Camera: piu' dolce ancora.
+            const isCam = axisTargetKey === 'axesRight';
+            const DEAD = isCam ? 0.18 : 0.14, EXP = isCam ? 2.0 : 1.7, SMOOTH = isCam ? 0.22 : 0.28;
+            let smX = 0, smY = 0;
             let centerX = 0;
             let centerY = 0;
 
@@ -363,6 +369,7 @@
                     if (e.changedTouches[i].identifier === touchId) {
                         touchId = null;
                         handle.style.transform = `translate(0px, 0px)`;
+                        smX = 0; smY = 0;
                         state[axisTargetKey] = [0, 0];
                         sendState();
                     }
@@ -387,6 +394,7 @@
                 if (!mouseDown) return;
                 mouseDown = false;
                 handle.style.transform = `translate(0px, 0px)`;
+                smX = 0; smY = 0;
                 state[axisTargetKey] = [0, 0];
                 sendState();
             });
@@ -403,9 +411,20 @@
 
                 handle.style.transform = `translate(${dx}px, ${dy}px)`;
 
+                // valore grezzo (-1..1) -> zona morta e curva sul modulo, direzione invariata
+                const nx = dx / maxDist, ny = dy / maxDist;
+                const mag = Math.hypot(nx, ny);
+                let tx = 0, ty = 0;
+                if (mag > DEAD) {
+                    const m = Math.pow(Math.min(1, (mag - DEAD) / (1 - DEAD)), EXP);
+                    tx = (nx / mag) * m;
+                    ty = (ny / mag) * m;
+                }
+                smX += (tx - smX) * SMOOTH;
+                smY += (ty - smY) * SMOOTH;
                 state[axisTargetKey] = [
-                    dx / maxDist,
-                    dy / maxDist
+                    Math.abs(smX) < 0.01 ? 0 : smX,
+                    Math.abs(smY) < 0.01 ? 0 : smY
                 ];
                 sendState();
             }
